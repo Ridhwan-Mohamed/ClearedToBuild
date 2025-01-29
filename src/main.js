@@ -42,15 +42,14 @@ class mapView extends Phaser.Scene {
     
     create() {
         Player.init(this);
-        // let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION)
-        Map.grid = [[1,[1,2],1,1,1,1,1],[1,1,1,1,1,1,1],
-        [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
-        [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
-        // Map.grid = grid
+        let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION)
+        Map.grid = grid
+        // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
+        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
+        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
         Map.initMap()
         Map.mapFromData(Map.grid)
-        Player.addPlayer(10,10,1)
-        Player.addPlayer(11,11,2)
+        // Player.addPlayer(10,10,1)
 
 
 
@@ -289,14 +288,14 @@ class mapView extends Phaser.Scene {
             .setDepth(UIDEPTH - 1);
     
         // Add the bottom bar
-        const bottomBar = this.add.rectangle(0, camera.height - 100, camera.width, 100, 0x000000, 1) // Opaque black
+        const bottomBar = this.add.rectangle(0, camera.height - 50, camera.width, 50, 0x000000, 1) // Opaque black
             .setOrigin(0, 0)
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH - 1);
             
     
         // Add "Layout" button
-        const itemTab = this.add.text(10, camera.height - 80, 'Layout', { fontSize: '24px', fill: '#ffffff' })
+        const itemTab = this.add.text(10, camera.height - 40, 'Layout', { fontSize: '24px', fill: '#ffffff' })
             .setInteractive()
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH)
@@ -309,7 +308,7 @@ class mapView extends Phaser.Scene {
         itemTab.setStroke('#000000', 3);
     
         // Add "Delete/Place" button
-        this.breakItems = this.add.text(120, camera.height - 80, 'Delete', { fontSize: '24px', fill: '#ffffff' })
+        this.breakItems = this.add.text(120, camera.height - 40, 'Delete', { fontSize: '24px', fill: '#ffffff' })
             .setInteractive()
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH)
@@ -357,7 +356,7 @@ class mapView extends Phaser.Scene {
         // Add Save Text
         const saveText = this.add.text(buttonMargin + buttonWidth / 2, buttonMargin + buttonHeight / 2, 'Save', {
             fontSize: '16px',
-            fill: '#ffffff',
+            fill: '#000000',
             align: 'center',
         })
             .setOrigin(0.5, 0.5)
@@ -369,11 +368,11 @@ class mapView extends Phaser.Scene {
         saveButton.setInteractive(saveButtonHitArea, Phaser.Geom.Rectangle.Contains);
         saveButton.on('pointerdown', () => {
             console.log('Save button clicked');
-        
+            
             // Convert Map.grid to a JSON string and copy it to clipboard
             const gridData = JSON.stringify(Map.grid);
             navigator.clipboard.writeText(gridData).then(() => {
-                console.log('Grid copied to clipboard:', gridData);
+                this.showSaveNotification()
             }).catch(err => {
                 console.error('Failed to copy grid to clipboard:', err);
             });
@@ -388,7 +387,7 @@ class mapView extends Phaser.Scene {
         // Add Load Text
         const loadText = this.add.text(buttonMargin + buttonWidth * 1.5 + buttonMargin, buttonMargin + buttonHeight / 2, 'Load', {
             fontSize: '16px',
-            fill: '#ffffff',
+            fill: '#000000',
             align: 'center',
         })
             .setOrigin(0.5, 0.5)
@@ -432,6 +431,35 @@ class mapView extends Phaser.Scene {
         Turret.update();
         this.handleKeyboardCameraMovement();
     }
+
+    showSaveNotification() {
+        const text = this.add.text(this.cameras.main.width / 2, -50, "World data saved 🌍", {
+            fontSize: "32px",
+            fill: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 4,
+            fontStyle: "bold"
+        })
+        .setOrigin(0.5, 0.5) // Center the text
+        .setDepth(1000); // Ensure it's on top
+    
+        // Tween: Drop down slightly, then bounce back up
+        this.tweens.add({
+            targets: text,
+            y: 60, // Move down to this position
+            duration: 600, // Drop duration
+            ease: "Bounce.easeOut", // Smooth drop effect
+            yoyo: true, // Move back up slightly
+            onComplete: () => {
+                // Remove the text after a delay
+                this.time.delayedCall(1000, () => {
+                    text.destroy();
+                });
+            }
+        });
+    }
+
+    
 }
 
 const config = {
@@ -441,7 +469,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: true
+            debug: false
         }
     },
     scene: [mapView, itemTab]

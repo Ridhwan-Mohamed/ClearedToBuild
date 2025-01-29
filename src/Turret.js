@@ -51,7 +51,8 @@ export class Turret{
     static handleMapClick(pointer, item) {
         // If we're in placing mode, finalize the placement
         if (this.isPlacing && this.topItem && !this.topItem.blocked) {
-            this.setPlaceAndInteractive(this.topItem, pointer, item)
+            // this.setPlaceAndInteractive(this.topItem, pointer, item)
+            this.topItem.setAlpha(1);
             this.setPlaceAndInteractive(this.baseItem, pointer, item)
             this.guns.push(this.topItem)
             this.topItem.delta = 1
@@ -65,6 +66,7 @@ export class Turret{
         this.isPlacing = false;
         Map.addBlockItem(Math.floor((x-item.lenX/2*SQUARESIZE)/SQUARESIZE),Math.floor((y-item.lenY/2*SQUARESIZE)/SQUARESIZE),item)
         const itemToPlace = image;
+        const top = this.topItem
         itemToPlace.setInteractive();
         itemToPlace.sx = Math.floor(x/SQUARESIZE)
         itemToPlace.sy = Math.floor(y/SQUARESIZE)
@@ -84,13 +86,15 @@ export class Turret{
             if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                 console.log('Destroying item...');
                 itemToPlace.destroy(); // Destroy the specific item
-                this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
+                top.destroy()
+                // this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
             }
         });
     }
 
     static update(){
-        this.guns.forEach(gun => {
+        this.guns.forEach((gun, index) => {
+            if(!gun.active){this.guns.splice(index, 1); return}
             let neighbours = this.scene.physics.overlapCirc(gun.x, gun.y, 500, true, false)
             let nearest = null;
             let shortestDistance = Infinity;

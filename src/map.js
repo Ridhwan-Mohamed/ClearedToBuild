@@ -122,7 +122,7 @@ export class Map{
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     console.log('Destroying item...');
                     itemToPlace.destroy(); // Destroy the specific item
-                    this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
+                    // this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
                 }
             });
         }
@@ -171,13 +171,16 @@ export class Map{
     static addBlockItem(posX, posY, item){
         for (let y = posY; y < posY + item.lenY; y++) {
             for (let x = posX; x < posX + item.lenX; x++) {
-                this.grid[y][x] = item.grid;
+                this.checkAndPlace(x,y,item.grid,item.depth)
+                // this.addValToIndex(x,y,item.grid)
+                // this.grid[y][x] = item.grid;
                 if(item.block){
                     let barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'barrier');
                     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(FLOORDEPTH).setAlpha(0);
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
-                    this.blocks[y*WORLD_DIMENSION+x] = barrierBlock; // Add to an array for tracking        
+                    this.handleGridDelete(barrierBlock, item, x, y)
+                    // this.blocks[y*WORLD_DIMENSION+x] = barrierBlock; // Add to an array for tracking        
                 }
             }
         }
@@ -186,17 +189,6 @@ export class Map{
     static placeTile(x, y, tileType, index=-1) {
         // Place the tile in the this.grid
         this.determineTileType(x, y, tileType, index);
-        // if(newGridValue){
-        //     if (index > -1) this.grid[y][x][index] = newGridValue
-        //     else if(TILE_TYPES[TILE_MAP(this.grid[y][x])].depth != TILE_TYPES[TILE_MAP(newGridValue)].depth){
-        //         if(TILE_TYPES[TILE_MAP(this.grid[y][x])].depth < TILE_TYPES[TILE_MAP(newGridValue)].depth){
-        //             this.grid[y][x] = [this.grid[y][x], newGridValue]
-        //             index = 1
-        //         }
-        //         else {this.grid[y][x] = [newGridValue, this.grid[y][x]]; index = 0}
-        //     }
-        //     else this.grid[y][x] = newGridValue;
-        // }
         let depth = TILE_TYPES[TILE_MAP(this.grabIndex(this.grid[y][x],index))].depth
         index = depth == FLOORDEPTH? 0 : 1;
         // Update neighbors to ensure correct transitions
@@ -228,13 +220,6 @@ export class Map{
                 this.drawGridValue(x,y)
             }
         }
-    
-        // Update neighbors to ensure correct transitions
-        // if (this.grid[y - 1]) this.grid[y - 1][x] = this.determineTileType(x, y - 1, tileType); // Above
-        // if (this.grid[y + 1]) this.grid[y + 1][x] = this.determineTileType(x, y + 1, tileType); // Below
-        // if (this.grid[y][x - 1]) this.grid[y][x - 1] = this.determineTileType(x - 1, y, tileType); // Left
-        // if (this.grid[y][x + 1]) this.grid[y][x + 1] = this.determineTileType(x + 1, y, tileType); // Right
-    
     }
 
     static reDraw(width = WORLD_DIMENSION, height = WORLD_DIMENSION){
@@ -254,52 +239,13 @@ export class Map{
         for (let y = 0; y < this.grid.length; y++) {
             for (let x = 0; x < this.grid[0].length; x++) {
                 if(Array.isArray(this.grid[y][x])){
+                    let type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])]
                     this.drawGridValue(x,y,0);
-                    this.drawGridValue(x,y,1);
-                    // let arrIndex = this.grid[y][x]
-                    // for(let i = 0; i < arrIndex.length; i++){
-                    //     let type = TILE_TYPES[TILE_MAP(arrIndex[i])]
-                    //     if(type.complex){
-                    //         this.placeTile(x,y,type.name,i);
-                    //     }
-                    //     else if(!type.complex){
-                    //         if(!Array.isArray(this.grid[y][x])) this.drawGridValue(x,y);
-                    //         else this.drawGridValue(x,y,i);
-                    //     }
-                    // }
+                    if(type) type.spread? this.drawGridValue(x,y,1): this.handleLoadNonSpread(x,y,type);
                 }
                 else{
-                    // let type = TILE_TYPES[TILE_MAP(this.grid[y][x])]
-                    // if(type.complex){
-                    //     this.placeTile(x,y,type.name);
-                    // }
-                    // else if(!type.complex){
-                        // this.grid[y][x] = type.grid;
-                        this.drawGridValue(x,y);
-                    // }
+                    this.drawGridValue(x,y);
                 }
-
-                
-                // let tileKey = TILE_ARR[this.grid[y][x]]
-                
-                // if(type.block){
-                //     Map.navGrid[y][x] = 0
-                //     let barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                //     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth);
-                //     this.barrier.add(barrierBlock);
-                //     this.blocks.push(barrierBlock); // Add to an array for tracking
-                //     Map.navGrid[y][x] = 0;
-                // }
-                // else{
-                //     Map.navGrid[y][x] = 1
-                //     let block = this.scene.add.image(
-                //         x * SQUARESIZE + SQUARESIZE / 2, 
-                //         y * SQUARESIZE + SQUARESIZE / 2, 
-                //         tileKey
-                //     );
-                //     block.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth); // Scale to fit the grid
-                //     this.blocks.push(block); // Add to an array for tracking
-                // }
             }
         }
     }
@@ -447,6 +393,8 @@ export class Map{
         return arr
     }
 
+
+
     static grabDepth(arr, depth){
         if(Array.isArray(arr)){
             return depth == FLOORDEPTH? arr[0]: arr[1]
@@ -458,6 +406,12 @@ export class Map{
         if(Array.isArray(this.grid[y][x])){
             depth == FLOORDEPTH? this.grid[y][x][0] = val: this.grid[y][x][1] = val
             return;
+        }
+        const oldItem = TILE_TYPES[TILE_MAP(this.grid[y][x])]
+        const newItem = TILE_TYPES[TILE_MAP(val)]
+        if(oldItem && newItem.depth != oldItem.depth){
+            newItem.depth == FLOORDEPTH? this.grid[y][x] = [newItem.grid, oldItem.grid]: this.grid[y][x] = [oldItem.grid, newItem.grid] 
+            return
         }
         this.grid[y][x] = val
     }
@@ -476,13 +430,91 @@ export class Map{
         return Number(Object.keys(distances).reduce((a, b) => distances[a] < distances[b] ? a : b));
     }
     
-    static addTopandBottomPiece(x,y,val,index){
-        if(TILE_TYPES[TILE_MAP(this.grid[y][x])].depth != TILE_TYPES[TILE_MAP(val)].depth){
-            if(TILE_TYPES[TILE_MAP(this.grid[y][x])].depth < TILE_TYPES[TILE_MAP(val)].depth){
-                this.grid[y][x] = [this.grid[y][x], val]
-                index = 1
+    static addValToIndex(x,y,val){
+        const oldItem = TILE_TYPES[TILE_MAP(this.grid[y][x])]
+        const newItem = TILE_TYPES[TILE_MAP(val)]
+        if(oldItem && newItem.depth != oldItem.depth){
+            newItem.depth == FLOORDEPTH? this.grid[y][x] = [newItem.grid, oldItem.grid]: this.grid[y][x] = [oldItem.grid, newItem.grid] 
+            return
+        }
+        this.grid[y][x] = newItem.grid
+    }
+
+    static handleLoadNonSpread(posX,posY,item){
+        if(item.name == 'turret'){
+            Turret.baseItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[0])
+                .setDepth(item.depth) 
+                .setInteractive()
+            Turret.topItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[1])
+                .setDepth(item.depth+1) // Ensure it's above base
+            const itemToPlace = Turret.baseItem;
+            const top = Turret.topItem
+            this.addBlockItem(posX,posY,item)
+            itemToPlace.setInteractive();
+            itemToPlace.sx = posX
+            itemToPlace.sy = posY
+            itemToPlace.lenX = item.lenX
+            itemToPlace.lenY = item.lenY
+            itemToPlace.on('pointerover', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
+                }
+            });
+            itemToPlace.on('pointerout', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    itemToPlace.clearTint(); // Restore original color
+                }
+            });
+            itemToPlace.on('pointerdown', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    console.log('Destroying item...');
+                    itemToPlace.destroy(); // Destroy the specific item
+                    top.destroy()
+                }
+            });
+            Turret.guns.push(Turret.topItem)
+            Turret.topItem.delta = 1
+            for(let y = posY; y < posY+item.lenY; y++){
+                for(let x = posX; x < posX+item.lenX; x++){
+                    this.checkAndPlace(x,y,-1,item.depth)
+                }
             }
-            else {this.grid[y][x] = [val, this.grid[y][x]]; index = 0}
+            Turret.placeItem = null;
+        }
+        else{
+            this.placingItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value)
+                .setDepth(item.depth) // Ensure it's above everything
+                .setInteractive();
+            this.addBlockItem(posX,posY,item)
+            const itemToPlace = this.placingItem
+            itemToPlace.setInteractive();
+            itemToPlace.sx = posX
+            itemToPlace.sy = posY
+            itemToPlace.lenX = item.lenX
+            itemToPlace.lenY = item.lenY
+            itemToPlace.on('pointerover', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
+                }
+            });
+            itemToPlace.on('pointerout', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    itemToPlace.clearTint(); // Restore original color
+                }
+            });
+            itemToPlace.on('pointerdown', () => {
+                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                    console.log('Destroying item...');
+                    itemToPlace.destroy(); // Destroy the specific item
+                    //this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
+                }
+            });
+            for(let y = posY; y < posY+item.lenY; y++){
+                for(let x = posX; x < posX+item.lenX; x++){
+                    this.checkAndPlace(x,y,-1,item.depth)
+                }
+            }
+            this.placingItem = null;
         }
     }
 

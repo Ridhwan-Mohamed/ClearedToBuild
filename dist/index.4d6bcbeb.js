@@ -649,80 +649,14 @@ class mapView extends (0, _phaserDefault.default).Scene {
     }
     create() {
         (0, _playerJs.Player).init(this);
-        // let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION)
-        (0, _mapJs.Map).grid = [
-            [
-                1,
-                [
-                    1,
-                    2
-                ],
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
-            ]
-        ];
-        // Map.grid = grid
+        let grid = (0, _constants.create2DArray)((0, _constants.WORLD_DIMENSION), (0, _constants.WORLD_DIMENSION));
+        (0, _mapJs.Map).grid = grid;
+        // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
+        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
+        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
         (0, _mapJs.Map).initMap();
         (0, _mapJs.Map).mapFromData((0, _mapJs.Map).grid);
-        (0, _playerJs.Player).addPlayer(10, 10, 1);
-        (0, _playerJs.Player).addPlayer(11, 11, 2);
+        // Player.addPlayer(10,10,1)
         this.cursors = this.input.keyboard.createCursorKeys();
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
@@ -905,11 +839,11 @@ class mapView extends (0, _phaserDefault.default).Scene {
         .setOrigin(0, 0).setScrollFactor(0) // Sticks to the camera
         .setDepth((0, _constants.UIDEPTH) - 1);
         // Add the bottom bar
-        const bottomBar = this.add.rectangle(0, camera.height - 100, camera.width, 100, 0x000000, 1) // Opaque black
+        const bottomBar = this.add.rectangle(0, camera.height - 50, camera.width, 50, 0x000000, 1) // Opaque black
         .setOrigin(0, 0).setScrollFactor(0) // Sticks to the camera
         .setDepth((0, _constants.UIDEPTH) - 1);
         // Add "Layout" button
-        const itemTab = this.add.text(10, camera.height - 80, 'Layout', {
+        const itemTab = this.add.text(10, camera.height - 40, 'Layout', {
             fontSize: '24px',
             fill: '#ffffff'
         }).setInteractive().setScrollFactor(0) // Sticks to the camera
@@ -921,7 +855,7 @@ class mapView extends (0, _phaserDefault.default).Scene {
         });
         itemTab.setStroke('#000000', 3);
         // Add "Delete/Place" button
-        this.breakItems = this.add.text(120, camera.height - 80, 'Delete', {
+        this.breakItems = this.add.text(120, camera.height - 40, 'Delete', {
             fontSize: '24px',
             fill: '#ffffff'
         }).setInteractive().setScrollFactor(0) // Sticks to the camera
@@ -963,7 +897,7 @@ class mapView extends (0, _phaserDefault.default).Scene {
         // Add Save Text
         const saveText = this.add.text(buttonMargin + buttonWidth / 2, buttonMargin + buttonHeight / 2, 'Save', {
             fontSize: '16px',
-            fill: '#ffffff',
+            fill: '#000000',
             align: 'center'
         }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth((0, _constants.UIDEPTH));
         // Make Save Button Interactive
@@ -974,7 +908,7 @@ class mapView extends (0, _phaserDefault.default).Scene {
             // Convert Map.grid to a JSON string and copy it to clipboard
             const gridData = JSON.stringify((0, _mapJs.Map).grid);
             navigator.clipboard.writeText(gridData).then(()=>{
-                console.log('Grid copied to clipboard:', gridData);
+                this.showSaveNotification();
             }).catch((err)=>{
                 console.error('Failed to copy grid to clipboard:', err);
             });
@@ -987,7 +921,7 @@ class mapView extends (0, _phaserDefault.default).Scene {
         // Add Load Text
         const loadText = this.add.text(buttonMargin + buttonWidth * 1.5 + buttonMargin, buttonMargin + buttonHeight / 2, 'Load', {
             fontSize: '16px',
-            fill: '#ffffff',
+            fill: '#000000',
             align: 'center'
         }).setOrigin(0.5, 0.5).setScrollFactor(0).setDepth((0, _constants.UIDEPTH));
         // Make Load Button Interactive
@@ -1018,6 +952,30 @@ class mapView extends (0, _phaserDefault.default).Scene {
         (0, _turretJs.Turret).update();
         this.handleKeyboardCameraMovement();
     }
+    showSaveNotification() {
+        const text = this.add.text(this.cameras.main.width / 2, -50, "World data saved \uD83C\uDF0D", {
+            fontSize: "32px",
+            fill: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 4,
+            fontStyle: "bold"
+        }).setOrigin(0.5, 0.5) // Center the text
+        .setDepth(1000); // Ensure it's on top
+        // Tween: Drop down slightly, then bounce back up
+        this.tweens.add({
+            targets: text,
+            y: 60,
+            duration: 600,
+            ease: "Bounce.easeOut",
+            yoyo: true,
+            onComplete: ()=>{
+                // Remove the text after a delay
+                this.time.delayedCall(1000, ()=>{
+                    text.destroy();
+                });
+            }
+        });
+    }
 }
 const config = {
     type: (0, _phaserDefault.default).WEBGL,
@@ -1026,7 +984,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: true
+            debug: false
         }
     },
     scene: [
@@ -1263,7 +1221,7 @@ class itemTab extends (0, _phaserDefault.default).Scene {
     }
     sceneButtons() {
         // Add a button or event to switch back to SceneA
-        const main = this.add.text(0, 800, 'Main', {
+        const main = this.add.text(10, this.cameras.main.height - 40, 'Main', {
             fontSize: '24px',
             fill: '#00ff00'
         }).setInteractive().on('pointerdown', ()=>{

@@ -154,7 +154,7 @@ export class itemTab extends Phaser.Scene {
 
     sceneButtons(){
         // Add a button or event to switch back to SceneA
-        const main = this.add.text(0, 800, 'Main', { fontSize: '24px', fill: '#00ff00' })
+        const main = this.add.text(10, this.cameras.main.height - 40, 'Main', { fontSize: '24px', fill: '#00ff00' })
             .setInteractive()
             .on('pointerdown', () => {
                 this.scene.selectMode = true;

@@ -1,0 +1,16 @@
+precision lowp float;
+
+uniform float time;  // Time uniform to animate the wave
+varying vec2 fragCoord;  // Assuming fragCoord is properly passed from the vertex shader
+
+void main() {
+    // Calculate a sine value based on the x-coordinate and time, creating a wave effect
+    float wave = sin(fragCoord.x + time*10.0);  // 0.05 is a scaling factor for x-coordinate
+
+    // Normalize the wave value to be between 0 and 1
+    wave = wave * 0.5 + 0.5;
+    vec3 col = vec3(0.529 * wave, 0.808*wave, 0.922 * wave);
+
+    // Use the wave value to modulate the color
+    gl_FragColor = vec4(col, 1.0); // Greyscale based on the wave
+}

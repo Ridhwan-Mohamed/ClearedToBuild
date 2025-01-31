@@ -21,6 +21,8 @@ export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
 export const SQUARESIZE = 16;
+export const CHUNK_SIZE = 60
+export const EDGE_RATIO = CHUNK_SIZE/2
 export const TILE_TYPES = {
     grass : {
         name: "grass",

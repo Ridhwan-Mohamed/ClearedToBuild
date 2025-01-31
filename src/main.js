@@ -9,7 +9,7 @@ import grass from '../assets/grass.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
-import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSION, TILE_TYPES, CONTROL_STATES } from './constants';
+import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSION, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
@@ -25,6 +25,9 @@ class mapView extends Phaser.Scene {
         Turret.scene = this;
         this.gridPlace = false;
         this.selectMode = true;
+        this.brushTiles = []; // Array to store affected tiles
+        this.isBrushMode = false; // Track if brush mode is active  
+        this.isBrushActive = false;  
     }
 
     preload() {
@@ -36,22 +39,20 @@ class mapView extends Phaser.Scene {
         this.load.image('leader', leader)
         this.load.image('hammer', hammer);
         this.load.image('grass', grass);
+        this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this)
         Projectile.init(this)
     }
     
     create() {
         Player.init(this);
-        let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION)
-        Map.grid = grid
+        let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
+        Map.grid = grid;
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
-        Map.initMap()
-        Map.mapFromData(Map.grid)
-        // Player.addPlayer(10,10,1)
-
-
+        Map.initMap();
+        Map.mapFromData(Map.grid);
 
         this.cursors = this.input.keyboard.createCursorKeys();
 
@@ -60,7 +61,6 @@ class mapView extends Phaser.Scene {
         this.physics.add.collider(Player.characters, Player.characters, Player.handlePlayerCollision);
         this.physics.add.collider(Player.characters, Projectile.projectileGroup, Player.handleCollision, null, this);
 
-        
         this.cursors = this.input.keyboard.createCursorKeys();
 
         // Variable to store the current text object
@@ -141,6 +141,10 @@ class mapView extends Phaser.Scene {
                 this.startCell = { x: gridX, y: gridY };
                 this.endCell = { x: gridX, y: gridY };
             }
+            else if(this.isBrushMode && pointer.button == 2){
+                this.isBrushActive = true;  
+                this.brushTiles = [];
+            }
             else if (this.breakItems.text != 'Place'){
                 let x = pointer.worldX;
                 let y = pointer.worldY;
@@ -215,14 +219,49 @@ class mapView extends Phaser.Scene {
             camera.scrollX += speed; // Move right
         }
     
-        // Clamp camera position to world bounds
-        // camera.scrollX = Phaser.Math.Clamp(camera.scrollX, 0, WORLD_DIMENSION * SQUARESIZE - width);
-        // camera.scrollY = Phaser.Math.Clamp(camera.scrollY, 0, WORLD_DIMENSION * SQUARESIZE - height);
+        // Clamp camera position to avoid accessing invalid indices
+        Phaser.Math.Clamp(camera.scrollX, -32, WORLD_DIMENSION * SQUARESIZE - width);
+        Phaser.Math.Clamp(camera.scrollY, -32, WORLD_DIMENSION * SQUARESIZE - height);
+    
+        // Calculate the center chunk coordinates of the camera
+        const centerChunkX = Math.floor(camera.scrollX / SQUARESIZE);
+        const centerChunkY = Math.floor(camera.scrollY / SQUARESIZE);
+    
+        // Initialize old center if not already set
+        if (!this.oldMapCenter) {
+            this.oldMapCenter = [centerChunkX, centerChunkY];
+        }
+    
+        // Check if the camera has deviated from the old center by a chunk size
+        const deviationX = Math.abs(centerChunkX - this.oldMapCenter[0]);
+        const deviationY = Math.abs(centerChunkY - this.oldMapCenter[1]);
+    
+        if (deviationX > EDGE_RATIO || deviationY > EDGE_RATIO) {
+            this.oldMapCenter = [centerChunkX, centerChunkY]; // Update old center
+            Map.reDraw(); // Trigger a redraw
+        }
     }
     
-
     onPointerMove(pointer) {
-        if (this.startCell) {
+        if (this.isBrushMode && this.isBrushActive) {
+            const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+            const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+
+            const alreadyExists = this.brushTiles.some(tile => tile.x === gridX && tile.y === gridY);
+
+            if (!alreadyExists) {
+                this.brushTiles.push({ x: gridX, y: gridY });
+
+                this.brushGraphics.fillStyle(0x00ff00, 0.5);
+                this.brushGraphics.fillRect(
+                    gridX * SQUARESIZE,
+                    gridY * SQUARESIZE,
+                    SQUARESIZE,
+                    SQUARESIZE
+                ).setDepth(UIDEPTH);
+            }
+        }
+        else if (this.startCell) {
             const gridX = Math.floor(pointer.worldX / SQUARESIZE);
             const gridY = Math.floor(pointer.worldY / SQUARESIZE);
     
@@ -239,7 +278,19 @@ class mapView extends Phaser.Scene {
 
     onPointerUp() {
         this.graphics.clear();
-        if(!this.gridPlace){ // player select
+        if (this.isBrushMode && this.isBrushActive) {
+            this.isBrushActive = false
+            if (this.brushTiles.length > 0) {
+                // Process the tiles
+                this.brushTiles.forEach(tile => {
+                    let item = itemTab.itemValues(this.registry.get('image'))
+                    Map.addSpreadArr(tile.x, tile.y, item, item.depth) // Customize as needed
+                });
+
+                this.brushGraphics.clear();
+            }
+        }
+        else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
         }
         else if (this.startCell && this.endCell) {
@@ -280,6 +331,26 @@ class mapView extends Phaser.Scene {
 
     sceneButtons() {
         const camera = this.cameras.main;
+
+        // Add a button on the bottom bar
+        const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
+            fontSize: '24px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        })
+            .setInteractive()
+            .on('pointerdown', () => {
+                if(this.isBrushMode){
+                    this.isBrushMode = false;
+                    this.gridPlace = true;
+                } else {this.isBrushMode = true; this.gridPlace = false;}
+                brushToggleButton.setText(`Brush Mode: ${this.isBrushMode ? 'ON' : 'OFF'}`);
+            });
+
+        // Ensure the button sticks to the bottom bar
+        brushToggleButton.setScrollFactor(0);
+        brushToggleButton.setDepth(UIDEPTH);
     
         // Add the top bar
         const topBar = this.add.rectangle(0, 0, camera.width, 50, 0x808080, 0.5) // Gray and transparent
@@ -405,12 +476,14 @@ class mapView extends Phaser.Scene {
             if (gridData) {
                 try {
                     // Parse the JSON string and update Map.grid
-                    const newGrid = JSON.parse(gridData);
-        
+                    let newGrid = JSON.parse(gridData);
+                    const copyGrid = structuredClone(newGrid)
                     // Ensure the new grid is a valid 2D array
                     if (Array.isArray(newGrid) && newGrid.every(row => Array.isArray(row))) {
                         Map.grid = newGrid; // Update the grid
                         Map.reDraw();       // Redraw the map
+                        Map.grid = copyGrid
+                        newGrid = null;
                         console.log('Grid successfully loaded and redrawn.');
                     } else {
                         alert('Invalid grid format. Ensure it is a 2D array.');
@@ -424,8 +497,6 @@ class mapView extends Phaser.Scene {
         
     }
     
-    
-
     update() {
         Player.update();
         Turret.update();
@@ -469,7 +540,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: false
+            debug: true
         }
     },
     scene: [mapView, itemTab]

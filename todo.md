@@ -2,12 +2,14 @@ todo:
 Map:
 generate
     - world terrain
-        - load chunk based on cameraXY
+        - load chunk based on cameraXY*** [✔]
+    - world generation
         - Wave collapse?
-    - store in data efficient manner***
-        - grid item = 1x1 pixel
-        - block item = store center/position
-    - recreate world from stored data***
+    - store in data efficient manner [✔]
+        - grid item = 1x1 pixel [✔]
+        - block item = store center/position [✔]
+    - recreate world from stored data [✔]
+    - brush draw feature [✔]
 Colonies
     - Add colonies on map
     - Add people in these colonies
@@ -27,5 +29,8 @@ Players:
     - Fighting
         - melee
         - projectiles
+itemTab
+    - make nicer
+        - add animations
 Bugs:
 Tiles re-grid glitch when swapping tiles (because of array values at index)

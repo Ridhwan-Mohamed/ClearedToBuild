@@ -631,6 +631,9 @@ class mapView extends (0, _phaserDefault.default).Scene {
         (0, _turretJs.Turret).scene = this;
         this.gridPlace = false;
         this.selectMode = true;
+        this.brushTiles = []; // Array to store affected tiles
+        this.isBrushMode = false; // Track if brush mode is active  
+        this.isBrushActive = false;
     }
     preload() {
         this.load.spritesheet('player', (0, _playerPngDefault.default), {
@@ -644,6 +647,7 @@ class mapView extends (0, _phaserDefault.default).Scene {
         this.load.image('leader', (0, _purplePngDefault.default));
         this.load.image('hammer', (0, _hammerPngDefault.default));
         this.load.image('grass', (0, _grassPngDefault.default));
+        this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         (0, _itemTabJs.itemTab).preload(this);
         (0, _projectileJs.Projectile).init(this);
     }
@@ -656,7 +660,6 @@ class mapView extends (0, _phaserDefault.default).Scene {
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
         (0, _mapJs.Map).initMap();
         (0, _mapJs.Map).mapFromData((0, _mapJs.Map).grid);
-        // Player.addPlayer(10,10,1)
         this.cursors = this.input.keyboard.createCursorKeys();
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
@@ -725,6 +728,9 @@ class mapView extends (0, _phaserDefault.default).Scene {
                     x: gridX,
                     y: gridY
                 };
+            } else if (this.isBrushMode && pointer.button == 2) {
+                this.isBrushActive = true;
+                this.brushTiles = [];
             } else if (this.breakItems.text != 'Place') {
                 let x = pointer.worldX;
                 let y = pointer.worldY;
@@ -782,12 +788,42 @@ class mapView extends (0, _phaserDefault.default).Scene {
         if (this.keys.down.isDown || this.keys.arrowDown.isDown) camera.scrollY += speed; // Move down
         if (this.keys.left.isDown || this.keys.arrowLeft.isDown) camera.scrollX -= speed; // Move left
         if (this.keys.right.isDown || this.keys.arrowRight.isDown) camera.scrollX += speed; // Move right
-    // Clamp camera position to world bounds
-    // camera.scrollX = Phaser.Math.Clamp(camera.scrollX, 0, WORLD_DIMENSION * SQUARESIZE - width);
-    // camera.scrollY = Phaser.Math.Clamp(camera.scrollY, 0, WORLD_DIMENSION * SQUARESIZE - height);
+        // Clamp camera position to avoid accessing invalid indices
+        (0, _phaserDefault.default).Math.Clamp(camera.scrollX, -32, (0, _constants.WORLD_DIMENSION) * (0, _constants.SQUARESIZE) - width);
+        (0, _phaserDefault.default).Math.Clamp(camera.scrollY, -32, (0, _constants.WORLD_DIMENSION) * (0, _constants.SQUARESIZE) - height);
+        // Calculate the center chunk coordinates of the camera
+        const centerChunkX = Math.floor(camera.scrollX / (0, _constants.SQUARESIZE));
+        const centerChunkY = Math.floor(camera.scrollY / (0, _constants.SQUARESIZE));
+        // Initialize old center if not already set
+        if (!this.oldMapCenter) this.oldMapCenter = [
+            centerChunkX,
+            centerChunkY
+        ];
+        // Check if the camera has deviated from the old center by a chunk size
+        const deviationX = Math.abs(centerChunkX - this.oldMapCenter[0]);
+        const deviationY = Math.abs(centerChunkY - this.oldMapCenter[1]);
+        if (deviationX > (0, _constants.EDGE_RATIO) || deviationY > (0, _constants.EDGE_RATIO)) {
+            this.oldMapCenter = [
+                centerChunkX,
+                centerChunkY
+            ]; // Update old center
+            (0, _mapJs.Map).reDraw(); // Trigger a redraw
+        }
     }
     onPointerMove(pointer) {
-        if (this.startCell) {
+        if (this.isBrushMode && this.isBrushActive) {
+            const gridX = Math.floor(pointer.worldX / (0, _constants.SQUARESIZE));
+            const gridY = Math.floor(pointer.worldY / (0, _constants.SQUARESIZE));
+            const alreadyExists = this.brushTiles.some((tile)=>tile.x === gridX && tile.y === gridY);
+            if (!alreadyExists) {
+                this.brushTiles.push({
+                    x: gridX,
+                    y: gridY
+                });
+                this.brushGraphics.fillStyle(0x00ff00, 0.5);
+                this.brushGraphics.fillRect(gridX * (0, _constants.SQUARESIZE), gridY * (0, _constants.SQUARESIZE), (0, _constants.SQUARESIZE), (0, _constants.SQUARESIZE)).setDepth((0, _constants.UIDEPTH));
+            }
+        } else if (this.startCell) {
             const gridX = Math.floor(pointer.worldX / (0, _constants.SQUARESIZE));
             const gridY = Math.floor(pointer.worldY / (0, _constants.SQUARESIZE));
             // Update the end cell for selection
@@ -802,7 +838,18 @@ class mapView extends (0, _phaserDefault.default).Scene {
     }
     onPointerUp() {
         this.graphics.clear();
-        if (!this.gridPlace) (0, _playerJs.Player).handlePlayerSelect();
+        if (this.isBrushMode && this.isBrushActive) {
+            this.isBrushActive = false;
+            if (this.brushTiles.length > 0) {
+                // Process the tiles
+                this.brushTiles.forEach((tile)=>{
+                    let item = (0, _itemTabJs.itemTab).itemValues(this.registry.get('image'));
+                    (0, _mapJs.Map).addSpreadArr(tile.x, tile.y, item, item.depth) // Customize as needed
+                    ;
+                });
+                this.brushGraphics.clear();
+            }
+        } else if (!this.gridPlace) (0, _playerJs.Player).handlePlayerSelect();
         else if (this.startCell && this.endCell) // Get all selected grid cells
         this.getSelectedCells();
         this.startCell = null;
@@ -834,6 +881,25 @@ class mapView extends (0, _phaserDefault.default).Scene {
     }
     sceneButtons() {
         const camera = this.cameras.main;
+        // Add a button on the bottom bar
+        const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
+            fontSize: '24px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setInteractive().on('pointerdown', ()=>{
+            if (this.isBrushMode) {
+                this.isBrushMode = false;
+                this.gridPlace = true;
+            } else {
+                this.isBrushMode = true;
+                this.gridPlace = false;
+            }
+            brushToggleButton.setText(`Brush Mode: ${this.isBrushMode ? 'ON' : 'OFF'}`);
+        });
+        // Ensure the button sticks to the bottom bar
+        brushToggleButton.setScrollFactor(0);
+        brushToggleButton.setDepth((0, _constants.UIDEPTH));
         // Add the top bar
         const topBar = this.add.rectangle(0, 0, camera.width, 50, 0x808080, 0.5) // Gray and transparent
         .setOrigin(0, 0).setScrollFactor(0) // Sticks to the camera
@@ -934,11 +1000,14 @@ class mapView extends (0, _phaserDefault.default).Scene {
             const gridData = prompt('Paste your grid data here (JSON format):');
             if (gridData) try {
                 // Parse the JSON string and update Map.grid
-                const newGrid = JSON.parse(gridData);
+                let newGrid = JSON.parse(gridData);
+                const copyGrid = structuredClone(newGrid);
                 // Ensure the new grid is a valid 2D array
                 if (Array.isArray(newGrid) && newGrid.every((row)=>Array.isArray(row))) {
                     (0, _mapJs.Map).grid = newGrid; // Update the grid
                     (0, _mapJs.Map).reDraw(); // Redraw the map
+                    (0, _mapJs.Map).grid = copyGrid;
+                    newGrid = null;
                     console.log('Grid successfully loaded and redrawn.');
                 } else alert('Invalid grid format. Ensure it is a 2D array.');
             } catch (err) {
@@ -984,7 +1053,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: false
+            debug: true
         }
     },
     scene: [
@@ -1015,379 +1084,7 @@ module.exports = require("b1bb3c005d672fd").getBundleURL('gnRNX') + "hammer.7623
 },{"b1bb3c005d672fd":"lgJ39"}],"9C4QU":[function(require,module,exports,__globalThis) {
 module.exports = require("7167b78d79599497").getBundleURL('gnRNX') + "grass.9122fc28.png" + "?" + Date.now();
 
-},{"7167b78d79599497":"lgJ39"}],"5vBbV":[function(require,module,exports,__globalThis) {
-var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
-parcelHelpers.defineInteropFlag(exports);
-parcelHelpers.export(exports, "itemTab", ()=>itemTab);
-var _phaser = require("phaser");
-var _phaserDefault = parcelHelpers.interopDefault(_phaser);
-var _constants = require("./constants");
-var _sandPng = require("../assets/sand.png");
-var _sandPngDefault = parcelHelpers.interopDefault(_sandPng);
-var _flowerPng = require("../assets/flower.png");
-var _flowerPngDefault = parcelHelpers.interopDefault(_flowerPng);
-var _pinePng = require("../assets/pine.png");
-var _pinePngDefault = parcelHelpers.interopDefault(_pinePng);
-var _rockPng = require("../assets/rock.png");
-var _rockPngDefault = parcelHelpers.interopDefault(_rockPng);
-var _brickPng = require("../assets/wall/brick.png");
-var _brickPngDefault = parcelHelpers.interopDefault(_brickPng);
-var _dirtImgPng = require("../assets/Dirt/dirtImg.png");
-var _dirtImgPngDefault = parcelHelpers.interopDefault(_dirtImgPng);
-var _turretBasePng = require("../assets/turretBase.png");
-var _turretBasePngDefault = parcelHelpers.interopDefault(_turretBasePng);
-var _turretPng = require("../assets/turret.png");
-var _turretPngDefault = parcelHelpers.interopDefault(_turretPng);
-var _wallPng = require("../assets/wall/Wall.png");
-var _wallPngDefault = parcelHelpers.interopDefault(_wallPng);
-var _twallPng = require("../assets/wall/TWall.png");
-var _twallPngDefault = parcelHelpers.interopDefault(_twallPng);
-var _bwallPng = require("../assets/wall/BWall.png");
-var _bwallPngDefault = parcelHelpers.interopDefault(_bwallPng);
-var _rwallPng = require("../assets/wall/RWall.png");
-var _rwallPngDefault = parcelHelpers.interopDefault(_rwallPng);
-var _lwallPng = require("../assets/wall/LWall.png");
-var _lwallPngDefault = parcelHelpers.interopDefault(_lwallPng);
-var _trcwallPng = require("../assets/wall/TRCWall.png");
-var _trcwallPngDefault = parcelHelpers.interopDefault(_trcwallPng);
-var _brcwallPng = require("../assets/wall/BRCWall.png");
-var _brcwallPngDefault = parcelHelpers.interopDefault(_brcwallPng);
-var _tlcwallPng = require("../assets/wall/TLCWall.png");
-var _tlcwallPngDefault = parcelHelpers.interopDefault(_tlcwallPng);
-var _blcwallPng = require("../assets/wall/BLCWall.png");
-var _blcwallPngDefault = parcelHelpers.interopDefault(_blcwallPng);
-var _dirtPng = require("../assets/Dirt/Dirt.png");
-var _dirtPngDefault = parcelHelpers.interopDefault(_dirtPng);
-var _tdirtPng = require("../assets/Dirt/TDirt.png");
-var _tdirtPngDefault = parcelHelpers.interopDefault(_tdirtPng);
-var _bdirtPng = require("../assets/Dirt/BDirt.png");
-var _bdirtPngDefault = parcelHelpers.interopDefault(_bdirtPng);
-var _rdirtPng = require("../assets/Dirt/RDirt.png");
-var _rdirtPngDefault = parcelHelpers.interopDefault(_rdirtPng);
-var _ldirtPng = require("../assets/Dirt/LDirt.png");
-var _ldirtPngDefault = parcelHelpers.interopDefault(_ldirtPng);
-var _trcdirtPng = require("../assets/Dirt/TRCDirt.png");
-var _trcdirtPngDefault = parcelHelpers.interopDefault(_trcdirtPng);
-var _brcdirtPng = require("../assets/Dirt/BRCDirt.png");
-var _brcdirtPngDefault = parcelHelpers.interopDefault(_brcdirtPng);
-var _tlcdirtPng = require("../assets/Dirt/TLCDirt.png");
-var _tlcdirtPngDefault = parcelHelpers.interopDefault(_tlcdirtPng);
-var _blcdirtPng = require("../assets/Dirt/BLCDirt.png");
-var _blcdirtPngDefault = parcelHelpers.interopDefault(_blcdirtPng);
-var _waterImgPng = require("../assets/water/waterImg.png");
-var _waterImgPngDefault = parcelHelpers.interopDefault(_waterImgPng);
-var _waterPng = require("../assets/water/water.png");
-var _waterPngDefault = parcelHelpers.interopDefault(_waterPng);
-var _twaterPng = require("../assets/water/TWater.png");
-var _twaterPngDefault = parcelHelpers.interopDefault(_twaterPng);
-var _bwaterPng = require("../assets/water/BWater.png");
-var _bwaterPngDefault = parcelHelpers.interopDefault(_bwaterPng);
-var _rwaterPng = require("../assets/water/RWater.png");
-var _rwaterPngDefault = parcelHelpers.interopDefault(_rwaterPng);
-var _lwaterPng = require("../assets/water/LWater.png");
-var _lwaterPngDefault = parcelHelpers.interopDefault(_lwaterPng);
-var _trcwaterPng = require("../assets/water/TRCWater.png");
-var _trcwaterPngDefault = parcelHelpers.interopDefault(_trcwaterPng);
-var _brcwaterPng = require("../assets/water/BRCWater.png");
-var _brcwaterPngDefault = parcelHelpers.interopDefault(_brcwaterPng);
-var _tlcwaterPng = require("../assets/water/TLCWater.png");
-var _tlcwaterPngDefault = parcelHelpers.interopDefault(_tlcwaterPng);
-var _blcwaterPng = require("../assets/water/BLCWater.png");
-var _blcwaterPngDefault = parcelHelpers.interopDefault(_blcwaterPng);
-var _playerImgPng = require("../assets/Players/playerImg.png");
-var _playerImgPngDefault = parcelHelpers.interopDefault(_playerImgPng);
-class itemTab extends (0, _phaserDefault.default).Scene {
-    constructor(){
-        super('itemTab');
-        this.numItems = 9;
-    }
-    preload() {}
-    static preload(scene) {
-        scene.load.image('image1', (0, _sandPngDefault.default)); // Make sure the path and filename are correct
-        scene.load.image('image2', (0, _rockPngDefault.default));
-        scene.load.image('image3', (0, _flowerPngDefault.default));
-        scene.load.image('image4', (0, _brickPngDefault.default));
-        scene.load.image('image5', (0, _dirtImgPngDefault.default));
-        scene.load.image('image6', (0, _pinePngDefault.default));
-        scene.load.image('image7', (0, _turretBasePngDefault.default));
-        scene.load.image('image7a', (0, _turretPngDefault.default));
-        scene.load.image('image8', (0, _waterImgPngDefault.default)); //water image
-        scene.load.image('image9', (0, _playerImgPngDefault.default)); //water image
-        scene.load.image('wall', (0, _wallPngDefault.default));
-        scene.load.image('tWall', (0, _twallPngDefault.default)); // Top wall
-        scene.load.image('bWall', (0, _bwallPngDefault.default)); // Bottom wall
-        scene.load.image('rWall', (0, _rwallPngDefault.default)); // Right wall
-        scene.load.image('lWall', (0, _lwallPngDefault.default)); // Left wall
-        scene.load.image('trcWall', (0, _trcwallPngDefault.default)); // Top-right corner wall
-        scene.load.image('brcWall', (0, _brcwallPngDefault.default)); // Bottom-right corner wall
-        scene.load.image('tlcWall', (0, _tlcwallPngDefault.default)); // Top-left corner wall
-        scene.load.image('blcWall', (0, _blcwallPngDefault.default)); // Bottom-left corner wall
-        scene.load.image('Dirt', (0, _dirtPngDefault.default));
-        scene.load.image('tDirt', (0, _tdirtPngDefault.default)); // Top Dirt
-        scene.load.image('bDirt', (0, _bdirtPngDefault.default)); // Bottom Dirt
-        scene.load.image('rDirt', (0, _rdirtPngDefault.default)); // Right Dirt
-        scene.load.image('lDirt', (0, _ldirtPngDefault.default)); // Left Dirt
-        scene.load.image('trcDirt', (0, _trcdirtPngDefault.default)); // Top-right corner Dirt
-        scene.load.image('brcDirt', (0, _brcdirtPngDefault.default)); // Bottom-right corner Dirt
-        scene.load.image('tlcDirt', (0, _tlcdirtPngDefault.default)); // Top-left corner Dirt
-        scene.load.image('blcDirt', (0, _blcdirtPngDefault.default)); // Bottom-left corner Dirt
-        scene.load.spritesheet('water', (0, _waterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        });
-        scene.load.spritesheet('twater', (0, _twaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Top Water
-        scene.load.spritesheet('bwater', (0, _bwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Bottom Water
-        scene.load.spritesheet('rwater', (0, _rwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Right Water
-        scene.load.spritesheet('lwater', (0, _lwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Left Water
-        scene.load.spritesheet('trcwater', (0, _trcwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Top-right corner Water
-        scene.load.spritesheet('brcwater', (0, _brcwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Bottom-right corner Water
-        scene.load.spritesheet('tlcwater', (0, _tlcwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Top-left corner Water
-        scene.load.spritesheet('blcwater', (0, _blcwaterPngDefault.default), {
-            frameWidth: 16,
-            frameHeight: 16
-        }); // Bottom-left corner Water
-    }
-    create() {
-        this.createAnim('water');
-        this.createAnim('twater');
-        this.createAnim('bwater');
-        this.createAnim('rwater');
-        this.createAnim('lwater');
-        this.createAnim('trcwater');
-        this.createAnim('brcwater');
-        this.createAnim('tlcwater');
-        this.createAnim('blcwater');
-        // Create a container for the dialog box
-        const dialogContainer = this.add.container(0, 0);
-        const dialogWidth = 800;
-        const dialogHeight = 800;
-        // Add a background for the dialog
-        const dialogBackground = this.add.rectangle(0, 0, dialogWidth, dialogHeight, 0x222222).setOrigin(0).setInteractive(); // Make the background interactive for scrolling
-        dialogContainer.add(dialogBackground);
-        // Create a content container to hold the images
-        const contentContainer = this.add.container(0, 0);
-        // Add images to the content container
-        const imageSpacing = 100; // Spacing between images
-        for(let i = 0; i < 10; i++){
-            let y = i * imageSpacing + 80;
-            let x = 80;
-            if (y > 700) {
-                y %= 700;
-                x += 150;
-            }
-            const image = this.add.image(x, y, `image${i % this.numItems + 1}`).setInteractive().setName(`image${i % this.numItems + 1}`);
-            // Add selection behavior
-            image.on('pointerdown', ()=>{
-                this.input.stopPropagation();
-                this.registry.set('image', image.name);
-                this.scene.switch('mapView');
-            });
-            // Add to content container
-            contentContainer.add(image);
-        }
-        // Add the content container to the dialog
-        dialogContainer.add(contentContainer);
-        // Mask the content
-        const maskShape = this.add.graphics().fillRect(0, 0, dialogWidth, dialogHeight);
-        const mask = maskShape.createGeometryMask();
-        contentContainer.setMask(mask);
-        // Enable scrolling
-        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY)=>{
-            const newY = (0, _phaserDefault.default).Math.Clamp(contentContainer.y - deltaY, -(contentContainer.height - dialogHeight), 0);
-            contentContainer.setY(newY);
-        });
-        this.sceneButtons();
-    }
-    sceneButtons() {
-        // Add a button or event to switch back to SceneA
-        const main = this.add.text(10, this.cameras.main.height - 40, 'Main', {
-            fontSize: '24px',
-            fill: '#00ff00'
-        }).setInteractive().on('pointerdown', ()=>{
-            this.scene.selectMode = true;
-            this.input.stopPropagation();
-            this.scene.switch('mapView');
-        });
-        main.depth = (0, _constants.UIDEPTH);
-    }
-    createAnim(key) {
-        this.anims.create({
-            key: key,
-            frames: this.anims.generateFrameNumbers(key, {
-                start: 0,
-                end: 2
-            }),
-            frameRate: 2,
-            repeat: -1
-        });
-    }
-    static itemValues(value) {
-        switch(value){
-            case 'image1':
-                return (0, _constants.TILE_TYPES).sand;
-            case 'image2':
-                return {
-                    grid: 2,
-                    lenX: 3,
-                    lenY: 3,
-                    block: false,
-                    depth: (0, _constants.FLOORDEPTH),
-                    value: 'image2',
-                    spread: false
-                };
-            case 'image3':
-                return (0, _constants.TILE_TYPES).grass;
-            case 'image4':
-                return (0, _constants.TILE_TYPES).stone;
-            case 'image5':
-                return (0, _constants.TILE_TYPES).dirt;
-            case 'image6':
-                return (0, _constants.TILE_TYPES).pine;
-            case 'image7':
-                return (0, _constants.TILE_TYPES).turret;
-            case 'image8':
-                return (0, _constants.TILE_TYPES).water;
-            case 'image9':
-                return (0, _constants.TILE_TYPES).player;
-            default:
-                break;
-        }
-    }
-}
-
-},{"phaser":"9U0wC","./constants":"3huJa","../assets/sand.png":"iSD1q","../assets/flower.png":"e9z1g","../assets/pine.png":"3qsOW","../assets/rock.png":"gwiwS","../assets/wall/brick.png":"ishfD","../assets/Dirt/dirtImg.png":"6LBkA","../assets/turretBase.png":"6Firb","../assets/turret.png":"5t7JE","../assets/wall/Wall.png":"eJaL6","../assets/wall/TWall.png":"9BkUy","../assets/wall/BWall.png":"8V8mP","../assets/wall/RWall.png":"inSzB","../assets/wall/LWall.png":"iOWHM","../assets/wall/TRCWall.png":"hQ5ac","../assets/wall/BRCWall.png":"kihZc","../assets/wall/TLCWall.png":"fXOeD","../assets/wall/BLCWall.png":"9rB5f","../assets/Dirt/Dirt.png":"7ECKi","../assets/Dirt/TDirt.png":"fdLDd","../assets/Dirt/BDirt.png":"7QdIS","../assets/Dirt/RDirt.png":"kTZ2p","../assets/Dirt/LDirt.png":"azmbf","../assets/Dirt/TRCDirt.png":"14Tid","../assets/Dirt/BRCDirt.png":"lMPQM","../assets/Dirt/TLCDirt.png":"kIb41","../assets/Dirt/BLCDirt.png":"9pJi7","../assets/water/waterImg.png":"evniQ","../assets/water/water.png":"lnJKd","../assets/water/TWater.png":"cwoAu","../assets/water/BWater.png":"8pdOw","../assets/water/RWater.png":"kU53G","../assets/water/LWater.png":"lRrXh","../assets/water/TRCWater.png":"lyxh7","../assets/water/BRCWater.png":"aMqEU","../assets/water/TLCWater.png":"GDf6t","../assets/water/BLCWater.png":"4wOV7","../assets/Players/playerImg.png":"rBCtd","@parcel/transformer-js/src/esmodule-helpers.js":"gkKU3"}],"iSD1q":[function(require,module,exports,__globalThis) {
-module.exports = require("2ee9f5635a5f947a").getBundleURL('gnRNX') + "sand.a5ab8848.png" + "?" + Date.now();
-
-},{"2ee9f5635a5f947a":"lgJ39"}],"e9z1g":[function(require,module,exports,__globalThis) {
-module.exports = require("ee9f975f1a0e25b9").getBundleURL('gnRNX') + "flower.641f1c48.png" + "?" + Date.now();
-
-},{"ee9f975f1a0e25b9":"lgJ39"}],"3qsOW":[function(require,module,exports,__globalThis) {
-module.exports = require("60cee8d3ddbc884c").getBundleURL('gnRNX') + "pine.0072b100.png" + "?" + Date.now();
-
-},{"60cee8d3ddbc884c":"lgJ39"}],"gwiwS":[function(require,module,exports,__globalThis) {
-module.exports = require("9da9540e141ad92a").getBundleURL('gnRNX') + "rock.24ae3a8c.png" + "?" + Date.now();
-
-},{"9da9540e141ad92a":"lgJ39"}],"ishfD":[function(require,module,exports,__globalThis) {
-module.exports = require("db2e8b3d20462a1f").getBundleURL('gnRNX') + "brick.3d2baa78.png" + "?" + Date.now();
-
-},{"db2e8b3d20462a1f":"lgJ39"}],"6LBkA":[function(require,module,exports,__globalThis) {
-module.exports = require("8e78501eeeb288d1").getBundleURL('gnRNX') + "dirtImg.4aa52516.png" + "?" + Date.now();
-
-},{"8e78501eeeb288d1":"lgJ39"}],"6Firb":[function(require,module,exports,__globalThis) {
-module.exports = require("1ea4b928a98ec4d").getBundleURL('gnRNX') + "turretBase.02ae028f.png" + "?" + Date.now();
-
-},{"1ea4b928a98ec4d":"lgJ39"}],"5t7JE":[function(require,module,exports,__globalThis) {
-module.exports = require("e57597930fb4f435").getBundleURL('gnRNX') + "turret.bf1bd5eb.png" + "?" + Date.now();
-
-},{"e57597930fb4f435":"lgJ39"}],"eJaL6":[function(require,module,exports,__globalThis) {
-module.exports = require("40d5287bd5d8b67c").getBundleURL('gnRNX') + "Wall.b49d660d.png" + "?" + Date.now();
-
-},{"40d5287bd5d8b67c":"lgJ39"}],"9BkUy":[function(require,module,exports,__globalThis) {
-module.exports = require("c144dc0cf1ad5d44").getBundleURL('gnRNX') + "TWall.ecd7291a.png" + "?" + Date.now();
-
-},{"c144dc0cf1ad5d44":"lgJ39"}],"8V8mP":[function(require,module,exports,__globalThis) {
-module.exports = require("4c5436f1e35362ea").getBundleURL('gnRNX') + "BWall.53b07a4c.png" + "?" + Date.now();
-
-},{"4c5436f1e35362ea":"lgJ39"}],"inSzB":[function(require,module,exports,__globalThis) {
-module.exports = require("f5f030e1c8726bf3").getBundleURL('gnRNX') + "RWall.99911b28.png" + "?" + Date.now();
-
-},{"f5f030e1c8726bf3":"lgJ39"}],"iOWHM":[function(require,module,exports,__globalThis) {
-module.exports = require("a6f46fb8cc9fb0df").getBundleURL('gnRNX') + "LWall.02fb8454.png" + "?" + Date.now();
-
-},{"a6f46fb8cc9fb0df":"lgJ39"}],"hQ5ac":[function(require,module,exports,__globalThis) {
-module.exports = require("b590684b4d506097").getBundleURL('gnRNX') + "TRCWall.e7bdbff4.png" + "?" + Date.now();
-
-},{"b590684b4d506097":"lgJ39"}],"kihZc":[function(require,module,exports,__globalThis) {
-module.exports = require("864a45dba536bdd0").getBundleURL('gnRNX') + "BRCWall.d0355cca.png" + "?" + Date.now();
-
-},{"864a45dba536bdd0":"lgJ39"}],"fXOeD":[function(require,module,exports,__globalThis) {
-module.exports = require("ccb102f1a85512c1").getBundleURL('gnRNX') + "TLCWall.49f7d0b2.png" + "?" + Date.now();
-
-},{"ccb102f1a85512c1":"lgJ39"}],"9rB5f":[function(require,module,exports,__globalThis) {
-module.exports = require("1675a8f114c4d30f").getBundleURL('gnRNX') + "BLCWall.3526c11c.png" + "?" + Date.now();
-
-},{"1675a8f114c4d30f":"lgJ39"}],"7ECKi":[function(require,module,exports,__globalThis) {
-module.exports = require("ac7dcb16f5c5a04b").getBundleURL('gnRNX') + "Dirt.d85109c8.png" + "?" + Date.now();
-
-},{"ac7dcb16f5c5a04b":"lgJ39"}],"fdLDd":[function(require,module,exports,__globalThis) {
-module.exports = require("8d4738ed99d6fffa").getBundleURL('gnRNX') + "TDirt.5c2280bc.png" + "?" + Date.now();
-
-},{"8d4738ed99d6fffa":"lgJ39"}],"7QdIS":[function(require,module,exports,__globalThis) {
-module.exports = require("94e4094d72d5a9c").getBundleURL('gnRNX') + "BDirt.390e98f9.png" + "?" + Date.now();
-
-},{"94e4094d72d5a9c":"lgJ39"}],"kTZ2p":[function(require,module,exports,__globalThis) {
-module.exports = require("24d24eac1215bc25").getBundleURL('gnRNX') + "RDirt.3f9f53fa.png" + "?" + Date.now();
-
-},{"24d24eac1215bc25":"lgJ39"}],"azmbf":[function(require,module,exports,__globalThis) {
-module.exports = require("91be917aa87e09c9").getBundleURL('gnRNX') + "LDirt.7cf1fc99.png" + "?" + Date.now();
-
-},{"91be917aa87e09c9":"lgJ39"}],"14Tid":[function(require,module,exports,__globalThis) {
-module.exports = require("bc006411f951ca07").getBundleURL('gnRNX') + "TRCDirt.5a6b8ba2.png" + "?" + Date.now();
-
-},{"bc006411f951ca07":"lgJ39"}],"lMPQM":[function(require,module,exports,__globalThis) {
-module.exports = require("671cc5e12e1bdd22").getBundleURL('gnRNX') + "BRCDirt.fa28492f.png" + "?" + Date.now();
-
-},{"671cc5e12e1bdd22":"lgJ39"}],"kIb41":[function(require,module,exports,__globalThis) {
-module.exports = require("2ca57ba559b3aad6").getBundleURL('gnRNX') + "TLCDirt.eff450b2.png" + "?" + Date.now();
-
-},{"2ca57ba559b3aad6":"lgJ39"}],"9pJi7":[function(require,module,exports,__globalThis) {
-module.exports = require("7526add23a9235ad").getBundleURL('gnRNX') + "BLCDirt.b4f97185.png" + "?" + Date.now();
-
-},{"7526add23a9235ad":"lgJ39"}],"evniQ":[function(require,module,exports,__globalThis) {
-module.exports = require("70375abba9d3ac6c").getBundleURL('gnRNX') + "waterImg.f90bf3a7.png" + "?" + Date.now();
-
-},{"70375abba9d3ac6c":"lgJ39"}],"lnJKd":[function(require,module,exports,__globalThis) {
-module.exports = require("2e75f2b1fb841214").getBundleURL('gnRNX') + "water.75e5ff26.png" + "?" + Date.now();
-
-},{"2e75f2b1fb841214":"lgJ39"}],"cwoAu":[function(require,module,exports,__globalThis) {
-module.exports = require("4f0de19b29a5e212").getBundleURL('gnRNX') + "TWater.cb3bb2c9.png" + "?" + Date.now();
-
-},{"4f0de19b29a5e212":"lgJ39"}],"8pdOw":[function(require,module,exports,__globalThis) {
-module.exports = require("2e09ff91a089a224").getBundleURL('gnRNX') + "BWater.edfca25a.png" + "?" + Date.now();
-
-},{"2e09ff91a089a224":"lgJ39"}],"kU53G":[function(require,module,exports,__globalThis) {
-module.exports = require("91d23e1526f69a7d").getBundleURL('gnRNX') + "RWater.a44b9ad2.png" + "?" + Date.now();
-
-},{"91d23e1526f69a7d":"lgJ39"}],"lRrXh":[function(require,module,exports,__globalThis) {
-module.exports = require("489e312c989f138a").getBundleURL('gnRNX') + "LWater.77531a77.png" + "?" + Date.now();
-
-},{"489e312c989f138a":"lgJ39"}],"lyxh7":[function(require,module,exports,__globalThis) {
-module.exports = require("b6a33cabaf290ec6").getBundleURL('gnRNX') + "TRCWater.f9f91f61.png" + "?" + Date.now();
-
-},{"b6a33cabaf290ec6":"lgJ39"}],"aMqEU":[function(require,module,exports,__globalThis) {
-module.exports = require("38be1ad954499cbf").getBundleURL('gnRNX') + "BRCWater.af8cc45a.png" + "?" + Date.now();
-
-},{"38be1ad954499cbf":"lgJ39"}],"GDf6t":[function(require,module,exports,__globalThis) {
-module.exports = require("d77725b76a3b724").getBundleURL('gnRNX') + "TLCWater.6e0eaecd.png" + "?" + Date.now();
-
-},{"d77725b76a3b724":"lgJ39"}],"4wOV7":[function(require,module,exports,__globalThis) {
-module.exports = require("2d7b64c32069714b").getBundleURL('gnRNX') + "BLCWater.c9bfab41.png" + "?" + Date.now();
-
-},{"2d7b64c32069714b":"lgJ39"}],"rBCtd":[function(require,module,exports,__globalThis) {
-module.exports = require("3ae73beae0f46c1c").getBundleURL('gnRNX') + "playerImg.fa0ba507.png" + "?" + Date.now();
-
-},{"3ae73beae0f46c1c":"lgJ39"}],"31Gol":[function(require,module,exports,__globalThis) {
+},{"7167b78d79599497":"lgJ39"}],"31Gol":[function(require,module,exports,__globalThis) {
 module.exports = require("bdf9f8aa9ae28e56").getBundleURL('gnRNX') + "player.96bd2956.png" + "?" + Date.now();
 
 },{"bdf9f8aa9ae28e56":"lgJ39"}]},["1Fqy1","gLLPy"], "gLLPy", "parcelRequire94c2")

@@ -1,7 +1,7 @@
-import { create2DArray, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSION, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH } from "./constants";
+import { create2DArray, CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSION, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH } from "./constants";
 import Phaser from "phaser";
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
-import { itemTab } from "./ItemTab";
+import { itemTab } from "./itemTab";
 import { Turret } from "./Turret";
 import { Player } from "./Player";
 
@@ -25,6 +25,7 @@ export class Map{
     static placingItem = null; // The current item being placed
     static isPlacing = false; // Flag to indicate placement mode
     static blocks = [];
+    static waterBlocks = [];
 
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
@@ -160,13 +161,9 @@ export class Map{
             for (let x = posX; x < posX + item.lenX + 1; x++) {
                 item.depth == FLOORDEPTH? index = 0: index = 1
                 this.addSpreadArr(x,y,item,index)
-                if(!item.complex){
-                    this.drawGridValue(x,y);
-                }
             }   
         }
     }
-        
 
     static addBlockItem(posX, posY, item){
         for (let y = posY; y < posY + item.lenY; y++) {
@@ -210,7 +207,6 @@ export class Map{
         }
     }
 
-
     static removeTile(posX, posY, lenX, lenY) {
         // Reset the tile
 
@@ -222,33 +218,47 @@ export class Map{
         }
     }
 
-    static reDraw(width = WORLD_DIMENSION, height = WORLD_DIMENSION){
-        this.graphics.clear()
+    static reDraw(width = WORLD_DIMENSION, height = WORLD_DIMENSION) {
+        this.graphics.clear();
         this.blocks.forEach(child => {
-            if(Array.isArray(child)){
-                for(let i = 0; i < child.length; i++){
-                    child[i].destroy()
+            if (Array.isArray(child)) {
+                for (let i = 0; i < child.length; i++) {
+                    child[i].destroy();
                 }
+            } else {
+                child.destroy();
             }
-            else{
-                child.destroy()
-            }
-        })
+        });
+        this.waterBlocks.forEach(child => child.destroy())
         this.barrier.clear(true);
+    
+        const camera = this.scene.cameras.main;
+    
+        // Calculate top-left and bottom-right grid indices to draw
+        const topLeftX = Math.floor(camera.scrollX / SQUARESIZE);
+        const topLeftY = Math.floor(camera.scrollY / SQUARESIZE);
+        const bottomRightX = topLeftX + CHUNK_SIZE
+        const bottomRightY = topLeftY + CHUNK_SIZE
         Map.navGrid = create2DArray(width,height)
-        for (let y = 0; y < this.grid.length; y++) {
-            for (let x = 0; x < this.grid[0].length; x++) {
-                if(Array.isArray(this.grid[y][x])){
-                    let type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])]
-                    this.drawGridValue(x,y,0);
-                    if(type) type.spread? this.drawGridValue(x,y,1): this.handleLoadNonSpread(x,y,type);
-                }
-                else{
-                    this.drawGridValue(x,y);
+        // Loop through only the visible chunk
+        for (let y = topLeftY; y < bottomRightY; y++) {
+            for (let x = topLeftX; x < bottomRightX; x++) {
+                if (y < 0 || x < 0 || y >= height || x >= width) {
+                    // Draw water tiles for out-of-bounds
+                    let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
+                    barrierBlock.play('water').setDepth(FLOORDEPTH) 
+                    this.waterBlocks.push(barrierBlock)   
+                } else if (Array.isArray(this.grid[y][x])) {
+                    const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
+                    this.drawGridValue(x, y, 0);
+                    if (type) type.spread ? this.drawGridValue(x, y, 1) : this.handleLoadNonSpread(x, y, type);
+                } else {
+                    this.drawGridValue(x, y);
                 }
             }
         }
     }
+    
 
     static drawGridValue(x,y,index=-1){
         let tileKey, type;
@@ -367,6 +377,10 @@ export class Map{
     
     static addSpreadArr(x, y, newItem, index){
         if(Array.isArray(this.grid[y][x])){
+            if(newItem.name == 'grass'){
+                this.grid[y][x][index] = newItem.grid
+                return this.drawGridValue(x,y,index)
+            }
             this.grid[y][x][index] = newItem.grid
             return this.placeTile(x,y,newItem.name,index)
         }
@@ -383,7 +397,7 @@ export class Map{
             this.grid[y][x] = newItem.grid;
             this.placeTile(x,y,newItem.name)
         }
-        else {this.grid[y][x] = newItem.grid}
+        else {this.grid[y][x] = newItem.grid; this.drawGridValue(x,y)}
     }
 
     static grabIndex(arr,index){
@@ -392,8 +406,6 @@ export class Map{
         }
         return arr
     }
-
-
 
     static grabDepth(arr, depth){
         if(Array.isArray(arr)){

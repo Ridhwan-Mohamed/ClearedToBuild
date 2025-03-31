@@ -27,16 +27,11 @@ import BRCDirt from '../assets/Dirt/BRCDirt.png'
 import TLCDirt from '../assets/Dirt/TLCDirt.png'
 import BLCDirt from '../assets/Dirt/BLCDirt.png'
 import WaterImg from '../assets/water/waterImg.png'
-import Water from '../assets/water/water.png'
-import TWater from '../assets/water/TWater.png'
-import BWater from '../assets/water/BWater.png'
-import RWater from '../assets/water/RWater.png'
-import LWater from '../assets/water/LWater.png'
-import TRCWater from '../assets/water/TRCWater.png'
-import BRCWater from '../assets/water/BRCWater.png'
-import TLCWater from '../assets/water/TLCWater.png'
-import BLCWater from '../assets/water/BLCWater.png'
 import playerImg from '../assets/Players/playerImg.png'
+import house1 from '../assets/house1.png'
+import house2 from '../assets/house2.png'
+import well from '../assets/well.png'
+import road from '../assets/road.png'
 
 export class itemTab extends Phaser.Scene {
     constructor() {
@@ -75,27 +70,13 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('brcDirt', BRCDirt); // Bottom-right corner Dirt
         scene.load.image('tlcDirt', TLCDirt); // Top-left corner Dirt
         scene.load.image('blcDirt', BLCDirt); // Bottom-left corner Dirt
-        scene.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
-        scene.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
-        scene.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
-        scene.load.spritesheet('rwater', RWater, { frameWidth: 16, frameHeight: 16}); // Right Water
-        scene.load.spritesheet('lwater', LWater, { frameWidth: 16, frameHeight: 16}); // Left Water
-        scene.load.spritesheet('trcwater', TRCWater, { frameWidth: 16, frameHeight: 16}); // Top-right corner Water
-        scene.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
-        scene.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
-        scene.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
+        scene.load.image('house1', house1); 
+        scene.load.image('house2', house2); 
+        scene.load.image('well', well); 
+        scene.load.image('road', road); 
     }
 
     create() {
-        this.createAnim('water')
-        this.createAnim('twater')
-        this.createAnim('bwater')
-        this.createAnim('rwater')
-        this.createAnim('lwater')
-        this.createAnim('trcwater')
-        this.createAnim('brcwater')
-        this.createAnim('tlcwater')
-        this.createAnim('blcwater')
 
         // Create a container for the dialog box
         const dialogContainer = this.add.container(0, 0);
@@ -164,14 +145,7 @@ export class itemTab extends Phaser.Scene {
         main.depth = UIDEPTH;
     }
 
-    createAnim(key){
-        this.anims.create({
-            key: key,
-            frames: this.anims.generateFrameNumbers(key, { start: 0, end: 2 }),
-            frameRate: 2,
-            repeat: -1
-        });
-    }
+
 
     static itemValues(value){
         switch (value) {
@@ -182,7 +156,7 @@ export class itemTab extends Phaser.Scene {
             case 'image3':
                 return TILE_TYPES.grass;
             case 'image4': //wall
-                return TILE_TYPES.stone;
+                return TILE_TYPES.wall;
             case 'image5':
                 return TILE_TYPES.dirt;
             case 'image6':

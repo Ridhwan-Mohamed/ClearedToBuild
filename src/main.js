@@ -6,6 +6,15 @@ import green from '../assets/green.png'
 import leader from '../assets/purple.png'
 import hammer from '../assets/hammer.png'
 import grass from '../assets/grass.png'
+import Water from '../assets/water/water.png'
+import TWater from '../assets/water/TWater.png'
+import BWater from '../assets/water/BWater.png'
+import RWater from '../assets/water/RWater.png'
+import LWater from '../assets/water/LWater.png'
+import TRCWater from '../assets/water/TRCWater.png'
+import BRCWater from '../assets/water/BRCWater.png'
+import TLCWater from '../assets/water/TLCWater.png'
+import BLCWater from '../assets/water/BLCWater.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
@@ -14,6 +23,8 @@ import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
+import { WaveCollapse } from './waveCollapse.js';
+import { generateTown } from './town.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -39,15 +50,48 @@ class mapView extends Phaser.Scene {
         this.load.image('leader', leader)
         this.load.image('hammer', hammer);
         this.load.image('grass', grass);
+        this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
+        this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
+        this.load.spritesheet('rwater', RWater, { frameWidth: 16, frameHeight: 16}); // Right Water
+        this.load.spritesheet('lwater', LWater, { frameWidth: 16, frameHeight: 16}); // Left Water
+        this.load.spritesheet('trcwater', TRCWater, { frameWidth: 16, frameHeight: 16}); // Top-right corner Water
+        this.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
+        this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
+        this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this)
         Projectile.init(this)
     }
     
     create() {
+        this.createAnim('water')
+        this.createAnim('twater')
+        this.createAnim('bwater')
+        this.createAnim('rwater')
+        this.createAnim('lwater')
+        this.createAnim('trcwater')
+        this.createAnim('brcwater')
+        this.createAnim('tlcwater')
+        this.createAnim('blcwater')
+
         Player.init(this);
-        let grid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
+        let grid = WaveCollapse.generateGrid(WORLD_DIMENSION, WORLD_DIMENSION);
+        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+        ])
+        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+        ])
+        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+        ])
+        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+        ])
         Map.grid = grid;
+        Map.navGrid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
+        console.log(grid)
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
@@ -73,7 +117,7 @@ class mapView extends Phaser.Scene {
             console.log(`Registry key 'image' updated to value:`, value);
             const item = itemTab.itemValues(value);
             if(item.spread){
-                this.gridPlace = true;
+                // this.gridPlace = true;
             }
             else if(item == TILE_TYPES.turret){
                 Turret.placeItem(item)
@@ -249,7 +293,7 @@ class mapView extends Phaser.Scene {
 
             const alreadyExists = this.brushTiles.some(tile => tile.x === gridX && tile.y === gridY);
 
-            if (!alreadyExists) {
+            if (!alreadyExists && gridX >= 0 && gridX < WORLD_DIMENSION && gridY >= 0 && gridY < WORLD_DIMENSION) {
                 this.brushTiles.push({ x: gridX, y: gridY });
 
                 this.brushGraphics.fillStyle(0x00ff00, 0.5);
@@ -427,8 +471,10 @@ class mapView extends Phaser.Scene {
         // Add Save Text
         const saveText = this.add.text(buttonMargin + buttonWidth / 2, buttonMargin + buttonHeight / 2, 'Save', {
             fontSize: '16px',
-            fill: '#000000',
+            fill: '#ffffff',
             align: 'center',
+            strokeThickness: 3,
+            stroke: '#000000'
         })
             .setOrigin(0.5, 0.5)
             .setScrollFactor(0)
@@ -458,8 +504,10 @@ class mapView extends Phaser.Scene {
         // Add Load Text
         const loadText = this.add.text(buttonMargin + buttonWidth * 1.5 + buttonMargin, buttonMargin + buttonHeight / 2, 'Load', {
             fontSize: '16px',
-            fill: '#000000',
+            fill: '#ffffff',
             align: 'center',
+            strokeThickness: 3,
+            stroke: '#000000'
         })
             .setOrigin(0.5, 0.5)
             .setScrollFactor(0)
@@ -495,6 +543,15 @@ class mapView extends Phaser.Scene {
             }
         });
         
+    }
+
+    createAnim(key){
+        this.anims.create({
+            key: key,
+            frames: this.anims.generateFrameNumbers(key, { start: 0, end: 2 }),
+            frameRate: 3,
+            repeat: -1
+        });
     }
     
     update() {
@@ -540,7 +597,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: true
+            debug: false
         }
     },
     scene: [mapView, itemTab]

@@ -16,7 +16,7 @@ export class Player {
         this.createAnim('walk','player',0,2);
         this.createAnim('idle','player',0,0);
     }
-
+    
     static addPlayer(x,y,team,spriteSheet='player',walk='walk') {
         const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x, SQUARESIZE*y, spriteSheet);
         newCube.setInteractive();

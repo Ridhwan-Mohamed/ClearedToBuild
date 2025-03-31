@@ -18,7 +18,7 @@ export class Map{
     static barrier;
     static graphics;
     static grid;
-    static navGrid;
+    static navGrid
     static navMesh;
     static scene;
     static imageData;
@@ -31,6 +31,28 @@ export class Map{
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         this.graphics = this.scene.add.graphics();
         this.navMesh = new NavMesh(buildPolysFromGridMap(this.grid, SQUARESIZE, SQUARESIZE, undefined, 0));
+    }
+
+    static initGrid(){ //makes tile types into correct orientation
+        for (let y = 0; y < this.grid.length; y++) {
+            for (let x = 0; x < this.grid[0].length; x++) {
+                let item = TILE_MAP(this.grid[y][x])
+                if(Array.isArray(this.grid[y][x])){
+                    let btmTile = TILE_MAP(this.grid[y][x][0])
+                    let topTile = TILE_MAP(this.grid[y][x][1])
+                    if(TILE_TYPES[btmTile].complex){
+                        this.determineTileType(x,y,item,0,0)
+                    }
+                }
+                else if (item == "water") {
+                    this.determineTileType(x,y,item,-1,0)
+                    this.grid[y][x] = [1, this.grid[y][x]]
+                }
+                else if(TILE_TYPES[item].complex) {
+                    this.determineTileType(x,y,item,-1,0)
+                }
+            }
+        }
     }
 
     static MapFromImage(canvas, image){
@@ -65,6 +87,7 @@ export class Map{
 
     static mapFromData(data){
         this.grid = data;
+        this.initGrid();
         this.reDraw(data[0].length, data.length);
     }
 
@@ -176,7 +199,7 @@ export class Map{
                     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(FLOORDEPTH).setAlpha(0);
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
-                    this.handleGridDelete(barrierBlock, item, x, y)
+                    if(y == posY && x == posX) this.handleGridDelete(barrierBlock, item, x, y)
                     // this.blocks[y*WORLD_DIMENSION+x] = barrierBlock; // Add to an array for tracking        
                 }
             }
@@ -257,8 +280,7 @@ export class Map{
                 }
             }
         }
-    }
-    
+    }   
 
     static drawGridValue(x,y,index=-1){
         let tileKey, type;
@@ -314,7 +336,7 @@ export class Map{
         }
     }
 
-    static determineTileType(x, y, tileType,index = -1) {
+    static determineTileType(x, y, tileType,index = -1, draw = 1) {
         let depth = TILE_TYPES[tileType].depth
         const above = TILE_MAP(this.grabDepth(this.grid[y - 1]?.[x], depth)) === tileType;
         const below = TILE_MAP(this.grabDepth(this.grid[y + 1]?.[x], depth)) === tileType;
@@ -324,54 +346,54 @@ export class Map{
         if (!above && !below && !left && !right) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
             else this.grid[y][x] = TILE_TYPES[tileType].interior;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].interior; // Isolated tile type
         } else if (!above && left && right) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.up;
             else this.grid[y][x] = TILE_TYPES[tileType].sides.up;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].sides.up; // Side - up
         } else if (!below && left && right) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.down;
             else this.grid[y][x] = TILE_TYPES[tileType].sides.down;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].sides.down; // Side - down
         } else if (!left && above && below) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.left;
             else this.grid[y][x] = TILE_TYPES[tileType].sides.left;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].sides.left; // Side - left
         } else if (!right && above && below) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.right;
             else this.grid[y][x] = TILE_TYPES[tileType].sides.right;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].sides.right; // Side - right
         } else if (!above && !left) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.topLeft;
             else this.grid[y][x] = TILE_TYPES[tileType].corners.topLeft;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].corners.topLeft; // Corner - top left
         } else if (!above && !right) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.topRight;
             else this.grid[y][x] = TILE_TYPES[tileType].corners.topRight;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].corners.topRight; // Corner - top right
         } else if (!below && !left) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.bottomLeft;
             else this.grid[y][x] = TILE_TYPES[tileType].corners.bottomLeft;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].corners.bottomLeft; // Corner - bottom left
         } else if (!below && !right) {
             if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.bottomRight;
             else this.grid[y][x] = TILE_TYPES[tileType].corners.bottomRight;
-            this.drawGridValue(x,y,index)
+            if (draw) this.drawGridValue(x,y,index)
             return TILE_TYPES[tileType].corners.bottomRight; // Corner - bottom right
         } 
         
         // Default fallback for interior
         if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
         else this.grid[y][x] = TILE_TYPES[tileType].interior;
-        this.drawGridValue(x,y,index)
+        if (draw) this.drawGridValue(x,y,index)
         return TILE_TYPES[tileType].interior; // Default to interior
     }
     

@@ -32,8 +32,8 @@ export const TILE_TYPES = {
         grid: 1,
         depth: FLOORDEPTH
     },
-    stone : {
-        name: "stone",
+    wall : {
+        name: "wall",
         interior: 2, // Incremented by 1
         sides: {
             up: 3,
@@ -127,11 +127,55 @@ export const TILE_TYPES = {
             bottomRight: 31,
         },
         grid: 23,
+        depth: BLOCKDEPTH
+    },
+    house1:{
+        name: "house1",
+        value: "house1",
+        spriteSheet: false,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 32,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4
+    },
+    house2:{
+        name: "house2",
+        value: "house2",
+        spriteSheet: false,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 33,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4
+    },
+    well:{
+        name: "well",
+        value: "well",
+        spriteSheet: false,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 34,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4
+    },
+    road : {
+        name: "road",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 35,
         depth: FLOORDEPTH
     },
     player:{
         name: "player",
-        block:true,
+        block: true,
         value: 'image9',
         depth: BLOCKDEPTH+1,
         lenX: 1,
@@ -172,16 +216,24 @@ export const TILE_ARR = [
     'trcwater',              // Bottom-right corner water
     'blcwater',              // Top-left corner water
     'brcwater',              // Bottom-left corner water
+    'house1',
+    'house2',
+    'well',
+    'road'
 ];
 
 export function TILE_MAP(val){
     if(val == 1){return "grass"}
-    else if(val >= 2 && val <= 10){return "stone"}
+    else if(val >= 2 && val <= 10){return "wall"}
     else if(val == 11){return "sand"}
     else if(val == 12){return "pine"}
     else if(val == 13){return "turret"}
     else if(val >= 14 && val <= 22){return "dirt"}
     else if(val >= 23 && val <= 31){return "water"}
+    else if(val == 32){return "house1"}
+    else if(val == 33){return "house2"}
+    else if(val == 34){return "well"}
+    else if(val == 35){return "road"}
     else{return {}}
 }
 

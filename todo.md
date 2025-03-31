@@ -1,10 +1,9 @@
-todo:
 Map:
 generate
     - world terrain
-        - load chunk based on cameraXY*** [✔]
+        - load chunk based on cameraXY [✔]
     - world generation
-        - Wave collapse?
+        - Wave collapse? [✔]
     - store in data efficient manner [✔]
         - grid item = 1x1 pixel [✔]
         - block item = store center/position [✔]
@@ -12,12 +11,14 @@ generate
     - brush draw feature [✔]
 Colonies
     - Add colonies on map
+        - Town Generation algorithm [✔]
     - Add people in these colonies
     - store data for people on game exit
-    - load and deload pplayers baased on Camera XY
+    - load and deload players baased on Camera XY
 Art/Assets
-    - Farm buildings
-    - houses
+    - town assests ***
+        - Farm buildings
+        - houses
     Players
         - militias
         - civilians/workers
@@ -33,4 +34,4 @@ itemTab
     - make nicer
         - add animations
 Bugs:
-Tiles re-grid glitch when swapping tiles (because of array values at index)
+    - water animations

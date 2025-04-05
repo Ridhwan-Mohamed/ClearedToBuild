@@ -1,4 +1,5 @@
 import { TILE_MAP, TILE_TYPES } from "./constants";
+import { Map } from "./map";
 
 export function generateTown(grid, buildings) {
     let gridWidth = grid[0].length;
@@ -50,6 +51,7 @@ function placeBuilding(grid, x, y, building) {
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building
+            Map.navGrid[y + i][x + j] = 0
         }
     }
 }

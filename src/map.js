@@ -30,7 +30,6 @@ export class Map{
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         this.graphics = this.scene.add.graphics();
-        this.navMesh = new NavMesh(buildPolysFromGridMap(this.grid, SQUARESIZE, SQUARESIZE, undefined, 0));
     }
 
     static initGrid(){ //makes tile types into correct orientation
@@ -114,7 +113,9 @@ export class Map{
     static handleMapClick(pointer, item) {
         // If we're in placing mode, finalize the placement
         if(item == TILE_TYPES.player && this.isPlacing && this.placingItem && !this.placingItem.blocked){
-            Player.addPlayer(Math.floor(pointer.x/SQUARESIZE), Math.floor(pointer.y/SQUARESIZE))
+            const worldX = this.scene.cameras.main.scrollX / SQUARESIZE + pointer.x/SQUARESIZE;
+            const worldY = this.scene.cameras.main.scrollY / SQUARESIZE + pointer.y/SQUARESIZE;
+            Player.addPlayer(Math.floor(worldX), Math.floor(worldY))
             this.isPlacing = false; // Exit placing mode
             this.placingItem.destroy(); // Clear placing item
         }
@@ -262,7 +263,6 @@ export class Map{
         const topLeftY = Math.floor(camera.scrollY / SQUARESIZE);
         const bottomRightX = topLeftX + CHUNK_SIZE
         const bottomRightY = topLeftY + CHUNK_SIZE
-        Map.navGrid = create2DArray(width,height)
         // Loop through only the visible chunk
         for (let y = topLeftY; y < bottomRightY; y++) {
             for (let x = topLeftX; x < bottomRightX; x++) {
@@ -274,7 +274,16 @@ export class Map{
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
                     this.drawGridValue(x, y, 0);
-                    if (type) type.spread ? this.drawGridValue(x, y, 1) : this.handleLoadNonSpread(x, y, type);
+                    if (type && type.spread) {
+                        this.drawGridValue(x, y, 1) 
+                    }
+                    else if(type && type.block) {
+                        this.navGrid[y][x] = 0;
+                        this.handleLoadNonSpread(x, y, type);
+                    }
+                    else{
+                        this.navGrid[y][x] = 0;
+                    }
                 } else {
                     this.drawGridValue(x, y);
                 }

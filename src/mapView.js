@@ -42,7 +42,7 @@ class mapView extends Phaser.Scene {
     }
 
     preload() {
-        this.load.spritesheet('player', player, { frameWidth: 20, frameHeight: 28});
+        this.load.spritesheet('player', player, { frameWidth: 16, frameHeight: 16});
         this.load.image('barrier', gray);  // Load a barrier image
         this.load.image('worldMap', worldMap);
         this.load.image('cube', black);  // Make sure the path and filename are correct
@@ -63,7 +63,7 @@ class mapView extends Phaser.Scene {
         itemTab.preload(this)
         Projectile.init(this)
     }
-    
+
     create() {
         this.createAnim('water')
         this.createAnim('twater')
@@ -76,27 +76,27 @@ class mapView extends Phaser.Scene {
         this.createAnim('blcwater')
 
         Player.init(this);
+        Map.navGrid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
         let grid = WaveCollapse.generateGrid(WORLD_DIMENSION, WORLD_DIMENSION);
-        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
             TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
         ])
-        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
             TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
         ])
-        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
             TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
         ])
-        grid = generateTown(grid, [TILE_TYPES.turret,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
+        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
             TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
         ])
         Map.grid = grid;
-        Map.navGrid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
-        console.log(grid)
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
         Map.initMap();
         Map.mapFromData(Map.grid);
+        Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
 
         this.cursors = this.input.keyboard.createCursorKeys();
 
@@ -219,7 +219,7 @@ class mapView extends Phaser.Scene {
                 selectionCountText = this.add.text(
                     this.cameras.main.width - 150, // Relative to camera
                     30,                            // Slight padding below the position text
-                    `Selected: ${Player.selected.length}`, 
+                    `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY],[posX]}\ngrid: ${Map.grid[posY],[posX]}`, 
                     { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
                 )
                 .setScrollFactor(0)                // Stick to camera
@@ -449,7 +449,7 @@ class mapView extends Phaser.Scene {
                 }
             });
         this.breakItems.setStroke('#000000', 3);
-    
+
         // Automatically scale the bars if the window resizes
         this.scale.on('resize', (gameSize) => {
             const { width, height } = gameSize;

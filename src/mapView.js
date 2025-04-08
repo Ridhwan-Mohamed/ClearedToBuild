@@ -23,13 +23,11 @@ import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
-import { WaveCollapse } from './waveCollapse.js';
-import { generateTown } from './town.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
 
-class mapView extends Phaser.Scene {
+export class mapView extends Phaser.Scene {
     constructor() {
         super('mapView');
         Map.scene = this;
@@ -39,6 +37,10 @@ class mapView extends Phaser.Scene {
         this.brushTiles = []; // Array to store affected tiles
         this.isBrushMode = false; // Track if brush mode is active  
         this.isBrushActive = false;  
+    }
+
+    init(data){
+        this.gridData = data
     }
 
     preload() {
@@ -76,20 +78,7 @@ class mapView extends Phaser.Scene {
         this.createAnim('blcwater')
 
         Player.init(this);
-        Map.navGrid = create2DArray(WORLD_DIMENSION,WORLD_DIMENSION);
-        let grid = WaveCollapse.generateGrid(WORLD_DIMENSION, WORLD_DIMENSION);
-        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-        ])
-        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-        ])
-        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-        ])
-        grid = generateTown(grid, [TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-            TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-        ])
+        let grid = this.gridData
         Map.grid = grid;
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
@@ -590,18 +579,5 @@ class mapView extends Phaser.Scene {
     
 }
 
-const config = {
-    type: Phaser.WEBGL,
-    width: screenW,
-    height: screenH,
-    physics: {
-        default: 'arcade',
-        arcade: {
-            debug: false
-        }
-    },
-    scene: [mapView, itemTab]
-};
 
-const gameInstance = new Phaser.Game(config);
 

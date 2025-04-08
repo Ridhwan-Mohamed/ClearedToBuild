@@ -12,21 +12,22 @@ export class WaveCollapse {
     };
 
     static generateGrid(width, height) {
+        const noise = new Noise(Math.random()); // Re-seed each time
+    
         let grid = Array.from({ length: height }, () =>
             Array.from({ length: width }, () => Object.keys(this.rules))
         );
-
-        // **STEP 1: SEED INITIAL TERRAIN WITH NOISE**
-        this.seedTerrain(grid, width, height);
-
-        // **STEP 2: RUN WAVE COLLAPSE**
+    
+        // ✅ Pass noise in to use it for seeding
+        this.seedTerrain(grid, width, height, noise);
+    
         return this.collapseWave(grid);
     }
-
-    static seedTerrain(grid, width, height) {
+    
+    static seedTerrain(grid, width, height, noise) {
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
-                let noiseValue = this.noise.simplex2(x / 50, y / 50); // Smooth variation
+                let noiseValue = noise.simplex2(x / 50, y / 50);
                 if (noiseValue < 0) {
                     grid[y][x] = ["water"];
                 } else if (noiseValue < 0.3) {
@@ -37,6 +38,7 @@ export class WaveCollapse {
             }
         }
     }
+    
 
     static collapseWave(grid) {
         let width = grid[0].length;

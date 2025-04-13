@@ -1,9 +1,8 @@
-import { create2DArray, CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSION, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH } from "./constants";
+import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH } from "./constants";
 import Phaser from "phaser";
-import { buildPolysFromGridMap, NavMesh } from "navmesh";
-import { itemTab } from "./itemTab";
 import { Turret } from "./Turret";
 import { Player } from "./Player";
+import { playerDict, turretTeams } from "./town";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -99,7 +98,7 @@ export class Map{
         // Enable mouse-following behavior
         this.isPlacing = true;
         this.scene.input.on('pointermove', (pointer) => {
-            if (this.placingItem && this.isPlacing && pointer.x>0 && pointer.x<SQUARESIZE*WORLD_DIMENSION && pointer.y>0 && pointer.y<SQUARESIZE*WORLD_DIMENSION) {
+            if (this.placingItem && this.isPlacing && pointer.x>0 && pointer.x<SQUARESIZE*WORLD_DIMENSIONX && pointer.y>0 && pointer.y<SQUARESIZE*WORLD_DIMENSIONY) {
                 let lenX = item.lenX
                 let lenY = item.lenY
                 let x = pointer.worldX - pointer.worldX%SQUARESIZE - lenX/2*SQUARESIZE
@@ -201,7 +200,7 @@ export class Map{
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
                     if(y == posY && x == posX) this.handleGridDelete(barrierBlock, item, x, y)
-                    // this.blocks[y*WORLD_DIMENSION+x] = barrierBlock; // Add to an array for tracking        
+                    // this.blocks[y*WORLD_DIMENSIONX+x] = barrierBlock; // Add to an array for tracking        
                 }
             }
         }
@@ -242,7 +241,29 @@ export class Map{
         }
     }
 
-    static reDraw(width = WORLD_DIMENSION, height = WORLD_DIMENSION) {
+    static navgridDraw(x, y) {
+        if(Map.navGrid[y]){
+            const value = Map.navGrid[y][x];
+    
+            const color = value !== 0 ? 0xffffff : 0x000000;
+            const alpha = value !== 0 ? 0.3 : 0.6;
+        
+            const tile = this.scene.add.rectangle(
+                x * SQUARESIZE,
+                y * SQUARESIZE,
+                SQUARESIZE,
+                SQUARESIZE,
+                color,
+                alpha
+            ).setOrigin(0)
+             .setDepth(100);
+        }
+
+    
+    }
+    
+
+    static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
         this.graphics.clear();
         this.blocks.forEach(child => {
             if (Array.isArray(child)) {
@@ -261,28 +282,30 @@ export class Map{
         // Calculate top-left and bottom-right grid indices to draw
         const topLeftX = Math.floor(camera.scrollX / SQUARESIZE);
         const topLeftY = Math.floor(camera.scrollY / SQUARESIZE);
-        const bottomRightX = topLeftX + CHUNK_SIZE
+        
+        const bottomRightX = Math.max(topLeftX + CHUNK_SIZE, topLeftX + Math.floor(window.innerWidth/SQUARESIZE))
         const bottomRightY = topLeftY + CHUNK_SIZE
         // Loop through only the visible chunk
         for (let y = topLeftY; y < bottomRightY; y++) {
             for (let x = topLeftX; x < bottomRightX; x++) {
+                // this.navgridDraw(x,y);
+                if (playerDict[`${x},${y}`]) {
+                    // there's a player here
+                    Player.addPlayer(x, y, playerDict[`${x},${y}`])
+                }
                 if (y < 0 || x < 0 || y >= height || x >= width) {
                     // Draw water tiles for out-of-bounds
                     let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
-                    barrierBlock.play('water').setDepth(FLOORDEPTH) 
-                    this.waterBlocks.push(barrierBlock)   
+                    barrierBlock.play('water').setDepth(FLOORDEPTH)
+                    this.waterBlocks.push(barrierBlock)
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
                     this.drawGridValue(x, y, 0);
                     if (type && type.spread) {
-                        this.drawGridValue(x, y, 1) 
+                        this.drawGridValue(x, y, 1)
                     }
                     else if(type && type.block) {
-                        this.navGrid[y][x] = 0;
                         this.handleLoadNonSpread(x, y, type);
-                    }
-                    else{
-                        this.navGrid[y][x] = 0;
                     }
                 } else {
                     this.drawGridValue(x, y);
@@ -306,11 +329,9 @@ export class Map{
                 barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth);
             }
             this.barrier.add(barrierBlock);
-            Map.navGrid[y][x] = 0;
             this.handleGridDelete(barrierBlock, type, x, y)
         }
         else{
-            Map.navGrid[y][x] = 1
             let block = this.scene.add.image(
                 x * SQUARESIZE + SQUARESIZE / 2, 
                 y * SQUARESIZE + SQUARESIZE / 2, 
@@ -323,22 +344,22 @@ export class Map{
 
     static handleGridDelete(block, type, x, y){
         if(type.depth == BLOCKDEPTH){
-            if(!Array.isArray(this.blocks[y*WORLD_DIMENSION+x])){
-                this.blocks[y*WORLD_DIMENSION+x] = [this.blocks[y*WORLD_DIMENSION+x], block];
+            if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
+                this.blocks[y*WORLD_DIMENSIONX+x] = [this.blocks[y*WORLD_DIMENSIONX+x], block];
             }
             else{
-                this.blocks[y*WORLD_DIMENSION+x][1]?.destroy();
-                this.blocks[y*WORLD_DIMENSION+x][1] = block;
+                this.blocks[y*WORLD_DIMENSIONX+x][1]?.destroy();
+                this.blocks[y*WORLD_DIMENSIONX+x][1] = block;
             }
         }
         else{
-            if(!Array.isArray(this.blocks[y*WORLD_DIMENSION+x])){
-                this.blocks[y*WORLD_DIMENSION+x] = block;
+            if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
+                this.blocks[y*WORLD_DIMENSIONX+x] = block;
             }
             else{
-                this.blocks[y*WORLD_DIMENSION+x][0]?.destroy();
-                this.blocks[y*WORLD_DIMENSION+x][0] = block;
-                if(this.blocks[y*WORLD_DIMENSION+x][1].body){
+                this.blocks[y*WORLD_DIMENSIONX+x][0]?.destroy();
+                this.blocks[y*WORLD_DIMENSIONX+x][0] = block;
+                if(this.blocks[y*WORLD_DIMENSIONX+x][1].body){
                     Map.navGrid[y][x] = 0
                 }
             }
@@ -491,6 +512,7 @@ export class Map{
             Turret.topItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[1])
                 .setDepth(item.depth+1) // Ensure it's above base
             const itemToPlace = Turret.baseItem;
+            Turret.topItem.team = turretTeams[`${posX},${posY}`]
             const top = Turret.topItem
             this.addBlockItem(posX,posY,item)
             itemToPlace.setInteractive();

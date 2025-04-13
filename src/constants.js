@@ -16,7 +16,8 @@ export const CONTROL_STATES = {
 }
 export const GRID_WIDTH     = 10
 export const GRID_ARRAY     = create2DArray(GRID_HEIGHT, GRID_WIDTH)
-export var WORLD_DIMENSION = 60;
+export var WORLD_DIMENSIONX = 120;
+export var WORLD_DIMENSIONY = 60;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1

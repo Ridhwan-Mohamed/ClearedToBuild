@@ -1,4 +1,4 @@
-import { SQUARESIZE, TILE_TYPES, TILE_MAP, handleGridXY, WORLD_DIMENSION } from "./constants";
+import { SQUARESIZE, TILE_TYPES, TILE_MAP, handleGridXY, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
 import { Map } from "./map";
 import { Projectile } from "./Projectile";
 import Phaser from "phaser";
@@ -24,7 +24,7 @@ export class Turret{
         // Enable mouse-following behavior
         this.isPlacing = true;
         this.scene.input.on('pointermove', (pointer) => {
-            if (this.baseItem && this.isPlacing && pointer.x>0 && pointer.x<SQUARESIZE*WORLD_DIMENSION && pointer.y>0 && pointer.y<SQUARESIZE*WORLD_DIMENSION) {
+            if (this.baseItem && this.isPlacing && pointer.x>0 && pointer.x<SQUARESIZE*WORLD_DIMENSIONX && pointer.y>0 && pointer.y<SQUARESIZE*WORLD_DIMENSIONY) {
                 let [x,y] = handleGridXY(pointer.x,pointer.y,item.lenX,item.lenY)
                 this.baseItem.setPosition(x, y);
                 this.topItem.setPosition(x, y);
@@ -101,7 +101,7 @@ export class Turret{
             let shortestDistance = Infinity;
 
             neighbours.forEach(neighbour => {
-                if (neighbour.dontTrack == true) return; // Ignore itself
+                if (neighbour.dontTrack == true || neighbour.team == gun.team) return; // Ignore itself
                 const distance = Phaser.Math.Distance.Between(gun.x, gun.y, neighbour.x, neighbour.y);
                 if (distance < shortestDistance) {
                     shortestDistance = distance;
@@ -122,7 +122,7 @@ export class Turret{
                 // Check if the gun is rotated toward the target and not on cooldown
                 if (Phaser.Math.Within(gun.rotation, targetAngle, rotationTolerance)) {
                     if (!gun.cooldown || gun.cooldown <= 0) {
-                        new Projectile(gun.x, gun.y, gun.rotation);
+                        new Projectile(gun.x, gun.y, gun.rotation, gun.team);
                         gun.cooldown = 100; // Cooldown time in milliseconds
 
                         // Calculate recoil offset

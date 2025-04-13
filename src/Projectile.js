@@ -10,7 +10,7 @@ export class Projectile {
         this.projectileGroup = this.scene.physics.add.group();
     }
 
-    constructor(x, y, angle, speed = 500) {
+    constructor(x, y, angle, teamNumber, speed = 500) {
         // Offset the starting position by 25 units in the direction of the angle
         const offsetX = Math.cos(angle) * 25;
         const offsetY = Math.sin(angle) * 25;
@@ -23,6 +23,7 @@ export class Projectile {
 
         // Enable physics for the graphics object
         newCube.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+        newCube.team = teamNumber;
         newCube.setDepth(TILE_TYPES.turret.depth);
         newCube.body.dontTrack = true;
         // Add the projectile to the group

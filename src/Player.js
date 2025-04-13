@@ -18,7 +18,7 @@ export class Player {
     }
     
     static addPlayer(x,y,team,spriteSheet='player',walk='walk') {
-        const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x, SQUARESIZE*y, spriteSheet);
+        const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, spriteSheet);
         newCube.setInteractive();
         newCube.setOrigin(0.5,0.5);
         newCube.setDepth(BLOCKDEPTH+1)
@@ -245,11 +245,12 @@ export class Player {
     
 
     static handleCollision(player, bullet){
-
-        player.health -= 50;
-        bullet.destroy();
-        if(player.health <= 0){
-            player.destroy();
+        if(bullet.team != player.body.team){
+            player.health -= 50;
+            bullet.destroy();
+            if(player.health <= 0){
+                player.destroy();
+            }
         }
     }
 

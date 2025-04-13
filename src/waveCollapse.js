@@ -1,6 +1,6 @@
 import { TILE_TYPES } from "./constants";
 import { Noise } from 'noisejs'; // Ensure you have noisejs for Perlin noise
-
+import { Map } from "./map";
 export class WaveCollapse {
     static noise = new Noise(Math.random()); // Initialize Perlin noise
 
@@ -28,11 +28,14 @@ export class WaveCollapse {
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 let noiseValue = noise.simplex2(x / 50, y / 50);
-                if (noiseValue < 0) {
+                if (noiseValue < -0.2) {
                     grid[y][x] = ["water"];
+                    Map.navGrid[y][x] = 0
                 } else if (noiseValue < 0.3) {
+                    Map.navGrid[y][x] = 1
                     grid[y][x] = ["dirt"];
                 } else {
+                    Map.navGrid[y][x] = 1
                     grid[y][x] = ["grass"];
                 }
             }

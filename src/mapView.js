@@ -18,7 +18,7 @@ import BLCWater from '../assets/water/BLCWater.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
-import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSION, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP } from './constants';
+import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
@@ -80,6 +80,7 @@ export class mapView extends Phaser.Scene {
         Player.init(this);
         let grid = this.gridData
         Map.grid = grid;
+        console.log(Map.navGrid)
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
@@ -92,8 +93,14 @@ export class mapView extends Phaser.Scene {
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
         this.physics.add.collider(Player.characters, Player.characters, Player.handlePlayerCollision);
-        this.physics.add.collider(Player.characters, Projectile.projectileGroup, Player.handleCollision, null, this);
-
+        this.physics.add.collider(
+            Player.characters,
+            Projectile.projectileGroup,
+            Player.handleCollision,
+            (player, bullet) => bullet.team !== player.body.team, // Only collide if teams are different
+            this
+        );
+        
         this.cursors = this.input.keyboard.createCursorKeys();
 
         // Variable to store the current text object
@@ -182,7 +189,7 @@ export class mapView extends Phaser.Scene {
                 let x = pointer.worldX;
                 let y = pointer.worldY;
 
-                let posX = Math.floor(x / SQUARESIZE)
+                let posX = Math.floor(x / SQUARESIZE) 
                 let posY = Math.floor(y / SQUARESIZE)
 
                 // Remove the previous text if it exists
@@ -208,7 +215,7 @@ export class mapView extends Phaser.Scene {
                 selectionCountText = this.add.text(
                     this.cameras.main.width - 150, // Relative to camera
                     30,                            // Slight padding below the position text
-                    `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY],[posX]}\ngrid: ${Map.grid[posY],[posX]}`, 
+                    `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY][posX]}\ngrid: ${Map.grid[posY][posX]}`, 
                     { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
                 )
                 .setScrollFactor(0)                // Stick to camera
@@ -218,10 +225,10 @@ export class mapView extends Phaser.Scene {
                     troop.state = CONTROL_STATES.USER_MODE
                     let troopX = Math.floor(troop.body.x / SQUARESIZE)
                     let troopY = Math.floor(troop.body.y / SQUARESIZE)
-                    if(Map.grid[troopY][troopX] == 0){
+                    if(Map.navGrid[troopY][troopX] == 0){
                         console.log("Start pos is at blocked grid");
                     }
-                    else if(Map.grid[posY][posX] == 0){
+                    else if(Map.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
                     }
                     Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: x, y: y }));
@@ -253,8 +260,8 @@ export class mapView extends Phaser.Scene {
         }
     
         // Clamp camera position to avoid accessing invalid indices
-        Phaser.Math.Clamp(camera.scrollX, -32, WORLD_DIMENSION * SQUARESIZE - width);
-        Phaser.Math.Clamp(camera.scrollY, -32, WORLD_DIMENSION * SQUARESIZE - height);
+        Phaser.Math.Clamp(camera.scrollX, -32, WORLD_DIMENSIONX * SQUARESIZE - width);
+        Phaser.Math.Clamp(camera.scrollY, -32, WORLD_DIMENSIONY * SQUARESIZE - height);
     
         // Calculate the center chunk coordinates of the camera
         const centerChunkX = Math.floor(camera.scrollX / SQUARESIZE);
@@ -282,7 +289,7 @@ export class mapView extends Phaser.Scene {
 
             const alreadyExists = this.brushTiles.some(tile => tile.x === gridX && tile.y === gridY);
 
-            if (!alreadyExists && gridX >= 0 && gridX < WORLD_DIMENSION && gridY >= 0 && gridY < WORLD_DIMENSION) {
+            if (!alreadyExists && gridX >= 0 && gridX < WORLD_DIMENSIONX && gridY >= 0 && gridY < WORLD_DIMENSIONY) {
                 this.brushTiles.push({ x: gridX, y: gridY });
 
                 this.brushGraphics.fillStyle(0x00ff00, 0.5);

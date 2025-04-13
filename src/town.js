@@ -1,7 +1,16 @@
-import { TILE_MAP, TILE_TYPES } from "./constants";
+import { SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
 import { Map } from "./map";
+import { Player } from "./Player";
 
-export function generateTown(grid, buildings) {
+export var playerDict = {}
+
+export function clearPlayerDict(){
+    playerDict = {}
+}
+
+export const turretTeams = {}
+
+export function generateTown(grid, buildings, teamNumber) {
     let gridWidth = grid[0].length;
     let gridHeight = grid.length
 
@@ -14,9 +23,11 @@ export function generateTown(grid, buildings) {
         townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
     }
     placeBuilding(grid, townCenterX, townCenterY, buildings[0]);
+    if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
 
     let outerRoads = [];
-    outerRoads.push(expandRoads(grid, townCenterX, townCenterY, buildings[0])); // Step 2: Expand roads around seed
+    outerRoads.push(expandRoads(grid, townCenterX, townCenterY, buildings[0])[1]); // Step 2: Expand roads around seed
+
 
     // // Step 3: Place remaining buildings
     while(outerRoads.length && buildings.length){
@@ -28,10 +39,12 @@ export function generateTown(grid, buildings) {
                 let canFit = canPlaceBuildingAtAnyCorner(grid, spot[0], spot[1], curBuilding)
                 if(canFit.success){
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
+                    if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
                     placeBuilding(grid, canFit.x, canFit.y, curBuilding);
                     buildings.splice(i, 1);
-                    let newOuterRoads = expandRoads(grid, canFit.x, canFit.y, curBuilding);
+                    let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
+                    if(curBuilding == TILE_TYPES.house1 || curBuilding == TILE_TYPES.house2) placePlayers(roads, teamNumber);
                     outerRoadsSucesss = true;
                     break; // Move to next building after placing
                 }
@@ -53,6 +66,20 @@ function placeBuilding(grid, x, y, building) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building
             Map.navGrid[y + i][x + j] = 0
         }
+    }
+}
+
+function placePlayers(roads, teamNumber){
+    for(let i = 0; i < 2; i++){
+        // Convert set to array and select a random spot
+        let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
+        let [x, y] = spotStr.split(',').map(Number);
+
+        // Use as key
+        playerDict[`${x},${y}`] = teamNumber;
+
+        // Remove from the set
+        roads.delete(spotStr);
     }
 }
 
@@ -98,7 +125,7 @@ function expandRoads(grid, startX, startY, building) {
         }
     }
 
-    return Array.from(surroundingTiles).map(coord => coord.split(',').map(Number));
+    return [roadTiles, Array.from(surroundingTiles).map(coord => coord.split(',').map(Number))];
 }
 
 

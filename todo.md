@@ -1,12 +1,32 @@
-todo:
-- make player bigger [✔]
-- make meun screen
-- investigate navgrids [✔] 1*
+Advancing TODOS
+- TOWNS:***
+    - Houses
+        - Load in adequate number of players per villages houses [✔]
+    - Teams
+        - Town players should all be on same team [✔]
+    - Turrets
+        - should only track non-team members [✔]
+- MENU:
+    - Sliders
+        - Land-Ocean-Sliders** [X]
+    - choose start
+        - allow user to choose starting location
+- GAME:
+    - Monies
+        - user should have set amount of monies *** [X]
+- PLAYERS:
+    - commandable
+        - allow player states to change (farm, defend)
+    - Types
+        - farmers, warriors, medics (change through monies)
 
-towns
-- houses (increases population)
-- hospital (heal people)
-- armory (allows for better weapons)
-- farming (develops you monies)
-
-1* - navgrid still sucks but is better
+Refining TODOS
+- PLAYERS:
+    - Player navgrids and obstacles
+        - make blocking objects bigger than they are
+        - Collisions
+            - make player hitboxes very tiny
+        - No Collisions
+            - handle player overlap
+    - Players not crowding a location they are sent to properly
+    - Players dont have smart tracking abilities

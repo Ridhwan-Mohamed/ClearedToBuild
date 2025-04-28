@@ -1,7 +1,10 @@
-import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES } from "./constants";
+import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP } from "./constants";
 import Phaser from "phaser";
 import { Map } from "./map";
 import { steer, avoid, calculateSeparationForce } from './steering';
+import { tillManager } from "./tillManager";
+import { Teams } from "./Teams";
+import { buildingManager } from "./buildingManager";
 
 export class Player {
 
@@ -27,11 +30,12 @@ export class Player {
         newCube.body.pushable = false;
         newCube.animState = 'idle'
         newCube.body.team = team;
-        newCube.state = CONTROL_STATES.TRACK_MODE
+        newCube.state = CONTROL_STATES.USER_MODE
         this.characters.add(newCube);
         this.troops.push(newCube);
         this.characters.add(newCube)
         this.configureCubeInteractivity(newCube);
+        return newCube
     }
 
     static configureCubeInteractivity(cube){
@@ -77,9 +81,8 @@ export class Player {
         troop.finalPos = path[path.length - 1]
         // Remove the starting point as it's the current position of the cube
         troop.currentPath.shift();
-
     }
-        
+
     static followPath(sprite) {
         if (sprite.currentPath.length === 0) {
             this.setAnimState(sprite, 'idle')
@@ -87,7 +90,6 @@ export class Player {
         }
         this.setAnimState(sprite, 'walk')
         let nextPoint = sprite.currentPath[0]; // Get the next point in the path
-        nextPoint = this.handleNextPoint(nextPoint);
         const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y).setLength(100);
     
         // Calculate new velocity
@@ -108,44 +110,31 @@ export class Player {
             sprite.currentPath.length = 0;
             // sprite.state = CONTROL_STATES.ATTACK_MODE
         }
+        else if(sprite.state == CONTROL_STATES.BUILD_MODE && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.finalPos.x, sprite.finalPos.y) < 50){
+            sprite.body.setVelocity(0, 0);
+            this.doAction(sprite)
+        }
         else if (Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y) < 15) {
             sprite.currentPath.shift(); // Remove the reached point from the path
             if (sprite.currentPath.length == 0) {
                 sprite.body.setVelocity(0, 0);
+                this.doAction(sprite)
             }
         }
     }
-    
-    static handleNextPoint(point){
-        if(!Map.grid[Math.floor(point.y/SQUARESIZE)][Math.floor((point.x-1)/SQUARESIZE)]){
-            point.x += SQUARESIZE;
+
+    static doAction(sprite){
+        if(sprite.state == CONTROL_STATES.FARM_MODE){
+            tillManager.beginTilling(sprite.finalPos.x,sprite.finalPos.y, sprite);
         }
-        else if(!Map.grid[Math.floor(point.y/SQUARESIZE)][Math.floor((point.x+1)/SQUARESIZE)]){
-            point.x -= SQUARESIZE;
+        else if(sprite.state == CONTROL_STATES.HARVEST_MODE){
+            tillManager.harvestCrop(sprite.finalPos.x,sprite.finalPos.y)
+            tillManager.getNextCropFor(sprite);
         }
-        if(!Map.grid[Math.floor((point.y-1)/SQUARESIZE)][Math.floor(point.x/SQUARESIZE)]){
-            point.y += SQUARESIZE;
+        else if(sprite.state == CONTROL_STATES.BUILD_MODE){
+            buildingManager.beginBuilding(sprite.finalPos.x,sprite.finalPos.y,sprite.buildType)
+            buildingManager.assignTroopToBuild(sprite)
         }
-        else if(!Map.grid[Math.floor((point.y+1)/SQUARESIZE)][Math.floor(point.x/SQUARESIZE)]){
-            point.y -= SQUARESIZE;
-        }
-        if(!Map.grid[Math.floor((point.y-1)/SQUARESIZE)][Math.floor((point.x-1)/SQUARESIZE)]){
-            point.y += SQUARESIZE;
-            point.x += SQUARESIZE;
-        }
-        if(!Map.grid[Math.floor((point.y+1)/SQUARESIZE)][Math.floor((point.x-1)/SQUARESIZE)]){
-            point.y -= SQUARESIZE;
-            point.x += SQUARESIZE;
-        }
-        if(!Map.grid[Math.floor((point.y-1)/SQUARESIZE)][Math.floor((point.x+1)/SQUARESIZE)]){
-            point.y += SQUARESIZE;
-            point.x -= SQUARESIZE;
-        }
-        if(!Map.grid[Math.floor((point.y+1)/SQUARESIZE)][Math.floor((point.x+1)/SQUARESIZE)]){
-            point.y -= SQUARESIZE;
-            point.x -= SQUARESIZE;
-        }
-        return point;
     }
 
     static mostThreatening(troop, neighbours) {
@@ -157,7 +146,7 @@ export class Player {
         const troopVelocity = new Phaser.Math.Vector2(troop.body.velocity.x, troop.body.velocity.y);
 
         neighbours.forEach(neighbour => {
-            if (neighbour === troop.body) return; // Ignore itself
+            if (neighbour === troop.body || neighbour.dontTrack) return; // Ignore itself
     
             // Neighbor position
             const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
@@ -211,7 +200,7 @@ export class Player {
         const troopPosition = new Phaser.Math.Vector2(troop.x, troop.y);
     
         neighbours.forEach(neighbour => {
-            if (neighbour === troop.body || neighbour.team == troop.body.team) return; // Ignore itself or untrackable neighbors
+            if (neighbour === troop.body || neighbour.team == troop.body.team || neighbour.dontTrack) return; // Ignore itself or untrackable neighbors
     
             // Neighbor position
             const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
@@ -293,7 +282,56 @@ export class Player {
         }
     }
 
+    static getFormation(centerX, centerY, troopCount) {
+        const visited = new Set();
+        const queue = [[centerX, centerY]];
+        const positions = [];
+
+        const isValid = (x, y) => {
+            if (x < 0 || y < 0 || y >= Map.grid.length || x >= Map.grid[0].length) return false;
+            const tile = Map.grid[y][x];
+            if (Array.isArray(tile)) return false;
+            const tileType = TILE_TYPES[TILE_MAP(tile)];
+            return tileType && !tileType.block;
+        };
+
+        while (queue.length && positions.length < troopCount) {
+            const [x, y] = queue.shift();
+            const key = `${x},${y}`;
+            if (visited.has(key)) continue;
+            visited.add(key);
+
+            if (isValid(x, y)) {
+                positions.push([
+                    x * SQUARESIZE + SQUARESIZE / 2,
+                    y * SQUARESIZE + SQUARESIZE / 2
+                ]);
+
+                // 🔍 Debug Cube
+                // const debugCube = Player.scene.add.rectangle(
+                //     x * SQUARESIZE + SQUARESIZE / 2,
+                //     y * SQUARESIZE + SQUARESIZE / 2,
+                //     SQUARESIZE,
+                //     SQUARESIZE,
+                //     0xffff00,
+                //     0.25
+                // );
+                // debugCube.setDepth(1000);
+
+
+                // Enqueue all cardinal directions (can also add diagonals if needed)
+                queue.push([x + 1, y]);
+                queue.push([x - 1, y]);
+                queue.push([x, y + 1]);
+                queue.push([x, y - 1]);
+            }
+        }
+        return positions;
+    }
+
+
     static handlePlayerCollision(player1, player2){
+        if (player1 === player2) return; // Prevent self overlap
         if(player1.finalPos?.x == player2.finalPos?.x && player1.finalPos?.y == player2.finalPos?.y){
             if(player1.body.velocity.x == 0 && player1.body.velocity.y == 0 && player2.currentPath.length && !player1.currentPath.length){
                 let newVelocity = new Phaser.Math.Vector2(
@@ -314,10 +352,19 @@ export class Player {
         }
     }
 
+    static drawPlayers(playerDict) {
+        for (const key in playerDict) {
+            const [x, y] = key.split(',').map(Number);  
+            Teams.teamLists[`${playerDict[key]}`].playerList.push(this.addPlayer(x,y,playerDict[key]))
+            delete playerDict[key];
+        }
+    }
+
     static update(){
         this.troops.forEach((troop, index) => {
-            // troop.body.setVelocity(speed*=-1,0)
             if(!troop.active){this.troops.splice(index, 1); return}
+            const inView = Map.cameraBounds.contains(troop.x, troop.y);
+            troop.setVisible(inView); // Will not draw if false
             let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
             let reTrack = this.mostClosestEnemy(troop, neighbours)
             if(troop.state == CONTROL_STATES.TRACK_MODE && reTrack){

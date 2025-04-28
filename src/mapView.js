@@ -15,14 +15,21 @@ import TRCWater from '../assets/water/TRCWater.png'
 import BRCWater from '../assets/water/BRCWater.png'
 import TLCWater from '../assets/water/TLCWater.png'
 import BLCWater from '../assets/water/BLCWater.png'
+import crops from '../assets/crops.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
-import { buildPolysFromGridMap, NavMesh } from "navmesh";
-import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP } from './constants';
+import { NavMesh } from './lib/navmesh/navmesh.js';
+import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
+import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
+import { playerDict } from './town.js';
+import { tillManager } from './tillManager.js'
+import { Teams } from './Teams.js';
+import { buildingManager } from './buildingManager.js';
+import { NavMeshUpdater } from './NavMeshUpdater.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -30,13 +37,17 @@ const screenW = window.innerWidth
 export class mapView extends Phaser.Scene {
     constructor() {
         super('mapView');
+        console.log(NavMesh)
         Map.scene = this;
         Turret.scene = this;
+        tillManager.scene = this;
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
         this.isBrushMode = false; // Track if brush mode is active  
         this.isBrushActive = false;  
+        this.farmMode = false;
+        this.harvestMode = this.false;
     }
 
     init(data){
@@ -61,6 +72,7 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
         this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
         this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
+        this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this)
         Projectile.init(this)
@@ -76,6 +88,7 @@ export class mapView extends Phaser.Scene {
         this.createAnim('brcwater')
         this.createAnim('tlcwater')
         this.createAnim('blcwater')
+        this.createAnim('crops',0,0.1)
 
         Player.init(this);
         let grid = this.gridData
@@ -87,12 +100,17 @@ export class mapView extends Phaser.Scene {
         Map.initMap();
         Map.mapFromData(Map.grid);
         Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
-
+        this.navMeshUpdater = new NavMeshUpdater(Map.navMesh, this);
+        this.navMeshUpdater.setupAddAndRemove()
+        buildingManager.NavMeshUpdater = this.navMeshUpdater
+        console.log(Map.navMesh)
+        Map.drawBuildings();
+        Player.drawPlayers(playerDict);
         this.cursors = this.input.keyboard.createCursorKeys();
 
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
-        this.physics.add.collider(Player.characters, Player.characters, Player.handlePlayerCollision);
+        this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
         this.physics.add.collider(
             Player.characters,
             Projectile.projectileGroup,
@@ -137,6 +155,7 @@ export class mapView extends Phaser.Scene {
 
         this.input.keyboard.on('keydown-ESC', () => {
             this.selectMode = true
+            //Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
             if(this.gridPlace){
                 this.gridPlace = false
             }
@@ -149,13 +168,19 @@ export class mapView extends Phaser.Scene {
                 Map.isPlacing = false; // Exit placing mode
                 Map.placingItem.destroy(); // Clear placing item
             }
-            Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
         });
 
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
-
+        this.fKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+        
+        this.input.keyboard.on('keydown-F', () => {
+            this.farmMode = !this.farmMode;
+        });
+        this.input.keyboard.on('keydown-C', () => {
+            this.harvestMode = !this.harvestMode;
+        });
         // Add a mouse click listener
         this.input.on('pointerdown', (pointer) => {
             if(Map.isPlacing && Map.placingItem){
@@ -220,18 +245,26 @@ export class mapView extends Phaser.Scene {
                 )
                 .setScrollFactor(0)                // Stick to camera
                 .setDepth(UIDEPTH);
+                const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
                     troop.state = CONTROL_STATES.USER_MODE
                     let troopX = Math.floor(troop.body.x / SQUARESIZE)
                     let troopY = Math.floor(troop.body.y / SQUARESIZE)
+                    const spot = formationSpots[index];
+                    if (!spot) return; // Not enough available spots
+                    let [targetX, targetY] = spot;
+                    // 🔥 Add slight pixel variance (±8px)
+                    const variance = 4;
+                    targetX += Phaser.Math.RND.between(-variance, variance);
+                    targetY += Phaser.Math.RND.between(-variance, variance);
                     if(Map.navGrid[troopY][troopX] == 0){
                         console.log("Start pos is at blocked grid");
                     }
                     else if(Map.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
                     }
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: x, y: y }));
+                    Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: targetX, y: targetY }));
                 });
             }
         });
@@ -318,17 +351,20 @@ export class mapView extends Phaser.Scene {
 
     onPointerUp() {
         this.graphics.clear();
-        if (this.isBrushMode && this.isBrushActive) {
+        if(this.farmMode){
+            this.getSelectedCells(1)
+            this.farmMode = false;
+        }
+        else if(this.harvestMode){
+            this.getSelectedCells(2)
+            this.harvestMode = false;
+        }
+        else if (this.isBrushMode && this.isBrushActive) {
             this.isBrushActive = false
-            if (this.brushTiles.length > 0) {
-                // Process the tiles
-                this.brushTiles.forEach(tile => {
-                    let item = itemTab.itemValues(this.registry.get('image'))
-                    Map.addSpreadArr(tile.x, tile.y, item, item.depth) // Customize as needed
-                });
-
-                this.brushGraphics.clear();
-            }
+            this.brushGraphics.clear();
+            Teams.teamLists['1'].buildList = [...this.brushTiles];
+            this.brushTiles = []
+            buildingManager.assingTroopsToBuild(1, itemTab.itemValues(this.registry.get('image')))
         }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
@@ -359,14 +395,54 @@ export class mapView extends Phaser.Scene {
         this.graphics.strokeRect(rectX, rectY, rectWidth, rectHeight); // Draw the rectangle
     }
 
-    getSelectedCells() {
+    getSelectedCells(mode = 0) {
         const minX = Math.min(this.startCell.x, this.endCell.x);
         const maxX = Math.max(this.startCell.x, this.endCell.x);
         const minY = Math.min(this.startCell.y, this.endCell.y);
         const maxY = Math.max(this.startCell.y, this.endCell.y);
-        const item = itemTab.itemValues(this.registry.get('image'));
-        item.lenX = maxX-minX; item.lenY = maxY-minY;
-        Map.addSpreadItem(minX,minY,item);
+        if(mode == 1){
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
+                    if(type.spread && type.name != "water" && type.name != 'crops'){
+                        const key = `${x},${y}`;
+                        Teams.teamLists['1'].tileList.push([x, y]);
+                        Teams.teamLists['1'].tileStates[key] = {
+                            state: 'untouched', 
+                            assigned: 0,
+                            timer: null
+                        };
+                    }
+                }
+            }
+            const allTroops = Teams.teamLists['1'].playerList;
+            tillManager.assignTilesToTroops(1,allTroops,Teams.teamLists['1'].tileList)
+        }
+        else if(mode == 2){
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
+                    if(type.name == 'crops'){
+                        let cropTile;
+                        if(Array.isArray(Map.blocks[y*WORLD_DIMENSIONX+x])){
+                            cropTile = Map.blocks[y*WORLD_DIMENSIONX+x][0]
+                        }else{cropTile = Map.blocks[y*WORLD_DIMENSIONX+x]}
+                        if(cropTile.anims.currentFrame.index == 3){
+                            const key = `${x},${y}`;
+                            Teams.teamLists['1'].cropList.push([x, y]);
+                        }
+                    }
+                }
+            }
+            const allTroops = Teams.teamLists['1'].playerList;
+            tillManager.assignCropsToTroops(1,allTroops,Teams.teamLists['1'].cropList)
+        }
+        else{
+            const item = itemTab.itemValues(this.registry.get('image'));
+            item.lenX = maxX-minX; item.lenY = maxY-minY;
+            Map.addSpreadItem(minX,minY,item);
+        }
+
     }
 
     sceneButtons() {
@@ -417,6 +493,20 @@ export class mapView extends Phaser.Scene {
                 this.scene.switch('itemTab');
             });
         itemTab.setStroke('#000000', 3);
+
+        // Add "Farm" Button on Bottom Right
+        const farmButton = this.add.text(screenW - 100, camera.height - 40, 'Farm', {
+            fontSize: '24px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        })
+        .setInteractive()
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH)
+        .on('pointerdown', () => {
+            this.farmMode = true;
+        });
     
         // Add "Delete/Place" button
         this.breakItems = this.add.text(120, camera.height - 40, 'Delete', { fontSize: '24px', fill: '#ffffff' })
@@ -431,7 +521,7 @@ export class mapView extends Phaser.Scene {
                     this.customCursor = this.add.sprite(0, 0, 'hammer').setDepth(UIDEPTH + 1).setScrollFactor(0); // Stick cursor to camera
                     this.input.on('pointermove', (pointer) => {
                         if (this.customCursor) {
-                            this.customCursor.setPosition(pointer.worldX, pointer.worldY);
+                            this.customCursor.setPosition(pointer.x, pointer.y); // ← screen-space position
                         }
                     });
                 } else if (this.breakItems.text === 'Place') {
@@ -541,12 +631,12 @@ export class mapView extends Phaser.Scene {
         
     }
 
-    createAnim(key){
+    createAnim(key,repeat = -1, frameRate = 3){
         this.anims.create({
             key: key,
             frames: this.anims.generateFrameNumbers(key, { start: 0, end: 2 }),
-            frameRate: 3,
-            repeat: -1
+            frameRate: frameRate,
+            repeat: repeat
         });
     }
     

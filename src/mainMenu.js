@@ -3,8 +3,9 @@ import { TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, create2DArray
 import { WaveCollapse } from './waveCollapse';
 import { itemTab } from './itemTab';
 import { mapView } from './mapView';
-import { clearPlayerDict, generateTown, playerDict } from './town.js';
+import { clearPlayerDict, generateTown, clearBuildingArray } from './town.js';
 import { Map } from './map.js';
+import { Teams } from './Teams.js';
 
 class MainMenu extends Phaser.Scene {
     constructor() {
@@ -37,7 +38,7 @@ class MainMenu extends Phaser.Scene {
         this.startText.on('pointerdown', () => this.startGame());
         
         // ✅ Listen to Phaser's internal resize event
-        this.scale.on('resize', this.updateLayout, this);   
+        this.scale.on('resize', this.updateLayout, this);
     }
 
     updateLayout() {
@@ -162,15 +163,17 @@ class MainMenu extends Phaser.Scene {
 
 
         const generateGridData = (firstTime = false) => {
+            clearBuildingArray();
             Map.navGrid = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
             this.gridData = WaveCollapse.generateGrid(WORLD_DIMENSIONX, WORLD_DIMENSIONY);
-            this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-                TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+            // this.gridData = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
+            this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             ], 1)
-            this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,
-                TILE_TYPES.well,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-            ], 2)
+            Teams.newTeam(1)
+            // this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+            // ], 2)
             drawGrid(firstTime);
+            // this.scene.start('mapView', this.gridData);
         };
     
         generateGridData(true); // Initial draw with fade-in
@@ -229,7 +232,7 @@ const config = {
     physics: {
         default: 'arcade',
         arcade: {
-            debug: true
+            debug: false
         }
     },
  

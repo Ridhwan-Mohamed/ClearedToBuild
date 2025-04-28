@@ -2,7 +2,8 @@ import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY,
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./Player";
-import { playerDict, turretTeams } from "./town";
+import { buildingArray, clearBuildingArray, turretTeams } from "./town";
+import { buildPolysFromGridMap, NavMesh } from "navmesh";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -11,6 +12,7 @@ const colors = {
     brownishYellow: { r: 204, g: 153, b: 0 },
     gray : {r: 195, g: 195, b: 195}
 };
+
 
 export class Map{
 
@@ -25,6 +27,7 @@ export class Map{
     static isPlacing = false; // Flag to indicate placement mode
     static blocks = [];
     static waterBlocks = [];
+    static cameraBounds;
 
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
@@ -199,7 +202,6 @@ export class Map{
                     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(FLOORDEPTH).setAlpha(0);
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
-                    if(y == posY && x == posX) this.handleGridDelete(barrierBlock, item, x, y)
                     // this.blocks[y*WORLD_DIMENSIONX+x] = barrierBlock; // Add to an array for tracking        
                 }
             }
@@ -258,22 +260,33 @@ export class Map{
             ).setOrigin(0)
              .setDepth(100);
         }
-
-    
     }
-    
+
+    static drawBuildings(){
+        for(let i = 0; i < buildingArray.length; i++){
+            this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2]);
+        }
+        clearBuildingArray();
+    }
 
     static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
         this.graphics.clear();
         this.blocks.forEach(child => {
             if (Array.isArray(child)) {
                 for (let i = 0; i < child.length; i++) {
-                    child[i].destroy();
+                    if(Array.isArray(child[i])){
+                        child[i][0].destroy();
+                        child[i][1].destroy();
+                    }
+                    else{
+                        child[i].destroy();
+                    }
                 }
             } else {
                 child.destroy();
             }
         });
+        this.blocks = []
         this.waterBlocks.forEach(child => child.destroy())
         this.barrier.clear(true);
     
@@ -285,14 +298,16 @@ export class Map{
         
         const bottomRightX = Math.max(topLeftX + CHUNK_SIZE, topLeftX + Math.floor(window.innerWidth/SQUARESIZE))
         const bottomRightY = topLeftY + CHUNK_SIZE
+
+        this.cameraBounds = new Phaser.Geom.Rectangle(
+            topLeftX * SQUARESIZE,
+            topLeftY * SQUARESIZE,
+            bottomRightX * SQUARESIZE,
+            bottomRightY * SQUARESIZE
+        );
         // Loop through only the visible chunk
         for (let y = topLeftY; y < bottomRightY; y++) {
             for (let x = topLeftX; x < bottomRightX; x++) {
-                // this.navgridDraw(x,y);
-                if (playerDict[`${x},${y}`]) {
-                    // there's a player here
-                    Player.addPlayer(x, y, playerDict[`${x},${y}`])
-                }
                 if (y < 0 || x < 0 || y >= height || x >= width) {
                     // Draw water tiles for out-of-bounds
                     let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
@@ -303,9 +318,6 @@ export class Map{
                     this.drawGridValue(x, y, 0);
                     if (type && type.spread) {
                         this.drawGridValue(x, y, 1)
-                    }
-                    else if(type && type.block) {
-                        this.handleLoadNonSpread(x, y, type);
                     }
                 } else {
                     this.drawGridValue(x, y);
@@ -332,12 +344,19 @@ export class Map{
             this.handleGridDelete(barrierBlock, type, x, y)
         }
         else{
-            let block = this.scene.add.image(
-                x * SQUARESIZE + SQUARESIZE / 2, 
-                y * SQUARESIZE + SQUARESIZE / 2, 
-                tileKey
-            );
-            block.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth); // Scale to fit the grid
+            let block;
+            if(type.spriteSheet){
+                block = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
+                block.play(tileKey).setDepth(type.depth)
+            }
+            else{
+                block = this.scene.add.image(
+                    x * SQUARESIZE + SQUARESIZE / 2, 
+                    y * SQUARESIZE + SQUARESIZE / 2, 
+                    tileKey
+                );
+            }
+            block.setDepth(type.depth); // Scale to fit the grid
             this.handleGridDelete(block, type, x, y)
         }
     }
@@ -348,12 +367,16 @@ export class Map{
                 this.blocks[y*WORLD_DIMENSIONX+x] = [this.blocks[y*WORLD_DIMENSIONX+x], block];
             }
             else{
-                this.blocks[y*WORLD_DIMENSIONX+x][1]?.destroy();
+                if(Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x][1])){
+                    this.blocks[y*WORLD_DIMENSIONX+x][1][0].destroy();
+                    this.blocks[y*WORLD_DIMENSIONX+x][1][1].destroy();
+                }else{this.blocks[y*WORLD_DIMENSIONX+x][1]?.destroy();}
                 this.blocks[y*WORLD_DIMENSIONX+x][1] = block;
             }
         }
         else{
             if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
+                this.blocks[y*WORLD_DIMENSIONX+x]?.destroy();
                 this.blocks[y*WORLD_DIMENSIONX+x] = block;
             }
             else{
@@ -428,6 +451,7 @@ export class Map{
     }
     
     static addSpreadArr(x, y, newItem, index){
+        if(newItem.block){Map.navGrid[y][x] = 0}
         if(Array.isArray(this.grid[y][x])){
             if(newItem.name == 'grass'){
                 this.grid[y][x][index] = newItem.grid
@@ -538,12 +562,7 @@ export class Map{
                 }
             });
             Turret.guns.push(Turret.topItem)
-            Turret.topItem.delta = 1
-            for(let y = posY; y < posY+item.lenY; y++){
-                for(let x = posX; x < posX+item.lenX; x++){
-                    this.checkAndPlace(x,y,-1,item.depth)
-                }
-            }
+            Turret.topItem.delta = 1          
             Turret.placeItem = null;
         }
         else{
@@ -574,11 +593,6 @@ export class Map{
                     //this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
                 }
             });
-            for(let y = posY; y < posY+item.lenY; y++){
-                for(let x = posX; x < posX+item.lenX; x++){
-                    this.checkAndPlace(x,y,-1,item.depth)
-                }
-            }
             this.placingItem = null;
         }
     }

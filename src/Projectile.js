@@ -20,6 +20,7 @@ export class Projectile {
         // Create a graphics object for the rectangle
         const newCube = Projectile.scene.physics.add.sprite(startX, startY, 'cube');
         Projectile.projectileGroup.add(newCube);
+        newCube.body.dontTrack = true;
 
         // Enable physics for the graphics object
         newCube.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);

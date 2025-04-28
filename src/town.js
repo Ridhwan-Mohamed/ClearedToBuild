@@ -8,6 +8,12 @@ export function clearPlayerDict(){
     playerDict = {}
 }
 
+export var buildingArray = []
+
+export function clearBuildingArray(){
+    buildingArray.length = 0;
+}
+
 export const turretTeams = {}
 
 export function generateTown(grid, buildings, teamNumber) {
@@ -61,6 +67,7 @@ export function generateTown(grid, buildings, teamNumber) {
 
 // Function to place a building
 function placeBuilding(grid, x, y, building) {
+    buildingArray.push([x,y,building])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building

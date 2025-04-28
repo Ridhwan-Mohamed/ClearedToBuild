@@ -1,24 +1,22 @@
 Advancing TODOS
-- TOWNS:***
-    - Houses
-        - Load in adequate number of players per villages houses [✔]
-    - Teams
-        - Town players should all be on same team [✔]
-    - Turrets
-        - should only track non-team members [✔]
-- MENU:
+- MENU: 2
     - Sliders
-        - Land-Ocean-Sliders** [X]
+        - Land-Ocean-Sliders 
     - choose start
         - allow user to choose starting location
-- GAME:
+- GAME: 3
     - Monies
-        - user should have set amount of monies *** [X]
-- PLAYERS:
-    - commandable
-        - allow player states to change (farm, defend)
-    - Types
-        - farmers, warriors, medics (change through monies)
+        - user should have set amount of monies
+    - crops generate monies overtime
+        - must come and grab and sell it
+        - sell at? 
+- NavMeshUpdates 1
+    - Troops building things
+        - walls (kinda)
+        - buildings+ (next)
+        - buildings- 
+        - bridges??? 
+- Fighting (NEXT SPRINT)
 
 Refining TODOS
 - PLAYERS:
@@ -28,5 +26,4 @@ Refining TODOS
             - make player hitboxes very tiny
         - No Collisions
             - handle player overlap
-    - Players not crowding a location they are sent to properly
-    - Players dont have smart tracking abilities
+    - Players not crowding a location they are sent to properly (kinda)

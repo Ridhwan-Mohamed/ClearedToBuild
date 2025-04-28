@@ -12,10 +12,13 @@ export const GRID_HEIGHT    = 10
 export const CONTROL_STATES = {
     USER_MODE: 0,
     TRACK_MODE: 1,
-    ATTACK_MODE: 2
+    ATTACK_MODE: 2,
+    FARM_MODE: 3,
+    HARVEST_MODE: 4,
+    FISH_MODE: 5,
+    HEAL_MODE: 6,
+    BUILD_MODE: 7
 }
-export const GRID_WIDTH     = 10
-export const GRID_ARRAY     = create2DArray(GRID_HEIGHT, GRID_WIDTH)
 export var WORLD_DIMENSIONX = 120;
 export var WORLD_DIMENSIONY = 60;
 export const UIDEPTH = 10
@@ -74,7 +77,7 @@ export const TILE_TYPES = {
         grid: 12,
         lenX: 2,
         lenY: 2,
-        depth: BLOCKDEPTH+10
+        depth: BLOCKDEPTH
     },
     turret: {
         name: "turret",
@@ -85,7 +88,7 @@ export const TILE_TYPES = {
         grid: 13,
         lenX: 3,
         lenY: 3,
-        depth: BLOCKDEPTH+10
+        depth: BLOCKDEPTH
     },
     dirt : {
         name: "dirt",
@@ -181,6 +184,16 @@ export const TILE_TYPES = {
         depth: BLOCKDEPTH+1,
         lenX: 1,
         lenY: 1,
+    },
+    crops: {
+        name: "crops",
+        block: false,
+        value: 'crops',
+        spriteSheet: true,
+        depth: FLOORDEPTH,
+        spread: true,
+        complex: false,
+        grid: 36
     }
 };
 
@@ -220,7 +233,8 @@ export const TILE_ARR = [
     'house1',
     'house2',
     'well',
-    'road'
+    'road',
+    'crops'
 ];
 
 export function TILE_MAP(val){
@@ -235,6 +249,7 @@ export function TILE_MAP(val){
     else if(val == 33){return "house2"}
     else if(val == 34){return "well"}
     else if(val == 35){return "road"}
+    else if(val == 36){return "crops"}
     else{return {}}
 }
 

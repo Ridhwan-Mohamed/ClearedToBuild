@@ -110,7 +110,7 @@ export class Player {
             sprite.currentPath.length = 0;
             // sprite.state = CONTROL_STATES.ATTACK_MODE
         }
-        else if(sprite.state == CONTROL_STATES.BUILD_MODE && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.finalPos.x, sprite.finalPos.y) < 50){
+        else if(sprite.state == CONTROL_STATES.BUILD_MODE_T && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.finalPos.x, sprite.finalPos.y) < 8){
             sprite.body.setVelocity(0, 0);
             this.doAction(sprite)
         }
@@ -131,9 +131,15 @@ export class Player {
             tillManager.harvestCrop(sprite.finalPos.x,sprite.finalPos.y)
             tillManager.getNextCropFor(sprite);
         }
-        else if(sprite.state == CONTROL_STATES.BUILD_MODE){
+        else if(sprite.state == CONTROL_STATES.BUILD_MODE_T){
             buildingManager.beginBuilding(sprite.finalPos.x,sprite.finalPos.y,sprite.buildType)
             buildingManager.assignTroopToBuild(sprite)
+        }
+        else if(sprite.state == CONTROL_STATES.BUILD_MODE_B){
+            buildingManager.beginBuildingBlock(sprite.finalPos.x,sprite.finalPos.y,sprite)
+        }
+        else if(sprite.state == CONTROL_STATES.DESTROY_MODE){
+            buildingManager.beginDestroyingBlock(sprite.finalPos.x,sprite.finalPos.y,sprite)
         }
     }
 

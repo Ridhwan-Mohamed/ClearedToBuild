@@ -30,6 +30,7 @@ import { tillManager } from './tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './buildingManager.js';
 import { NavMeshUpdater } from './NavMeshUpdater.js';
+import monies from '../assets/monies.png'
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -41,6 +42,7 @@ export class mapView extends Phaser.Scene {
         Map.scene = this;
         Turret.scene = this;
         tillManager.scene = this;
+        buildingManager.scene = this;
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
@@ -48,6 +50,7 @@ export class mapView extends Phaser.Scene {
         this.isBrushActive = false;  
         this.farmMode = false;
         this.harvestMode = this.false;
+        this.money = 100; // Starting amount
     }
 
     init(data){
@@ -63,6 +66,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('leader', leader)
         this.load.image('hammer', hammer);
         this.load.image('grass', grass);
+        this.load.image('monies', monies);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
@@ -88,7 +92,7 @@ export class mapView extends Phaser.Scene {
         this.createAnim('brcwater')
         this.createAnim('tlcwater')
         this.createAnim('blcwater')
-        this.createAnim('crops',0,0.1)
+        this.createAnim('crops',0,1)
 
         Player.init(this);
         let grid = this.gridData
@@ -185,10 +189,21 @@ export class mapView extends Phaser.Scene {
         this.input.on('pointerdown', (pointer) => {
             if(Map.isPlacing && Map.placingItem){
                 const items = itemTab.itemValues(this.registry.get('image'))
-                Map.handleMapClick(pointer, items)
-                if(!Map.placingItem.blocked){
-                    Map.placeItem(items)
-                }
+                let cam = this.cameras.main;
+                let x = Math.floor((pointer.x + cam.scrollX - ((pointer.worldX+cam.scrollX)%SQUARESIZE)) / SQUARESIZE);
+                let y = Math.floor((pointer.y + cam.scrollY - ((pointer.worldY+cam.scrollY)%SQUARESIZE)) / SQUARESIZE);                
+                Teams.teamLists['1'].buildingBlockList.push([x,y])
+                Teams.teamLists['1'].blockBuildingState[`${x},${y}`] = {
+                    type: items,
+                    x: x,
+                    y: y,
+                    duration: 100
+                };
+                buildingManager.assignTroopToBuildBlock(1);
+                // Map.handleMapClick(pointer, items)
+                // if(!Map.placingItem.blocked){
+                //     Map.placeItem(items)
+                // }
             }
             else if(Turret.isPlacing){
                 const items = itemTab.itemValues(this.registry.get('image'))
@@ -196,7 +211,6 @@ export class mapView extends Phaser.Scene {
                 if(!Turret.placeItem.blocked){
                     Turret.placeItem(items)
                 }
-
             }
             else if((this.gridPlace || this.selectMode) && pointer.button == 2){
                 const gridX = Math.floor(pointer.worldX / SQUARESIZE);
@@ -224,7 +238,6 @@ export class mapView extends Phaser.Scene {
                 if (selectionCountText) {
                     selectionCountText.destroy();
                 }
-
 
                 // Add the position text
                 currentText = this.add.text(
@@ -362,9 +375,9 @@ export class mapView extends Phaser.Scene {
         else if (this.isBrushMode && this.isBrushActive) {
             this.isBrushActive = false
             this.brushGraphics.clear();
-            Teams.teamLists['1'].buildList = [...this.brushTiles];
+            Teams.teamLists['1'].buildTileList = [...this.brushTiles];
             this.brushTiles = []
-            buildingManager.assingTroopsToBuild(1, itemTab.itemValues(this.registry.get('image')))
+            buildingManager.assingTroopsToBuildTile(1, itemTab.itemValues(this.registry.get('image')))
         }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
@@ -447,6 +460,23 @@ export class mapView extends Phaser.Scene {
 
     sceneButtons() {
         const camera = this.cameras.main;
+
+        // === MONEY UI (Top Center) ===
+        const topCenterX = this.cameras.main.width / 2;
+        const moneyIcon = this.add.image(topCenterX - 20, 25, 'monies')
+            .setScrollFactor(0)
+            .setScale(0.5)
+            .setDepth(UIDEPTH);
+
+        this.moneyText = this.add.text(topCenterX + 5, 18, `$${this.money}`, {
+            fontSize: '20px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        })
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH);
+
 
         // Add a button on the bottom bar
         const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
@@ -630,6 +660,49 @@ export class mapView extends Phaser.Scene {
         });
         
     }
+
+    updateMoney(amountDelta) {
+        const oldAmount = this.money;
+        this.money += amountDelta;
+        this.moneyText.setText(`$${this.money}`);
+    
+        // Determine color and ghost prefix
+        const isGain = amountDelta > 0;
+        const color = isGain ? '#00ff00' : '#ff3333';
+        const sign = isGain ? '+' : '-';
+    
+        // Temporarily change the fill color
+        this.moneyText.setFill(color);
+    
+        // Create ghost text above the current amount
+        const ghost = this.add.text(
+            this.moneyText.x,
+            this.moneyText.y,
+            `${sign}$${Math.abs(amountDelta)}`,
+            {
+                fontSize: '20px',
+                fill: color,
+                stroke: '#000000',
+                strokeThickness: 2
+            }
+        ).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
+    
+        // Animate ghost text: float up and fade out
+        this.tweens.add({
+            targets: ghost,
+            y: ghost.y - 20,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ghost.destroy()
+        });
+    
+        // Reset fill color back to white after a short delay
+        this.time.delayedCall(600, () => {
+            this.moneyText.setFill('#ffffff');
+        });
+    }
+    
 
     createAnim(key,repeat = -1, frameRate = 3){
         this.anims.create({

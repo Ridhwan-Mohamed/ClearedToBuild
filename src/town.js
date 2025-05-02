@@ -16,19 +16,29 @@ export function clearBuildingArray(){
 
 export const turretTeams = {}
 
-export function generateTown(grid, buildings, teamNumber) {
+export function generateTown(grid, buildings, teamNumber, startX = -1, startY = -1, navGrid = Map.navGrid) {
+    grid = structuredClone(grid);
     let gridWidth = grid[0].length;
-    let gridHeight = grid.length
-
+    let gridHeight = grid.length;
     // Step 1: Start with a random town seed within grid bounds
-    let townCenterX = Phaser.Math.RND.between(1, gridWidth - buildings[0].lenX);  // Avoid edges if needed
-    let townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
-    while(!canPlaceBuildingAtAnyCorner(grid, townCenterX, townCenterY, buildings[0]).success){
+    let townCenterX;
+    let townCenterY;
+    if(teamNumber == 1 && startX != -1 && startY != -1){
+        if(!canPlaceBuildingAtAnyCorner(grid, startX, startY, buildings[0]).success) return;
+        townCenterX = startX
+        townCenterY = startY
+    }
+    else{
         // loop until valid start location
         townCenterX = Phaser.Math.RND.between(1, gridWidth - buildings[0].lenX);  // Avoid edges if needed
         townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
+        while(!canPlaceBuildingAtAnyCorner(grid, townCenterX, townCenterY, buildings[0]).success){
+            // loop until valid start location
+            townCenterX = Phaser.Math.RND.between(1, gridWidth - buildings[0].lenX);  // Avoid edges if needed
+            townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
+        }   
     }
-    placeBuilding(grid, townCenterX, townCenterY, buildings[0]);
+    placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid);
     if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
 
     let outerRoads = [];
@@ -46,7 +56,7 @@ export function generateTown(grid, buildings, teamNumber) {
                 if(canFit.success){
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
                     if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
-                    placeBuilding(grid, canFit.x, canFit.y, curBuilding);
+                    placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid);
                     buildings.splice(i, 1);
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
@@ -61,17 +71,16 @@ export function generateTown(grid, buildings, teamNumber) {
 
     // Step 4: Surround town with stone
     // surroundWithStone(grid);
-
     return grid;
 }
 
 // Function to place a building
-function placeBuilding(grid, x, y, building) {
+function placeBuilding(grid, x, y, building, navGrid) {
     buildingArray.push([x,y,building])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building
-            Map.navGrid[y + i][x + j] = 0
+            navGrid[y + i][x + j] = 0
         }
     }
 }

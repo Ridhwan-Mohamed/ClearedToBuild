@@ -17,10 +17,12 @@ export const CONTROL_STATES = {
     HARVEST_MODE: 4,
     FISH_MODE: 5,
     HEAL_MODE: 6,
-    BUILD_MODE: 7
+    BUILD_MODE_T: 7,
+    BUILD_MODE_B: 8,
+    DESTROY_MODE: 9
 }
-export var WORLD_DIMENSIONX = 120;
-export var WORLD_DIMENSIONY = 60;
+export var WORLD_DIMENSIONX = 70;
+export var WORLD_DIMENSIONY = 70;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1

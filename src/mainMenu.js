@@ -113,11 +113,47 @@ class MainMenu extends Phaser.Scene {
                     if (!existing) {
                         const rect = this.add.rectangle(posX, posY, tileSize - 1, tileSize - 1, color)
                             .setOrigin(0)
-                            .setDepth(1);
+                            .setDepth(1)
+                            .setInteractive();
         
+                        // Hover animation
+                        rect.on('pointerover', () => {
+                            rect.setStrokeStyle(1, 0xffffff);
+                            rect.setScale(1.2);
+                        });
+                        rect.on('pointerout', () => {
+                            rect.setStrokeStyle(); // Remove stroke
+                            rect.setScale(1);
+                        });
+        
+                        // Click behavior → generateTown at x, y
+                        rect.on('pointerdown', () => {
+                            clearBuildingArray();
+                            clearPlayerDict();
+                            
+                            const freshGrid = structuredClone(this.baseGridData);
+                            const freshNavGrid = structuredClone(this.oldNavGrid)
+                            this.gridData = generateTown(freshGrid, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+                            ], 1, x, y, freshNavGrid);
+                            Map.navGrid = freshNavGrid
+                            drawGrid(false);
+                            
+                            this.tweens.add({
+                                targets: rect,
+                                scale: 1.5,
+                                alpha: 0.3,
+                                duration: 150,
+                                yoyo: true,
+                                ease: 'Quad.easeOut',
+                                onComplete: () => {
+                                    rect.setScale(1).setAlpha(1);
+                                }
+                            });
+                        });
+                        
+
                         if (firstTime) {
                             rect.setAlpha(0);
-                            // Grouped fade-in per row
                             this.time.delayedCall(y * 20, () => {
                                 this.tweens.add({
                                     targets: rect,
@@ -126,7 +162,7 @@ class MainMenu extends Phaser.Scene {
                                 });
                             });
                         }
-        
+
                         this.gridGraphics[index] = rect;
                     } else {
                         const currentColor = existing.fillColor;
@@ -137,7 +173,7 @@ class MainMenu extends Phaser.Scene {
                             yoyo: true,
                             ease: 'Quad.easeOut'
                         });
-    
+        
                         this.tweens.addCounter({
                             from: 0,
                             to: 100,
@@ -155,22 +191,24 @@ class MainMenu extends Phaser.Scene {
                                 );
                             }
                         });
-                        
                     }
                 }
             }
         };
 
-
         const generateGridData = (firstTime = false) => {
             clearBuildingArray();
             Map.navGrid = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
-            this.gridData = WaveCollapse.generateGrid(WORLD_DIMENSIONX, WORLD_DIMENSIONY);
+            const ratio = this.sliderValue || 0.8;
+            this.gridData = WaveCollapse.generateGrid(WORLD_DIMENSIONX, WORLD_DIMENSIONY, ratio);
+            this.oldNavGrid = structuredClone(Map.navGrid)
             // this.gridData = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
+            this.baseGridData = this.gridData
             this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             ], 1)
+            console.log(this.baseGridData == this.gridData)
             Teams.newTeam(1)
-            // this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+            // this.gridDatad = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 2)
             drawGrid(firstTime);
             // this.scene.start('mapView', this.gridData);
@@ -206,12 +244,68 @@ class MainMenu extends Phaser.Scene {
             });
         });
         
-    
         this.tweens.add({
             targets: [generateBtn, playBtn],
             alpha: 1,
             duration: 500,
             delay: 400
+        });
+
+
+        // === SLIDER UI (Rounded + Stepped) ===
+        const sliderX = offsetX - 50;
+        const sliderY = offsetY;
+        const sliderHeight = gridHeight * tileSize;
+        const sliderWidth = 12;
+        const sliderSteps = 10;
+        const minRatio = 0.3;
+        const maxRatio = 0.8;
+        const stepSize = sliderHeight / (sliderSteps - 1);
+
+        // Rounded trackbar
+        const sliderTrack = this.add.graphics().setDepth(2);
+        sliderTrack.fillStyle(0x888888, 1);
+        sliderTrack.fillRoundedRect(sliderX - sliderWidth / 2, sliderY, sliderWidth, sliderHeight, 6);
+
+        // Step dots for visual feedback (optional)
+        for (let i = 0; i < sliderSteps; i++) {
+            const y = sliderY + i * stepSize;
+            this.add.circle(sliderX, y, 2, 0xffffff).setDepth(2).setAlpha(0.5);
+        }
+
+        // Circular slider handle
+        const sliderHandle = this.add.circle(sliderX, sliderY, 8, 0xffffff)
+            .setInteractive({ draggable: true })
+            .setDepth(3);
+
+        // Labels
+        this.add.text(sliderX, sliderY - 20, 'Water', {
+            fontSize: '14px',
+            fill: '#ffffff'
+        }).setOrigin(0.5);
+
+        this.add.text(sliderX, sliderY + sliderHeight + 20, 'land', {
+            fontSize: '14px',
+            fill: '#ffffff'
+        }).setOrigin(0.5);
+
+        // Slider drag logic with step snapping
+        this.input.setDraggable(sliderHandle);
+        this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+            if (gameObject !== sliderHandle) return;
+
+            // Clamp and snap to nearest step
+            const clampedY = Phaser.Math.Clamp(dragY, sliderY, sliderY + sliderHeight);
+            const stepIndex = Math.round((clampedY - sliderY) / stepSize);
+            const snappedY = sliderY + stepIndex * stepSize;
+            sliderHandle.y = snappedY;
+
+            // Ratio = mapped linearly from stepIndex to [maxRatio...minRatio] (land at top, water at bottom)
+            const ratio = maxRatio - (stepIndex / (sliderSteps - 1)) * (maxRatio - minRatio);
+            this.sliderValue = ratio;
+
+            // Optional debug:
+            // console.log(`Step ${stepIndex} → Ratio: ${ratio.toFixed(2)}`);
         });
     }
     

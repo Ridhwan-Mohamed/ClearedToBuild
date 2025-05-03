@@ -9,7 +9,11 @@ export class Teams{
             tileStates: {},
             tileList: [],
             cropList: [],
-            buildingList: []
+            buildingTileList: [],
+            blockBuildingState: {},
+            buildingBlockList: [],
+            destroyList: [],
+            destroyState: {}
         }
     }
 

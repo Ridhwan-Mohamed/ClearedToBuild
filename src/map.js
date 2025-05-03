@@ -4,6 +4,8 @@ import { Turret } from "./Turret";
 import { Player } from "./Player";
 import { buildingArray, clearBuildingArray, turretTeams } from "./town";
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
+import { Teams } from "./Teams";
+import { buildingManager } from "./buildingManager";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -112,27 +114,29 @@ export class Map{
         });
     }
 
-    static handleMapClick(pointer, item) {
+    static handleMapClick(x, y, item) {
         // If we're in placing mode, finalize the placement
         if(item == TILE_TYPES.player && this.isPlacing && this.placingItem && !this.placingItem.blocked){
-            const worldX = this.scene.cameras.main.scrollX / SQUARESIZE + pointer.x/SQUARESIZE;
-            const worldY = this.scene.cameras.main.scrollY / SQUARESIZE + pointer.y/SQUARESIZE;
+            // const worldX = this.scene.cameras.main.scrollX / SQUARESIZE + pointer.x/SQUARESIZE;
+            // const worldY = this.scene.cameras.main.scrollY / SQUARESIZE + pointer.y/SQUARESIZE;
             Player.addPlayer(Math.floor(worldX), Math.floor(worldY))
             this.isPlacing = false; // Exit placing mode
             this.placingItem.destroy(); // Clear placing item
         }
         else if (this.isPlacing && this.placingItem && !this.placingItem.blocked) {
-            let x = pointer.worldX - pointer.worldX%SQUARESIZE - item.lenX/2*SQUARESIZE
-            let y = pointer.worldY - pointer.worldY%SQUARESIZE - item.lenY/2*SQUARESIZE
+            // let x = pointer.worldX - pointer.worldX%SQUARESIZE - item.lenX/2*SQUARESIZE
+            // let y = pointer.worldY - pointer.worldY%SQUARESIZE - item.lenY/2*SQUARESIZE
             this.placingItem.clearTint()
             this.placingItem.setAlpha(1); // Set full visibility
-            this.placingItem.setPosition(pointer.worldX - pointer.worldX%SQUARESIZE, pointer.worldY - pointer.worldY%SQUARESIZE); // Finalize position
+            this.placingItem.setPosition(x, y); // Finalize position
+            x = Math.floor(x/SQUARESIZE)
+            y = Math.floor(y/SQUARESIZE)
             this.isPlacing = false;
-            this.addBlockItem(Math.floor(x/SQUARESIZE),Math.floor(y/SQUARESIZE),item)
+            this.addBlockItem(x,y,item)
             const itemToPlace = this.placingItem
             itemToPlace.setInteractive();
-            itemToPlace.sx = Math.floor(x/SQUARESIZE)
-            itemToPlace.sy = Math.floor(y/SQUARESIZE)
+            itemToPlace.sx = x
+            itemToPlace.sy = y
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
             itemToPlace.on('pointerover', () => {
@@ -148,7 +152,16 @@ export class Map{
             itemToPlace.on('pointerdown', () => {
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     console.log('Destroying item...');
-                    itemToPlace.destroy(); // Destroy the specific item
+                    Teams.teamLists['1'].destroyList.push([x,y])
+                    Teams.teamLists['1'].destroyState[`${x},${y}`] = {
+                        type: item,
+                        value: itemToPlace,
+                        x: x,
+                        y: y,
+                        duration: 100
+                    }
+                    buildingManager.assingTroopsToDestroy(1)
+                    // itemToPlace.destroy(); // Destroy the specific item
                     // this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
                 }
             });
@@ -390,6 +403,15 @@ export class Map{
     }
 
     static determineTileType(x, y, tileType,index = -1, draw = 1) {
+        if(TILE_TYPES[tileType].name == "water" && (x == 0 || x == this.grid[0].length - 1
+            || y == 0 || y == this.grid.length - 1
+        )){
+            // Default fallback for interior
+            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
+            else this.grid[y][x] = TILE_TYPES[tileType].interior;
+            if (draw) this.drawGridValue(x,y,index)
+            return TILE_TYPES[tileType].interior; // Default to interior
+        }
         let depth = TILE_TYPES[tileType].depth
         const above = TILE_MAP(this.grabDepth(this.grid[y - 1]?.[x], depth)) === tileType;
         const below = TILE_MAP(this.grabDepth(this.grid[y + 1]?.[x], depth)) === tileType;

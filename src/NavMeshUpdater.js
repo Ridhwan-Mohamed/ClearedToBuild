@@ -1,5 +1,5 @@
 // navmeshUpdater.js
-import { SQUARESIZE } from './constants.js';
+import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from './constants.js';
 import { Map } from './map.js';
 import jsastar from "javascript-astar";
 import Vector2 from "./lib/navmesh/math/vector-2";
@@ -45,6 +45,9 @@ export class NavMeshUpdater {
             graphics.beginPath();
             graphics.moveTo(first.x, first.y);
             for (const point of rest) {
+                if(point.x < 0 || point.x > WORLD_DIMENSIONX*SQUARESIZE || 
+                    point.y < 0 || point.y > WORLD_DIMENSIONY*SQUARESIZE
+                ) console.log(point)
                 graphics.lineTo(point.x, point.y);
             }
             graphics.lineTo(first.x, first.y);
@@ -108,7 +111,7 @@ export class NavMeshUpdater {
     /**
      * Block multiple tiles at once (for multi-tile walls).
      */
-    blockTiles(tileCoords) {
+    blockTiles(tileCoords, addTiles = false) {
         const tileRects = tileCoords.map(({ x, y }) => ({
             x: x * SQUARESIZE,
             y: y * SQUARESIZE,
@@ -117,10 +120,17 @@ export class NavMeshUpdater {
         }));
     
         // Step 1: Find affected polygons
-        const affectedPolys = Map.navMesh.navPolygons.filter(poly =>
-            tileRects.some(tileRect => this._polygonIntersectsRect(poly.polygon.points, tileRect))
-        );
-    
+        let affectedPolys;
+        if(addTiles){
+            affectedPolys = Map.navMesh.navPolygons.filter(poly =>
+                tileRects.some(tileRect => this._polygonIsAdjacentToRect(poly.polygon.points, tileRect))
+            );            
+        }else{
+            affectedPolys = Map.navMesh.navPolygons.filter(poly =>
+                tileRects.some(tileRect => this._polygonIntersectsRect(poly.polygon.points, tileRect))
+            );
+        }
+
         // Step 2: Gather unaffected neighbors
         const neighborPolys = new Set();
         for (const poly of affectedPolys) {
@@ -137,14 +147,34 @@ export class NavMeshUpdater {
         // Step 4: Build local nav grid
         const gridWidth = Math.ceil(bounds.w / SQUARESIZE);
         const gridHeight = Math.ceil(bounds.h / SQUARESIZE);
-        const navGrid = Array.from({ length: gridHeight }, () => Array(gridWidth).fill(1));
+        const navGrid = Array.from({ length: gridHeight }, () => Array(gridWidth).fill(0)); // All blocked initially        
     
         // Step 5: Mark blocked tiles in nav grid
+        for (const poly of affectedPolys) {
+            const polyPoints = poly.polygon.points;
+        
+            const minTileX = Math.floor((Math.min(...polyPoints.map(p => p.x)) - bounds.x) / SQUARESIZE);
+            const maxTileX = Math.floor((Math.max(...polyPoints.map(p => p.x)) - bounds.x) / SQUARESIZE);
+            const minTileY = Math.floor((Math.min(...polyPoints.map(p => p.y)) - bounds.y) / SQUARESIZE);
+            const maxTileY = Math.floor((Math.max(...polyPoints.map(p => p.y)) - bounds.y) / SQUARESIZE);
+        
+            for (let ty = minTileY; ty <= maxTileY; ty++) {
+                for (let tx = minTileX; tx <= maxTileX; tx++) {
+                    const worldX = bounds.x + tx * SQUARESIZE + SQUARESIZE / 2;
+                    const worldY = bounds.y + ty * SQUARESIZE + SQUARESIZE / 2;
+                    if (poly.contains({ x: worldX, y: worldY })) {
+                        navGrid[ty][tx] = 1;
+                    }
+                }
+            }
+        }
+        //mark tile coords as 0
+        const TILE_COORD_VAL = addTiles? 1 : 0;
         for (const { x, y } of tileCoords) {
             const localX = Math.floor((x * SQUARESIZE - bounds.x) / SQUARESIZE);
             const localY = Math.floor((y * SQUARESIZE - bounds.y) / SQUARESIZE);
             if (navGrid[localY] && navGrid[localY][localX] !== undefined) {
-                navGrid[localY][localX] = 0; // 0 = blocked
+                navGrid[localY][localX] = TILE_COORD_VAL;
             }
         }
     
@@ -182,7 +212,7 @@ export class NavMeshUpdater {
         const maxY = Math.max(...ys);
         return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     }
-    
+
     _extractPolygonsFromGrid(grid, originX, originY) {
 
         // Create a new navmesh instance (locally, not touching your main one)
@@ -226,7 +256,7 @@ export class NavMeshUpdater {
 
     _polygonIntersectsRect(points, rect) {
         const polyBounds = this._getPolygonBounds(points);
-    
+
         return !(
             polyBounds.x + polyBounds.w <= rect.x ||    // polygon is left of tile
             polyBounds.x >= rect.x + rect.w ||          // polygon is right of tile
@@ -343,24 +373,20 @@ export class NavMeshUpdater {
             
     }
 
-    static calculateCentroid(points){
-        const centroid = new Vector2(0, 0);
-        const length = points.length;
-        points.forEach((p) => centroid.add(p));
-        centroid.x /= length;
-        centroid.y /= length;
-        return centroid;
+    _polygonIsAdjacentToRect(points, rect) {
+        const polyBounds = this._getPolygonBounds(points);
+    
+        const horizontallyAdjacent =
+            (polyBounds.x + polyBounds.w === rect.x || polyBounds.x === rect.x + rect.w) &&
+            !(polyBounds.y + polyBounds.h <= rect.y || polyBounds.y >= rect.y + rect.h);
+    
+        const verticallyAdjacent =
+            (polyBounds.y + polyBounds.h === rect.y || polyBounds.y === rect.y + rect.h) &&
+            !(polyBounds.x + polyBounds.w <= rect.x || polyBounds.x >= rect.x + rect.w);
+    
+        return horizontallyAdjacent || verticallyAdjacent;
     }
-
-    static calculateRadius(points, centroid) {
-        let boundingRadius = 0;
-        for (const point of points) {
-            const d = centroid.distance(point);
-            if (d > boundingRadius)
-                boundingRadius = d;
-        }
-        return boundingRadius;
-    }
+    
 }
 
 

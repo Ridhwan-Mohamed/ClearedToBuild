@@ -11,36 +11,39 @@ export class WaveCollapse {
         pine: ["grass"]
     };
 
-    static generateGrid(width, height) {
+    static generateGrid(width, height, ratio = 0.8) {
         const noise = new Noise(Math.random()); // Re-seed each time
     
         let grid = Array.from({ length: height }, () =>
             Array.from({ length: width }, () => Object.keys(this.rules))
         );
     
-        // ✅ Pass noise in to use it for seeding
-        this.seedTerrain(grid, width, height, noise);
-    
+        this.seedTerrain(grid, width, height, noise, ratio);
         return this.collapseWave(grid);
     }
+
+    static seedTerrain(grid, width, height, noise, ratio = 0.8) {
+        // Ratio = [0.3 ... 0.8] → map to waterThreshold (lower = more water)
+        const waterThreshold = 1 - ratio; // e.g., 0.3 → 0.8 water, 0.8 → 0.3 water
     
-    static seedTerrain(grid, width, height, noise) {
         for (let y = 0; y < height; y++) {
             for (let x = 0; x < width; x++) {
                 let noiseValue = noise.simplex2(x / 50, y / 50);
-                if (noiseValue < -0.2) {
+    
+                if (noiseValue < -waterThreshold) {
                     grid[y][x] = ["water"];
-                    Map.navGrid[y][x] = 0
+                    Map.navGrid[y][x] = 0;
                 } else if (noiseValue < 0.3) {
-                    Map.navGrid[y][x] = 1
                     grid[y][x] = ["dirt"];
+                    Map.navGrid[y][x] = 1;
                 } else {
-                    Map.navGrid[y][x] = 1
                     grid[y][x] = ["grass"];
+                    Map.navGrid[y][x] = 1;
                 }
             }
         }
     }
+    
     
 
     static collapseWave(grid) {

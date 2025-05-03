@@ -1,5 +1,6 @@
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "./constants";
 import { Map } from "./map";
+import { mapView } from "./mapView";
 import { Player } from "./Player";
 import { Teams } from "./Teams";
 
@@ -33,7 +34,6 @@ export class tillManager {
             for (let tile of tileList) {
                 const key = this.getTileKey(tile[0], tile[1]);
                 const state = this.getTileState(tile[0], tile[1], teamNumber);
-
                 if (state.state === 'tilled') continue;
                 if (state.assigned < fewestAssigned) {
                     best = tile;
@@ -75,7 +75,8 @@ export class tillManager {
         } else {
             cropTile = block;
         }
-        if (cropTile && cropTile.anims) {
+        if (cropTile && cropTile.anims.currentFrame.index == 3) {
+            this.scene.updateMoney(10)
             cropTile.setFrame(1);           // ✅ Reset to first frame
             cropTile.anims.play('crops');   // ✅ Play the crop animation
         }

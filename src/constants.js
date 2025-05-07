@@ -54,6 +54,7 @@ export const TILE_TYPES = {
             bottomRight: 10,
         },
         complex: true,
+        price: 5,
         spread: true,
         block: true,
         grid: 2,
@@ -73,6 +74,7 @@ export const TILE_TYPES = {
     pine: {
         name: "pine",
         value: 'image6',
+        price: 50,
         spread: false,
         block: true,
         complex: false,
@@ -195,6 +197,7 @@ export const TILE_TYPES = {
         depth: FLOORDEPTH,
         spread: true,
         complex: false,
+        price: 5,
         grid: 36
     }
 };
@@ -282,6 +285,25 @@ export function handleGridXY(x,y,itemX,itemY){
     }
 
     return [finalX,finalY]
+}
+
+export function showAlert(scene, message, color = '#ffffff') {
+    const alert = scene.add.text(
+        scene.cameras.main.width / 2, 0, message,
+        { fontSize: '24px', fill: color, stroke: '#000000', strokeThickness: 3 }
+    )
+    .setOrigin(0.5, 0)
+    .setScrollFactor(0)
+    .setDepth(UIDEPTH);
+
+    scene.tweens.add({
+        targets: alert,
+        y: 50,
+        alpha: 0,
+        duration: 1000,
+        ease: 'Cubic.easeOut',
+        onComplete: () => alert.destroy()
+    });
 }
 
 export function intDiv(n,d){

@@ -41,15 +41,25 @@ export class tillManager {
                 }
                 if(fewestAssigned == 0){break;}
             }
-
+            let troopX, troopY;
             if (best) {
                 const [tx, ty] = best;
                 const key = this.getTileKey(tx, ty);
                 const state = this.getTileState(tx, ty, teamNumber);
                 state.assigned += 1;
                 troop.state = CONTROL_STATES.FARM_MODE
-                Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
-            }
+                troopX = Math.floor(troop.body.x/SQUARESIZE)
+                troopY = Math.floor(troop.body.y/SQUARESIZE)
+                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                if (newX === -1) {
+                    console.log("No valid start tile nearby");
+                } else {
+                    troopX = newX;
+                    troopY = newY
+                    console.log("New valid tile:", newX, newY);
+                }
+                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
+            }    
         }
     }
 
@@ -160,7 +170,15 @@ export class tillManager {
             const state = this.getTileState(tx, ty, troop.body.team);
             state.assigned += 1;
             troop.state = CONTROL_STATES.FARM_MODE
-            Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
+            let troopX = Math.floor(troop.body.x/SQUARESIZE)
+            let troopY = Math.floor(troop.body.y/SQUARESIZE)
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) {
+                console.log("No valid start tile nearby");
+            } else {
+                console.log("New valid tile:", newX, newY);
+            }
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
         }else{
             troop.state = CONTROL_STATES.USER_MODE
         }
@@ -172,7 +190,15 @@ export class tillManager {
         let cropList = Teams.teamLists[`${troop.body.team}`].cropList
         if(Teams.teamLists[`${troop.body.team}`].cropList.length){
             let tile = cropList.shift()
-            Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: tile[0]*SQUARESIZE, y: tile[1]*SQUARESIZE }));
+            let troopX = Math.floor(troop.body.x/SQUARESIZE)
+            let troopY = Math.floor(troop.body.y/SQUARESIZE)
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) {
+                console.log("No valid start tile nearby");
+            } else {
+                console.log("New valid tile:", newX, newY);
+            }
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tile[0]*SQUARESIZE, y: tile[1]*SQUARESIZE }));
         }else{
             troop.state = CONTROL_STATES.USER_MODE
         }

@@ -1,6 +1,7 @@
 import { SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
 import { Map } from "./map";
 import { Player } from "./Player";
+import { Teams } from "./Teams";
 
 export var playerDict = {}
 
@@ -39,6 +40,8 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
         }   
     }
     placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid);
+    Teams.teamLists[`${teamNumber}`].center[0] = townCenterX
+    Teams.teamLists[`${teamNumber}`].center[1] = townCenterY
     if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
 
     let outerRoads = [];
@@ -86,7 +89,7 @@ function placeBuilding(grid, x, y, building, navGrid) {
 }
 
 function placePlayers(roads, teamNumber){
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < 1; i++){
         // Convert set to array and select a random spot
         let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
         let [x, y] = spotStr.split(',').map(Number);

@@ -20,11 +20,12 @@ import { Map } from './map.js';
 import { Turret } from './Turret.js';
 import { NavMesh } from './lib/navmesh/navmesh.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
-import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH } from './constants';
+import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
+import playerAction from '../assets/Players/playerAction.png'
 import { playerDict } from './town.js';
 import { tillManager } from './tillManager.js'
 import { Teams } from './Teams.js';
@@ -43,6 +44,7 @@ export class mapView extends Phaser.Scene {
         Turret.scene = this;
         tillManager.scene = this;
         buildingManager.scene = this;
+        itemTab.mapRef = this;
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
@@ -59,6 +61,7 @@ export class mapView extends Phaser.Scene {
 
     preload() {
         this.load.spritesheet('player', player, { frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('playerAction', playerAction, { frameWidth: 16, frameHeight: 16});
         this.load.image('barrier', gray);  // Load a barrier image
         this.load.image('worldMap', worldMap);
         this.load.image('cube', black);  // Make sure the path and filename are correct
@@ -189,24 +192,40 @@ export class mapView extends Phaser.Scene {
         this.input.on('pointerdown', (pointer) => {
             if(Map.isPlacing && Map.placingItem){
                 const items = itemTab.itemValues(this.registry.get('image'))
+                if(items.price){
+                    if(this.money>=items.price){
+                        this.updateMoney(-1*items.price)
+                    }else{
+                        showAlert(this, 'insufficient Funds', "#ff0000");
+                        return;
+                    }
+                }
                 let cam = this.cameras.main;
                 let x = Math.floor((pointer.x + cam.scrollX - ((pointer.worldX+cam.scrollX)%SQUARESIZE)) / SQUARESIZE);
-                let y = Math.floor((pointer.y + cam.scrollY - ((pointer.worldY+cam.scrollY)%SQUARESIZE)) / SQUARESIZE);                
-                Teams.teamLists['1'].buildingBlockList.push([x,y])
-                Teams.teamLists['1'].blockBuildingState[`${x},${y}`] = {
-                    type: items,
-                    x: x,
-                    y: y,
-                    duration: 100
-                };
-                buildingManager.assignTroopToBuildBlock(1);
-                // Map.handleMapClick(pointer, items)
-                // if(!Map.placingItem.blocked){
-                //     Map.placeItem(items)
-                // }
+                let y = Math.floor((pointer.y + cam.scrollY - ((pointer.worldY+cam.scrollY)%SQUARESIZE)) / SQUARESIZE);
+                if(items == TILE_TYPES.player){Player.addPlayer(x,y,0)}
+                else{
+                    Teams.teamLists['1'].buildingBlockList.push([x,y])
+                    Teams.teamLists['1'].blockBuildingState[`${x},${y}`] = {
+                        type: items,
+                        x: x,
+                        y: y,
+                        duration: 100
+                    };
+                    buildingManager.assignTroopToBuildBlock(1);
+                }                
+
             }
             else if(Turret.isPlacing){
                 const items = itemTab.itemValues(this.registry.get('image'))
+                if(items.price){
+                    if(this.money>=items.price){
+                        this.updateMoney(-1*items.price)
+                    }else{
+                        showAlert(this, 'insufficient Funds', "#ff0000");
+                        return;
+                    }
+                }
                 Turret.handleMapClick(pointer, items)
                 if(!Turret.placeItem.blocked){
                     Turret.placeItem(items)
@@ -272,12 +291,19 @@ export class mapView extends Phaser.Scene {
                     targetX += Phaser.Math.RND.between(-variance, variance);
                     targetY += Phaser.Math.RND.between(-variance, variance);
                     if(Map.navGrid[troopY][troopX] == 0){
-                        console.log("Start pos is at blocked grid");
+                        let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                        if (newX === -1) {
+                            console.log("No valid start tile nearby");
+                        } else {
+                            console.log("New valid tile:", newX, newY);
+                            troopX = newX
+                            troopY = newY
+                        }
                     }
                     else if(Map.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
                     }
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: targetX, y: targetY }));
+                    Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX, y: targetY }));
                 });
             }
         });
@@ -375,9 +401,11 @@ export class mapView extends Phaser.Scene {
         else if (this.isBrushMode && this.isBrushActive) {
             this.isBrushActive = false
             this.brushGraphics.clear();
+            let items = itemTab.itemValues(this.registry.get('image'))
+            if(items.price && this.checkSufficientFunds(items.price*this.brushTiles.length)) return;
             Teams.teamLists['1'].buildTileList = [...this.brushTiles];
             this.brushTiles = []
-            buildingManager.assingTroopsToBuildTile(1, itemTab.itemValues(this.registry.get('image')))
+            buildingManager.assingTroopsToBuildTile(1, items)
         }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
@@ -703,7 +731,6 @@ export class mapView extends Phaser.Scene {
         });
     }
     
-
     createAnim(key,repeat = -1, frameRate = 3){
         this.anims.create({
             key: key,
@@ -746,7 +773,13 @@ export class mapView extends Phaser.Scene {
         });
     }
 
-    
+    checkSufficientFunds(price){
+        if(price>this.money){
+            showAlert(this, "Insufficient Funds", '#ff0000')
+        }
+        return price>this.money;
+    }
+
 }
 
 

@@ -102,6 +102,8 @@ export class buildingManager{
     }
 
     static beginBuilding(x,y,type){
+        if(buildingManager.scene.checkSufficientFunds(type.price)){return;}
+        buildingManager.scene.updateMoney(-1*type.price);
         x = Math.floor(x/SQUARESIZE);
         y = Math.floor(y/SQUARESIZE);
         Map.navGrid[y][x] = 0;
@@ -202,6 +204,7 @@ export class buildingManager{
                 delete Teams.teamLists[`${sprite.body.team}`].blockBuildingState[key];
             }
             sprite.state = CONTROL_STATES.USER_MODE;
+            sprite.play('idle');
             return;
         }
     
@@ -221,11 +224,13 @@ export class buildingManager{
                 } else {
                     sprite.direction = dy > 0 ? 'down' : 'up';
                 }
-    
+                
+                sprite.play('action');
                 tile.duration -= 50;
     
                 if (tile.duration <= 0) {
                     sprite.state = CONTROL_STATES.USER_MODE;
+                    sprite.play('idle');
                     sprite.timer = null;
                     console.log("Done building.");
                     Map.handleMapClick(x*SQUARESIZE, y*SQUARESIZE, tile.type)
@@ -279,6 +284,7 @@ export class buildingManager{
             if (tile) {
                 delete Teams.teamLists[`${sprite.body.team}`].destroyState[key];
             }
+            sprite.play('idle')
             sprite.state = CONTROL_STATES.USER_MODE;
             return;
         }
@@ -291,11 +297,13 @@ export class buildingManager{
                 if (!tile) return;
     
                 tile.duration -= 50;
-    
+                sprite.play('action')
+
                 if (tile.duration <= 0) {
                     sprite.state = CONTROL_STATES.USER_MODE;
                     sprite.timer = null;
                     console.log("Done building.");
+                    sprite.play('idle')
                     tile.value.destroy()
                     let blockTiles = []
                     for(let i = Math.floor(tile.y - (tile.type.lenY/2)); i < tile.type.lenY + Math.floor(tile.y - (tile.type.lenY/2)); i++){

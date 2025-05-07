@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { FLOORDEPTH, UIDEPTH, TILE_TYPES } from "./constants";
+import { FLOORDEPTH, UIDEPTH, TILE_TYPES, showAlert } from "./constants";
 import sand from '../assets/sand.png'
 import flower from '../assets/flower.png'
 import pine from '../assets/pine.png'
@@ -34,6 +34,9 @@ import well from '../assets/well.png'
 import road from '../assets/road.png'
 
 export class itemTab extends Phaser.Scene {
+
+    static mapRef;
+
     constructor() {
         super('itemTab');
         this.numItems = 9;
@@ -105,11 +108,26 @@ export class itemTab extends Phaser.Scene {
                 .setInteractive()
                 .setName(`image${(i % this.numItems) + 1}`);
 
+            const price = itemTab.itemValues(`image${(i % this.numItems) + 1}`).price || 0;
+
+            // Price label
+            const priceText = this.add.text(x + 40, y, `$${price}`, {
+                fontSize: '16px',
+                fill: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0, 0.5);
+
+
             // Add selection behavior
             image.on('pointerdown', () => {
-                this.input.stopPropagation();
-                this.registry.set('image', image.name);
-                this.scene.switch('mapView');
+                if (itemTab.mapRef.money >= price) {
+                    this.input.stopPropagation();
+                    this.registry.set('image', image.name);
+                    this.scene.switch('mapView');
+                } else {
+                    showAlert(this, 'Insufficient Funds', '#ff3333');
+                }
             });
 
             // Add to content container

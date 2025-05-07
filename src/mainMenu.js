@@ -133,7 +133,7 @@ class MainMenu extends Phaser.Scene {
                             
                             const freshGrid = structuredClone(this.baseGridData);
                             const freshNavGrid = structuredClone(this.oldNavGrid)
-                            this.gridData = generateTown(freshGrid, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+                            this.gridData = generateTown(freshGrid, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
                             ], 1, x, y, freshNavGrid);
                             Map.navGrid = freshNavGrid
                             drawGrid(false);
@@ -204,10 +204,12 @@ class MainMenu extends Phaser.Scene {
             this.oldNavGrid = structuredClone(Map.navGrid)
             // this.gridData = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
             this.baseGridData = this.gridData
-            this.gridData = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+            Teams.newTeam(1)
+            // this.gridData = generateTown(this.gridData, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
+            // ], 1)
+               this.gridData = generateTown(this.gridData, [TILE_TYPES.house2, TILE_TYPES.house2
             ], 1)
             console.log(this.baseGridData == this.gridData)
-            Teams.newTeam(1)
             // this.gridDatad = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 2)
             drawGrid(firstTime);

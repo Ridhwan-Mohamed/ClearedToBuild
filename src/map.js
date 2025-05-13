@@ -6,6 +6,8 @@ import { buildingArray, clearBuildingArray, turretTeams } from "./town";
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
 import { Teams } from "./Teams";
 import { buildingManager } from "./buildingManager";
+import { seedManager } from "./seedManager";
+import { tillManager } from "./tillManager";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -28,6 +30,7 @@ export class Map{
     static placingItem = null; // The current item being placed
     static isPlacing = false; // Flag to indicate placement mode
     static blocks = [];
+    static cropDict = {};  // add at top of map.js
     static waterBlocks = [];
     static cameraBounds;
 
@@ -117,9 +120,7 @@ export class Map{
     static handleMapClick(x, y, item) {
         // If we're in placing mode, finalize the placement
         if(item == TILE_TYPES.player && this.isPlacing && this.placingItem && !this.placingItem.blocked){
-            // const worldX = this.scene.cameras.main.scrollX / SQUARESIZE + pointer.x/SQUARESIZE;
-            // const worldY = this.scene.cameras.main.scrollY / SQUARESIZE + pointer.y/SQUARESIZE;
-            Player.addPlayer(Math.floor(worldX), Math.floor(worldY))
+            Player.addPlayer(x, y, 0, Phaser.Display.Color.GetColor(0, 0, 0))
             this.isPlacing = false; // Exit placing mode
             this.placingItem.destroy(); // Clear placing item
         }
@@ -247,7 +248,6 @@ export class Map{
 
     static removeTile(posX, posY, lenX, lenY) {
         // Reset the tile
-
         for(let y = posY; y < posY+lenY+1; y++){
             for(let x = posX; x < posX+lenX+1; x++){
                 this.grid[y][x] = 1;
@@ -296,11 +296,11 @@ export class Map{
                     }
                 }
             } else {
-                child.destroy();
+                if(child) child.destroy();
             }
         });
-        this.blocks = []
-        this.waterBlocks.forEach(child => child.destroy())
+        this.blocks = [];
+        this.waterBlocks.forEach(child => child.destroy());
         this.barrier.clear(true);
     
         const camera = this.scene.cameras.main;
@@ -326,6 +326,9 @@ export class Map{
                     let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
                     barrierBlock.play('water').setDepth(FLOORDEPTH)
                     this.waterBlocks.push(barrierBlock)
+                }
+                else if(this.grid[y][x] == TILE_TYPES.crops.grid){
+                    this.handleCrops(x,y);
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
                     this.drawGridValue(x, y, 0);
@@ -338,6 +341,13 @@ export class Map{
             }
         }
     }   
+
+    static handleCrops(x,y){
+        const key = `${x},${y}`;
+        if(!this.cropDict[key]){
+            this.drawGridValue(x, y);
+        }
+    }
 
     static drawGridValue(x,y,index=-1){
         let tileKey, type;
@@ -375,7 +385,14 @@ export class Map{
     }
 
     static handleGridDelete(block, type, x, y){
-        if(type.depth == BLOCKDEPTH){
+        if (type.name === "crops") {
+            const key = `${x},${y}`;
+            Map.cropDict[key] = block;
+            // track this crop separately
+            this.blocks[y*WORLD_DIMENSIONX+x] = null;
+            return;  // don’t fall through into the normal blocks[] logic
+        }
+        else if(type.depth == BLOCKDEPTH){
             if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
                 this.blocks[y*WORLD_DIMENSIONX+x] = [this.blocks[y*WORLD_DIMENSIONX+x], block];
             }
@@ -399,6 +416,9 @@ export class Map{
                     Map.navGrid[y][x] = 0
                 }
             }
+        }
+        if(type.name === "grassCrop"){
+            seedManager.makeClickable(x, y, block);
         }
     }
 

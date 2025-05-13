@@ -19,7 +19,9 @@ export class WaveCollapse {
         );
     
         this.seedTerrain(grid, width, height, noise, ratio);
-        return this.collapseWave(grid);
+        grid = this.convertToGridValues(grid)
+        this.scatterOnGrass(grid)
+        return grid;
     }
 
     static seedTerrain(grid, width, height, noise, ratio = 0.8) {
@@ -43,101 +45,40 @@ export class WaveCollapse {
             }
         }
     }
-    
-    
 
-    static collapseWave(grid) {
-        let width = grid[0].length;
-        let height = grid.length;
+    static scatterOnGrass(grid, count = 50, itemValue = 37) {
+        const grassCode = TILE_TYPES.grass.grid;
+        const candidates = [];
 
-        while (!this.isFullyCollapsed(grid)) {
-            let [x, y] = this.findLowestEntropy(grid);
-            if (x === -1 || y === -1) break;
-
-            // Bias selection: Favor majority tile in neighbors
-            let chosenTile = this.getBiasedTile(grid, x, y);
-            
-            grid[y][x] = [chosenTile];
-
-            this.propagate(grid, x, y, chosenTile, width, height);
-        }
-
-        return this.convertToGridValues(grid);
-    }
-
-    static getBiasedTile(grid, x, y) {
-        let neighbors = this.getNeighbors(grid, x, y);
-        let tileCounts = {};
-
-        for (let tile of neighbors) {
-            if (!tileCounts[tile]) tileCounts[tile] = 0;
-            tileCounts[tile]++;
-        }
-
-        let maxTile = Object.keys(tileCounts).reduce((a, b) =>
-            tileCounts[a] > tileCounts[b] ? a : b
-        );
-
-        return Math.random() < 0.75 ? maxTile : Phaser.Utils.Array.GetRandom(grid[y][x]); // Bias to natural spread
-    }
-
-    static propagate(grid, x, y, tile, width, height) {
-        let possibleTiles = this.rules[tile] || [];
-
-        let neighbors = this.getNeighborPositions(x, y, width, height);
-
-        for (let [nx, ny] of neighbors) {
-            let currentOptions = grid[ny][nx];
-
-            let newOptions = currentOptions.filter(t => possibleTiles.includes(t));
-
-            if (newOptions.length === 0) {
-                newOptions = [Phaser.Utils.Array.GetRandom(possibleTiles)];
-            }
-
-            grid[ny][nx] = newOptions;
-        }
-    }
-
-    static getNeighbors(grid, x, y) {
-        let neighbors = [];
-        let positions = this.getNeighborPositions(x, y, grid[0].length, grid.length);
-        for (let [nx, ny] of positions) {
-            neighbors.push(grid[ny][nx][0]); 
-        }
-        return neighbors;
-    }
-
-    static getNeighborPositions(x, y, width, height) {
-        return [
-            [x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y], 
-            [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1]
-        ].filter(([nx, ny]) => nx >= 0 && ny >= 0 && nx < width && ny < height);
-    }
-
-    static findLowestEntropy(grid) {
-        let lowestEntropy = Infinity;
-        let lowestCell = [-1, -1];
-
+        // 1. Collect all grass positions
         for (let y = 0; y < grid.length; y++) {
-            for (let x = 0; x < grid[y].length; x++) {
-                let entropy = grid[y][x].length;
-                if (entropy > 1 && entropy < lowestEntropy) {
-                    lowestEntropy = entropy;
-                    lowestCell = [x, y];
-                }
+          for (let x = 0; x < grid[y].length; x++) {
+            if (grid[y][x] === grassCode) {
+              candidates.push({ x, y });
             }
+          }
         }
-        return lowestCell;
-    }
-
-    static isFullyCollapsed(grid) {
-        return grid.every(row => row.every(cell => cell.length === 1));
-    }
-
+      
+        // 2. Shuffle with Fisher–Yates
+        for (let i = candidates.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+        }
+      
+        // 3. Overwrite the first `count` candidates
+        const placeCount = Math.min(count, candidates.length);
+        for (let i = 0; i < placeCount; i++) {
+          const { x, y } = candidates[i];
+          grid[y][x] = itemValue;
+        }
+      }
+      
+    
     static convertToGridValues(grid) {
         return grid.map(row =>
             row.map(cell => TILE_TYPES[cell[0]].grid)
         );
     }
+
+
 }

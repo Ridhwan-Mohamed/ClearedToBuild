@@ -32,6 +32,8 @@ import house1 from '../assets/house1.png'
 import house2 from '../assets/house2.png'
 import well from '../assets/well.png'
 import road from '../assets/road.png'
+import house1Img from '../assets/house1Img.png'
+import grassCrop from '../assets/grassCrop.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -39,7 +41,7 @@ export class itemTab extends Phaser.Scene {
 
     constructor() {
         super('itemTab');
-        this.numItems = 9;
+        this.numItems = 10;
     }
 
     preload(){}
@@ -55,6 +57,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('image7a', turret)
         scene.load.image('image8', WaterImg); //water image
         scene.load.image('image9', playerImg); //water image
+        scene.load.image('image10', house1Img);
         scene.load.image('wall', Wall);
         scene.load.image('tWall', TWall); // Top wall
         scene.load.image('bWall', BWall); // Bottom wall
@@ -77,6 +80,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('house2', house2); 
         scene.load.image('well', well); 
         scene.load.image('road', road); 
+        scene.load.image('grassCrop', grassCrop);
     }
 
     create() {
@@ -97,7 +101,7 @@ export class itemTab extends Phaser.Scene {
 
         // Add images to the content container
         const imageSpacing = 100; // Spacing between images
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 11; i++) {
             let y = (i * imageSpacing + 80)
             let x = 80
             if(y > 700){
@@ -185,6 +189,8 @@ export class itemTab extends Phaser.Scene {
                 return TILE_TYPES.water
             case 'image9':
                 return TILE_TYPES.player
+            case 'image10':
+                return TILE_TYPES.house1
             default:
                 break;
         }

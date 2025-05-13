@@ -5,6 +5,6 @@ export const weapons = {
         critProb: 20,
         accuracy: 75,
         duration: 100,
-        range: 30
+        range: 16
     }
 }

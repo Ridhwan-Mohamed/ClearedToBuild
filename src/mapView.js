@@ -26,12 +26,15 @@ import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
 import playerAction from '../assets/Players/playerAction.png'
-import { playerDict } from './town.js';
+import { playerDict, setupTownBoundsToggle } from './town.js';
 import { tillManager } from './tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './buildingManager.js';
 import { NavMeshUpdater } from './NavMeshUpdater.js';
 import monies from '../assets/monies.png'
+import seeds from '../assets/seeds.png'
+import { fightManager } from './fightManager.js';
+import { seedManager } from './seedManager.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -44,6 +47,8 @@ export class mapView extends Phaser.Scene {
         Turret.scene = this;
         tillManager.scene = this;
         buildingManager.scene = this;
+        fightManager.scene = this;
+        seedManager.scene = this;
         itemTab.mapRef = this;
         this.gridPlace = false;
         this.selectMode = true;
@@ -52,7 +57,8 @@ export class mapView extends Phaser.Scene {
         this.isBrushActive = false;  
         this.farmMode = false;
         this.harvestMode = this.false;
-        this.money = 100; // Starting amount
+        this.money = 1000; // Starting amount
+        this.seeds = 0;
     }
 
     init(data){
@@ -70,6 +76,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('hammer', hammer);
         this.load.image('grass', grass);
         this.load.image('monies', monies);
+        this.load.image('seeds', seeds);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
@@ -81,8 +88,8 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
         this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
-        itemTab.preload(this)
-        Projectile.init(this)
+        itemTab.preload(this);
+        Projectile.init(this);
     }
 
     create() {
@@ -101,6 +108,7 @@ export class mapView extends Phaser.Scene {
         let grid = this.gridData
         Map.grid = grid;
         console.log(Map.navGrid)
+        setupTownBoundsToggle(this);
         // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
         // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
@@ -203,7 +211,7 @@ export class mapView extends Phaser.Scene {
                 let cam = this.cameras.main;
                 let x = Math.floor((pointer.x + cam.scrollX - ((pointer.worldX+cam.scrollX)%SQUARESIZE)) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY - ((pointer.worldY+cam.scrollY)%SQUARESIZE)) / SQUARESIZE);
-                if(items == TILE_TYPES.player){Player.addPlayer(x,y,0)}
+                if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
                 else{
                     Teams.teamLists['1'].buildingBlockList.push([x,y])
                     Teams.teamLists['1'].blockBuildingState[`${x},${y}`] = {
@@ -280,9 +288,9 @@ export class mapView extends Phaser.Scene {
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
-                    troop.state = CONTROL_STATES.USER_MODE
-                    let troopX = Math.floor(troop.body.x / SQUARESIZE)
-                    let troopY = Math.floor(troop.body.y / SQUARESIZE)
+                    troop.state = CONTROL_STATES.USER_MODE;
+                    let troopX = Math.floor(troop.body.x / SQUARESIZE);
+                    let troopY = Math.floor(troop.body.y / SQUARESIZE);
                     const spot = formationSpots[index];
                     if (!spot) return; // Not enough available spots
                     let [targetX, targetY] = spot;
@@ -303,7 +311,7 @@ export class mapView extends Phaser.Scene {
                     else if(Map.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
                     }
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX, y: targetY }));
+                    Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX+SQUARESIZE/2, y: targetY+SQUARESIZE/2 }));
                 });
             }
         });
@@ -441,40 +449,49 @@ export class mapView extends Phaser.Scene {
         const maxX = Math.max(this.startCell.x, this.endCell.x);
         const minY = Math.min(this.startCell.y, this.endCell.y);
         const maxY = Math.max(this.startCell.y, this.endCell.y);
+        // compute total seeds needed in the selected rectangle
+        const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
+        // if insufficient, show alert and bail out
         if(mode == 1){
+            if (!this.checkSufficientSeeds(tileCount)) return;
+            let tempArray = []
+            let tempDict = {}
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
                     if(type.spread && type.name != "water" && type.name != 'crops'){
                         const key = `${x},${y}`;
-                        Teams.teamLists['1'].tileList.push([x, y]);
-                        Teams.teamLists['1'].tileStates[key] = {
-                            state: 'untouched', 
+                        tempArray.push([x, y]);
+                        tempDict[key] = {
+                            state: 'untouched',
                             assigned: 0,
                             timer: null
                         };
                     }
                 }
             }
+            Teams.addFarmSpots(1, tempArray, tempDict)
             const allTroops = Teams.teamLists['1'].playerList;
             tillManager.assignTilesToTroops(1,allTroops,Teams.teamLists['1'].tileList)
         }
         else if(mode == 2){
+            let tempArray = []
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
                     if(type.name == 'crops'){
                         let cropTile;
-                        if(Array.isArray(Map.blocks[y*WORLD_DIMENSIONX+x])){
-                            cropTile = Map.blocks[y*WORLD_DIMENSIONX+x][0]
-                        }else{cropTile = Map.blocks[y*WORLD_DIMENSIONX+x]}
+                        const key = `${x},${y}`
+                        if(Array.isArray(Map.cropDict[key])){
+                            cropTile = Map.cropDict[key][0]
+                        }else{cropTile = Map.cropDict[key]}
                         if(cropTile.anims.currentFrame.index == 3){
-                            const key = `${x},${y}`;
-                            Teams.teamLists['1'].cropList.push([x, y]);
+                            tempArray.push([x, y]);
                         }
                     }
                 }
             }
+            Teams.teamLists['1'].cropList = tempArray;
             const allTroops = Teams.teamLists['1'].playerList;
             tillManager.assignCropsToTroops(1,allTroops,Teams.teamLists['1'].cropList)
         }
@@ -483,7 +500,6 @@ export class mapView extends Phaser.Scene {
             item.lenX = maxX-minX; item.lenY = maxY-minY;
             Map.addSpreadItem(minX,minY,item);
         }
-
     }
 
     sceneButtons() {
@@ -504,6 +520,23 @@ export class mapView extends Phaser.Scene {
         })
         .setScrollFactor(0)
         .setDepth(UIDEPTH);
+
+        // === SEEDS UI (Top Center) ===
+        const seedsIcon = this.add.image(topCenterX - 80, 25, 'seeds')
+            .setScrollFactor(0)
+            .setScale(0.5)
+            .setDepth(UIDEPTH);
+
+        // seeds text
+        this.seedsText = this.add.text(topCenterX - 65, 18, `${this.seeds}`, {
+            fontSize: '20px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        })
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH);
+
 
 
         // Add a button on the bottom bar
@@ -730,6 +763,47 @@ export class mapView extends Phaser.Scene {
             this.moneyText.setFill('#ffffff');
         });
     }
+
+    updateSeeds(amountDelta) {
+        const oldCount = this.seeds;
+        this.seeds += amountDelta;
+        this.seedsText.setText(`${this.seeds}`);
+    
+        // color flash
+        const color = amountDelta > 0 ? '#00ff00' : '#ff3333';
+        this.seedsText.setFill(color);
+    
+        // floating ghost text
+        const ghost = this.add.text(
+            this.seedsText.x,
+            this.seedsText.y,
+            amountDelta > 0 ? `+${amountDelta}` : `${amountDelta}`,
+            {
+                fontSize: '20px',
+                fill: color,
+                stroke: '#000000',
+                strokeThickness: 2
+            }
+        )
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH);
+    
+        this.tweens.add({
+            targets: ghost,
+            y: ghost.y - 20,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ghost.destroy()
+        });
+    
+        // reset color
+        this.time.delayedCall(600, () => {
+            this.seedsText.setFill('#ffffff');
+        });
+    }
+    
     
     createAnim(key,repeat = -1, frameRate = 3){
         this.anims.create({
@@ -777,7 +851,14 @@ export class mapView extends Phaser.Scene {
         if(price>this.money){
             showAlert(this, "Insufficient Funds", '#ff0000')
         }
-        return price>this.money;
+        return price<=this.money;
+    }
+
+    checkSufficientSeeds(seedAmnt){
+        if(seedAmnt>this.seeds){
+            showAlert(this, "Insufficient seeds", '#ff0000')
+        }
+        return seedAmnt<=this.seeds;
     }
 
 }

@@ -7,9 +7,10 @@ export class Teams{
     static newTeam(teamNumber){
         Teams.teamLists[`${teamNumber}`] = {
             playerList: [],
-            farmList: [],
             tileStates: {},
             tileList: [],
+            seedList: [],
+            seedStates: {},
             cropList: [],
             buildingTileList: [],
             blockBuildingState: {},
@@ -32,17 +33,27 @@ export class Teams{
         // Euclidean distance in tile‐space
         const dist = Phaser.Math.Distance.Between(centerX, centerY, troopX, troopY);
         return dist > maxTiles;
-      }
+    }
 
     static addPlayer(teamNumber, player){
         if(player.active) Teams.teamLists[`${teamNumber}`].playerList.push(player)
     }
 
-    static addFarmSpots(teamNumber, farmList){
-        Teams.teamLists[`${teamNumber}`].farmList.concat(farmList)
+    static addFarmSpots(teamNumber, farmList, states){
+        Teams.teamLists[`${teamNumber}`].tileList = farmList
+        Teams.teamLists[`${teamNumber}`].tileStates = states
+    }
+
+    static addCropSpots(teamNumber, cropList){
+        Teams.teamLists[`${teamNumber}`].cropList = cropList
+    }
+
+    static addSeedSpots(teamNumber, newVal){
+        Teams.teamLists[`${teamNumber}`].seedList.push(newVal);
     }
 
     static addBuildSpots(teamNumber, buildList){
         Teams.teamLists[`${teamNumber}`].buildList.concat(buildList)
     }
+    
 }

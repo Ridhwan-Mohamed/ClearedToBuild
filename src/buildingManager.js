@@ -16,7 +16,6 @@ export class buildingManager{
     static getTileState(x, y, teamNumber) {
         const key = this.getTileKey(x, y);
         const tileStates = Teams.teamLists[`${teamNumber}`].blockBuildingState;
-        // Only initialize if it doesn't exist
         if (!tileStates[key]) {
             return null;
         }
@@ -26,7 +25,6 @@ export class buildingManager{
     static getDestroyState(x, y, teamNumber) {
         const key = this.getTileKey(x, y);
         const tileStates = Teams.teamLists[`${teamNumber}`].destroyState;
-        // Only initialize if it doesn't exist
         if (!tileStates[key]) {
             return null;
         }
@@ -39,7 +37,7 @@ export class buildingManager{
         if (buildList.length > 0) {
             // Process the tiles
             troops.forEach(troop => {
-                if(troop.state != CONTROL_STATES.USER_MODE) return
+                if(!Player.playerAvailible(troop)) return;
                 let tile = buildList[0]
                 if(tile){
                     let approachTile = this.findBuildApproachTile(tile.x, tile.y, troop)                        
@@ -133,7 +131,7 @@ export class buildingManager{
         let troops = Teams.teamLists[`${teamNumber}`].playerList
         let blockList = Teams.teamLists[`${teamNumber}`].buildingBlockList
         troops.forEach(troop => {
-            if(troop.state != CONTROL_STATES.USER_MODE) return
+            if(!Player.playerAvailible(troop)) return;
             let tile = blockList[0]
             if(tile){
                 tile = this.getTileState(tile[0],tile[1],1);
@@ -260,7 +258,7 @@ export class buildingManager{
         let troops = Teams.teamLists[`${teamNumber}`].playerList
         if (destroyList.length > 0) {
             troops.forEach(troop => {
-                if(troop.state != CONTROL_STATES.USER_MODE) return
+                if(!Player.playerAvailible(troop)) return;
                 let tile = destroyList[0]
                 if(tile){
                     tile = this.getDestroyState(tile[0],tile[1],1);

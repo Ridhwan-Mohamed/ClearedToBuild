@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
+import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert } from "./constants";
 import Phaser from "phaser";
 import { Map } from "./map";
 import { steer, avoid, calculateSeparationForce } from './steering';
@@ -7,6 +7,7 @@ import { Teams } from "./Teams";
 import { buildingManager } from "./buildingManager";
 import { weapons } from "./weapons";
 import { fightManager } from "./fightManager";
+import { seedManager } from "./seedManager";
 
 export class Player {
 
@@ -23,23 +24,25 @@ export class Player {
         this.createAnim('action','playerAction',0,2,-1,10);
     }
     
-    static addPlayer(x,y,team,spriteSheet='player',walk='walk') {
+    static addPlayer(x,y,team,tint=Phaser.Display.Color.GetColor(255, 255, 255),spriteSheet='player',walk='walk') {
         const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, spriteSheet);
         newCube.setInteractive();
         newCube.setOrigin(0.5,0.5);
+        newCube.setTint(tint);
         newCube.setDepth(BLOCKDEPTH+1)
         newCube.currentPath = []
-        newCube.health = 100;
+        team == 1? newCube.health = 200 : newCube.health = 100;
         newCube.body.pushable = false;
         newCube.animState = 'idle'
+        newCube.oldState = null;
         newCube.body.team = team;
-        newCube.state = CONTROL_STATES.TRACK_MODE
+        newCube.state = CONTROL_STATES.USER_MODE
         newCube.weapon = weapons.hands
         this.characters.add(newCube);
         this.troops.push(newCube);
-        this.characters.add(newCube)
+        this.characters.add(newCube);
         this.configureCubeInteractivity(newCube);
-        return newCube
+        return newCube;
     }
 
     static destroyPlayer(player) {
@@ -51,6 +54,10 @@ export class Player {
         const idx = team.playerList.indexOf(player);
         if (idx !== -1) {
             team.playerList.splice(idx, 1);
+            if(team.playerList.length == 0 && teamNum){
+                showAlert(Player.scene, `Team ${teamNum} has been destroyed`, "#ff0000", 3000);
+                
+            }
         }
     
         // Finally destroy the Phaser sprite
@@ -159,7 +166,7 @@ export class Player {
             sprite.rotation = Phaser.Math.Angle.Between(0, 0, newVelocity.x, newVelocity.y); // Calculate angle
         }
         //hack fix belowLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL-fds09as
-        if (sprite.state == CONTROL_STATES.TRACK_MODE && !sprite.roam && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.track[0].transform.x, sprite.track[0].transform.y) < 30) {
+        if (sprite.state == CONTROL_STATES.TRACK_MODE && !sprite.roam && sprite.track && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.track[0].gameObject.x, sprite.track[0].gameObject.y) < sprite.weapon.range) {
             sprite.body.setVelocity(0, 0);
             sprite.currentPath.length = 0;
             sprite.state = CONTROL_STATES.ATTACK_MODE
@@ -172,7 +179,13 @@ export class Player {
         else if (Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y) < 3) {
             sprite.currentPath.shift(); // Remove the reached point from the path
             if (sprite.currentPath.length == 0) {
-                sprite.roam = false;
+                if(sprite.roam){
+                    // schedule roam flag reset after 2–4s
+                    const roamDuration = Phaser.Math.Between(1000, 1500);
+                    sprite.scene.time.delayedCall(roamDuration, () => {
+                        sprite.roam = false;
+                    });
+                }
                 sprite.body.setVelocity(0, 0);
                 this.doAction(sprite)
             }
@@ -201,6 +214,9 @@ export class Player {
         else if(sprite.state == CONTROL_STATES.DESTROY_MODE){
             sprite.play('action')
             buildingManager.beginDestroyingBlock(sprite.finalPos.x,sprite.finalPos.y,sprite)
+        }
+        else if(sprite.state == CONTROL_STATES.SEED_MODE){
+            seedManager.beginSeeding(sprite.finalPos.x,sprite.finalPos.y,sprite)
         }
     }
 
@@ -283,9 +299,9 @@ export class Player {
         });
         
         if(troop.track && troop.track[0] == mostClosest){
-            if(Math.abs(troop.track[1].x - mostClosest.transform.x) > 20 || Math.abs(troop.track[1].y - mostClosest.transform.y) > 20){
-                troop.track[1].x = mostClosest.transform.x
-                troop.track[1].y = mostClosest.transform.y
+            if(Math.abs(troop.track[1].x - mostClosest.gameObject.x) > troop.weapon.range || Math.abs(troop.track[1].y - mostClosest.gameObject.y) > troop.weapon.range){
+                troop.track[1].x = mostClosest.gameObject.x
+                troop.track[1].y = mostClosest.gameObject.y
                 return true;
             }
             return false;
@@ -340,7 +356,7 @@ export class Player {
             this.troops.forEach(troop => {
                 if (Phaser.Geom.Rectangle.Contains(selectionRect, troop.x, troop.y)) {
                     this.selected.push(troop);
-                    troop.setTint(0xff0000); // Highlight selected troops
+                    troop.setTint(0x000000); // Highlight selected troops
                 } else {
                     troop.clearTint(); // Clear highlight from non-selected troops
                 }
@@ -421,11 +437,92 @@ export class Player {
 
     static drawPlayers(playerDict) {
         for (const key in playerDict) {
-            const [x, y] = key.split(',').map(Number);  
-            Teams.teamLists[`${playerDict[key]}`].playerList.push(this.addPlayer(x,y,playerDict[key]))
+            const [x, y] = key.split(',').map(Number);
+            let tint = Phaser.Display.Color.GetColor(255, 255, 255)
+            if(playerDict[key] == 0){
+                tint = Phaser.Display.Color.GetColor(0, 0, 0)
+            }
+            Teams.teamLists[`${playerDict[key]}`].playerList.push(this.addPlayer(x,y,playerDict[key],tint))
             delete playerDict[key];
         }
     }
+
+    static roam(troop) {
+        // start roaming
+        troop.roam = true;
+        let px = troop.x;
+        let py = troop.y;
+        let troopX = Math.floor(px/SQUARESIZE)
+        let troopY = Math.floor(py/SQUARESIZE)
+        if(Map.navGrid[troopY][troopX] == 0){
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) {
+                console.log("No valid start tile nearby");
+                return;
+            } else {
+                console.log("New valid tile:", newX, newY);
+                px = newX*SQUARESIZE+SQUARESIZE/2;
+                py = newY*SQUARESIZE+SQUARESIZE/2;
+            }
+        }
+
+        // four directions at one grid distance (SQUARESIZE px)
+        const offsets = [
+            { x: px,              y: py - SQUARESIZE }, // above
+            { x: px,              y: py + SQUARESIZE }, // below
+            { x: px - SQUARESIZE, y: py             }, // left
+            { x: px + SQUARESIZE, y: py             }  // right
+        ];
+    
+        const validPositions = [];
+        for (const pos of offsets) {
+            const gx = Math.floor(pos.x / SQUARESIZE);
+            const gy = Math.floor(pos.y / SQUARESIZE);
+            if (
+                gx >= 0 && gx < WORLD_DIMENSIONX &&
+                gy >= 0 && gy < WORLD_DIMENSIONY &&
+                ((Map.grid[gy][gx] == 35 && troop.body.team) || !troop.body.team) &&
+                Map.navGrid[gy][gx] === 1
+            ) {
+                validPositions.push(pos);
+            }
+        }
+    
+        if (validPositions.length) {
+            // pick a random valid direction
+            const dest = Phaser.Utils.Array.GetRandom(validPositions);
+            const path = Map.navMesh.findPath(
+                { x: px, y: py },
+                { x: dest.x, y: dest.y }
+            );
+            Player.moveTo(troop, path);
+        }
+    }
+
+    static handleStateIntteruptStart(troop){
+        if(!troop.oldState){
+            troop.oldState = troop.state;
+            troop.state = CONTROL_STATES.TRACK_MODE
+            if(troop.oldState == CONTROL_STATES.FARM_MODE && troop.tillTile){
+                troop.tillTile.assigned -= 1;
+            }
+        }
+        return;
+    }
+
+    static handleStateIntteruptComplete(troop){
+        if(troop.oldState){
+            troop.state = troop.oldState
+            if(troop.oldState == CONTROL_STATES.FARM_MODE){
+                tillManager.getNextTileFor(troop);
+            }else if(troop.oldState == CONTROL_STATES.SEED_MODE){
+                seedManager.getNextTileFor(troop)
+            }
+            troop.oldState = null;
+        }
+        return;
+    }   
+    
 
     static update(){
         this.troops.forEach((troop, index) => {
@@ -434,9 +531,11 @@ export class Player {
             troop.setVisible(inView); // Will not draw if false
             let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
             let reTrack = this.mostClosestEnemy(troop, neighbours)
-            if(troop.state == CONTROL_STATES.TRACK_MODE && reTrack){
-                let troopX = Math.floor(troop.body.x/SQUARESIZE)
-                let troopY = Math.floor(troop.body.y/SQUARESIZE)
+            if(reTrack){
+                troop.roam = false;
+                this.handleStateIntteruptStart(troop)
+                let troopX = Math.floor(troop.x/SQUARESIZE)
+                let troopY = Math.floor(troop.y/SQUARESIZE)
                 if(Map.navGrid[troopY][troopX] == 0){
                     let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                     if (newX === -1) {
@@ -448,50 +547,22 @@ export class Player {
                     }
                 }    
                 Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: troop.track[1].x, y: troop.track[1].y }));
-            }// }else if(troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
-            //     let troopX = Math.floor(troop.body.x / SQUARESIZE);
-            //     let troopY = Math.floor(troop.body.y / SQUARESIZE);
-            //     const dirs = [[ 0, -1],
-            //     [-1,  0], [ 1,  0], [ 0,  1]
-            //     ];
-            //     const validTiles = [];
-            //     for (const [dx, dy] of dirs) {
-            //         const nx = troopX + dx, ny = troopY + dy;
-            //         if (
-            //             nx >= 0 && nx < WORLD_DIMENSIONX &&
-            //             ny >= 0 && ny < WORLD_DIMENSIONY &&
-            //             Map.navGrid[ny][nx] === 1 &&
-            //             Map.grid[ny][nx] == 35 &&
-            //             Phaser.Math.Distance.Between(troop.body.x, troop.body.y, nx * SQUARESIZE+SQUARESIZE/2, ny * SQUARESIZE+SQUARESIZE/2) > 11
-            //         ) {
-            //             validTiles.push([nx, ny]);
-            //         }
-            //     }
-            //     if (validTiles.length > 0) {
-            //         // Move to a random valid neighbour
-            //         let startX = troop.body.x
-            //         let startY = troop.body.y
-            //         if(Map.navGrid[troopY][troopX] == 0){
-            //             let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-            //             if (newX === -1) {
-            //                 console.log("No valid start tile nearby");
-            //                 return;
-            //             } else {
-            //                 console.log("New valid tile:", newX, newY);
-            //                 startX = newX*SQUARESIZE+SQUARESIZE/2
-            //                 startY = newY*SQUARESIZE+SQUARESIZE/2
-            //             }
-            //         }
-            //         const [nx, ny] = Phaser.Utils.Array.GetRandom(validTiles);
-            //         const path = Map.navMesh.findPath(
-            //             { x: startX, y: startY },
-            //             { x: nx * SQUARESIZE+SQUARESIZE/2, y: ny * SQUARESIZE+SQUARESIZE/2 }
-            //         );
-            //         if(path) troop.roam = true;
-            //         Player.moveTo(troop, path);
-            //     }
+            }
+            else if(!troop.track){
+                this.handleStateIntteruptComplete(troop);
+                // Player.roam(troop);
+            }
+            // }else if(!troop.roam && troop.state != CONTROL_STATES.ATTACK_MODE && (!troop.currentPath || troop.currentPath.length == 0)){
+            //     troop.state = CONTROL_STATES.TRACK_MODE;
             // }
-            this.followPath(troop)
+            this.followPath(troop);
         })
+    }
+
+    static playerAvailible(troop){
+        if(troop.state == CONTROL_STATES.USER_MODE || (troop.state == CONTROL_STATES.TRACK_MODE && !troop.track)){
+            return true;
+        }
+        return false;
     }
 }

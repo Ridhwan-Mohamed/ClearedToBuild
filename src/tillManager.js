@@ -27,7 +27,7 @@ export class tillManager {
 
     static assignTilesToTroops(teamNumber, troops, tileList) {
         for (let troop of troops) {
-            if(troop.state != CONTROL_STATES.USER_MODE) continue
+            if(!Player.playerAvailible(troop)) continue
             let best = null;
             let fewestAssigned = Infinity;
 
@@ -41,35 +41,38 @@ export class tillManager {
                 }
                 if(fewestAssigned == 0){break;}
             }
+            if(fewestAssigned>0){//all tiles have been taken by atleast 1 troop
+                break; //no need to bother anymore
+            }
             let troopX, troopY;
             if (best) {
                 const [tx, ty] = best;
                 const key = this.getTileKey(tx, ty);
                 const state = this.getTileState(tx, ty, teamNumber);
                 state.assigned += 1;
-                troop.state = CONTROL_STATES.FARM_MODE
-                troopX = Math.floor(troop.body.x/SQUARESIZE)
-                troopY = Math.floor(troop.body.y/SQUARESIZE)
+                troop.state = CONTROL_STATES.FARM_MODE;
+                troopX = Math.floor(troop.body.x/SQUARESIZE);
+                troopY = Math.floor(troop.body.y/SQUARESIZE);
                 let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                 if (newX === -1) {
                     console.log("No valid start tile nearby");
                 } else {
                     troopX = newX;
-                    troopY = newY
+                    troopY = newY;
                     console.log("New valid tile:", newX, newY);
                 }
-                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
+                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE+SQUARESIZE/2, y: ty*SQUARESIZE+SQUARESIZE/2 }));
             }    
         }
     }
 
     static assignCropsToTroops(teamNumber, troops, cropList){
         for (let troop of troops) {
-            if(troop.state == CONTROL_STATES.USER_MODE){
+            if(Player.playerAvailible(troop)){
                 if(cropList.length){
                     troop.state = CONTROL_STATES.HARVEST_MODE
                     let tile = cropList.shift()
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: tile[0]*SQUARESIZE, y: tile[1]*SQUARESIZE }));
+                    Player.moveTo(troop, Map.navMesh.findPath({ x: troop.body.x, y: troop.body.y }, { x: tile[0]*SQUARESIZE+SQUARESIZE/2, y: tile[1]*SQUARESIZE+SQUARESIZE/2 }));
                 }
             }
         }
@@ -79,14 +82,15 @@ export class tillManager {
         x = Math.floor(x/SQUARESIZE);
         y = Math.floor(y/SQUARESIZE);
         let cropTile;
-        const block = Map.blocks[y * WORLD_DIMENSIONX + x];
+        const key = `${x},${y}`
+        const block = Map.cropDict[key];
         if (Array.isArray(block)) {
             cropTile = block[0];
         } else {
             cropTile = block;
         }
         if (cropTile && cropTile.anims.currentFrame.index == 3) {
-            this.scene.updateMoney(10)
+            this.scene.updateMoney(10);
             cropTile.setFrame(1);           // ✅ Reset to first frame
             cropTile.anims.play('crops');   // ✅ Play the crop animation
         }
@@ -102,48 +106,27 @@ export class tillManager {
     
         tile.assigned = (tile.assigned || 0) + 1;
     
-        // If already tilling, halve the remaining time
-        if (tile.timer) {
-            const remaining = tile.timer.delay - tile.timer.getProgress() * tile.timer.delay;
-            tile.timer.remove(false); // Cancel old timer
-    
-            tile.timer = this.scene.time.delayedCall(remaining / 2, () => {
-                tile.state = 'tilled';
-                // ✅ Remove from tileStates and tileList
-                const key = this.getTileKey(x, y);
-                const teamData = Teams.teamLists[`${sprite.teamNumber}`];
-                if (teamData) {
-                    delete teamData.tileStates[key];
-                    teamData.tileList = teamData.tileList.filter(([tx, ty]) => tx !== x || ty !== y);
-                }
-                if (sprite) {
-                    this.onTillingDone(sprite);
-                }
-                Map.grid[y][x] = TILE_TYPES.crops.grid
-                Map.drawGridValue(x,y)
-                // Map.addSpreadArr(x, y, TILE_TYPES.crops, 0);
-                tile.timer = null;
-            });
-            
-        } else {
-            tile.state = 'tilling';
-            tile.timer = this.scene.time.delayedCall(1000, () => {
-                tile.state = 'tilled';
-                const key = this.getTileKey(x, y);
-                const teamData = Teams.teamLists[`${sprite.teamNumber}`];
-                if (teamData) {
-                    delete teamData.tileStates[key];
-                    teamData.tileList = teamData.tileList.filter(([tx, ty]) => tx !== x || ty !== y);
-                }
-                if (sprite) {
-                    this.onTillingDone(sprite);
-                }
-                Map.grid[y][x] = TILE_TYPES.crops.grid
-                Map.drawGridValue(x,y)
-                // Map.addSpreadArr(x, y, TILE_TYPES.crops, 0);
-                tile.timer = null;
-            });
-        }
+        tile.state = 'tilling';
+        if(!this.scene.checkSufficientSeeds(1)) return;
+        tile.timer = this.scene.time.delayedCall(1000, () => {
+            if(!this.scene.checkSufficientSeeds(1)) return;
+            if(sprite.state != CONTROL_STATES.FARM_MODE){return;}
+            tile.state = 'tilled';
+            const key = this.getTileKey(x, y);
+            const teamData = Teams.teamLists[`${sprite.body.team}`];
+            if (teamData) {
+                delete teamData.tileStates[key];
+                teamData.tileList = teamData.tileList.filter(([tx, ty]) => tx !== x || ty !== y);
+            }
+            if (sprite) {
+                this.scene.updateSeeds(-1);
+                this.onTillingDone(sprite);
+            }
+            Map.grid[y][x] = TILE_TYPES.crops.grid
+            Map.drawGridValue(x,y)
+            // Map.addSpreadArr(x, y, TILE_TYPES.crops, 0);
+            tile.timer = null;
+        });
     }    
 
     static getNextTileFor(troop) {
@@ -169,6 +152,7 @@ export class tillManager {
             const key = this.getTileKey(tx, ty);
             const state = this.getTileState(tx, ty, troop.body.team);
             state.assigned += 1;
+            troop.tillTile = state;
             troop.state = CONTROL_STATES.FARM_MODE
             let troopX = Math.floor(troop.body.x/SQUARESIZE)
             let troopY = Math.floor(troop.body.y/SQUARESIZE)
@@ -178,7 +162,7 @@ export class tillManager {
             } else {
                 console.log("New valid tile:", newX, newY);
             }
-            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE, y: ty*SQUARESIZE }));
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tx*SQUARESIZE+SQUARESIZE/2, y: ty*SQUARESIZE+SQUARESIZE/2 }));
         }else{
             troop.state = CONTROL_STATES.USER_MODE
         }
@@ -198,7 +182,7 @@ export class tillManager {
             } else {
                 console.log("New valid tile:", newX, newY);
             }
-            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tile[0]*SQUARESIZE, y: tile[1]*SQUARESIZE }));
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: tile[0]*SQUARESIZE+SQUARESIZE/2, y: tile[1]*SQUARESIZE+SQUARESIZE/2 }));
         }else{
             troop.state = CONTROL_STATES.USER_MODE
         }
@@ -211,11 +195,11 @@ export class tillManager {
             const state = tillManager.getTileState(nx, ny, sprite.body.team);
             state.assigned += 1;
             
-            Player.moveTo(sprite, Map.navMesh.findPath({ x: sprite.body.x, y: sprite.body.y }, { x: nx*SQUARESIZE, y: ny*SQUARESIZE }));
+            Player.moveTo(sprite, Map.navMesh.findPath({ x: sprite.body.x, y: sprite.body.y }, { x: nx*SQUARESIZE+SQUARESIZE/2, y: ny*SQUARESIZE+SQUARESIZE/2 }));
         } else {
             sprite.state = CONTROL_STATES.TRACK_MODE;
         }
-    }    
+    }
 
     static isTilled(x, y) {
         const tile = this.getTileState(x, y);

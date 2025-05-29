@@ -35,6 +35,9 @@ import monies from '../assets/monies.png'
 import seeds from '../assets/seeds.png'
 import { fightManager } from './fightManager.js';
 import { seedManager } from './seedManager.js';
+import char from '../assets/char.png'
+import charHurt from '../assets/charHurt.png'
+import berry from '../assets/berry.png'
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -57,8 +60,10 @@ export class mapView extends Phaser.Scene {
         this.isBrushActive = false;  
         this.farmMode = false;
         this.harvestMode = this.false;
-        this.money = 1000; // Starting amount
-        this.seeds = 0;
+        this.money = 10000; // Starting amount
+        this.seeds = 500;
+        this.berries = 0;
+        this.berryMode = false;
     }
 
     init(data){
@@ -77,6 +82,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('grass', grass);
         this.load.image('monies', monies);
         this.load.image('seeds', seeds);
+        this.load.image('berry', berry);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
@@ -87,6 +93,8 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
         this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
         this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('char', char, {frameWidth: 60, frameHeight: 50});
+        this.load.spritesheet('charHurt', charHurt, {frameWidth: 60, frameHeight: 50});
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
@@ -103,6 +111,8 @@ export class mapView extends Phaser.Scene {
         this.createAnim('tlcwater')
         this.createAnim('blcwater')
         this.createAnim('crops',0,1)
+        this.createAnim('char', -1, 5, 3)
+        this.createAnim('charHurt', -1, 5, 3)
 
         Player.init(this);
         let grid = this.gridData
@@ -121,11 +131,12 @@ export class mapView extends Phaser.Scene {
         console.log(Map.navMesh)
         Map.drawBuildings();
         Player.drawPlayers(playerDict);
+        console.log(Teams.teamLists[1].stateLists)
         this.cursors = this.input.keyboard.createCursorKeys();
 
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
-        this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
+        // this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
         this.physics.add.collider(
             Player.characters,
             Projectile.projectileGroup,
@@ -152,7 +163,7 @@ export class mapView extends Phaser.Scene {
                 Turret.placeItem(item)
             }
             else{
-                Map.placeItem(item)
+                Map.beginPlacing(item)
             }
         });
 
@@ -182,6 +193,7 @@ export class mapView extends Phaser.Scene {
             else{
                 Map.isPlacing = false; // Exit placing mode
                 Map.placingItem.destroy(); // Clear placing item
+                Map.placingItem = null;
             }
         });
 
@@ -198,31 +210,28 @@ export class mapView extends Phaser.Scene {
         });
         // Add a mouse click listener
         this.input.on('pointerdown', (pointer) => {
-            if(Map.isPlacing && Map.placingItem){
+            if(Map.placingItem && !Map.placingItem.blocked){
                 const items = itemTab.itemValues(this.registry.get('image'))
                 if(items.price){
-                    if(this.money>=items.price){
-                        this.updateMoney(-1*items.price)
-                    }else{
+                    if(!this.checkSufficientFunds(items.price)){
                         showAlert(this, 'insufficient Funds', "#ff0000");
                         return;
                     }
                 }
                 let cam = this.cameras.main;
-                let x = Math.floor((pointer.x + cam.scrollX - ((pointer.worldX+cam.scrollX)%SQUARESIZE)) / SQUARESIZE);
-                let y = Math.floor((pointer.y + cam.scrollY - ((pointer.worldY+cam.scrollY)%SQUARESIZE)) / SQUARESIZE);
+                let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
+                let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
                 else{
-                    Teams.teamLists['1'].buildingBlockList.push([x,y])
-                    Teams.teamLists['1'].blockBuildingState[`${x},${y}`] = {
+                    Teams.teamLists['1'].blockBuildingStates.push({
                         type: items,
-                        x: x,
-                        y: y,
-                        duration: 100
-                    };
+                        x: x - Math.floor(items.lenX/2),
+                        y: y - Math.floor(items.lenY/2),
+                        duration: 100,
+                        assigned: 0
+                    });
                     buildingManager.assignTroopToBuildBlock(1);
-                }                
-
+                }
             }
             else if(Turret.isPlacing){
                 const items = itemTab.itemValues(this.registry.get('image'))
@@ -270,7 +279,7 @@ export class mapView extends Phaser.Scene {
                 currentText = this.add.text(
                     this.cameras.main.width - 120,  // Relative to camera
                     10,                            // Slight padding from top
-                    `(${posX}, ${posY})`, 
+                    `(${posX}, ${posY})`,
                     { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
                 )
                 .setScrollFactor(0)                // Stick to camera
@@ -288,7 +297,7 @@ export class mapView extends Phaser.Scene {
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
-                    troop.state = CONTROL_STATES.USER_MODE;
+                    Teams.movePlayerState(troop, CONTROL_STATES.USER_MODE)
                     let troopX = Math.floor(troop.body.x / SQUARESIZE);
                     let troopY = Math.floor(troop.body.y / SQUARESIZE);
                     const spot = formationSpots[index];
@@ -410,10 +419,10 @@ export class mapView extends Phaser.Scene {
             this.isBrushActive = false
             this.brushGraphics.clear();
             let items = itemTab.itemValues(this.registry.get('image'))
-            if(items.price && this.checkSufficientFunds(items.price*this.brushTiles.length)) return;
-            Teams.teamLists['1'].buildTileList = [...this.brushTiles];
-            this.brushTiles = []
-            buildingManager.assingTroopsToBuildTile(1, items)
+            if(items.price && !this.checkSufficientFunds(items.price*this.brushTiles.length)) return;
+            buildingManager.createBuildTileStateArray(this.brushTiles, 1);
+            this.brushTiles = [];
+            buildingManager.assingTroopsToBuildTile(1, items);
         }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
@@ -454,28 +463,24 @@ export class mapView extends Phaser.Scene {
         // if insufficient, show alert and bail out
         if(mode == 1){
             if (!this.checkSufficientSeeds(tileCount)) return;
-            let tempArray = []
-            let tempDict = {}
+            let tillList = Teams.teamLists['1'].tileList;
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
                     if(type.spread && type.name != "water" && type.name != 'crops'){
-                        const key = `${x},${y}`;
-                        tempArray.push([x, y]);
-                        tempDict[key] = {
-                            state: 'untouched',
-                            assigned: 0,
-                            timer: null
-                        };
+                        tillList.push( {
+                            x,
+                            y,
+                            assigned: 0
+                        });
                     }
                 }
             }
-            Teams.addFarmSpots(1, tempArray, tempDict)
             const allTroops = Teams.teamLists['1'].playerList;
-            tillManager.assignTilesToTroops(1,allTroops,Teams.teamLists['1'].tileList)
+            tillManager.assignTilesToTroops(allTroops,tillList)
         }
         else if(mode == 2){
-            let tempArray = []
+            let cropList = Teams.teamLists['1'].cropList;
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
@@ -486,14 +491,17 @@ export class mapView extends Phaser.Scene {
                             cropTile = Map.cropDict[key][0]
                         }else{cropTile = Map.cropDict[key]}
                         if(cropTile.anims.currentFrame.index == 3){
-                            tempArray.push([x, y]);
+                            cropList.push({
+                                x,
+                                y,
+                                assigned: 0
+                            });
                         }
                     }
                 }
             }
-            Teams.teamLists['1'].cropList = tempArray;
             const allTroops = Teams.teamLists['1'].playerList;
-            tillManager.assignCropsToTroops(1,allTroops,Teams.teamLists['1'].cropList)
+            tillManager.assignCropsToTroops(allTroops,Teams.teamLists['1'].cropList)
         }
         else{
             const item = itemTab.itemValues(this.registry.get('image'));
@@ -537,7 +545,43 @@ export class mapView extends Phaser.Scene {
         .setScrollFactor(0)
         .setDepth(UIDEPTH);
 
+        // === SEEDS UI (Top Center) ===
+        const berryIcon = this.add.image(topCenterX - 140, 25, 'berry')
+            .setScrollFactor(0)
+            .setScale(0.5)
+            .setDepth(UIDEPTH);
+    
+        this.berryText = this.add.text(topCenterX - 125, 18, `${this.berries}`, {
+            fontSize: '20px',
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3
+        })
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
 
+        let berryOutline = null;
+        berryIcon
+              .setInteractive()
+              .on('pointerdown', () => {
+                this.berryMode = !this.berryMode;
+            
+                if (this.berryMode) {
+                  // draw a white outline around the berry icon
+                  berryOutline = this.add.graphics()
+                    .setScrollFactor(0)
+                    .setDepth(UIDEPTH);
+                  berryOutline.lineStyle(2, 0xffffff, 1);
+                  const b = berryIcon.getBounds();
+                  berryOutline.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
+                } else {
+                  // remove the outline
+                  if (berryOutline) {
+                    berryOutline.destroy();
+                    berryOutline = null;
+                  }
+                }
+              });            
 
         // Add a button on the bottom bar
         const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
@@ -803,12 +847,49 @@ export class mapView extends Phaser.Scene {
             this.seedsText.setFill('#ffffff');
         });
     }
+
+    updateBerry(amountDelta) {
+        this.berries += amountDelta;
+        this.berryText.setText(`${this.berries}`);
+    
+        const color = amountDelta > 0 ? '#00ff00' : '#ff3333';
+        this.berryText.setFill(color);
+    
+        const ghost = this.add.text(
+            this.berryText.x,
+            this.berryText.y,
+            amountDelta > 0 ? `+${amountDelta}` : `${amountDelta}`,
+            {
+                fontSize: '20px',
+                fill: color,
+                stroke: '#000000',
+                strokeThickness: 2
+            }
+        )
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH);
+    
+        this.tweens.add({
+            targets: ghost,
+            y: ghost.y - 20,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ghost.destroy()
+        });
+    
+        this.time.delayedCall(600, () => {
+            this.berryText.setFill('#ffffff');
+        });
+    }
     
     
-    createAnim(key,repeat = -1, frameRate = 3){
+    
+    createAnim(key,repeat = -1, frameRate = 3, end=2){
         this.anims.create({
             key: key,
-            frames: this.anims.generateFrameNumbers(key, { start: 0, end: 2 }),
+            frames: this.anims.generateFrameNumbers(key, { start: 0, end: end }),
             frameRate: frameRate,
             repeat: repeat
         });
@@ -859,6 +940,13 @@ export class mapView extends Phaser.Scene {
             showAlert(this, "Insufficient seeds", '#ff0000')
         }
         return seedAmnt<=this.seeds;
+    }
+
+    checkSufficientBerries(berryAmnt){
+        if(berryAmnt>this.berries){
+            showAlert(this, "Insufficient berries", '#ff0000')
+        }
+        return berryAmnt<=this.berries;
     }
 
 }

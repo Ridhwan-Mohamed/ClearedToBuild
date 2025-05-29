@@ -68,8 +68,9 @@ export const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 11,
-        lenX: 4,
-        lenY: 4,
+        lenX: 3,
+        lenY: 3,
+        price: 10,
         depth: BLOCKDEPTH
     },
     pine: {
@@ -82,7 +83,7 @@ export const TILE_TYPES = {
         grid: 12,
         lenX: 2,
         lenY: 2,
-        depth: BLOCKDEPTH
+        depth: BLOCKDEPTH+2
     },
     turret: {
         name: "turret",
@@ -150,7 +151,7 @@ export const TILE_TYPES = {
         depth: BLOCKDEPTH,
         lenX: 4,
         lenY: 4,
-        price: 5000
+        price: 1000
     },
     house2:{
         name: "house2",
@@ -210,8 +211,18 @@ export const TILE_TYPES = {
         block: false,
         complex: false,
         grid: 37,
-        depth: FLOORDEPTH
+        depth: FLOORDEPTH,
+        interactable: true
     },
+    grassBerry : {
+        name: "grassBerry",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 38,
+        depth: FLOORDEPTH,
+        interactable: true
+    }
 };
 
 export const TILE_ARR = [
@@ -252,7 +263,8 @@ export const TILE_ARR = [
     'well',
     'road',
     'crops',
-    'grassCrop'
+    'grassCrop',
+    'grassBerry'
 ];
 
 export function TILE_MAP(val){
@@ -269,7 +281,8 @@ export function TILE_MAP(val){
     else if(val == 35){return "road"}
     else if(val == 36){return "crops"}
     else if(val == 37){return "grassCrop"}
-    else{return {}}
+    else if(val == 38){return "grassBerry"}
+    else{return}
 }
 
 export function gridPos(x, y){
@@ -322,4 +335,14 @@ export function showAlert(scene, message, color = '#ffffff', duration = 1000) {
 
 export function intDiv(n,d){
     return Math.floor(n/d)
+}
+
+export function clearTaskPlusTimer(sprite){
+    if(sprite.task){
+        sprite.task = null;
+    }
+    if(sprite.timer){
+        sprite.timer.remove(false);
+        sprite.timer = null;
+    }
 }

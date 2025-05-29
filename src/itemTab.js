@@ -34,6 +34,7 @@ import well from '../assets/well.png'
 import road from '../assets/road.png'
 import house1Img from '../assets/house1Img.png'
 import grassCrop from '../assets/grassCrop.png'
+import grassBerry from '../assets/grassBerry.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -81,6 +82,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('well', well); 
         scene.load.image('road', road); 
         scene.load.image('grassCrop', grassCrop);
+        scene.load.image('grassBerry', grassBerry);
     }
 
     create() {

@@ -1,5 +1,6 @@
 export const weapons = {
     hands : {
+        name: "Hands",
         baseDmg: 10,
         critDmg: 15,
         critProb: 20,

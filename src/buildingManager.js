@@ -4,53 +4,33 @@ import { Map } from "./map"
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "./constants"
 import { NavMesh } from "./lib/navmesh/navmesh"
 import { buildPolysFromGridMap } from "./lib/navmesh/map-parsers/build-polys-from-grid-map"
+import { Manager } from "./Manager/Manager"
 export class buildingManager{
 
     static NavMeshUpdater;
     static scene;
 
-    static getTileKey(x, y) {
-        return `${x},${y}`;
-    }
-
-    static getTileState(x, y, teamNumber) {
-        const key = this.getTileKey(x, y);
-        const tileStates = Teams.teamLists[`${teamNumber}`].blockBuildingState;
-        if (!tileStates[key]) {
-            return null;
+    static createBuildTileStateArray(tiles, teamNumber) {
+        const team = Teams.teamLists[teamNumber];
+        // make sure buildingTileStates is an array
+        if (!Array.isArray(team.buildingTileStates)) {
+          team.buildingTileStates = [];
         }
-        return tileStates[key];
-    }
-
-    static getDestroyState(x, y, teamNumber) {
-        const key = this.getTileKey(x, y);
-        const tileStates = Teams.teamLists[`${teamNumber}`].destroyState;
-        if (!tileStates[key]) {
-            return null;
-        }
-        return tileStates[key];
+      
+        tiles.forEach(tile => {
+          team.buildingTileStates.push({
+            x: tile.x,
+            y: tile.y,
+            assigned: 0,
+            buildType: TILE_TYPES.wall
+          });
+        });
     }
 
     static assingTroopsToBuildTile(teamNumber, type){
-        let buildList = Teams.teamLists[`${teamNumber}`].buildTileList
+        let buildList = Teams.teamLists[`${teamNumber}`].buildingTileStates
         let troops = Teams.teamLists[`${teamNumber}`].playerList
-        if (buildList.length > 0) {
-            // Process the tiles
-            troops.forEach(troop => {
-                if(!Player.playerAvailible(troop)) return;
-                let tile = buildList[0]
-                if(tile){
-                    let approachTile = this.findBuildApproachTile(tile.x, tile.y, troop)                        
-                    if(approachTile){
-                        buildList.shift()
-                        troop.state = CONTROL_STATES.BUILD_MODE_T
-                        troop.buildType = type
-                        Player.moveTo(troop, approachTile.path)
-                        troop.finalPos = {x: tile.x*SQUARESIZE, y: tile.y*SQUARESIZE}
-                    }
-                }
-            })
-        }
+        Manager.assignTroopsToAction(troops, buildList, CONTROL_STATES.BUILD_MODE_T);
     }
 
     static findBuildApproachTile(buildX, buildY, troop) {
@@ -61,6 +41,19 @@ export class buildingManager{
             [-2, -1], [-2, 1], [2, -1], [2, 1],       // Extended Diagonal (2 away)
             [-1, -2], [1, -2], [-1, 2], [1, 2],
         ];
+
+        let troopX = Math.floor(troop.body.x/SQUARESIZE)
+        let troopY = Math.floor(troop.body.y/SQUARESIZE)
+        if(!Map.navGrid[troopX][troopY]){
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) {
+                console.log("No valid start tile nearby");
+            } else {
+                troopX = newX;
+                troopY = newY;
+                console.log("New valid tile:", newX, newY);
+            }
+        }
     
         const troopPos = new Phaser.Math.Vector2(troop.x, troop.y);
     
@@ -86,7 +79,7 @@ export class buildingManager{
         // 3. Try candidates one by one
         for (const candidate of candidates) {
             const path = Map.navMesh.findPath(
-                { x: troop.x, y: troop.y },
+                { x: troopX*SQUARESIZE, y: troopY*SQUARESIZE },
                 { x: candidate.tx * SQUARESIZE + SQUARESIZE / 2, y: candidate.ty * SQUARESIZE + SQUARESIZE / 2 }
             );
     
@@ -99,51 +92,23 @@ export class buildingManager{
         return null; // ❌ No valid approach found
     }
 
-    static beginBuilding(x,y,type){
-        if(buildingManager.scene.checkSufficientFunds(type.price)){return;}
-        buildingManager.scene.updateMoney(-1*type.price);
-        x = Math.floor(x/SQUARESIZE);
-        y = Math.floor(y/SQUARESIZE);
+    static beginBuilding(troop){
+        if(!buildingManager.scene.checkSufficientFunds(troop.task.buildType.price)){return}
+        buildingManager.scene.updateMoney(-1*troop.task.buildType.price);
+        const x = troop.task.x;
+        const y = troop.task.y;
         Map.navGrid[y][x] = 0;
-        // Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
         this.NavMeshUpdater.blockTile(x,y);
-        Map.placeTile(x,y,type.name);
-    }
-
-    static assignTroopToBuild(troop){
-        let buildList = Teams.teamLists[`${troop.body.team}`].buildTileList
-        if (buildList.length > 0) {
-            let tile = buildList.shift()
-            if(tile){
-                let approachTile = this.findBuildApproachTile(tile.x, tile.y, troop)
-                if(approachTile){
-                    troop.state = CONTROL_STATES.BUILD_MODE_T
-                    troop.buildType = TILE_TYPES.wall
-                    Player.moveTo(troop, approachTile.path)
-                    troop.finalPos = {x: tile.x*SQUARESIZE, y: tile.y*SQUARESIZE}
-                }
-            }
-        }
-        else{troop.state = CONTROL_STATES.USER_MODE}
+        Map.placeTile(x,y,troop.task.buildType.name);
+        Teams.removeFromStateArray(1, "buildingTileStates", troop.task);
+        troop.task = null;
+        Manager.assignOneTroopToAction(troop, Teams.teamLists[1].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
     }
 
     static assignTroopToBuildBlock(teamNumber){
         let troops = Teams.teamLists[`${teamNumber}`].playerList
-        let blockList = Teams.teamLists[`${teamNumber}`].buildingBlockList
-        troops.forEach(troop => {
-            if(!Player.playerAvailible(troop)) return;
-            let tile = blockList[0]
-            if(tile){
-                tile = this.getTileState(tile[0],tile[1],1);
-                let approachTile = this.findBuildApproachBlock(tile.x, tile.y, tile.type, troop)
-                if(approachTile){
-                    blockList.shift()
-                    troop.state = CONTROL_STATES.BUILD_MODE_B
-                    Player.moveTo(troop, approachTile.path)
-                    troop.finalPos = {x: tile.x, y: tile.y}
-                }
-            }
-        })
+        let blockList = Teams.teamLists[`${teamNumber}`].blockBuildingStates
+        Manager.assignTroopsToAction(troops, blockList, CONTROL_STATES.BUILD_MODE_B);
     }
 
     static findBuildApproachBlock(x, y, type, troop) {
@@ -151,8 +116,8 @@ export class buildingManager{
         const candidates = [];
     
         // Compute top-left corner of the block
-        const startX = x - Math.floor(type.lenX / 2);
-        const startY = y - Math.floor(type.lenY / 2);
+        const startX = x;
+        const startY = y;
 
         // Search one tile around the perimeter of the block
         for (let dy = -1; dy <= type.lenY; dy++) {
@@ -193,28 +158,38 @@ export class buildingManager{
         return null; // ❌ No valid path found
     }
 
-    static beginBuildingBlock(x, y, sprite) {
-        const key = this.getTileKey(x, y);
-        const tile = this.getTileState(x, y, sprite.body.team);
-    
-        if (!tile || tile.duration <= 0) {
-            if (tile) {
-                delete Teams.teamLists[`${sprite.body.team}`].blockBuildingState[key];
+    static beginBuildingBlock(sprite) {
+        let task = sprite.task;
+
+        if (!task || task.duration <= 0) {
+            console.log(`sprite: ${sprite.id} delete mode outside of timer with duration: ${task.duration}`)
+            if (task) {
+                Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
             }
-            sprite.state = CONTROL_STATES.USER_MODE;
+            sprite.task = null
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
+            let teamNumber = sprite.body.team;
+            Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
             sprite.play('idle');
             return;
         }
-    
+
         if (!sprite.timer) {
             sprite.timer = this.scene.time.delayedCall(1000, () => {
-                const key = this.getTileKey(x, y);
-                const tile = this.getTileState(x, y, sprite.body.team);
-    
-                if (!tile) return;
-
-                const dx = x - sprite.body.tileX;
-                const dy = y - sprite.body.tileY;
+                console.log(`sprite: ${sprite.id} starting timer, duration: ${task.duration}`)
+                if(!sprite.active) return;
+                let teamNumber = sprite.body.team;
+                if (!task || task.duration <= 0){
+                    console.log(`sprite: ${sprite.id} delete mode within timer `)
+                    Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
+                    sprite.task = null;
+                    sprite.timer = null; 
+                    sprite.play('idle');
+                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
+                    return;
+                }
+                const dx = sprite.x - sprite.task.x*SQUARESIZE;
+                const dy = sprite.y - sprite.task.y*SQUARESIZE;
 
                 if (Math.abs(dx) > Math.abs(dy)) {
                     sprite.flipX = dx < 0; // Face left if dx is negative
@@ -224,98 +199,106 @@ export class buildingManager{
                 }
                 
                 sprite.play('action');
-                tile.duration -= 50;
+                task.duration -= 50;
     
-                if (tile.duration <= 0) {
-                    sprite.state = CONTROL_STATES.USER_MODE;
+                if (task.duration <= 0) {
+                    if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;
+                    buildingManager.scene.updateMoney(-1*task.type.price);
+                    Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
                     sprite.play('idle');
                     sprite.timer = null;
                     console.log("Done building.");
-                    Map.handleMapClick(x*SQUARESIZE, y*SQUARESIZE, tile.type)
-                    if(!Map.placingItem.blocked){
-                        Map.placeItem(tile.type)
-                    }
+                    Map.handleMapClick(task.x*SQUARESIZE, task.y*SQUARESIZE, task.type)
                     let blockTiles = []
-                    for(let i = Math.floor(tile.y - (tile.type.lenY/2)); i < tile.type.lenY + Math.floor(tile.y - (tile.type.lenY/2)); i++){
-                        for(let j = Math.floor(tile.x - (tile.type.lenX/2)); j < tile.type.lenX + Math.floor(tile.x - (tile.type.lenX/2)); j++){
+                    let startY = task.y
+                    let startX = task.x
+                    for(let i =  startY; i < task.type.lenY + startY; i++){
+                        for(let j = startX; j < task.type.lenX + startX; j++){
                             blockTiles.push({x: j, y: i})
                         }
                     }
                     this.NavMeshUpdater.blockTiles(blockTiles)
-                    delete Teams.teamLists[`${sprite.body.team}`].blockBuildingState[key];
+                    Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
+                    sprite.task = null;
+                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
                 } else {
-                    console.log(`Continuing build: ${tile.duration} left`);
+                    console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
                     sprite.timer = null;
                     // 🔥 Restart another delayed call if still building
-                    this.beginBuildingBlock(x, y, sprite);
+                    this.beginBuildingBlock(sprite);
                 }
             });
         }
     }
 
     static assingTroopsToDestroy(teamNumber){
-        let destroyList = Teams.teamLists[`${teamNumber}`].destroyList
-        let troops = Teams.teamLists[`${teamNumber}`].playerList
-        if (destroyList.length > 0) {
-            troops.forEach(troop => {
-                if(!Player.playerAvailible(troop)) return;
-                let tile = destroyList[0]
-                if(tile){
-                    tile = this.getDestroyState(tile[0],tile[1],1);
-                    let approachTile = this.findBuildApproachTile(tile.x, tile.y, troop)                        
-                    if(approachTile){
-                        destroyList.shift();
-                        troop.state = CONTROL_STATES.DESTROY_MODE
-                        Player.moveTo(troop, approachTile.path)
-                        troop.finalPos = {x: tile.x, y: tile.y}
-                    }
-                }
-            })
-        }
+        let destroyList = Teams.teamLists[`${teamNumber}`].destroyStates;
+        let troops = Teams.teamLists[`${teamNumber}`].playerList;
+        Manager.assignTroopsToAction(troops, destroyList, CONTROL_STATES.DESTROY_MODE);
     }
 
-    static beginDestroyingBlock(x, y, sprite) {
-        const key = this.getTileKey(x, y);
-        const tile = this.getDestroyState(x, y, sprite.body.team);
-    
-        if (!tile || tile.duration <= 0) {
-            if (tile) {
-                delete Teams.teamLists[`${sprite.body.team}`].destroyState[key];
+    static beginDestroyingBlock(sprite) {
+        let task = sprite.task;
+        if (!task || task.duration <= 0) {
+            console.log(`sprite: ${sprite.id} delete mode outside of timer with duration: ${task.duration}`)
+            if (task) {
+                Teams.removeFromStateArray(1, "destroyStates", sprite.task);
             }
-            sprite.play('idle')
-            sprite.state = CONTROL_STATES.USER_MODE;
+            sprite.task = null
+            sprite.timer = null; 
+            let teamNumber = sprite.body.team;
+            Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
+            sprite.play('idle');
             return;
         }
     
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(1000, () => {
-                const key = this.getTileKey(x, y);
-                const tile = this.getDestroyState(x, y, sprite.body.team);
-    
-                if (!tile) return;
-    
-                tile.duration -= 50;
-                sprite.play('action')
+            sprite.timer = this.scene.time.delayedCall(500, () => {
+                console.log(`Start Destroying timer, Sprite: ${sprite.id}`)
+                if(Teams.teamLists['1'].playerList[0] == sprite) console.log(Teams.teamLists['1'].playerList[1]) 
+                else console.log(Teams.teamLists['1'].playerList[1])
+                if(!sprite.active) return;
+                let teamNumber = sprite.body.team;
+                if (!task || task.duration <= 0){
+                    console.log(`sprite: ${sprite.id} delete mode within timer `)
+                    sprite.task = null;
+                    if(sprite.timer){
+                        sprite.timer.remove(false);
+                        sprite.timer = null;
+                    }
+                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
+                    return;
+                }
 
-                if (tile.duration <= 0) {
-                    sprite.state = CONTROL_STATES.USER_MODE;
+                task.duration -= 50;
+                sprite.play('action');
+                
+                if (task.duration <= 0) {
+                    sprite.timer.remove(false);
                     sprite.timer = null;
-                    console.log("Done building.");
+                    console.log("Done Destroying.");
                     sprite.play('idle')
-                    tile.value.destroy()
+                    task.value.destroy()
                     let blockTiles = []
-                    for(let i = Math.floor(tile.y - (tile.type.lenY/2)); i < tile.type.lenY + Math.floor(tile.y - (tile.type.lenY/2)); i++){
-                        for(let j = Math.floor(tile.x - (tile.type.lenX/2)); j < tile.type.lenX + Math.floor(tile.x - (tile.type.lenX/2)); j++){
+                    for(let i =  task.y; i < task.type.lenY + task.y; i++){
+                        for(let j = task.x; j < task.type.lenX + task.x; j++){
                             blockTiles.push({x: j, y: i})
+                            if(Array.isArray(Map.grid[i][j])) Map.grid[i][j] = Map.grid[i][j][0]
+                            Map.navGrid[i][j] = 1;
                         }
                     }
                     this.NavMeshUpdater.blockTiles(blockTiles, true)
-                    delete Teams.teamLists[`${sprite.body.team}`].destroyState[key];
+                    Teams.removeFromStateArray(1, "destroyStates", sprite.task);
+                    sprite.task = null;
+                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
                 } else {
-                    console.log(`Continuing destroying: ${tile.duration} left`);
+                    console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
+                    console.log(Teams.teamLists['1'].playerList[0].currentPath);
+                    console.log(Teams.teamLists['1'].playerList[1].currentPath);
+                    sprite.timer.remove(false);
                     sprite.timer = null;
                     // 🔥 Restart another delayed call if still building
-                    this.beginDestroyingBlock(x, y, sprite);
+                    this.beginDestroyingBlock(sprite);
                 }
             });
         }

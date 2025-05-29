@@ -166,7 +166,7 @@ function placeBuilding(grid, x, y, building, navGrid) {
 }
 
 function placePlayers(roads, teamNumber){
-    for(let i = 0; i < 1; i++){
+    for(let i = 0; i < 2; i++){
         // Convert set to array and select a random spot
         let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
         let [x, y] = spotStr.split(',').map(Number);

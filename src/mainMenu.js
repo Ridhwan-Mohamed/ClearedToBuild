@@ -102,7 +102,8 @@ class MainMenu extends Phaser.Scene {
                         house2: 0x006400,
                         road: 0x555555,
                         well: 0xADD8E6,
-                        grassCrop: 0x33cc33
+                        grassCrop: 0x33cc33,
+                        grassBerry: 0x33cc33,
                     }[type] || 0xffffff;
         
                     const index = y * gridWidth + x;
@@ -210,7 +211,7 @@ class MainMenu extends Phaser.Scene {
             // this.gridData = generateTown(this.gridData, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 1)
             this.gridData = generateTown(this.gridData, [TILE_TYPES.house2, TILE_TYPES.house2], 1)
-            placeNeutralPlayers(1);
+            // placeNeutralPlayers(1);
             console.log(this.baseGridData == this.gridData)
             // this.gridDatad = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 2)

@@ -12,6 +12,7 @@ export class fightManager{
         if(!target || !target.active){
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
+            Player.handleStateIntteruptComplete(sprite);
             return;
         }
         const weapon = sprite.weapon;
@@ -25,6 +26,7 @@ export class fightManager{
         if (!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject.active || dist > weapon.range) {
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
+            Player.handleStateIntteruptComplete(sprite);
             return;
         }
 
@@ -33,15 +35,19 @@ export class fightManager{
         if (!sprite.timer) {
             sprite.play('action');
             sprite.timer = sprite.scene.time.delayedCall(weapon.duration, () => {
-                if (!sprite.active) return; // ✅ prevent animation or logic after death
+                if (!sprite.active) {
+                    return;
+                } // ✅ prevent animation or logic after death
                 // Check if target is within weapon range
                 const dist = Phaser.Math.Distance.Between(
                     sprite.x, sprite.y,
                     target.x, target.y
                 );
-                if(!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject.active || dist > weapon.range){
+                if(!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject || !sprite.track[0].gameObject.active || sprite.track[0].gameObject.health <= 0 || dist > weapon.range){
                     sprite.track = null;
                     sprite.state = CONTROL_STATES.TRACK_MODE;
+                    sprite.play('idle')
+                    Player.handleStateIntteruptComplete(sprite);
                     return;
                 }
                 // 🎯 Accuracy and crit rolls
@@ -61,6 +67,7 @@ export class fightManager{
                 if (isHit) {
                     damage = isCrit ? weapon.critDmg : weapon.baseDmg;
                     target.health = Math.max(0, target.health - damage);
+                    Player.updateDetailsTab(target)
                     text = isCrit ? `CRIT ${damage}` : `HIT ${damage}`;
                     color = sprite.body.team === 1 ? '#00ff00' : '#ff3333';
                 } else {
@@ -94,6 +101,7 @@ export class fightManager{
                     Player.destroyPlayer(target);
                     sprite.track = null;
                     sprite.state = CONTROL_STATES.TRACK_MODE;
+                    Player.handleStateIntteruptComplete(sprite);
                     sprite.timer = null;
                     sprite.play('idle');
                 } else {
@@ -106,7 +114,7 @@ export class fightManager{
     }
 
     static checkForKillReward(sprite, target){
-        if(sprite.body.team == 1){
+        if(sprite.body && sprite.body.team == 1){
             this.scene.updateMoney(Phaser.Math.Between(1000, 1500));
         }
     }

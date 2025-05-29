@@ -19,7 +19,8 @@ export const CONTROL_STATES = {
     HEAL_MODE: 6,
     BUILD_MODE_T: 7,
     BUILD_MODE_B: 8,
-    DESTROY_MODE: 9
+    DESTROY_MODE: 9,
+    SEED_MODE: 10,
 }
 export var WORLD_DIMENSIONX = 70;
 export var WORLD_DIMENSIONY = 70;
@@ -67,8 +68,9 @@ export const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 11,
-        lenX: 4,
-        lenY: 4,
+        lenX: 3,
+        lenY: 3,
+        price: 10,
         depth: BLOCKDEPTH
     },
     pine: {
@@ -81,7 +83,7 @@ export const TILE_TYPES = {
         grid: 12,
         lenX: 2,
         lenY: 2,
-        depth: BLOCKDEPTH
+        depth: BLOCKDEPTH+2
     },
     turret: {
         name: "turret",
@@ -92,6 +94,7 @@ export const TILE_TYPES = {
         grid: 13,
         lenX: 3,
         lenY: 3,
+        price: 20000,
         depth: BLOCKDEPTH
     },
     dirt : {
@@ -147,7 +150,8 @@ export const TILE_TYPES = {
         grid: 32,
         depth: BLOCKDEPTH,
         lenX: 4,
-        lenY: 4
+        lenY: 4,
+        price: 1000
     },
     house2:{
         name: "house2",
@@ -159,7 +163,8 @@ export const TILE_TYPES = {
         grid: 33,
         depth: BLOCKDEPTH,
         lenX: 4,
-        lenY: 4
+        lenY: 4,
+        price: 5000
     },
     well:{
         name: "well",
@@ -199,6 +204,24 @@ export const TILE_TYPES = {
         complex: false,
         price: 5,
         grid: 36
+    },
+    grassCrop : {
+        name: "grassCrop",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 37,
+        depth: FLOORDEPTH,
+        interactable: true
+    },
+    grassBerry : {
+        name: "grassBerry",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 38,
+        depth: FLOORDEPTH,
+        interactable: true
     }
 };
 
@@ -239,7 +262,9 @@ export const TILE_ARR = [
     'house2',
     'well',
     'road',
-    'crops'
+    'crops',
+    'grassCrop',
+    'grassBerry'
 ];
 
 export function TILE_MAP(val){
@@ -255,13 +280,15 @@ export function TILE_MAP(val){
     else if(val == 34){return "well"}
     else if(val == 35){return "road"}
     else if(val == 36){return "crops"}
-    else{return {}}
+    else if(val == 37){return "grassCrop"}
+    else if(val == 38){return "grassBerry"}
+    else{return}
 }
 
 export function gridPos(x, y){
     return {
-        x: Math.floor(x % WORLD_DIMENSION),
-        y: Math.floor(y % WORLD_DIMENSION)
+        x: Math.floor(x % WORLD_DIMENSIONX),
+        y: Math.floor(y % WORLD_DIMENSIONY)
     };
 }
 
@@ -287,7 +314,7 @@ export function handleGridXY(x,y,itemX,itemY){
     return [finalX,finalY]
 }
 
-export function showAlert(scene, message, color = '#ffffff') {
+export function showAlert(scene, message, color = '#ffffff', duration = 1000) {
     const alert = scene.add.text(
         scene.cameras.main.width / 2, 0, message,
         { fontSize: '24px', fill: color, stroke: '#000000', strokeThickness: 3 }
@@ -300,7 +327,7 @@ export function showAlert(scene, message, color = '#ffffff') {
         targets: alert,
         y: 50,
         alpha: 0,
-        duration: 1000,
+        duration: duration,
         ease: 'Cubic.easeOut',
         onComplete: () => alert.destroy()
     });
@@ -308,4 +335,14 @@ export function showAlert(scene, message, color = '#ffffff') {
 
 export function intDiv(n,d){
     return Math.floor(n/d)
+}
+
+export function clearTaskPlusTimer(sprite){
+    if(sprite.task){
+        sprite.task = null;
+    }
+    if(sprite.timer){
+        sprite.timer.remove(false);
+        sprite.timer = null;
+    }
 }

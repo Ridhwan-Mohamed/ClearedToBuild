@@ -4,36 +4,52 @@ import { Player } from "./Player";
 
 export class fightManager{
 
+    static scene; 
+
     static attack(sprite) {
 
         const target = sprite.track[0].gameObject;
         if(!target || !target.active){
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
+            Player.handleStateIntteruptComplete(sprite);
             return;
         }
         const weapon = sprite.weapon;
 
         // Check if target is within weapon range
         const dist = Phaser.Math.Distance.Between(
-            sprite.body.x, sprite.body.y,
-            target.body.x,
-            target.body.y
+            sprite.x, sprite.y,
+            target.x, target.y
         );
 
         if (!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject.active || dist > weapon.range) {
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
+            Player.handleStateIntteruptComplete(sprite);
             return;
         }
 
         if (!weapon) return;
     
         if (!sprite.timer) {
-            sprite.play('attack');
-    
+            sprite.play('action');
             sprite.timer = sprite.scene.time.delayedCall(weapon.duration, () => {
-                if (!sprite.active) return; // ✅ prevent animation or logic after death
+                if (!sprite.active) {
+                    return;
+                } // ✅ prevent animation or logic after death
+                // Check if target is within weapon range
+                const dist = Phaser.Math.Distance.Between(
+                    sprite.x, sprite.y,
+                    target.x, target.y
+                );
+                if(!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject || !sprite.track[0].gameObject.active || sprite.track[0].gameObject.health <= 0 || dist > weapon.range){
+                    sprite.track = null;
+                    sprite.state = CONTROL_STATES.TRACK_MODE;
+                    sprite.play('idle')
+                    Player.handleStateIntteruptComplete(sprite);
+                    return;
+                }
                 // 🎯 Accuracy and crit rolls
                 const accuracyRoll = Phaser.Math.Between(0, 100);
                 const critRoll = Phaser.Math.Between(0, 100);
@@ -41,8 +57,8 @@ export class fightManager{
                 const isCrit = critRoll <= weapon.critProb;
     
                 // 💥 Ghost text setup
-                const textX = target.x || target.body?.x || 0;
-                const textY = target.y || target.body?.y || 0;
+                const textX = target.x || 0;
+                const textY = target.y || 0;
     
                 let damage = 0;
                 let text = '';
@@ -51,6 +67,7 @@ export class fightManager{
                 if (isHit) {
                     damage = isCrit ? weapon.critDmg : weapon.baseDmg;
                     target.health = Math.max(0, target.health - damage);
+                    Player.updateDetailsTab(target)
                     text = isCrit ? `CRIT ${damage}` : `HIT ${damage}`;
                     color = sprite.body.team === 1 ? '#00ff00' : '#ff3333';
                 } else {
@@ -77,12 +94,14 @@ export class fightManager{
                         onComplete: () => ghost.destroy()
                     });
                 }
-    
+
                 // ☠️ Target defeated
                 if (target.health <= 0) {
+                    this.checkForKillReward(sprite,target)
                     Player.destroyPlayer(target);
                     sprite.track = null;
                     sprite.state = CONTROL_STATES.TRACK_MODE;
+                    Player.handleStateIntteruptComplete(sprite);
                     sprite.timer = null;
                     sprite.play('idle');
                 } else {
@@ -93,5 +112,11 @@ export class fightManager{
             });
         }
     }
-    
+
+    static checkForKillReward(sprite, target){
+        if(sprite.body && sprite.body.team == 1){
+            this.scene.updateMoney(Phaser.Math.Between(1000, 1500));
+        }
+    }
+
 }

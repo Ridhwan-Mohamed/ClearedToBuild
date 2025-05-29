@@ -7,6 +7,7 @@ import { NavMesh } from './lib/navmesh/navmesh.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import NavPoly from './lib/navmesh/navpoly.js';
 import Polygon from './lib/navmesh/math/polygon.js';
+import { Teams } from './Teams.js';
 
 export class NavMeshUpdater {
     constructor(navMesh, scene) {
@@ -112,6 +113,8 @@ export class NavMeshUpdater {
      * Block multiple tiles at once (for multi-tile walls).
      */
     blockTiles(tileCoords, addTiles = false) {
+        console.log(Teams.teamLists['1'].playerList[0]);
+        console.log(Teams.teamLists['1'].playerList[1]);
         const tileRects = tileCoords.map(({ x, y }) => ({
             x: x * SQUARESIZE,
             y: y * SQUARESIZE,

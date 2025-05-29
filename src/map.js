@@ -6,6 +6,9 @@ import { buildingArray, clearBuildingArray, turretTeams } from "./town";
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
 import { Teams } from "./Teams";
 import { buildingManager } from "./buildingManager";
+import { seedManager } from "./seedManager";
+import { tillManager } from "./tillManager";
+import { Manager } from "./Manager/Manager";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -28,6 +31,7 @@ export class Map{
     static placingItem = null; // The current item being placed
     static isPlacing = false; // Flag to indicate placement mode
     static blocks = [];
+    static cropDict = {};  // add at top of map.js
     static waterBlocks = [];
     static cameraBounds;
 
@@ -94,84 +98,92 @@ export class Map{
         this.reDraw(data[0].length, data.length);
     }
 
-    static placeItem(item){
+    static beginPlacing(item){
         this.placingItem = this.scene.add.sprite(0, 0, item.value)
             .setAlpha(0.5) // Make it semi-transparent
             .setDepth(item.depth) // Ensure it's above everything
             .setInteractive();
         this.placingItem.blocked = false;
-        // Enable mouse-following behavior
-        this.isPlacing = true;
+       // Enable mouse-following behavior
+        this.isPlacing = true; 
         this.scene.input.on('pointermove', (pointer) => {
             if (this.placingItem && this.isPlacing && pointer.x>0 && pointer.x<SQUARESIZE*WORLD_DIMENSIONX && pointer.y>0 && pointer.y<SQUARESIZE*WORLD_DIMENSIONY) {
-                let lenX = item.lenX
-                let lenY = item.lenY
-                let x = pointer.worldX - pointer.worldX%SQUARESIZE - lenX/2*SQUARESIZE
-                let y = pointer.worldY - pointer.worldY%SQUARESIZE - lenY/2*SQUARESIZE
-                this.placingItem.setTint(this.checkBlockPosition(Math.floor(x/SQUARESIZE),Math.floor(y/SQUARESIZE),lenX, lenY))
-                this.placingItem.setPosition(pointer.worldX - pointer.worldX%SQUARESIZE, pointer.worldY - pointer.worldY%SQUARESIZE);
+                let lenX = item.lenX;
+                let lenY = item.lenY;
+                let x = Math.floor(pointer.worldX - pointer.worldX%SQUARESIZE);
+                let y = Math.floor(pointer.worldY - pointer.worldY%SQUARESIZE);
+                if(item.lenX%2 != 0){x += SQUARESIZE/2}
+                if(item.lenY%2 != 0){y += SQUARESIZE/2}
+                // compute the grid‐aligned top-left tile for the item
+                const gridX = Math.floor(x / SQUARESIZE) - Math.floor(lenX / 2);
+                const gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
+                // pass both dimensions into checkBlockPosition
+                const tintColor = this.checkBlockPosition(gridX, gridY, lenX, lenY);
+                this.placingItem.setTint(tintColor);
+                this.placingItem.setPosition(x, y);
+            }
+        });
+    }
+
+    static placeItem(x,y,item){
+        const placingItem = this.scene.add.sprite(0, 0, item.value)
+            .setDepth(item.depth) // Ensure it's above everything
+            .setInteractive();
+        placingItem.clearTint()
+        placingItem.setAlpha(1); // Set full visibility
+        if(item.lenX%2 != 0){x += SQUARESIZE/2}
+        if(item.lenY%2 != 0){y += SQUARESIZE/2}
+        placingItem.setPosition(x + Math.floor(item.lenX/2)*SQUARESIZE, y + Math.floor(item.lenY/2)*SQUARESIZE); // Finalize position
+        x = Math.floor(x/SQUARESIZE)
+        y = Math.floor(y/SQUARESIZE)
+        this.addBlockItem(x,y,item)
+        const itemToPlace = placingItem
+        itemToPlace.setInteractive();
+        itemToPlace.dontTrack = true;
+        itemToPlace.sx = x
+        itemToPlace.sy = y
+        itemToPlace.lenX = item.lenX
+        itemToPlace.lenY = item.lenY
+        itemToPlace.on('pointerover', () => {
+            if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
+            }
+        });
+        itemToPlace.on('pointerout', () => {
+            if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                itemToPlace.clearTint(); // Restore original color
+            }
+        });
+        itemToPlace.on('pointerdown', () => {
+            if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+                console.log('Destroying item...');
+                Teams.teamLists['1'].destroyStates.push({
+                    type: item,
+                    value: itemToPlace,
+                    x: x,
+                    y: y,
+                    duration: 100,
+                    assigned: 0
+                });
+                buildingManager.assingTroopsToDestroy(1);
             }
         });
     }
 
     static handleMapClick(x, y, item) {
         // If we're in placing mode, finalize the placement
-        if(item == TILE_TYPES.player && this.isPlacing && this.placingItem && !this.placingItem.blocked){
-            // const worldX = this.scene.cameras.main.scrollX / SQUARESIZE + pointer.x/SQUARESIZE;
-            // const worldY = this.scene.cameras.main.scrollY / SQUARESIZE + pointer.y/SQUARESIZE;
-            Player.addPlayer(Math.floor(worldX), Math.floor(worldY))
-            this.isPlacing = false; // Exit placing mode
-            this.placingItem.destroy(); // Clear placing item
+        if(item == TILE_TYPES.player && this.placingItem && !this.placingItem.blocked){
+            Player.addPlayer(x, y, 0)
         }
-        else if (this.isPlacing && this.placingItem && !this.placingItem.blocked) {
-            // let x = pointer.worldX - pointer.worldX%SQUARESIZE - item.lenX/2*SQUARESIZE
-            // let y = pointer.worldY - pointer.worldY%SQUARESIZE - item.lenY/2*SQUARESIZE
-            this.placingItem.clearTint()
-            this.placingItem.setAlpha(1); // Set full visibility
-            this.placingItem.setPosition(x, y); // Finalize position
-            x = Math.floor(x/SQUARESIZE)
-            y = Math.floor(y/SQUARESIZE)
-            this.isPlacing = false;
-            this.addBlockItem(x,y,item)
-            const itemToPlace = this.placingItem
-            itemToPlace.setInteractive();
-            itemToPlace.sx = x
-            itemToPlace.sy = y
-            itemToPlace.lenX = item.lenX
-            itemToPlace.lenY = item.lenY
-            itemToPlace.on('pointerover', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
-                }
-            });
-            itemToPlace.on('pointerout', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    itemToPlace.clearTint(); // Restore original color
-                }
-            });
-            itemToPlace.on('pointerdown', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    console.log('Destroying item...');
-                    Teams.teamLists['1'].destroyList.push([x,y])
-                    Teams.teamLists['1'].destroyState[`${x},${y}`] = {
-                        type: item,
-                        value: itemToPlace,
-                        x: x,
-                        y: y,
-                        duration: 100
-                    }
-                    buildingManager.assingTroopsToDestroy(1)
-                    // itemToPlace.destroy(); // Destroy the specific item
-                    // this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
-                }
-            });
+        else {
+            this.placeItem(x,y,item)
         }
     }
     
     static checkBlockPosition(posX, posY, lenX, lenY, turret=0){
         for (let y = posY; y < posY + lenY; y++) {
             for (let x = posX; x < posX + lenX; x++) {
-                if(TILE_TYPES[TILE_MAP(this.grid[y][x])]?.block){
+                if(TILE_TYPES[TILE_MAP(this.grid[y][x])].block){
                     turret ? Turret.topItem.blocked = true : this.placingItem.blocked = true;
                     return Phaser.Display.Color.GetColor(200, 49, 19);
                 }
@@ -247,7 +259,6 @@ export class Map{
 
     static removeTile(posX, posY, lenX, lenY) {
         // Reset the tile
-
         for(let y = posY; y < posY+lenY+1; y++){
             for(let x = posX; x < posX+lenX+1; x++){
                 this.grid[y][x] = 1;
@@ -296,11 +307,11 @@ export class Map{
                     }
                 }
             } else {
-                child.destroy();
+                if(child) child.destroy();
             }
         });
-        this.blocks = []
-        this.waterBlocks.forEach(child => child.destroy())
+        this.blocks = [];
+        this.waterBlocks.forEach(child => child.destroy());
         this.barrier.clear(true);
     
         const camera = this.scene.cameras.main;
@@ -326,6 +337,9 @@ export class Map{
                     let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
                     barrierBlock.play('water').setDepth(FLOORDEPTH)
                     this.waterBlocks.push(barrierBlock)
+                }
+                else if(this.grid[y][x] == TILE_TYPES.crops.grid){
+                    this.handleCrops(x,y);
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
                     this.drawGridValue(x, y, 0);
@@ -338,6 +352,13 @@ export class Map{
             }
         }
     }   
+
+    static handleCrops(x,y){
+        const key = `${x},${y}`;
+        if(!this.cropDict[key]){
+            this.drawGridValue(x, y);
+        }
+    }
 
     static drawGridValue(x,y,index=-1){
         let tileKey, type;
@@ -375,7 +396,14 @@ export class Map{
     }
 
     static handleGridDelete(block, type, x, y){
-        if(type.depth == BLOCKDEPTH){
+        if (type.name === "crops") {
+            const key = `${x},${y}`;
+            Map.cropDict[key] = block;
+            // track this crop separately
+            this.blocks[y*WORLD_DIMENSIONX+x] = null;
+            return;  // don’t fall through into the normal blocks[] logic
+        }
+        else if(type.depth == BLOCKDEPTH){
             if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
                 this.blocks[y*WORLD_DIMENSIONX+x] = [this.blocks[y*WORLD_DIMENSIONX+x], block];
             }
@@ -399,6 +427,9 @@ export class Map{
                     Map.navGrid[y][x] = 0
                 }
             }
+        }
+        if(type.interactable){
+            seedManager.makeClickable(x, y, block);
         }
     }
 
@@ -594,8 +625,8 @@ export class Map{
             this.addBlockItem(posX,posY,item)
             const itemToPlace = this.placingItem
             itemToPlace.setInteractive();
-            itemToPlace.sx = posX
-            itemToPlace.sy = posY
+            itemToPlace.sx = posX + Math.floor(item.lenX)
+            itemToPlace.sy = posY + Math.floor(item.lenY)
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
             itemToPlace.on('pointerover', () => {
@@ -611,8 +642,17 @@ export class Map{
             itemToPlace.on('pointerdown', () => {
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     console.log('Destroying item...');
-                    itemToPlace.destroy(); // Destroy the specific item
-                    //this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
+                    Teams.teamLists['1'].destroyStates.push({
+                        type: item,
+                        value: itemToPlace,
+                        x: posX,
+                        y: posY,
+                        duration: 100,
+                        assigned: 0
+                    });
+                    buildingManager.assingTroopsToDestroy(1);
+                    // itemToPlace.destroy(); // Destroy the specific item
+                    // this.removeTile(itemToPlace.sx, itemToPlace.sy, itemToPlace.lenX, itemToPlace.lenY)
                 }
             });
             this.placingItem = null;

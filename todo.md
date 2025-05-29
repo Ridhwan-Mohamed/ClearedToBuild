@@ -1,30 +1,40 @@
 Advancing TODOS
-- movement
-    - make users stop getting stuck ✔️
-buildings
-    - shrink buildings for a manual mesh-shrinkwrap ✔️
-    - animations for building blocks ✔️
-    - animations for destorying ✔️
-fighting
-    - code for attacking ✔️
-    - animations ✔️
-    - health/hurt feedback ✔️
-    - update necessary arrays after deaths ✔️
-Store
-    - attach cost to block-items and make them purchaseable ✔️
-    - attach cost to tile-items and make them purchaseable ✔️
 
+🕹️ Player Details  
+    📈 lvl  ☑️      
+    ❤️ health  ☑️   
+    ⚔️ weapon  ☑️   
+    🔄 refresh ☑️    
+🌿 Environment  
+  🍇 healing berries ☑️
+🎨 Sprites
+  ⚪ white sprites for tinting  ☑️
+  ✏️ Fix Hover tints and select tints ☑️
+🚶 Roaming
+  🏃‍♂️ enable roam ☑️
+  ⚔️ Make users go back to routines after fighting  
+    🏗️ BuildingT ☑️
+    🏗️ BuildingB ☑️ 
+    ⚔️ Destroy ☑️
+    🌱 Seeding ☑️
+    🚜 Farming ☑️
+    🌾 Croping  ☑️
+FIX THE DAMN PLAYER STATE CODE (STANDARDIZE ITTTTT)
+  🏗️ BuildingT ☑️* (seems to be some navgrid error but the code itself seems fine)
+  🏗️ BuildingB ☑️
+  ⚔️ Destroy ☑️
+  🌱 Seeding ☑️
+  🚜 Farming ☑️
+  🌾 Croping ☑️
 
-Weapons/Items, Starting Draw, Villages, Environment, Towns, Boats+Fishing??? + More(NEXT SPRINT)
-
+🎯 routines! (NEXT SPRINT)
+------------------------------------------------------------------------------------------------
 Refining TODOS
-- BuildingManager
-    - building pathing fix (findBestStartPoint)
-    - build and destory blocks have bad looping structures (list check and not assigning more troops)
-- PLAYERS:
-    - Player navgrids and obstacles
-        - make blocking objects bigger than they are
-        - Collisions
-            - make player hitboxes very tiny
-        - No Collisions
-            - handle player overlap
+build and esc issues☑️
+can destroy preplaced buildings☑️
+🏗️ BuildingManager 
+    🛤️ Building pathing fix (findBestStartPoint) (not important)
+    🔄 Build and destroy blocks have bad looping structures (list check and not assigning more troops) ❌
+🧭 navMeshes 
+    - STILL JANK 😭😭😭
+WHY IS TEAM # STILL LINKED TO BODY

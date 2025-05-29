@@ -3,7 +3,7 @@ import { TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, create2DArray
 import { WaveCollapse } from './waveCollapse';
 import { itemTab } from './itemTab';
 import { mapView } from './mapView';
-import { clearPlayerDict, generateTown, clearBuildingArray } from './town.js';
+import { clearPlayerDict, generateTown, clearBuildingArray, placeNeutralPlayers } from './town.js';
 import { Map } from './map.js';
 import { Teams } from './Teams.js';
 
@@ -101,7 +101,9 @@ class MainMenu extends Phaser.Scene {
                         house1: 0x8b0000,
                         house2: 0x006400,
                         road: 0x555555,
-                        well: 0xADD8E6
+                        well: 0xADD8E6,
+                        grassCrop: 0x33cc33,
+                        grassBerry: 0x33cc33,
                     }[type] || 0xffffff;
         
                     const index = y * gridWidth + x;
@@ -135,9 +137,10 @@ class MainMenu extends Phaser.Scene {
                             const freshNavGrid = structuredClone(this.oldNavGrid)
                             this.gridData = generateTown(freshGrid, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
                             ], 1, x, y, freshNavGrid);
+                            placeNeutralPlayers(1);
                             Map.navGrid = freshNavGrid
                             drawGrid(false);
-                            
+
                             this.tweens.add({
                                 targets: rect,
                                 scale: 1.5,
@@ -150,7 +153,6 @@ class MainMenu extends Phaser.Scene {
                                 }
                             });
                         });
-                        
 
                         if (firstTime) {
                             rect.setAlpha(0);
@@ -173,7 +175,7 @@ class MainMenu extends Phaser.Scene {
                             yoyo: true,
                             ease: 'Quad.easeOut'
                         });
-        
+
                         this.tweens.addCounter({
                             from: 0,
                             to: 100,
@@ -204,18 +206,19 @@ class MainMenu extends Phaser.Scene {
             this.oldNavGrid = structuredClone(Map.navGrid)
             // this.gridData = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
             this.baseGridData = this.gridData
-            Teams.newTeam(1)
+            Teams.newTeam(1) // your team
+            Teams.newTeam(0) // idk???
             // this.gridData = generateTown(this.gridData, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 1)
-               this.gridData = generateTown(this.gridData, [TILE_TYPES.house2, TILE_TYPES.house2
-            ], 1)
+            this.gridData = generateTown(this.gridData, [TILE_TYPES.house2, TILE_TYPES.house2], 1)
+            // placeNeutralPlayers(1);
             console.log(this.baseGridData == this.gridData)
             // this.gridDatad = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 2)
             drawGrid(firstTime);
             // this.scene.start('mapView', this.gridData);
         };
-    
+
         generateGridData(true); // Initial draw with fade-in
     
         // Buttons

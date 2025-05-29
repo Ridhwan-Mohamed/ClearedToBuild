@@ -1,9 +1,10 @@
-import { SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
+import { SQUARESIZE, TILE_MAP, TILE_TYPES, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
 import { Map } from "./map";
 import { Player } from "./Player";
 import { Teams } from "./Teams";
 
 export var playerDict = {}
+export var townBounds = {}
 
 export function clearPlayerDict(){
     playerDict = {}
@@ -16,6 +17,40 @@ export function clearBuildingArray(){
 }
 
 export const turretTeams = {}
+
+export function setupTownBoundsToggle(scene) {
+    let boundsGroup = null;
+    let showing = false;
+  
+    // Listen for "T" key
+    const keyT = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T);
+    keyT.on('down', () => {
+      if (showing) {
+        // Remove all drawn bounds
+        boundsGroup.clear(true, true);
+        boundsGroup = null;
+        showing = false;
+      } else {
+        // Draw bounds for each team
+        boundsGroup = scene.add.group();
+        for (const team in townBounds) {
+          const { minx, miny, maxx, maxy } = townBounds[team];
+          const rect = scene.add.rectangle(
+            minx * SQUARESIZE,
+            miny * SQUARESIZE,
+            (maxx - minx + 1) * SQUARESIZE,
+            (maxy - miny + 1) * SQUARESIZE,
+            0x00ff00,
+            0.2
+          )
+          .setOrigin(0)
+          .setDepth(500);
+          boundsGroup.add(rect);
+        }
+        showing = true;
+      }
+    });
+  }
 
 export function generateTown(grid, buildings, teamNumber, startX = -1, startY = -1, navGrid = Map.navGrid) {
     grid = structuredClone(grid);
@@ -39,6 +74,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
             townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
         }   
     }
+    const firstIndex = buildingArray.length;
     placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid);
     Teams.teamLists[`${teamNumber}`].center[0] = townCenterX
     Teams.teamLists[`${teamNumber}`].center[1] = townCenterY
@@ -60,7 +96,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
                     if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
                     placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid);
-                    buildings.splice(i, 1);
+                    buildings.splice(i, 1); 
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
                     if(curBuilding == TILE_TYPES.house1 || curBuilding == TILE_TYPES.house2) placePlayers(roads, teamNumber);
@@ -72,10 +108,51 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
         if(!outerRoadsSucesss) outerRoads.splice(0,1)
     }
 
-    // Step 4: Surround town with stone
-    // surroundWithStone(grid);
+    const myBuildings = buildingArray.slice(firstIndex);
+    // Compute bounding box from all placed buildings
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const [bx, by, building] of myBuildings) {
+    // building.lenX, lenY are its footprint dimensions
+        minx = Math.min(minx, bx);
+        miny = Math.min(miny, by);
+        maxx = Math.max(maxx, bx + building.lenX - 1);
+        maxy = Math.max(maxy, by + building.lenY - 1);
+    }
+    minx = Math.max(0, minx - 1);
+    miny = Math.max(0, miny - 1);
+    maxx = Math.min(gridWidth - 1, maxx + 1);
+    maxy = Math.min(gridHeight - 1, maxy + 1); //extend by 1 in all directions
+    // Store in the global townBounds dictionary under this team number
+    townBounds[teamNumber] = { minx, miny, maxx, maxy };
+
     return grid;
 }
+
+export function placeNeutralPlayers(count) {
+    let placed = 0;
+    while (placed < count) {
+      const x = Phaser.Math.Between(0, WORLD_DIMENSIONX - 1);
+      const y = Phaser.Math.Between(0, WORLD_DIMENSIONY - 1);
+  
+      // Must be walkable
+      if (Map.navGrid[y][x] !== 1) continue;
+  
+      // Skip if inside any town’s rectangle
+      let insideTown = false;
+      for (const team in townBounds) {
+        const b = townBounds[team];
+        if (x >= b.minx && x <= b.maxx && y >= b.miny && y <= b.maxy) {
+          insideTown = true;
+          break;
+        }
+      }
+      if (insideTown) continue;
+  
+      // Place one neutral (team 0) here
+      playerDict[`${x},${y}`] = 0;
+      placed++;
+    }
+  }
 
 // Function to place a building
 function placeBuilding(grid, x, y, building, navGrid) {
@@ -89,7 +166,7 @@ function placeBuilding(grid, x, y, building, navGrid) {
 }
 
 function placePlayers(roads, teamNumber){
-    for(let i = 0; i < 1; i++){
+    for(let i = 0; i < 2; i++){
         // Convert set to array and select a random spot
         let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
         let [x, y] = spotStr.split(',').map(Number);
@@ -145,35 +222,6 @@ function expandRoads(grid, startX, startY, building) {
     }
 
     return [roadTiles, Array.from(surroundingTiles).map(coord => coord.split(',').map(Number))];
-}
-
-
-// Function to surround the town with stone (only exterior)
-function surroundWithStone(grid) {
-    let height = grid.length;
-    let width = grid[0].length;
-
-    let directions = [
-        [0, -1],  // Up
-        [0, 1],   // Down
-        [-1, 0],  // Left
-        [1, 0]    // Right
-    ];
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            if (grid[y][x] > 0) { // If it's part of the town (road/building)
-                for (let [dx, dy] of directions) {
-                    let nx = x + dx;
-                    let ny = y + dy;
-                    
-                    if (nx >= 0 && ny >= 0 && nx < width && ny < height && grid[ny][nx] === 0) {
-                        grid[ny][nx] = 2; // Place stone at the exterior
-                    }
-                }
-            }
-        }
-    }
 }
 
 function canPlaceBuildingAtAnyCorner(grid, x, y, building) {

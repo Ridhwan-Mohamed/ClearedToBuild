@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH } from "./constants";
+import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./Player";
@@ -381,6 +381,12 @@ export class Map{
             let block;
             if(type.spriteSheet){
                 block = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
+                if(type == TILE_TYPES.crops){
+                    block.on(`animationcomplete-${tileKey}`, () => {
+                        Teams.addFarmSpots(block, x, y)
+                        Manager.assignTroopsToAction(Teams.teamLists['1'].playerList, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
+                    });
+                }
                 block.play(tileKey).setDepth(type.depth)
             }
             else{
@@ -400,6 +406,9 @@ export class Map{
             const key = `${x},${y}`;
             Map.cropDict[key] = block;
             // track this crop separately
+            if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
+                this.blocks[y*WORLD_DIMENSIONX+x].destroy()
+            }
             this.blocks[y*WORLD_DIMENSIONX+x] = null;
             return;  // don’t fall through into the normal blocks[] logic
         }
@@ -417,6 +426,7 @@ export class Map{
         }
         else{
             if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
+                let Sblock = this.blocks[y*WORLD_DIMENSIONX+x];
                 this.blocks[y*WORLD_DIMENSIONX+x]?.destroy();
                 this.blocks[y*WORLD_DIMENSIONX+x] = block;
             }

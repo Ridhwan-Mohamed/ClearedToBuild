@@ -253,7 +253,7 @@ export class buildingManager{
         }
     
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(500, () => {
+            sprite.timer = this.scene.time.delayedCall(1000, () => {
                 console.log(`Start Destroying timer, Sprite: ${sprite.id}`)
                 if(Teams.teamLists['1'].playerList[0] == sprite) console.log(Teams.teamLists['1'].playerList[1]) 
                 else console.log(Teams.teamLists['1'].playerList[1])

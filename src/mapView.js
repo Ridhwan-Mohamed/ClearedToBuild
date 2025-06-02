@@ -38,6 +38,7 @@ import { seedManager } from './seedManager.js';
 import char from '../assets/char.png'
 import charHurt from '../assets/charHurt.png'
 import berry from '../assets/berry.png'
+import { Manager } from './Manager/Manager.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -56,14 +57,15 @@ export class mapView extends Phaser.Scene {
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
-        this.isBrushMode = false; // Track if brush mode is active  
+        this.isBrushMode = false; // Track if brush mode is active
         this.isBrushActive = false;  
         this.farmMode = false;
-        this.harvestMode = this.false;
-        this.money = 10000; // Starting amount
-        this.seeds = 500;
+        this.harvestMode = false;
+        this.money = 1000; // Starting amount
+        this.seeds = 50;
         this.berries = 0;
         this.berryMode = false;
+        this.seedGridMode = false;
     }
 
     init(data){
@@ -110,7 +112,7 @@ export class mapView extends Phaser.Scene {
         this.createAnim('brcwater')
         this.createAnim('tlcwater')
         this.createAnim('blcwater')
-        this.createAnim('crops',0,1)
+        this.createAnim('crops',0,0.05)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
 
@@ -208,8 +210,17 @@ export class mapView extends Phaser.Scene {
         this.input.keyboard.on('keydown-C', () => {
             this.harvestMode = !this.harvestMode;
         });
+        this.input.keyboard.on('keydown-V', () => {
+            this.seedGridMode = !this.seedGridMode;
+        });
         // Add a mouse click listener
         this.input.on('pointerdown', (pointer) => {
+            let cam = this.cameras.main;
+            const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
+            if (clickedOnPlayer.length > 0) {
+                console.log("hit player");
+                return;
+            }
             if(Map.placingItem && !Map.placingItem.blocked){
                 const items = itemTab.itemValues(this.registry.get('image'))
                 if(items.price){
@@ -218,7 +229,6 @@ export class mapView extends Phaser.Scene {
                         return;
                     }
                 }
-                let cam = this.cameras.main;
                 let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
@@ -351,11 +361,11 @@ export class mapView extends Phaser.Scene {
         // Clamp camera position to avoid accessing invalid indices
         Phaser.Math.Clamp(camera.scrollX, -32, WORLD_DIMENSIONX * SQUARESIZE - width);
         Phaser.Math.Clamp(camera.scrollY, -32, WORLD_DIMENSIONY * SQUARESIZE - height);
-    
+
         // Calculate the center chunk coordinates of the camera
         const centerChunkX = Math.floor(camera.scrollX / SQUARESIZE);
         const centerChunkY = Math.floor(camera.scrollY / SQUARESIZE);
-    
+
         // Initialize old center if not already set
         if (!this.oldMapCenter) {
             this.oldMapCenter = [centerChunkX, centerChunkY];
@@ -414,6 +424,10 @@ export class mapView extends Phaser.Scene {
         else if(this.harvestMode){
             this.getSelectedCells(2)
             this.harvestMode = false;
+        }
+        else if(this.seedGridMode){
+            this.getSelectedCells(3)
+            this.seedGridMode = false;
         }
         else if (this.isBrushMode && this.isBrushActive) {
             this.isBrushActive = false
@@ -502,6 +516,16 @@ export class mapView extends Phaser.Scene {
             }
             const allTroops = Teams.teamLists['1'].playerList;
             tillManager.assignCropsToTroops(allTroops,Teams.teamLists['1'].cropList)
+        }
+        else if(mode == 3){
+            for (let y = minY; y <= maxY; y++) {
+                for (let x = minX; x <= maxX; x++) {
+                    if(Map.grid[y][x] == TILE_TYPES.grassCrop.grid || Map.grid[y][x] == TILE_TYPES.grassBerry.grid){
+                        Teams.addSeedSpots(1, x, y);
+                    }
+                }
+            }
+            seedManager.assignSeedsToTroops(1)
         }
         else{
             const item = itemTab.itemValues(this.registry.get('image'));

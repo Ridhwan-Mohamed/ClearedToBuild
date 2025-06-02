@@ -61,8 +61,8 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
     let townCenterY;
     if(teamNumber == 1 && startX != -1 && startY != -1){
         if(!canPlaceBuildingAtAnyCorner(grid, startX, startY, buildings[0]).success) return;
-        townCenterX = startX
-        townCenterY = startY
+        townCenterX = startX;
+        townCenterY = startY;
     }
     else{
         // loop until valid start location
@@ -72,12 +72,13 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
             // loop until valid start location
             townCenterX = Phaser.Math.RND.between(1, gridWidth - buildings[0].lenX);  // Avoid edges if needed
             townCenterY = Phaser.Math.RND.between(1, gridHeight - buildings[0].lenY);
-        }   
+        }
     }
     const firstIndex = buildingArray.length;
     placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid);
-    Teams.teamLists[`${teamNumber}`].center[0] = townCenterX
-    Teams.teamLists[`${teamNumber}`].center[1] = townCenterY
+    const center = getValidCenterTile(townCenterX, townCenterY, buildings[0])
+    Teams.teamLists[`${teamNumber}`].center[0] = center.tx
+    Teams.teamLists[`${teamNumber}`].center[1] = center.ty
     if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
 
     let outerRoads = [];
@@ -267,12 +268,24 @@ function canPlaceBuildingAtAnyCorner(grid, x, y, building) {
 }
 
 
-// Function to get new position based on direction
-function getNewCoords(x, y, direction, width, height) {
-    switch (direction) {
-        case "left": return [x - width - 1, y];
-        case "right": return [x + 1, y];
-        case "up": return [x, y - height - 1];
-        case "down": return [x, y + 1];
+function getValidCenterTile(startX,startY,type){
+
+    // 1. Build list of candidate tiles with distances
+    let candidates = [];
+    for (let dy = -1; dy <= type.lenY; dy++) {
+        for (let dx = -1; dx <= type.lenX; dx++) {
+            const tx = startX + dx;
+            const ty = startY + dy;
+
+            const isInsideBlock = dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY;
+            if (isInsideBlock) continue;
+
+            if (tx < 0 || ty < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
+            if (!Map.navGrid[ty][tx]) continue; // Not walkable
+
+            candidates.push({ tx, ty });
+        }
     }
+
+    return Phaser.Utils.Array.GetRandom(candidates)
 }

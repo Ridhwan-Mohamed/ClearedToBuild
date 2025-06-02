@@ -96,7 +96,7 @@ export class Manager {
                 return true;
             }
         }
-        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        if(!Player.playerAvailible(troop)) Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         troop.play('idle');
         return false;
     }

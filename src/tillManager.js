@@ -17,6 +17,7 @@ export class tillManager {
     }
 
     static harvestCrop(sprite){
+        if(!sprite.task) return;
         const x = sprite.task.x;
         const y = sprite.task.y;
         let cropTile;
@@ -32,9 +33,16 @@ export class tillManager {
             cropTile.setFrame(1);           // ✅ Reset to first frame
             cropTile.anims.play('crops');   // ✅ Play the crop animation
         }
-        Teams.removeFromStateArray(1, "cropList", sprite.task);
-        sprite.task = null;
-        Manager.assignOneTroopToAction(sprite, Teams.teamLists[`${sprite.body.team}`].cropList, CONTROL_STATES.HARVEST_MODE);
+
+        if(sprite.state == CONTROL_STATES.R_FARM_MODE){
+            Teams.removeFromStateArray(1, "TeamFarmSpots", sprite.task);
+            sprite.task = null;
+            Manager.assignOneTroopToAction(sprite, Teams.teamLists[`${sprite.body.team}`].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
+        }else{
+            Teams.removeFromStateArray(1, "cropList", sprite.task);
+            sprite.task = null;
+            Manager.assignOneTroopToAction(sprite, Teams.teamLists[`${sprite.body.team}`].cropList, CONTROL_STATES.HARVEST_MODE);
+        }
     }
 
     static beginTilling(sprite) {
@@ -44,7 +52,7 @@ export class tillManager {
         if(!this.scene.checkSufficientSeeds(1)) return;
         sprite.timer = this.scene.time.delayedCall(1000, () => {
             if(!this.scene.checkSufficientSeeds(1)) return;
-            if(sprite.state != CONTROL_STATES.FARM_MODE){return;}
+            if(sprite.state != CONTROL_STATES.FARM_MODE) return;
             Teams.removeFromStateArray(1, "tileList", task);
             if (sprite) {
                 this.scene.updateSeeds(-1);

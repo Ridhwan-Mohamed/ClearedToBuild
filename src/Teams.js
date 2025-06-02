@@ -1,4 +1,8 @@
-import { CONTROL_STATES, SQUARESIZE } from "./constants";
+import { CONTROL_STATES, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
+import { townBounds } from "./town";
+import { Map } from "./map";
+import { Player } from "./Player";
+
 
 export class Teams {
     static teamLists = {};
@@ -6,7 +10,7 @@ export class Teams {
     static newTeam(teamNumber) {
       const list = {
         playerList: [],
-        tileStates: {},
+        TeamFarmSpots: [],
         tileList: [],
         seedList: [],
         seedStates: {},
@@ -25,7 +29,7 @@ export class Teams {
         const stateVal = CONTROL_STATES[stateKey];
         list.stateLists[stateVal] = new Set();
       }
-  
+    
       Teams.teamLists[teamNumber] = list;
     }
   
@@ -68,19 +72,80 @@ export class Teams {
       return Array.from(team.stateLists[state]);
     }
 
-    static farFromCenter(troop, maxTiles = 30) {
+    static farFromCenter(troop) {
+        const teamNum = troop.body.team;
+        const bounds = townBounds[teamNum];
+        if (!bounds) return false; // No defined town bounds → not far
+      
+        const tileX = Math.floor(troop.x / SQUARESIZE);
+        const tileY = Math.floor(troop.y / SQUARESIZE);
+        const { minx, miny, maxx, maxy } = bounds;
+      
+        // If outside the rectangular town bounds → far
+        if (tileX < minx || tileX > maxx || tileY < miny || tileY > maxy) {
+          return true;
+        }
+      
+        // Inside bounds: check adjacent (N/E/S/W) for a road (35)
+        const neighbors = [
+          [tileX,     tileY - 1], // top
+          [tileX + 1, tileY    ], // right
+          [tileX,     tileY + 1], // bottom
+          [tileX - 1, tileY    ]  // left
+        ];
+      
+        for (const [nx, ny] of neighbors) {
+          if (
+            nx >= 0 && nx < WORLD_DIMENSIONX &&
+            ny >= 0 && ny < WORLD_DIMENSIONY &&
+            Map.grid[ny][nx] === 35
+          ) {
+            return false; // adjacent to a road → not far
+          }
+        }
+      
+        // Inside bounds and no adjacent road → far
+        return true;
+    }
+      
+     
+    static sendTroopToTown(troop) {
         const teamNum = troop.body.team;
         const team = Teams.teamLists[teamNum];
-        if (!team || !Array.isArray(team.center)) return false;
-    
-        const [centerX, centerY] = team.center;
-        const troopX = Math.floor(troop.body.x / SQUARESIZE);
-        const troopY = Math.floor(troop.body.y / SQUARESIZE);
-    
-        // Euclidean distance in tile‐space
-        const dist = Phaser.Math.Distance.Between(centerX, centerY, troopX, troopY);
-        return dist > maxTiles;
-    }
+        if (!team) {
+          console.warn(`No team found for troop with team ${teamNum}.`);
+          return;
+        }
+      
+        // Extract the saved center tile for this team
+        const [centerTileX, centerTileY] = team.center;
+      
+        // Convert that center tile into world‐pixel coordinates
+        const destX = centerTileX * SQUARESIZE + SQUARESIZE / 2;
+        const destY = centerTileY * SQUARESIZE + SQUARESIZE / 2;
+      
+        // Grab the troop’s current world‐pixel position
+        const startX = troop.body.x;
+        const startY = troop.body.y;
+      
+        // Ask the navmesh to build a path back to town center
+        const path = Map.navMesh.findPath(
+          { x: startX, y: startY },
+          { x: destX,   y: destY   }
+        );
+      
+        if (!path || path.length === 0) {
+          console.warn(
+            `Troop (team ${teamNum}) could not find a path to town center at (${centerTileX},${centerTileY}).`
+          );
+          return;
+        }
+      
+        this.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN)
+        // Hand off that path to Player.moveTo
+        Player.moveTo(troop, path);
+      }
+      
 
     static removeFromStateArray(teamNumber, arrayKey, element) {
         const team = Teams.teamLists[teamNumber];
@@ -111,12 +176,25 @@ export class Teams {
           arr.splice(idx, 1);
         }
       }
-      
 
-    static addFarmSpots(teamNumber, farmList, states){
-        Teams.teamLists[`${teamNumber}`].tileList = farmList
-        Teams.teamLists[`${teamNumber}`].tileStates = states
-    }
+
+    static addFarmSpots(block, x, y) {
+        const team = Teams.teamLists['1'];
+        if (!team.TeamFarmSpots) {
+          throw new Error(`No such Team: 1`);
+        }
+        const spots = team.TeamFarmSpots;
+        
+        // Find index of an existing spot
+        const idx = spots.findIndex(spot => spot.x === x && spot.y === y);
+        if (idx !== -1) {
+          // Remove the old entry
+          spots.splice(idx, 1);
+        }
+        // Always push a fresh entry
+        spots.push({ block, x, y, assigned: 0 });
+    }      
+      
 
     static addCropSpots(teamNumber, cropList){
         Teams.teamLists[`${teamNumber}`].cropList = cropList

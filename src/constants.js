@@ -21,6 +21,8 @@ export const CONTROL_STATES = {
     BUILD_MODE_B: 8,
     DESTROY_MODE: 9,
     SEED_MODE: 10,
+    R_FARM_MODE: 11,
+    BACK_TO_TOWN: 12,
 }
 export var WORLD_DIMENSIONX = 70;
 export var WORLD_DIMENSIONY = 70;

@@ -169,11 +169,17 @@ export class Player {
     
         // 🚫 4. No valid nearby tile
         return [-1, -1];
-    }    
+    }
 
     static followPath(sprite) {
         if (sprite.currentPath.length === 0) {
-            this.setAnimState(sprite, 'idle')
+            this.setAnimState(sprite, 'idle');
+            return;
+        }
+        if(sprite.state == CONTROL_STATES.BACK_TO_TOWN && !Teams.farFromCenter(sprite)){
+            this.setAnimState(sprite, 'idle');
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+            sprite.currentPath = null;
             return;
         }
         this.setAnimState(sprite, 'walk')
@@ -236,13 +242,13 @@ export class Player {
             buildingManager.beginBuildingBlock(sprite)
         }
         else if(sprite.state == CONTROL_STATES.DESTROY_MODE){
-            console.log(Teams.teamLists['1'].playerList)
-            console.log(Teams.teamLists['1'].playerList[0].currentPath);
-            console.log(Teams.teamLists['1'].playerList[1].currentPath);
             buildingManager.beginDestroyingBlock(sprite)
         }
         else if(sprite.state == CONTROL_STATES.SEED_MODE){
             seedManager.beginSeeding(sprite);
+        }
+        else if(sprite.state == CONTROL_STATES.R_FARM_MODE){
+            tillManager.harvestCrop(sprite)
         }
         else if(sprite.state == CONTROL_STATES.USER_MODE){
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
@@ -556,6 +562,8 @@ export class Player {
                 Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.BUILD_MODE_T)
             }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_B){
                 Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_T)
+            }else if(troop.oldState == CONTROL_STATES.R_FARM_MODE){
+                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE)
             }
         }
         troop.oldState = null;
@@ -587,14 +595,29 @@ export class Player {
                 Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: troop.track[1].x, y: troop.track[1].y }));
             }
             else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
-                Player.roam(troop);
+                if(Teams.teamLists['1'].TeamFarmSpots.length && troop.body.team){
+                    Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
+                }else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && Teams.farFromCenter(troop)){
+                    Teams.sendTroopToTown(troop);
+                }else{
+                    this.roam(troop);
+                }
+            }
+            else if(troop.state == CONTROL_STATES.R_FARM_MODE && !Teams.teamLists['1'].TeamFarmSpots.length){
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             }
             this.followPath(troop);  
         })
     }
 
     static playerAvailible(troop){
-        if(troop.state == CONTROL_STATES.USER_MODE || (troop.state == CONTROL_STATES.TRACK_MODE && (!troop.track || !troop.track.gameObject))){
+        if(troop.state == CONTROL_STATES.USER_MODE || troop.state == CONTROL_STATES.R_FARM_MODE 
+            || troop.state == CONTROL_STATES.BACK_TO_TOWN
+            || (troop.state == CONTROL_STATES.TRACK_MODE && (!troop.track || !troop.track.gameObject))){
+            if(troop.state == CONTROL_STATES.R_FARM_MODE && troop.task){
+                troop.task.assigned = 0;
+                troop.task = null;
+            }
             return true;
         }
         return false;

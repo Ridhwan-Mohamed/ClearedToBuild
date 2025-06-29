@@ -9,6 +9,7 @@ import { weapons } from "./weapons";
 import { fightManager } from "./fightManager";
 import { seedManager } from "./seedManager";
 import { Manager } from "./Manager/Manager";
+import { Projectile } from "./Projectile";
 
 export class Player {
 
@@ -29,10 +30,13 @@ export class Player {
         this.characters = this.scene.physics.add.group({});
         this.createAnim('walk','player',0,2);
         this.createAnim('idle','player',0,0);
+        this.createAnim('gun1Walk', 'gun1',0,2);
+        this.createAnim('gun1Idle', 'gun1',0,0);
         this.createAnim('action','playerAction',0,2,-1,10);
+        this.setUpBackToTown()
     }
-    
-    static addPlayer(x,y,team,spriteSheet='player',walk='walk') {
+
+    static addPlayer(x,y,team,spriteSheet='player',walk='walk',idle='idle',action='action', weapon=weapons.hands) {
         const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, spriteSheet);
         newCube.setInteractive();
         newCube.id = this.count;
@@ -42,17 +46,22 @@ export class Player {
         newCube.roam = false;
         newCube.currentPath = []
         newCube.body.team = team;
-        team == 1? newCube.health = 200 : newCube.health = 100;
+        team == 1 ? newCube.health = 200 : newCube.health = 100;
+        team == 1 ? newCube.speed = 100 : newCube.speed = 50;
         this.applyDefaultTint(newCube)
         newCube.body.pushable = false;
-        newCube.animState = 'idle'
+        newCube.animState = idle
+        newCube.walk = walk;
+        newCube.idle = idle;
+        newCube.action = action;
         newCube.oldState = null;
         Teams.movePlayerState(newCube, CONTROL_STATES.TRACK_MODE)
-        newCube.weapon = weapons.hands
+        newCube.weapon = weapon
         this.characters.add(newCube);
         this.troops.push(newCube);
         this.characters.add(newCube);
         this.configureCubeInteractivity(newCube);
+        Teams.addPlayer(team, newCube);
         return newCube;
     }
 
@@ -61,7 +70,7 @@ export class Player {
         const teamNum = player.body.team;
         const team = Teams.teamLists[`${teamNum}`];
         if (!team) return;
-    
+        Teams.removePlayerFromState(player.body.team, player, player.state);
         // Remove from the team's playerList
         let idx = team.playerList.indexOf(player);
         if (idx !== -1) {
@@ -78,7 +87,6 @@ export class Player {
             player.task.assigned -= 1;
             player.task = null;
         }
-    
         // Finally destroy the Phaser sprite
         player.destroy();
     }    
@@ -94,6 +102,10 @@ export class Player {
                 cube.health += 30;
                 this.updateDetailsTab(cube);
                 return;
+            }
+            if(Player.selected.length && !cube.body.team){
+                Teams.addTroopsToFight(1, cube);
+                fightManager.sendToAttack()
             }
             cube.selected = !cube.selected; // Toggle the selected state
             if (cube.selected) {
@@ -128,6 +140,11 @@ export class Player {
     static moveTo(troop, path) {
         if (!path || path.length === 0) {
             console.log("No path found or path is empty.");
+            if(troop.task){
+                troop.task.assigned -= 1;
+                troop.task = null;
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
             return;
         }
         troop.currentPath = path
@@ -171,50 +188,114 @@ export class Player {
         return [-1, -1];
     }
 
-    static followPath(sprite) {
-        if (sprite.currentPath.length === 0) {
-            this.setAnimState(sprite, 'idle');
-            return;
+    static pathTo(troop, fx, fy, gridSpot = true){
+        let troopX = Math.floor(troop.x/SQUARESIZE);
+        let troopY = Math.floor(troop.y/SQUARESIZE);
+        let startX = troop.x;
+        let startY = troop.y;
+        if(!Map.navGrid[troopX][troopY]){
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) {
+                console.log("No valid start tile nearby");
+                return null;
+            } else {
+                startX = newX * SQUARESIZE + SQUARESIZE/2;
+                startY = newY * SQUARESIZE + SQUARESIZE/2;
+                console.log("New valid tile:", newX, newY);
+            }
         }
-        if(sprite.state == CONTROL_STATES.BACK_TO_TOWN && !Teams.farFromCenter(sprite)){
+
+        // Convert that center tile into world‐pixel coordinates
+        let destX = fx, destY = fy;
+        if(gridSpot){
+            destX = fx * SQUARESIZE + SQUARESIZE / 2;
+            destY = fy * SQUARESIZE + SQUARESIZE / 2;
+        }
+        
+        // Ask the navmesh to build a path back to town center
+        const path = Map.navMesh.findPath(
+          { x: startX, y: startY },
+          { x: destX,   y: destY   }
+        );
+      
+        if (!path || path.length === 0) {
+          console.warn(
+            `Troop (team ${troop.body.team}) could not find a path to (${fx},${fy}).`
+          );
+          return null;
+        }
+
+        return path
+    }
+
+    static handleReMap(sprite){
+    // Attempt to re‐path from the sprite’s current world‐position to its final destination
+        const start = { x: sprite.x, y: sprite.y };
+        const end   = sprite.finalPos; // assigned earlier in Player.moveTo()
+        const newPath = Map.navMesh.findPath(start, end);
+        if (newPath && newPath.length > 0) {
+            console.log("New path found")
+            this.moveTo(sprite, newPath)
+        } else {
+            // No valid path found → abort movement
+            console.warn("No valid path found, now in trackMode")
+            sprite.currentPath = [];
             this.setAnimState(sprite, 'idle');
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            sprite.currentPath = null;
+            return false;
+        }
+        return true; // skip the rest of this frame so we don’t walk into a blocked tile
+    }
+
+    static followPath(sprite) {
+        Manager.handleDurationCheck(sprite)
+        if (sprite.currentPath.length === 0) {
+            this.setAnimState(sprite, sprite.idle);
             return;
         }
-        this.setAnimState(sprite, 'walk')
+        this.setAnimState(sprite, sprite.walk)
         let nextPoint = sprite.currentPath[0]; // Get the next point in the path
-        const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y).setLength(100);
-    
+        //check if new path is needed
+        // const nextTileX = Math.floor(nextPoint.x / SQUARESIZE);
+        // const nextTileY = Math.floor(nextPoint.y / SQUARESIZE);
+        // if (
+        //     nextTileY >= 0 && nextTileY < Map.navGrid.length &&
+        //     nextTileX >= 0 && nextTileX < Map.navGrid[0].length &&
+        //     Map.navGrid[nextTileY][nextTileX] === 0
+        //     ){
+        //     console.log(`Sprite: ${sprite.id} on team ${sprite.body.team} has to recalculate path due to ${nextTileX},${nextTileY} not being a valid point anymore`)
+        //     const rePathed = this.handleReMap(sprite)
+        //     if(!rePathed) return;
+        // }
+        const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y).setLength(sprite.speed);
         // Calculate new velocity
         let newVelocity = new Phaser.Math.Vector2(
             desired.x,
             desired.y
         );
-    
         sprite.body.setVelocity(newVelocity.x, newVelocity.y);
-    
         // Rotate the sprite to face the direction of movement
         if (newVelocity.length() > 0) {
             sprite.rotation = Phaser.Math.Angle.Between(0, 0, newVelocity.x, newVelocity.y); // Calculate angle
         }
-        if(sprite.state == CONTROL_STATES.DESTROY_MODE){
-            let val = Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y);
-            console.log(`sprite: ${sprite.id} this far away: ${val}, currentPath.length: ${sprite.currentPath.length}`)
-        }
+        // if(sprite.state == CONTROL_STATES.DESTROY_MODE){
+        //     let val = Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y);
+        //     console.log(`sprite: ${sprite.id} this far away: ${val}, currentPath.length: ${sprite.currentPath.length}`)
+        // }
         //hack fix belowLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL-fds09as
-        if (sprite.state == CONTROL_STATES.TRACK_MODE && !sprite.roam && sprite.track && sprite.track[0].gameObject && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.track[0].gameObject.x, sprite.track[0].gameObject.y) < sprite.weapon.range) {
+        if ((sprite.state == CONTROL_STATES.TRACK_MODE || sprite.state == CONTROL_STATES.TRACK_TARGET) && !sprite.roam && sprite.track && sprite.track[0].gameObject && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.track[0].gameObject.x, sprite.track[0].gameObject.y) < sprite.weapon.range && (!sprite.weapon.projectile || Projectile.hasLineOfSight(sprite, sprite.track[0].gameObject))) {
             sprite.body.setVelocity(0, 0);
             sprite.currentPath.length = 0;
-            Teams.movePlayerState(sprite, CONTROL_STATES.ATTACK_MODE)
-            this.doAction(sprite)
+            if(sprite.state == CONTROL_STATES.TRACK_TARGET) sprite.oldState = CONTROL_STATES.TRACK_TARGET;
+            Teams.movePlayerState(sprite, CONTROL_STATES.ATTACK_MODE);
+            this.doAction(sprite);
         }
         else if (Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y) < 3) {
             sprite.currentPath.shift(); // Remove the reached point from the path
             if (sprite.currentPath.length == 0) {
                 if(sprite.roam && !sprite.task){
                     // schedule roam flag reset after 2–4s
-                    const roamDuration = Phaser.Math.Between(1000, 1500);
+                    const roamDuration = Phaser.Math.Between(1000, 4000);
                     sprite.scene.time.delayedCall(roamDuration, () => {
                         sprite.roam = false;
                     });
@@ -251,6 +332,9 @@ export class Player {
             tillManager.harvestCrop(sprite)
         }
         else if(sprite.state == CONTROL_STATES.USER_MODE){
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+        }
+        else if(sprite.state == CONTROL_STATES.BACK_TO_TOWN){
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         }
     }
@@ -313,30 +397,33 @@ export class Player {
     static mostClosestEnemy(troop, neighbours) {
         let mostClosest = null;
         let shortestDistance = Infinity;
-    
-        // Troop position
-        const troopPosition = new Phaser.Math.Vector2(troop.x, troop.y);
-    
-        neighbours.forEach(neighbour => {
-            if (neighbour === troop.body || neighbour.team == troop.body.team || (neighbour.gameObject && !neighbour.gameObject.active) || neighbour.dontTrack) return; // Ignore itself or untrackable neighbors
-    
-            // Neighbor position
-            const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
-    
-            // Calculate straight-line distance to the neighbor
-            const distance = Phaser.Math.Distance.BetweenPoints(troopPosition, neighbourPosition);
-    
-            // Update most closest if this neighbor is closer
-            if (distance < shortestDistance) {
-                shortestDistance = distance;
-                mostClosest = neighbour;
-            }
-        });
+        let search;
+        troop.state == CONTROL_STATES.TRACK_TARGET ? search = false : search = true;
+        if(search){
+            // Troop position
+            const troopPosition = new Phaser.Math.Vector2(troop.x, troop.y);
         
-        if(troop.track && troop.track[0] == mostClosest){
-            if(Math.abs(troop.track[1].x - mostClosest.gameObject.x) > troop.weapon.range || Math.abs(troop.track[1].y - mostClosest.gameObject.y) > troop.weapon.range){
-                troop.track[1].x = mostClosest.gameObject.x;
-                troop.track[1].y = mostClosest.gameObject.y;
+            neighbours.forEach(neighbour => {
+                if (neighbour === troop.body || neighbour.team == troop.body.team || (neighbour.gameObject && !neighbour.gameObject.active) || neighbour.dontTrack) return; // Ignore itself or untrackable neighbors
+        
+                // Neighbor position
+                const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
+        
+                // Calculate straight-line distance to the neighbor
+                const distance = Phaser.Math.Distance.BetweenPoints(troopPosition, neighbourPosition);
+        
+                // Update most closest if this neighbor is closer
+                if (distance < shortestDistance) {
+                    shortestDistance = distance;
+                    mostClosest = neighbour;
+                }
+            });
+        }
+        
+        if(troop.track && (troop.track[0] == mostClosest || troop.state == CONTROL_STATES.TRACK_TARGET)){
+            if(Math.abs(troop.track[1].x - troop.track[0].gameObject.x) > troop.weapon.range || Math.abs(troop.track[1].y - troop.track[0].gameObject.y) > troop.weapon.range){
+                troop.track[1].x = troop.track[0].gameObject.x;
+                troop.track[1].y = troop.track[0].gameObject.y;
                 return true;
             }
             return false;
@@ -344,21 +431,10 @@ export class Player {
         else if(mostClosest){
             troop.track = [null,null]
             troop.track[0] = mostClosest
-            troop.track[1] = {x: mostClosest.transform.x, y: mostClosest.transform.y}
+            troop.track[1] = {x: mostClosest.gameObject.x, y: mostClosest.gameObject.y}
             return true;
         }
         return false;
-    }
-    
-
-    static handleCollision(player, bullet){
-        if(bullet.team != player.body.team){
-            player.health -= 50;
-            bullet.destroy();
-            if(player.health <= 0){
-                player.destroy();
-            }
-        }
     }
 
     static createAnim(key, image, start, end, repeat = -1, frameRate = 3){
@@ -474,9 +550,11 @@ export class Player {
           const [x, y] = key.split(',').map(Number);
           const teamNumber = playerDict[key];
           // create the sprite
-          const player = this.addPlayer(x, y, teamNumber);
-          // register with Teams (adds to playerList and USER_MODE state)
-          Teams.addPlayer(teamNumber, player);
+          if(teamNumber){
+            this.addPlayer(x, y, teamNumber, 'gun1', 'gun1Walk', 'gun1Idle', 'gun1Idle', weapons.pistol);
+          }else{
+            this.addPlayer(x, y, teamNumber);
+          }
           // remove from the dict
           delete playerDict[key];
         }
@@ -517,7 +595,7 @@ export class Player {
             if (
                 gx >= 0 && gx < WORLD_DIMENSIONX &&
                 gy >= 0 && gy < WORLD_DIMENSIONY &&
-                ((Map.grid[gy][gx] == 35 && troop.body.team) || !troop.body.team) &&
+                (((Map.grid[gy][gx] == 35 || Map.grid[gy][gx] == TILE_TYPES.crops.grid) && troop.body.team) || !troop.body.team) &&
                 Map.navGrid[gy][gx] === 1
             ) {
                 validPositions.push(pos);
@@ -536,6 +614,7 @@ export class Player {
     }
 
     static handleStateIntteruptStart(troop){
+        if(troop.state == CONTROL_STATES.TRACK_TARGET) {return;};
         if(troop.oldState == undefined || troop.oldState == null){
             troop.oldState = troop.state;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE)
@@ -548,23 +627,23 @@ export class Player {
     }
 
     static handleStateIntteruptComplete(troop){
-        if(troop.oldState){
-            Teams.movePlayerState(troop, troop.oldState)
-            if(troop.oldState == CONTROL_STATES.FARM_MODE){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].tileList, CONTROL_STATES.FARM_MODE)
-            }else if(troop.oldState == CONTROL_STATES.SEED_MODE){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].seedList, CONTROL_STATES.SEED_MODE)
-            }else if(troop.oldState == CONTROL_STATES.HARVEST_MODE){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].cropList, CONTROL_STATES.HARVEST_MODE)
-            }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_T){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].buildingTileStates, CONTROL_STATES.BUILD_MODE_T)
-            }else if(troop.oldState == CONTROL_STATES.DESTROY_MODE){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.BUILD_MODE_T)
-            }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_B){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_T)
-            }else if(troop.oldState == CONTROL_STATES.R_FARM_MODE){
-                Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE)
-            }
+        Teams.movePlayerState(troop, troop.oldState)
+        if(troop.oldState == CONTROL_STATES.FARM_MODE){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].tileList, CONTROL_STATES.FARM_MODE)
+        }else if(troop.oldState == CONTROL_STATES.SEED_MODE){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].seedList, CONTROL_STATES.SEED_MODE)
+        }else if(troop.oldState == CONTROL_STATES.HARVEST_MODE){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].cropList, CONTROL_STATES.HARVEST_MODE)
+        }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_T){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].buildingTileStates, CONTROL_STATES.BUILD_MODE_T)
+        }else if(troop.oldState == CONTROL_STATES.DESTROY_MODE){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.DESTROY_MODE)
+        }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_B){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B)
+        }else if(troop.oldState == CONTROL_STATES.R_FARM_MODE){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE)
+        }else if(troop.oldState == CONTROL_STATES.TRACK_TARGET){
+            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].fightingList, CONTROL_STATES.TRACK_TARGET)
         }
         troop.oldState = null;
         return;
@@ -576,7 +655,7 @@ export class Player {
             const inView = Map.cameraBounds.contains(troop.x, troop.y);
             troop.setVisible(inView); // Will not draw if false
             let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
-            let reTrack = this.mostClosestEnemy(troop, neighbours)
+            let reTrack = this.mostClosestEnemy(troop, neighbours);
             if(reTrack){
                 troop.roam = false;
                 this.handleStateIntteruptStart(troop)
@@ -591,15 +670,15 @@ export class Player {
                         troopX = newX;
                         troopY = newY;
                     }
-                }    
+                }
                 Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: troop.track[1].x, y: troop.track[1].y }));
             }
             else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
                 if(Teams.teamLists['1'].TeamFarmSpots.length && troop.body.team){
                     Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
-                }else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && Teams.farFromCenter(troop)){
+                }/*else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && Teams.farFromCenter(troop)){
                     Teams.sendTroopToTown(troop);
-                }else{
+                }*/else{
                     this.roam(troop);
                 }
             }
@@ -856,6 +935,14 @@ export class Player {
           ? 0x64ff32   // your green
           : 0xff0000;  // your red for others
         cube.setTint(color);
+    }
+
+    static setUpBackToTown(){
+        this.scene.input.keyboard.on('keydown-B', () => {
+            this.selected.forEach(troop => {
+                Teams.sendTroopToTown(troop);
+            })
+        });
     }
       
 }

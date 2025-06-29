@@ -5,6 +5,10 @@ import { Teams } from "./Teams";
 
 export var playerDict = {}
 export var townBounds = {}
+export var townRoads = {};
+export var spawnPoints = [];
+
+const PLAYERS_PER_HOUSE = 1;
 
 export function clearPlayerDict(){
     playerDict = {}
@@ -54,6 +58,7 @@ export function setupTownBoundsToggle(scene) {
 
 export function generateTown(grid, buildings, teamNumber, startX = -1, startY = -1, navGrid = Map.navGrid) {
     grid = structuredClone(grid);
+    buildings = structuredClone(buildings);
     let gridWidth = grid[0].length;
     let gridHeight = grid.length;
     // Step 1: Start with a random town seed within grid bounds
@@ -80,11 +85,9 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
     Teams.teamLists[`${teamNumber}`].center[0] = center.tx
     Teams.teamLists[`${teamNumber}`].center[1] = center.ty
     if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
-
+    townRoads[`${teamNumber}`] = [];
     let outerRoads = [];
-    outerRoads.push(expandRoads(grid, townCenterX, townCenterY, buildings[0])[1]); // Step 2: Expand roads around seed
-
-
+    outerRoads.push(expandRoads(grid, townCenterX, townCenterY, buildings[0], teamNumber)[1]); // Step 2: Expand roads around seed
     // // Step 3: Place remaining buildings
     while(outerRoads.length && buildings.length){
         let outerRoadsSucesss = false;
@@ -97,10 +100,10 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
                     if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
                     placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid);
-                    buildings.splice(i, 1); 
-                    let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding);
+                    buildings.splice(i, 1);
+                    let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding, teamNumber);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
-                    if(curBuilding == TILE_TYPES.house1 || curBuilding == TILE_TYPES.house2) placePlayers(roads, teamNumber);
+                    if(curBuilding.name == TILE_TYPES.house1.name || curBuilding.name == TILE_TYPES.house2.name) placePlayers(roads, teamNumber);
                     outerRoadsSucesss = true;
                     break; // Move to next building after placing
                 }
@@ -119,13 +122,13 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
         maxx = Math.max(maxx, bx + building.lenX - 1);
         maxy = Math.max(maxy, by + building.lenY - 1);
     }
-    minx = Math.max(0, minx - 1);
-    miny = Math.max(0, miny - 1);
-    maxx = Math.min(gridWidth - 1, maxx + 1);
-    maxy = Math.min(gridHeight - 1, maxy + 1); //extend by 1 in all directions
+    minx = Math.max(0, minx - 10);
+    miny = Math.max(0, miny - 10);
+    maxx = Math.min(gridWidth - 1, maxx + 10);
+    maxy = Math.min(gridHeight - 1, maxy + 10); //extend by 1 in all directions
     // Store in the global townBounds dictionary under this team number
     townBounds[teamNumber] = { minx, miny, maxx, maxy };
-
+    buildingArray.push(placeSpawns(grid, navGrid));
     return grid;
 }
 
@@ -153,11 +156,72 @@ export function placeNeutralPlayers(count) {
       playerDict[`${x},${y}`] = 0;
       placed++;
     }
-  }
+}
+
+export function placeSpawns(grid, navGrid) {
+    const width = 4;
+    const height = 4;
+    const type = TILE_TYPES.spawn;
+
+    let tries = 0;
+    const maxTries = 500;
+
+    while (tries++ < maxTries) {
+        const x = Phaser.Math.Between(0, WORLD_DIMENSIONX - width - 1);
+        const y = Phaser.Math.Between(0, WORLD_DIMENSIONY - height - 1);
+
+        // Check if inside any town bounds
+        let insideTown = false;
+        for (const team in townBounds) {
+            const b = townBounds[team];
+            if (x + width > b.minx && x < b.maxx && y + height > b.miny && y < b.maxy) {
+                insideTown = true;
+                break;
+            }
+        }
+        if (insideTown) continue;
+
+        // Check if area is unblocked
+        let canPlace = true;
+        for (let dy = 0; dy < height; dy++) {
+            for (let dx = 0; dx < width; dx++) {
+                const gx = x + dx;
+                const gy = y + dy;
+
+                if (
+                    gx >= WORLD_DIMENSIONX || gy >= WORLD_DIMENSIONY ||
+                    Array.isArray(grid[gy][gx]) ||
+                    TILE_MAP(grid[gy][gx]) === "water" ||
+                    TILE_TYPES[TILE_MAP(grid[gy][gx])]?.block
+                ) {
+                    canPlace = false;
+                    break;
+                }
+            }
+            if (!canPlace) break;
+        }
+
+        if (!canPlace) continue;
+
+        // ✅ Place the 4x4 spawn block
+        for (let dy = 0; dy < height; dy++) {
+            for (let dx = 0; dx < width; dx++) {
+                grid[y + dy][x + dx] = [grid[y + dy][x + dx], TILE_TYPES.spawn.grid];
+                navGrid[y + dy][x + dx] = 1;
+            }
+        }
+
+        // Optional: return the top-left position of spawn
+        return [x, y, TILE_TYPES.spawn];
+    }
+
+    console.warn("Failed to place spawn outside of towns after", maxTries, "tries.");
+    return null;
+}
 
 // Function to place a building
 function placeBuilding(grid, x, y, building, navGrid) {
-    buildingArray.push([x,y,building])
+    buildingArray.push([x,y,building,null])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building
@@ -167,7 +231,7 @@ function placeBuilding(grid, x, y, building, navGrid) {
 }
 
 function placePlayers(roads, teamNumber){
-    for(let i = 0; i < 2; i++){
+    for(let i = 0; i < PLAYERS_PER_HOUSE; i++){
         // Convert set to array and select a random spot
         let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
         let [x, y] = spotStr.split(',').map(Number);
@@ -180,7 +244,7 @@ function placePlayers(roads, teamNumber){
     }
 }
 
-function expandRoads(grid, startX, startY, building) {
+function expandRoads(grid, startX, startY, building, teamNumber) {
     let roadValue = 35;
     let roadTiles = new Set();
     let surroundingTiles = new Set();
@@ -192,8 +256,9 @@ function expandRoads(grid, startX, startY, building) {
                 x >= 0 && y >= 0 && x < grid[0].length && y < grid.length &&
                 !(x >= startX && x < startX + building.lenX && y >= startY && y < startY + building.lenY) // Exclude the building itself
             ) {
-                if (TILE_MAP(grid[y][x]) != "water") { // Only replace empty tiles
+                if (!Array.isArray(grid[y][x]) && TILE_MAP(grid[y][x]) != "water") { // Only replace empty tiles
                     grid[y][x] = roadValue;
+                    townRoads[`${teamNumber}`].push([x,y])
                     roadTiles.add(`${x},${y}`);
                 }
             }
@@ -203,7 +268,7 @@ function expandRoads(grid, startX, startY, building) {
     // Step 2: Find surrounding tiles **outside the road area**
     for (let tile of roadTiles) {
         let [roadX, roadY] = tile.split(',').map(Number);
-        
+
         let possibleSurrounding = [
             [roadX - 1, roadY], [roadX + 1, roadY], // Left & Right
             [roadX, roadY - 1], [roadX, roadY + 1], // Above & Below

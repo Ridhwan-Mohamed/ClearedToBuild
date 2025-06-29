@@ -1,5 +1,5 @@
-import { CONTROL_STATES, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
-import { townBounds } from "./town";
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
+import { townBounds, townRoads } from "./town";
 import { Map } from "./map";
 import { Player } from "./Player";
 
@@ -18,6 +18,7 @@ export class Teams {
         buildingTileStates: [],
         blockBuildingStates: [],
         destroyStates: [],
+        fightingList: [],
         center: [0, 0],
   
         // per‐state buckets
@@ -43,16 +44,20 @@ export class Teams {
     }
   
     static addPlayerToState(teamNumber, player, state) {
-      const team = Teams.teamLists[teamNumber];
-      if (!team) return;
-      // remove from any prior state
-      for (const s in team.stateLists) {
-        team.stateLists[s].delete(player);
-      }
-      // add to new state
-      team.stateLists[state].add(player);
-      // also store on the sprite for convenience
-      player.state = state;
+        const team = Teams.teamLists[teamNumber];
+        if (!team) return;
+
+        // Already in desired state, no need to re-add
+        if (player.state === state) return;
+
+        // Remove from previous state if applicable
+        if (player.state !== undefined) {
+            Teams.removePlayerFromState(teamNumber, player, player.state);
+        }
+
+        // Add to new state
+        team.stateLists[state].add(player);
+        player.state = state;
     }
   
     static movePlayerState(player, newState) {
@@ -63,7 +68,29 @@ export class Teams {
     static removePlayerFromState(teamNumber, player, state) {
       const team = Teams.teamLists[teamNumber];
       if (!team) return;
+
       team.stateLists[state].delete(player);
+
+      // Clean up related task array if state is now empty
+      const stateIsEmpty = team.stateLists[state].size === 0;
+
+      if (stateIsEmpty && teamNumber) {
+        // Map state to task array key
+        const taskMapping = {
+          [CONTROL_STATES.DESTROY_MODE]: 'destroyStates',
+          [CONTROL_STATES.BUILD_MODE_B]: 'blockBuildingStates',
+          [CONTROL_STATES.BUILD_MODE_T]: 'buildingTileStates',
+          [CONTROL_STATES.FARM_MODE]: 'tileList',
+          [CONTROL_STATES.HARVEST_MODE]: 'cropList',
+          [CONTROL_STATES.SEED_MODE]: 'seedList',
+          // Add more mappings if needed
+        };
+
+        const taskKey = taskMapping[state];
+        if (taskKey && Array.isArray(team[taskKey])) {
+          team[taskKey] = [];
+        }
+      }
     }
   
     static getPlayersInState(teamNumber, state) {
@@ -98,7 +125,7 @@ export class Teams {
           if (
             nx >= 0 && nx < WORLD_DIMENSIONX &&
             ny >= 0 && ny < WORLD_DIMENSIONY &&
-            Map.grid[ny][nx] === 35
+            Map.grid[ny][nx] === 35 || Map.grid[ny][nx] === TILE_TYPES.crops.grid
           ) {
             return false; // adjacent to a road → not far
           }
@@ -110,73 +137,72 @@ export class Teams {
       
      
     static sendTroopToTown(troop) {
-        const teamNum = troop.body.team;
-        const team = Teams.teamLists[teamNum];
-        if (!team) {
-          console.warn(`No team found for troop with team ${teamNum}.`);
-          return;
-        }
-      
-        // Extract the saved center tile for this team
-        const [centerTileX, centerTileY] = team.center;
-      
-        // Convert that center tile into world‐pixel coordinates
-        const destX = centerTileX * SQUARESIZE + SQUARESIZE / 2;
-        const destY = centerTileY * SQUARESIZE + SQUARESIZE / 2;
-      
-        // Grab the troop’s current world‐pixel position
-        const startX = troop.body.x;
-        const startY = troop.body.y;
-      
-        // Ask the navmesh to build a path back to town center
-        const path = Map.navMesh.findPath(
-          { x: startX, y: startY },
-          { x: destX,   y: destY   }
-        );
-      
-        if (!path || path.length === 0) {
-          console.warn(
-            `Troop (team ${teamNum}) could not find a path to town center at (${centerTileX},${centerTileY}).`
-          );
-          return;
-        }
-      
-        this.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN)
-        // Hand off that path to Player.moveTo
-        Player.moveTo(troop, path);
+      const teamNum = troop.body.team;
+      const team = Teams.teamLists[teamNum];
+      if (!team) {
+        console.warn(`No team found for troop with team ${teamNum}.`);
+        return;
       }
+    
+      // Extract the saved center tile for this team
+      const roads = townRoads[`${troop.body.team}`];
+      if (!roads || roads.length === 0) return null;
+
+      const [x, y] = Phaser.Utils.Array.GetRandom(roads);      
+      const path = Player.pathTo(troop, x, y);
+      if(!path) return; 
+    
+      this.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN);
+      // Hand off that path to Player.moveTo
+      Player.moveTo(troop, path);
+    }
       
 
     static removeFromStateArray(teamNumber, arrayKey, element) {
-        const team = Teams.teamLists[teamNumber];
-        if (!team) return;
-      
-        const arr = team[arrayKey];
-        if (!Array.isArray(arr)) return;
-      
-        // Try direct identity or primitive match
-        let idx = arr.indexOf(element);
-      
-        // Fallback for object entries with x/y
-        if (idx === -1 && element && typeof element === 'object') {
-          if (Array.isArray(element) && element.length === 2) {
-            // e.g. seedList entries like [x, y]
-            idx = arr.findIndex(e => 
-              Array.isArray(e) && e[0] === element[0] && e[1] === element[1]
-            );
-          } else if ('x' in element && 'y' in element) {
-            // e.g. { x, y, ... } entries
-            idx = arr.findIndex(e => 
-              e && e.x === element.x && e.y === element.y
-            );
-          }
-        }
-      
-        if (idx !== -1) {
-          arr.splice(idx, 1);
+      const team = Teams.teamLists[teamNumber];
+      if (!team) return;
+    
+      const arr = team[arrayKey];
+      if (!Array.isArray(arr)) return;
+    
+      // Try direct identity or primitive match
+      let idx = arr.indexOf(element);
+    
+      // Fallback for object entries with x/y
+      if (idx === -1 && element && typeof element === 'object') {
+        if (Array.isArray(element) && element.length === 2) {
+          // e.g. seedList entries like [x, y]
+          idx = arr.findIndex(e => 
+            Array.isArray(e) && e[0] === element[0] && e[1] === element[1]
+          );
+        } else if ('x' in element && 'y' in element) {
+          // e.g. { x, y, ... } entries
+          idx = arr.findIndex(e => 
+            e && e.x === element.x && e.y === element.y
+          );
         }
       }
+    
+      if (idx !== -1) {
+        arr.splice(idx, 1);
+      }
+    }
 
+    static addToStateArrayIfNotExists(teamNumber, arrayKey, val) {
+      const team = Teams.teamLists[teamNumber];
+      if (!team) return;
+
+      const arr = team[arrayKey];
+      if (!Array.isArray(arr)) return;
+
+      const exists = arr.some(e =>
+          e.x === val.x && e.y === val.y && e.type === val.type
+      );
+
+      if (!exists) {
+          arr.push(val);
+      }
+    }
 
     static addFarmSpots(block, x, y) {
         const team = Teams.teamLists['1'];
@@ -194,7 +220,6 @@ export class Teams {
         // Always push a fresh entry
         spots.push({ block, x, y, assigned: 0 });
     }      
-      
 
     static addCropSpots(teamNumber, cropList){
         Teams.teamLists[`${teamNumber}`].cropList = cropList
@@ -207,7 +232,6 @@ export class Teams {
           list.push({ x, y, assigned: 0 });
         }
     }
-      
 
     static removeSeedSpot(teamNumber, val){
         Teams.teamLists[`${teamNumber}`].seedList = Teams.teamLists[`${teamNumber}`].seedList.filter(value => value !== val)
@@ -216,5 +240,9 @@ export class Teams {
     static addBuildSpots(teamNumber, buildList){
         Teams.teamLists[`${teamNumber}`].buildList.concat(buildList)
     }
-    
+
+    static addTroopsToFight(teamNumber, enemy){
+        Teams.teamLists[`${teamNumber}`].fightingList.push(enemy)
+    }
+
 }

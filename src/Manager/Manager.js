@@ -8,10 +8,10 @@ import { Teams } from "../Teams";
 export class Manager {
     static scene;
 
-    static assignTroopsToAction(troopList, taskList, state){
+    static assignTroopsToAction(troopList, taskList, state, force = false){
         if (taskList.length <= 0) return;
         for(let troop of troopList){
-            if(!Player.playerAvailible(troop)) continue;
+            if(!force && !Player.playerAvailible(troop)) continue;
             for(let task of taskList){
                 if(this.buildType(state)){
                     if(this.tooManyAssigned(task, state)) continue;
@@ -23,6 +23,7 @@ export class Manager {
                     }
                     if(approachTile){
                         troop.roam = false;
+                        if(force) Player.handleStateIntteruptStart(troop)
                         Teams.movePlayerState(troop, state)
                         if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type
                         troop.task = task;
@@ -30,8 +31,22 @@ export class Manager {
                         Player.moveTo(troop, approachTile.path)
                         break;
                     }
-                }else{
+                }else if (state == CONTROL_STATES.TRACK_TARGET){
+                    //add the logic for tracking the dipshit
+                    const path = Player.pathTo(troop, task.x, task.y, false); 
+                    if(path){
+                        troop.roam = false;
+                        troop.track = [null,null];
+                        troop.track[0] = task.body;
+                        troop.track[1] = {x: task.x, y: task.y};
+                        Player.moveTo(troop, path);
+                        if(force) Player.handleStateIntteruptStart(troop)
+                        Teams.movePlayerState(troop, state);
+                        break;
+                    }
+                }else {
                     if(this.tooManyAssigned(task, state)) continue;
+                    if(force) Player.handleStateIntteruptStart(troop)
                     Teams.movePlayerState(troop, state)
                     troop.roam = false;
                     task.assigned += 1;
@@ -68,10 +83,22 @@ export class Manager {
                 if(approachTile){
                     troop.roam = false;
                     Teams.movePlayerState(troop, state)
-                    if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type
+                    if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                     troop.task = task;
                     troop.task.assigned += 1;
                     Player.moveTo(troop, approachTile.path)
+                    return true;
+                }
+            }else if (state == CONTROL_STATES.TRACK_TARGET){
+                //add the logic for tracking the dipshit
+                const path = Player.pathTo(troop, task.x, task.y, false);
+                if(path){
+                    troop.roam = false;
+                    troop.track = [null,null];
+                    troop.track[0] = task.body;
+                    troop.track[1] = {x: task.x, y: task.y};
+                    Player.moveTo(troop, path);
+                    Teams.movePlayerState(troop, state);
                     return true;
                 }
             }else{
@@ -98,7 +125,23 @@ export class Manager {
         }
         if(!Player.playerAvailible(troop)) Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         troop.play('idle');
+        troop.task = null;
         return false;
+    }
+
+    static handleDurationCheck(troop){
+        if(troop.task && troop.task.hasOwnProperty('duration') && troop.task.duration <= 0){
+            switch (troop.state) {
+                case CONTROL_STATES.BUILD_MODE_B:
+                    Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B)
+                    break;
+                case CONTROL_STATES.DESTROY_MODE:
+                    Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.DESTROY_MODE)
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
     static buildType(state){
@@ -109,6 +152,6 @@ export class Manager {
 
     static tooManyAssigned(task, state){
         return (task.assigned > 0 && (state != CONTROL_STATES.BUILD_MODE_B && state != CONTROL_STATES.DESTROY_MODE)) || 
-            (task.assigned > 1 && (state == CONTROL_STATES.BUILD_MODE_B || state == CONTROL_STATES.DESTROY_MODE))
+            (task.assigned > 5 && (state == CONTROL_STATES.BUILD_MODE_B || state == CONTROL_STATES.DESTROY_MODE))
     }
 }

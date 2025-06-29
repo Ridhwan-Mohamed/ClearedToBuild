@@ -2,7 +2,7 @@ import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY,
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./Player";
-import { buildingArray, clearBuildingArray, turretTeams } from "./town";
+import { buildingArray, clearBuildingArray, spawnPoints, townRoads, turretTeams } from "./town";
 import { buildPolysFromGridMap, NavMesh } from "navmesh";
 import { Teams } from "./Teams";
 import { buildingManager } from "./buildingManager";
@@ -45,6 +45,7 @@ export class Map{
             for (let x = 0; x < this.grid[0].length; x++) {
                 let item = TILE_MAP(this.grid[y][x])
                 if(Array.isArray(this.grid[y][x])){
+                    item = TILE_MAP(this.grid[y][x][0])
                     let btmTile = TILE_MAP(this.grid[y][x][0])
                     let topTile = TILE_MAP(this.grid[y][x][1])
                     if(TILE_TYPES[btmTile].complex){
@@ -136,6 +137,7 @@ export class Map{
         placingItem.setPosition(x + Math.floor(item.lenX/2)*SQUARESIZE, y + Math.floor(item.lenY/2)*SQUARESIZE); // Finalize position
         x = Math.floor(x/SQUARESIZE)
         y = Math.floor(y/SQUARESIZE)
+        this.drawRoadAround(x,y,item)
         this.addBlockItem(x,y,item)
         const itemToPlace = placingItem
         itemToPlace.setInteractive();
@@ -169,6 +171,49 @@ export class Map{
             }
         });
     }
+
+    static drawRoadAround(x, y, item) {
+        const startX = x - 1;
+        const startY = y - 1;
+        const endX = x + item.lenX;
+        const endY = y + item.lenY;
+
+        const validEdgeTiles = [];
+
+        for (let row = startY; row <= endY; row++) {
+            for (let col = startX; col <= endX; col++) {
+                const isEdge =
+                    row === startY || row === endY ||
+                    col === startX || col === endX;
+
+                if (row < 0 || col < 0 ||
+                    row >= Map.grid.length || col >= Map.grid[0].length) continue;
+
+                const cell = Map.grid[row][col];
+                const mapped = TILE_MAP(Array.isArray(cell) ? cell[0] : cell);
+
+                if (!Array.isArray(cell) && !TILE_TYPES[mapped].block) {
+                    Map.grid[row][col] = TILE_TYPES.road.grid;
+                    Map.drawGridValue(col, row);
+
+                    if (isEdge) {
+                        townRoads['1'].push([col, row]);
+                        validEdgeTiles.push([col, row]);
+                    }
+                }
+            }
+        }
+
+        // 🚶‍♂️ Place 2 neutral players if house
+        const isHouse = item.value === 'house1' || item.value === 'house2';
+        if (isHouse && validEdgeTiles.length >= 2) {
+            const chosen = Phaser.Utils.Array.Shuffle(validEdgeTiles).slice(0, 2);
+            for (const [px, py] of chosen) {
+                Player.addPlayer(px, py, 1);
+            }
+        }
+    }
+
 
     static handleMapClick(x, y, item) {
         // If we're in placing mode, finalize the placement
@@ -288,9 +333,9 @@ export class Map{
 
     static drawBuildings(){
         for(let i = 0; i < buildingArray.length; i++){
-            this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2]);
+            this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
+            if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
-        clearBuildingArray();
     }
 
     static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
@@ -364,17 +409,17 @@ export class Map{
         let tileKey, type;
         if(index > -1) {tileKey = TILE_ARR[this.grid[y][x][index]];type = TILE_TYPES[TILE_MAP(this.grid[y][x][index])]}
         else {tileKey = TILE_ARR[this.grid[y][x]]; type = TILE_TYPES[TILE_MAP(this.grid[y][x])]}
-        if(type.block){
+        if(!type.spread){
             let barrierBlock;
             if(type.spriteSheet){
                 barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                barrierBlock.play(tileKey).setDepth(type.depth)
+                barrierBlock.play(tileKey).setDepth(type.depth);
             }
             else{
                 barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
                 barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth);
             }
-            this.barrier.add(barrierBlock);
+            if(type.block) this.barrier.add(barrierBlock);
             this.handleGridDelete(barrierBlock, type, x, y)
         }
         else{
@@ -591,7 +636,7 @@ export class Map{
         this.grid[y][x] = newItem.grid
     }
 
-    static handleLoadNonSpread(posX,posY,item){
+    static handleLoadNonSpread(posX,posY,item,index=-1){
         if(item.name == 'turret'){
             Turret.baseItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[0])
                 .setDepth(item.depth) 
@@ -639,6 +684,8 @@ export class Map{
             itemToPlace.sy = posY + Math.floor(item.lenY)
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
+            if(item == TILE_TYPES.spawn) spawnPoints.push([posX, posY, itemToPlace])
+            if(index>-1) buildingArray[index][3] = itemToPlace;
             itemToPlace.on('pointerover', () => {
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover

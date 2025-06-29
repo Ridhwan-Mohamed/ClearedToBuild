@@ -7,6 +7,11 @@ import { clearPlayerDict, generateTown, clearBuildingArray, placeNeutralPlayers 
 import { Map } from './map.js';
 import { Teams } from './Teams.js';
 
+const teamSetupArray = {
+    smallTeam: [TILE_TYPES.house1, TILE_TYPES.house2],
+    bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
+}
+
 class MainMenu extends Phaser.Scene {
     constructor() {
         super('MainMenu');
@@ -17,12 +22,20 @@ class MainMenu extends Phaser.Scene {
     }
 
     create() {
+        const origTextFactory = Phaser.GameObjects.GameObjectFactory.prototype.text;
+        // override it so that any call missing fontFamily will get your default:
+        Phaser.GameObjects.GameObjectFactory.prototype.text = function(x, y, content, style) {
+        style = style || {};
+        if (!style.fontFamily) {
+            style.fontFamily = 'Georgia, serif';
+        }
+        return origTextFactory.call(this, x, y, content, style);
+        };
+
         this.logo = this.add.image(0, 0, 'logo').setOrigin(0.5).setScale(1);
         this.startText = this.add.text(0, 0, 'START', {
             fontSize: '30px',
             fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 4
         }).setOrigin(0.5).setInteractive();
 
         this.tweens.add({
@@ -104,6 +117,7 @@ class MainMenu extends Phaser.Scene {
                         well: 0xADD8E6,
                         grassCrop: 0x33cc33,
                         grassBerry: 0x33cc33,
+                        spawn: 0x333333,
                     }[type] || 0xffffff;
         
                     const index = y * gridWidth + x;
@@ -127,7 +141,6 @@ class MainMenu extends Phaser.Scene {
                             rect.setStrokeStyle(); // Remove stroke
                             rect.setScale(1);
                         });
-        
                         // Click behavior → generateTown at x, y
                         rect.on('pointerdown', () => {
                             clearBuildingArray();
@@ -135,9 +148,7 @@ class MainMenu extends Phaser.Scene {
                             
                             const freshGrid = structuredClone(this.baseGridData);
                             const freshNavGrid = structuredClone(this.oldNavGrid)
-                            this.gridData = generateTown(freshGrid, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-                            ], 1, x, y, freshNavGrid);
-                            placeNeutralPlayers(1);
+                            this.gridData = generateTown(freshGrid, teamSetupArray.bigTeam, 1, x, y, freshNavGrid);
                             Map.navGrid = freshNavGrid
                             drawGrid(false);
 
@@ -204,26 +215,20 @@ class MainMenu extends Phaser.Scene {
             const ratio = this.sliderValue || 0.8;
             this.gridData = WaveCollapse.generateGrid(WORLD_DIMENSIONX, WORLD_DIMENSIONY, ratio);
             this.oldNavGrid = structuredClone(Map.navGrid)
-            // this.gridData = create2DArray(WORLD_DIMENSIONX,WORLD_DIMENSIONY);
             this.baseGridData = this.gridData
             Teams.newTeam(1) // your team
             Teams.newTeam(0) // idk???
             // this.gridData = generateTown(this.gridData, [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
             // ], 1)
-            this.gridData = generateTown(this.gridData, [TILE_TYPES.house2, TILE_TYPES.house2], 1)
-            // placeNeutralPlayers(1);
-            console.log(this.baseGridData == this.gridData)
-            // this.gridDatad = generateTown(this.gridData, [TILE_TYPES.turret,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1
-            // ], 2)
+            this.gridData = generateTown(this.gridData, teamSetupArray.smallTeam, 1)
             drawGrid(firstTime);
-            // this.scene.start('mapView', this.gridData);
         };
 
         generateGridData(true); // Initial draw with fade-in
     
         // Buttons
         const buttonStyle = {
-            fontSize: '20px',
+            fontSize: '16px',
             fill: '#ffffff',
             backgroundColor: '#333333',
             padding: { x: 10, y: 5 }
@@ -285,12 +290,12 @@ class MainMenu extends Phaser.Scene {
 
         // Labels
         this.add.text(sliderX, sliderY - 20, 'Water', {
-            fontSize: '14px',
+            fontSize: '12px',
             fill: '#ffffff'
         }).setOrigin(0.5);
 
         this.add.text(sliderX, sliderY + sliderHeight + 20, 'land', {
-            fontSize: '14px',
+            fontSize: '12px',
             fill: '#ffffff'
         }).setOrigin(0.5);
 

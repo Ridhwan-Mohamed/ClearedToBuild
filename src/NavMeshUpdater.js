@@ -113,8 +113,6 @@ export class NavMeshUpdater {
      * Block multiple tiles at once (for multi-tile walls).
      */
     blockTiles(tileCoords, addTiles = false) {
-        console.log(Teams.teamLists['1'].playerList[0]);
-        console.log(Teams.teamLists['1'].playerList[1]);
         const tileRects = tileCoords.map(({ x, y }) => ({
             x: x * SQUARESIZE,
             y: y * SQUARESIZE,
@@ -197,7 +195,7 @@ export class NavMeshUpdater {
     
         // Step 10: Add new polys
         for (const newPoly of newNavPolys) {
-            Map.navMesh.navPolygons.push(newPoly);
+            Map.navMesh.addPolygon(newPoly);
         }
 
         const allPolys = newNavPolys.concat(Array.from(neighborPolys));
@@ -330,19 +328,10 @@ export class NavMeshUpdater {
     }
 
     setupAddAndRemove(){
-        Map.navMesh.addPolygon = function (points) {
+        Map.navMesh.addPolygon = function (navPoly) {
             const id = this.navPolygons.length;
-        
-            // Create polygon from raw points
-            const polygon = new Polygon(points.map(p => new Vector2(p.x, p.y))); // assumes points are in {x,y} form
-        
-            // Create a new NavPoly from that polygon
-            const navPoly = new NavPoly(id, polygon);
-        
             // Add to navPolygons list
             this.navPolygons.push(navPoly);
-
-            return navPoly
         };
         
         Map.navMesh.removePolygon = function(poly) {

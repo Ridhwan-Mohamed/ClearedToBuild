@@ -8,12 +8,18 @@ import { Teams } from "./Teams";
 export class tillManager {
     static scene;
 
-    static assignTilesToTroops(troops, tileList) {
-        Manager.assignTroopsToAction(troops, tileList, CONTROL_STATES.FARM_MODE);
+    static assignTilesToTroops(teamNumber) {
+        const tillList = Teams.teamLists['1'].tileList;
+        const force = Player.selected.length? true : false;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        Manager.assignTroopsToAction(troops, tillList, CONTROL_STATES.FARM_MODE, force);
     }
 
-    static assignCropsToTroops(troops, cropList){
-        Manager.assignTroopsToAction(troops, cropList, CONTROL_STATES.HARVEST_MODE);
+    static assignCropsToTroops(teamNumber){
+        const cropList = Teams.teamLists['1'].cropList;
+        const force = Player.selected.length? true : false;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        Manager.assignTroopsToAction(troops, cropList, CONTROL_STATES.HARVEST_MODE, force);
     }
 
     static harvestCrop(sprite){
@@ -52,7 +58,7 @@ export class tillManager {
         if(!this.scene.checkSufficientSeeds(1)) return;
         sprite.timer = this.scene.time.delayedCall(1000, () => {
             if(!this.scene.checkSufficientSeeds(1)) return;
-            if(sprite.state != CONTROL_STATES.FARM_MODE) return;
+            if(!sprite.actice || sprite.state != CONTROL_STATES.FARM_MODE) return;
             Teams.removeFromStateArray(1, "tileList", task);
             if (sprite) {
                 this.scene.updateSeeds(-1);

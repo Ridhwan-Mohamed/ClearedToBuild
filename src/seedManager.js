@@ -9,9 +9,10 @@ export class seedManager {
     static scene;
 
     static assignSeedsToTroops(teamNumber) {
-        const troops = Teams.teamLists[`${teamNumber}`].playerList;
+        const force = Player.selected.length? true : false;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
         const seedList = Teams.teamLists[`${teamNumber}`].seedList;
-        Manager.assignTroopsToAction(troops, seedList, CONTROL_STATES.SEED_MODE);
+        Manager.assignTroopsToAction(troops, seedList, CONTROL_STATES.SEED_MODE, force);
     }
 
     static beginSeeding(sprite) {
@@ -24,7 +25,7 @@ export class seedManager {
         let y = task.y;
         sprite.play('action')
         sprite.timer = this.scene.time.delayedCall(1000, () => {
-            if(sprite.state != CONTROL_STATES.SEED_MODE){return;}
+            if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) return;
             Teams.removeFromStateArray(1, "seedList", task);
             if (sprite) {
                 this.onSeedingDone(sprite);

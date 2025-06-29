@@ -25,6 +25,7 @@ import {itemTab} from './itemTab.js';
 import { Player } from './Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
+import gun1 from '../assets/Players/gun1.png'
 import playerAction from '../assets/Players/playerAction.png'
 import { playerDict, setupTownBoundsToggle } from './town.js';
 import { tillManager } from './tillManager.js'
@@ -38,7 +39,11 @@ import { seedManager } from './seedManager.js';
 import char from '../assets/char.png'
 import charHurt from '../assets/charHurt.png'
 import berry from '../assets/berry.png'
+import spawn from '../assets/hole.png'
 import { Manager } from './Manager/Manager.js';
+import { recalculateDestroyTasksFromPoint } from './spawn.js';
+import { Clock } from './Clock.js';
+import { openPowerupScreen } from './Powerups.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -61,11 +66,14 @@ export class mapView extends Phaser.Scene {
         this.isBrushActive = false;  
         this.farmMode = false;
         this.harvestMode = false;
-        this.money = 1000; // Starting amount
-        this.seeds = 50;
+        this.money = 300; // Starting amount
+        this.seeds = 0;
         this.berries = 0;
         this.berryMode = false;
         this.seedGridMode = false;
+        this.selectingEnemies = false;
+        this.enemySelectStart = null;
+        this.enemySelectionRect = null;
     }
 
     init(data){
@@ -74,6 +82,7 @@ export class mapView extends Phaser.Scene {
 
     preload() {
         this.load.spritesheet('player', player, { frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('gun1', gun1, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('playerAction', playerAction, { frameWidth: 16, frameHeight: 16});
         this.load.image('barrier', gray);  // Load a barrier image
         this.load.image('worldMap', worldMap);
@@ -85,6 +94,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('monies', monies);
         this.load.image('seeds', seeds);
         this.load.image('berry', berry);
+        this.load.image('spawn', spawn);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
@@ -121,28 +131,26 @@ export class mapView extends Phaser.Scene {
         Map.grid = grid;
         console.log(Map.navGrid)
         setupTownBoundsToggle(this);
-        // Map.grid = [[1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
-        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],
-        // [1,1,1,1,1,1,1],[1,1,1,1,1,1,1],[1,1,1,1,1,1,1]]
         Map.initMap();
         Map.mapFromData(Map.grid);
         Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
         this.navMeshUpdater = new NavMeshUpdater(Map.navMesh, this);
-        this.navMeshUpdater.setupAddAndRemove()
-        buildingManager.NavMeshUpdater = this.navMeshUpdater
-        console.log(Map.navMesh)
+        this.navMeshUpdater.setupAddAndRemove();
+        buildingManager.NavMeshUpdater = this.navMeshUpdater;
+        console.log(Map.navMesh);
         Map.drawBuildings();
         Player.drawPlayers(playerDict);
-        console.log(Teams.teamLists[1].stateLists)
+        console.log(Teams.teamLists[1].stateLists);
         this.cursors = this.input.keyboard.createCursorKeys();
-
+        this.clock = new Clock(this);
+        recalculateDestroyTasksFromPoint();
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
         // this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
         this.physics.add.collider(
             Player.characters,
             Projectile.projectileGroup,
-            Player.handleCollision,
+            Projectile.handleCollision,
             (player, bullet) => bullet.team !== player.body.team, // Only collide if teams are different
             this
         );
@@ -198,12 +206,9 @@ export class mapView extends Phaser.Scene {
                 Map.placingItem = null;
             }
         });
-
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
-        this.fKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
-        
         this.input.keyboard.on('keydown-F', () => {
             this.farmMode = !this.farmMode;
         });
@@ -212,6 +217,12 @@ export class mapView extends Phaser.Scene {
         });
         this.input.keyboard.on('keydown-V', () => {
             this.seedGridMode = !this.seedGridMode;
+        });
+        this.input.keyboard.on('keydown-K', () => {
+            this.selectingEnemies = true;
+            this.enemySelectStart = this.input.activePointer.positionToCamera(this.cameras.main).clone();
+            if (this.enemySelectionRect) this.enemySelectionRect.destroy();
+            this.enemySelectionRect = this.add.graphics().setDepth(1000);
         });
         // Add a mouse click listener
         this.input.on('pointerdown', (pointer) => {
@@ -287,10 +298,10 @@ export class mapView extends Phaser.Scene {
 
                 // Add the position text
                 currentText = this.add.text(
-                    this.cameras.main.width - 120,  // Relative to camera
-                    10,                            // Slight padding from top
+                    this.cameras.main.width - 150,  // Relative to camera
+                    50,                            // Slight padding from top
                     `(${posX}, ${posY})`,
-                    { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+                    { fontSize: '14px', fill: '#ffffff' }
                 )
                 .setScrollFactor(0)                // Stick to camera
                 .setDepth(UIDEPTH);
@@ -298,9 +309,9 @@ export class mapView extends Phaser.Scene {
                 // Add the selection count text
                 selectionCountText = this.add.text(
                     this.cameras.main.width - 150, // Relative to camera
-                    30,                            // Slight padding below the position text
+                    65,                            // Slight padding below the position text
                     `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY][posX]}\ngrid: ${Map.grid[posY][posX]}`, 
-                    { fontSize: '16px', fill: '#ffffff', stroke: '#000000', strokeThickness: 3 }
+                    { fontSize: '14px', fill: '#ffffff' }
                 )
                 .setScrollFactor(0)                // Stick to camera
                 .setDepth(UIDEPTH);
@@ -379,6 +390,7 @@ export class mapView extends Phaser.Scene {
             this.oldMapCenter = [centerChunkX, centerChunkY]; // Update old center
             Map.reDraw(); // Trigger a redraw
         }
+
     }
     
     onPointerMove(pointer) {
@@ -417,7 +429,18 @@ export class mapView extends Phaser.Scene {
 
     onPointerUp() {
         this.graphics.clear();
-        if(this.farmMode){
+        if (this.selectingEnemies) {
+            const end = this.input.activePointer.positionToCamera(this.cameras.main).clone();
+            this.processEnemySelection(this.enemySelectStart, end);
+            this.selectingEnemies = false;
+
+            if (this.enemySelectionRect) {
+                this.enemySelectionRect.clear();
+                this.enemySelectionRect.destroy();
+                this.enemySelectionRect = null;
+            }
+        }
+        else if(this.farmMode){
             this.getSelectedCells(1)
             this.farmMode = false;
         }
@@ -436,7 +459,7 @@ export class mapView extends Phaser.Scene {
             if(items.price && !this.checkSufficientFunds(items.price*this.brushTiles.length)) return;
             buildingManager.createBuildTileStateArray(this.brushTiles, 1);
             this.brushTiles = [];
-            buildingManager.assingTroopsToBuildTile(1, items);
+            buildingManager.assingTroopsToBuildTile(1);
         }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
@@ -490,8 +513,7 @@ export class mapView extends Phaser.Scene {
                     }
                 }
             }
-            const allTroops = Teams.teamLists['1'].playerList;
-            tillManager.assignTilesToTroops(allTroops,tillList)
+            tillManager.assignTilesToTroops(1)
         }
         else if(mode == 2){
             let cropList = Teams.teamLists['1'].cropList;
@@ -514,8 +536,7 @@ export class mapView extends Phaser.Scene {
                     }
                 }
             }
-            const allTroops = Teams.teamLists['1'].playerList;
-            tillManager.assignCropsToTroops(allTroops,Teams.teamLists['1'].cropList)
+            tillManager.assignCropsToTroops(1)
         }
         else if(mode == 3){
             for (let y = minY; y <= maxY; y++) {
@@ -545,10 +566,10 @@ export class mapView extends Phaser.Scene {
             .setDepth(UIDEPTH);
 
         this.moneyText = this.add.text(topCenterX + 5, 18, `$${this.money}`, {
-            fontSize: '20px',
+            fontSize: '18px',
             fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
+            stroke: "#000000",
+            strokeThickness: 2,
         })
         .setScrollFactor(0)
         .setDepth(UIDEPTH);
@@ -561,10 +582,10 @@ export class mapView extends Phaser.Scene {
 
         // seeds text
         this.seedsText = this.add.text(topCenterX - 65, 18, `${this.seeds}`, {
-            fontSize: '20px',
+            fontSize: '18px',
             fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
+            stroke: "#000000",
+            strokeThickness: 2,
         })
         .setScrollFactor(0)
         .setDepth(UIDEPTH);
@@ -576,10 +597,10 @@ export class mapView extends Phaser.Scene {
             .setDepth(UIDEPTH);
     
         this.berryText = this.add.text(topCenterX - 125, 18, `${this.berries}`, {
-            fontSize: '20px',
+            fontSize: '18px',
             fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 3
+            stroke: "#000000",
+            strokeThickness: 2,
         })
             .setScrollFactor(0)
             .setDepth(UIDEPTH);
@@ -609,10 +630,8 @@ export class mapView extends Phaser.Scene {
 
         // Add a button on the bottom bar
         const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
-            fontSize: '24px',
-            fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 2
+            fontSize: '22px',
+            fill: '#ffffff'
         })
             .setInteractive()
             .on('pointerdown', () => {
@@ -634,14 +653,14 @@ export class mapView extends Phaser.Scene {
             .setDepth(UIDEPTH - 1);
     
         // Add the bottom bar
-        const bottomBar = this.add.rectangle(0, camera.height - 50, camera.width, 50, 0x000000, 1) // Opaque black
+        const bottomBar = this.add.rectangle(0, camera.height - 50, camera.width, 50, 0x808080, 0.5) // Opaque black
             .setOrigin(0, 0)
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH - 1);
             
     
         // Add "Layout" button
-        const itemTab = this.add.text(10, camera.height - 40, 'Layout', { fontSize: '24px', fill: '#ffffff' })
+        const itemTab = this.add.text(10, camera.height - 40, 'Layout', { fontSize: '22px', fill: '#ffffff' })
             .setInteractive()
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH)
@@ -655,10 +674,8 @@ export class mapView extends Phaser.Scene {
 
         // Add "Farm" Button on Bottom Right
         const farmButton = this.add.text(screenW - 100, camera.height - 40, 'Farm', {
-            fontSize: '24px',
+            fontSize: '22px',
             fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 2
         })
         .setInteractive()
         .setScrollFactor(0)
@@ -668,7 +685,7 @@ export class mapView extends Phaser.Scene {
         });
     
         // Add "Delete/Place" button
-        this.breakItems = this.add.text(120, camera.height - 40, 'Delete', { fontSize: '24px', fill: '#ffffff' })
+        this.breakItems = this.add.text(120, camera.height - 40, 'Delete', { fontSize: '22px', fill: '#ffffff' })
             .setInteractive()
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH)
@@ -715,11 +732,9 @@ export class mapView extends Phaser.Scene {
 
         // Add Save Text
         const saveText = this.add.text(buttonMargin + buttonWidth / 2, buttonMargin + buttonHeight / 2, 'Save', {
-            fontSize: '16px',
+            fontSize: '14px',
             fill: '#ffffff',
             align: 'center',
-            strokeThickness: 3,
-            stroke: '#000000'
         })
             .setOrigin(0.5, 0.5)
             .setScrollFactor(0)
@@ -748,11 +763,9 @@ export class mapView extends Phaser.Scene {
 
         // Add Load Text
         const loadText = this.add.text(buttonMargin + buttonWidth * 1.5 + buttonMargin, buttonMargin + buttonHeight / 2, 'Load', {
-            fontSize: '16px',
+            fontSize: '14px',
             fill: '#ffffff',
-            align: 'center',
-            strokeThickness: 3,
-            stroke: '#000000'
+            align: 'center'
         })
             .setOrigin(0.5, 0.5)
             .setScrollFactor(0)
@@ -809,10 +822,8 @@ export class mapView extends Phaser.Scene {
             this.moneyText.y,
             `${sign}$${Math.abs(amountDelta)}`,
             {
-                fontSize: '20px',
+                fontSize: '18px',
                 fill: color,
-                stroke: '#000000',
-                strokeThickness: 2
             }
         ).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
     
@@ -847,10 +858,8 @@ export class mapView extends Phaser.Scene {
             this.seedsText.y,
             amountDelta > 0 ? `+${amountDelta}` : `${amountDelta}`,
             {
-                fontSize: '20px',
+                fontSize: '18px',
                 fill: color,
-                stroke: '#000000',
-                strokeThickness: 2
             }
         )
         .setOrigin(0, 0)
@@ -884,10 +893,8 @@ export class mapView extends Phaser.Scene {
             this.berryText.y,
             amountDelta > 0 ? `+${amountDelta}` : `${amountDelta}`,
             {
-                fontSize: '20px',
+                fontSize: '18px',
                 fill: color,
-                stroke: '#000000',
-                strokeThickness: 2
             }
         )
         .setOrigin(0, 0)
@@ -922,6 +929,7 @@ export class mapView extends Phaser.Scene {
     update() {
         Player.update();
         Turret.update();
+        this.clock.update();
         this.handleKeyboardCameraMovement();
     }
 
@@ -972,6 +980,31 @@ export class mapView extends Phaser.Scene {
         }
         return berryAmnt<=this.berries;
     }
+
+    processEnemySelection(start, end) {
+        const team1 = Teams.teamLists['1'];
+        if (!team1) return;
+
+        const x1 = Math.min(start.x, end.x);
+        const y1 = Math.min(start.y, end.y);
+        const x2 = Math.max(start.x, end.x);
+        const y2 = Math.max(start.y, end.y);
+
+        const enemies = Teams.teamLists['0'].playerList.filter(enemy => {
+            return enemy.x >= x1 && enemy.x <= x2 &&
+                enemy.y >= y1 && enemy.y <= y2 &&
+                enemy.active;
+        });
+
+        for (const enemy of enemies) {
+            if (!team1.fightingList.includes(enemy)) {
+                Teams.addTroopsToFight('1', enemy);
+            }
+        }
+
+        fightManager.sendToAttack()
+    }
+
 
 }
 

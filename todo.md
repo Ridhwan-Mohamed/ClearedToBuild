@@ -1,29 +1,43 @@
 Advancing TODOS
-🔁 Routines
-  🌾 Routine Farming☑️☑️☑️
-    👥 After selecting some users, clicking a farm spot makes them routinely check and farm it☑️
-    📋 Set up routine states☑️
-    📍 add farm spots to TeamFarmArray☑️
-    🔄 Loop through array of values and check for new fully grown crops (work in parallel)☑️
-  🏡 GoBackToTown☑️☑️☑️
-    ✅ On 📋 task complete, check if you’re already in town; if not:☑️
-    🗺️ Compute a path back to the town center☑️
-    🚶 Follow that path until you enter town bounds (and land on a 🚧 road tile)☑️
-  🌱 Better Seeding☑️☑️☑️
-    🔎 Check within a range, get all seeds in that range, then return to town on finish☑️
-    📋 Set up routine states☑️
-    🌐 Search for seeds in a region☑️
-    🧺 Build an array of those seed locations☑️
-    🎯 Collect those seeds☑️
-    🏘️ On completion, return to town and wander again☑️
-  QOL☑️
-    on click players should not be moved, just their detail window popped up☑️
+✨ QOL
+    🔤 Fonts ☑️
+Building
+    only allow building in team zone
+Back_To_Town + roam ☑️
+    farm spots are valid walk areas ☑️
+    only go back to town if told to, stay put (or roam) otherwise ☑️
+enemy ai
+    - attack infra ☑️
+    - attack players bug needs fixing 
+base 
+    - house makes players ☑️
+    - select for tasks ☑️
+    - empty state when state empty ☑️
+fighting
+     - on click enemy with selected go send them to fight ☑️
+     - calculate all possible sites to attack for holes ☑️
+     - large group fighting enemy select thingy ☑️ 
+     - enemy routine (check what can attack after one attack) ☑️
+     - your team should check if any targets are to attack after complete attack ☑️
+Guns
+    - make animations ☑️
+    - make shots lead ☑️
+    - make shots hurt and kill ☑️
+    - edit bullets look 
+    - make player move away from target
+Draw
+    - starting draw of population, buildings, players
+    - day end level screen with 3 rogue like features and store like mechanics
+day and night cycles
+    - add clock ☑️
+    - add rectangle of darkness ☑️
+    - spawn and send at night hours ☑️
+base 
+    - for shared tasks, stop in follow path if no longer active ☑️
+goals
+    - build ship to leave 
+----------------------------------------------------------------------------------------------
+to finish MVP:
 
-🎯 Next Sprint - Investigate navmesh error, evade
-🎯 1-2 month   - UI itemtab and mainScreen, water stations, Villages, fighting, Map expansion
-🎯 Month+      - Water meshes, boats, trade, intelligent villages/communities/players, better saves
-------------------------------------------------------------------------------------------------
-Refining ToDos
-🧭 navMeshes 
-    - bugs every once in a while when i build a tile
-    - STILL JANK 😭😭😭
+goals
+    - build ship to leave

@@ -23,6 +23,7 @@ export const CONTROL_STATES = {
     SEED_MODE: 10,
     R_FARM_MODE: 11,
     BACK_TO_TOWN: 12,
+    TRACK_TARGET: 13,
 }
 export var WORLD_DIMENSIONX = 70;
 export var WORLD_DIMENSIONY = 70;
@@ -31,7 +32,7 @@ export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
 export const SQUARESIZE = 16;
 export const CHUNK_SIZE = 60
-export const EDGE_RATIO = CHUNK_SIZE/2
+export const EDGE_RATIO = CHUNK_SIZE/8
 export const TILE_TYPES = {
     grass : {
         name: "grass",
@@ -224,6 +225,18 @@ export const TILE_TYPES = {
         grid: 38,
         depth: FLOORDEPTH,
         interactable: true
+    },
+    spawn: {
+        name: "spawn",
+        value: "spawn",
+        spriteSheet: false,
+        spread: false,
+        block: false,
+        complex: false,
+        grid: 39,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4
     }
 };
 
@@ -266,7 +279,8 @@ export const TILE_ARR = [
     'road',
     'crops',
     'grassCrop',
-    'grassBerry'
+    'grassBerry',
+    'spawn'
 ];
 
 export function TILE_MAP(val){
@@ -284,6 +298,7 @@ export function TILE_MAP(val){
     else if(val == 36){return "crops"}
     else if(val == 37){return "grassCrop"}
     else if(val == 38){return "grassBerry"}
+    else if(val == 39){return "spawn"}
     else{return}
 }
 

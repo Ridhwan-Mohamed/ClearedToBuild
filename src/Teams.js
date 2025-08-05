@@ -1,7 +1,7 @@
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
+import { CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
 import { townBounds, townRoads } from "./town";
 import { Map } from "./map";
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 
 
 export class Teams {
@@ -10,17 +10,30 @@ export class Teams {
     static newTeam(teamNumber) {
       const list = {
         playerList: [],
+        farmerList: [],
+        foragerList: [],
+        firemanList: [],
+        fighterList: [],
+        builderList: [],
+        houseList: [],
         TeamFarmSpots: [],
         tileList: [],
         seedList: [],
         seedStates: {},
         cropList: [],
+        crops: [],
+        wateringList: [],
         buildingTileStates: [],
         blockBuildingStates: [],
         destroyStates: [],
         fightingList: [],
         center: [0, 0],
-  
+        ovenList: [],
+        storageList: [],
+        ovenPickupItems: [],
+        ovenDeliveryItems: [],
+        storagePickupItems: [],
+        storageDeliveryItems: [],
         // per‐state buckets
         stateLists: {}
       };
@@ -42,19 +55,16 @@ export class Teams {
       // put new player into USER_MODE by default
       Teams.addPlayerToState(teamNumber, player, CONTROL_STATES.TRACK_MODE);
     }
-  
+
     static addPlayerToState(teamNumber, player, state) {
         const team = Teams.teamLists[teamNumber];
         if (!team) return;
-
         // Already in desired state, no need to re-add
         if (player.state === state) return;
-
         // Remove from previous state if applicable
         if (player.state !== undefined) {
             Teams.removePlayerFromState(teamNumber, player, player.state);
         }
-
         // Add to new state
         team.stateLists[state].add(player);
         player.state = state;
@@ -82,7 +92,7 @@ export class Teams {
           [CONTROL_STATES.BUILD_MODE_T]: 'buildingTileStates',
           [CONTROL_STATES.FARM_MODE]: 'tileList',
           [CONTROL_STATES.HARVEST_MODE]: 'cropList',
-          [CONTROL_STATES.SEED_MODE]: 'seedList',
+          // [CONTROL_STATES.SEED_MODE]: 'seedList',
           // Add more mappings if needed
         };
 
@@ -245,4 +255,106 @@ export class Teams {
         Teams.teamLists[`${teamNumber}`].fightingList.push(enemy)
     }
 
+    static getStorageWithCapacity(teamNumber, itemType, amount) {
+        const team = Teams.teamLists[teamNumber];
+        if (!team || !team.storageList) return null;
+
+        for (const storage of team.storageList) {
+            if (storage.canAcceptItem(itemType, amount)) {
+                return storage;
+            }
+        }
+
+        return null;
+    }
+    
+    static getOvens(teamNumber) {
+      const team = Teams.teamLists[teamNumber];
+      return team ? team.ovenList : [];
+    }
+
+    static resetDailyWatering(teamNumber) {
+        const cropList = Teams.teamLists[teamNumber]?.crops;
+        if (!cropList) return;
+
+        // Reset watering flags and build new watering list
+        const wateringList = [];
+
+        for (let crop of cropList) {
+            crop.dailyWatered = false;
+
+            if (crop.growthStage < MAX_CROP_GROWTH_STAGE) {
+                wateringList.push({
+                    x: crop.x,
+                    y: crop.y,
+                    assigned: 0,
+                    sprite: crop.sprite
+                });
+            }
+        }
+
+        Teams.teamLists[teamNumber].wateringList = wateringList;
+    }
+
+    static getCropsNeedingWater(teamNumber) {
+        return Teams.teamLists[teamNumber]?.wateringList || [];
+    }
+
+    static markCropWatered(team, x, y) {
+        const cropList = Teams.teamLists[team]?.crops;
+        const wateringList = Teams.teamLists[team]?.wateringList;
+
+        if (!cropList || !wateringList) return;
+
+        for (let crop of cropList) {
+            if (crop.x === x && crop.y === y && crop.growthStage < MAX_CROP_GROWTH_STAGE) {
+                crop.dailyWatered = true;
+                break;
+            }
+        }
+
+        // Remove from wateringList (if still present)
+        const i = wateringList.findIndex(task => task.x === x && task.y === y);
+        if (i !== -1) wateringList.splice(i, 1);
+    }
+
+    static getCropAt(x, y, team) {
+      const cropList = Teams.teamLists[team]?.crops;
+      if (!cropList) return null;
+
+      return cropList.find(crop => crop.x === x && crop.y === y) || null;
+    }
+
+    static resetCrop(crop) {
+      if (!crop) return;
+
+      crop.dailyWatered = false;
+      crop.growthStage = 0;
+      this.setCropForWatering(crop);
+      // Reset the sprite frame and animation
+      crop.sprite.setFrame(0);
+    }
+
+    static setCropForWatering(crop){
+      const wateringList = this.teamLists['1'].wateringList;
+      wateringList.push({
+          x: crop.x,
+          y: crop.y,
+          assigned: 0,
+          sprite: crop.sprite
+      });
+    } 
+
+    static growWateredCrops(teamNumber) {
+        const crops = this.teamLists[teamNumber].crops;
+        for (let crop of crops) {
+            if (crop.dailyWatered && crop.sprite && crop.sprite.active) {
+                crop.growthStage = Math.min(crop.growthStage + 1, MAX_CROP_GROWTH_STAGE);
+                crop.sprite.setFrame(crop.growthStage);
+                if (crop.growthStage === MAX_CROP_GROWTH_STAGE) {
+                    this.addFarmSpots(crop.sprite, crop.x, crop.y); // Ready to harvest
+                }
+            }
+        }
+    }
 }

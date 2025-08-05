@@ -1,14 +1,13 @@
 import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./Turret";
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 import { buildingArray, clearBuildingArray, spawnPoints, townRoads, turretTeams } from "./town";
-import { buildPolysFromGridMap, NavMesh } from "navmesh";
 import { Teams } from "./Teams";
-import { buildingManager } from "./buildingManager";
-import { seedManager } from "./seedManager";
-import { tillManager } from "./tillManager";
-import { Manager } from "./Manager/Manager";
+import { buildingManager } from "./Manager/buildingManager";
+import { seedManager } from "./Manager/seedManager";
+import { House } from "./buildings/House";
+import { StorageBuilding } from "./buildings/Storage";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -205,13 +204,13 @@ export class Map{
         }
 
         // 🚶‍♂️ Place 2 neutral players if house
-        const isHouse = item.value === 'house1' || item.value === 'house2';
-        if (isHouse && validEdgeTiles.length >= 2) {
-            const chosen = Phaser.Utils.Array.Shuffle(validEdgeTiles).slice(0, 2);
-            for (const [px, py] of chosen) {
-                Player.addPlayer(px, py, 1);
-            }
-        }
+        // const isHouse = item.value === 'house1' || item.value === 'house2';
+        // if (isHouse && validEdgeTiles.length >= 2) {
+        //     const chosen = Phaser.Utils.Array.Shuffle(validEdgeTiles).slice(0, 2);
+        //     for (const [px, py] of chosen) {
+        //         Player.addPlayer(px, py, 1);
+        //     }
+        // }
     }
 
 
@@ -223,6 +222,17 @@ export class Map{
         else {
             this.placeItem(x,y,item)
         }
+    }
+
+    static checkBlockPositionGen(posX, posY, lenX, lenY){
+        for (let y = posY; y < posY + lenY; y++) {
+            for (let x = posX; x < posX + lenX; x++) {
+                if(TILE_TYPES[TILE_MAP(this.grid[y][x])].block){
+                    return true;
+                }
+            }
+        }
+        return false;
     }
     
     static checkBlockPosition(posX, posY, lenX, lenY, turret=0){
@@ -333,7 +343,10 @@ export class Map{
 
     static drawBuildings(){
         for(let i = 0; i < buildingArray.length; i++){
-            this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
+            console.log(buildingArray[i][2])
+            if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],1);
+            else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],1);
+            else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
     }
@@ -426,13 +439,12 @@ export class Map{
             let block;
             if(type.spriteSheet){
                 block = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                if(type == TILE_TYPES.crops){
-                    block.on(`animationcomplete-${tileKey}`, () => {
-                        Teams.addFarmSpots(block, x, y)
-                        Manager.assignTroopsToAction(Teams.teamLists['1'].playerList, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
-                    });
+                if (tileKey === 'crops') {
+                    block.setFrame(0); // Start at frame 0 (or first stage)
+                } else {
+                    block.play(tileKey);
                 }
-                block.play(tileKey).setDepth(type.depth)
+                block.setDepth(type.depth);
             }
             else{
                 block = this.scene.add.image(
@@ -450,6 +462,19 @@ export class Map{
         if (type.name === "crops") {
             const key = `${x},${y}`;
             Map.cropDict[key] = block;
+            Teams.teamLists['1'].crops.push({
+                sprite: block,
+                x: x,
+                y: y,
+                dailyWatered: false,
+                growthStage: 0
+            });
+            Teams.teamLists['1'].wateringList.push({
+                x: x,
+                y: y,
+                assigned: 0,
+                sprite: block
+            });
             // track this crop separately
             if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
                 this.blocks[y*WORLD_DIMENSIONX+x].destroy()
@@ -479,7 +504,7 @@ export class Map{
                 this.blocks[y*WORLD_DIMENSIONX+x][0]?.destroy();
                 this.blocks[y*WORLD_DIMENSIONX+x][0] = block;
                 if(this.blocks[y*WORLD_DIMENSIONX+x][1].body){
-                    Map.navGrid[y][x] = 0
+                    Map.navGrid[y][x] = 0;
                 }
             }
         }

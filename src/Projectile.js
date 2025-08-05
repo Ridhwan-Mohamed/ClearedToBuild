@@ -3,7 +3,7 @@ import { CONTROL_STATES, SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
 import { Map } from "./map";
 import { weapons } from "./weapons";
 import { fightManager } from "./fightManager";
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 import { Teams } from "./Teams";
 
 export class Projectile {

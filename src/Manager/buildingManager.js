@@ -1,11 +1,13 @@
-import { Player } from "./Player"
-import { Teams } from "./Teams"
-import { Map } from "./map"
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "./constants"
-import { NavMesh } from "./lib/navmesh/navmesh"
-import { buildPolysFromGridMap } from "./lib/navmesh/map-parsers/build-polys-from-grid-map"
-import { Manager } from "./Manager/Manager"
-import { buildingArray } from "./town"
+import { Player } from "../players/Player"
+import { Teams } from "../Teams"
+import { Map } from "../map"
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
+import { Manager } from "./Manager"
+import { buildingArray } from "../town"
+import { ClayOven } from "../buildings/ClayOven"
+import { StorageBuilding } from "../buildings/Storage"
+import { House } from "../buildings/House"
+import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 export class buildingManager{
 
     static NavMeshUpdater;
@@ -31,7 +33,7 @@ export class buildingManager{
     static assingTroopsToBuildTile(teamNumber){
         let buildList = Teams.teamLists[`${teamNumber}`].buildingTileStates
         const force = Player.selected.length? true : false;
-        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].builderList ;
         Manager.assignTroopsToAction(troops, buildList, CONTROL_STATES.BUILD_MODE_T, force);
     }
 
@@ -109,13 +111,17 @@ export class buildingManager{
 
     static assignTroopToBuildBlock(teamNumber){
         const force = Player.selected.length? true : false;
-        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].builderList;
         let blockList = Teams.teamLists[`${teamNumber}`].blockBuildingStates
         Manager.assignTroopsToAction(troops, blockList, CONTROL_STATES.BUILD_MODE_B, force);
+        if(Map.isPlacing){
+            Map.isPlacing = false; // Exit placing mode
+            Map.placingItem.destroy(); // Clear placing item
+            Map.placingItem = null;
+        }
     }
 
     static findBuildApproachBlock(x, y, type, troop) {
-        const troopPos = new Phaser.Math.Vector2(troop.x, troop.y);
         const candidates = [];
     
         // Compute top-left corner of the block
@@ -173,7 +179,7 @@ export class buildingManager{
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
             let teamNumber = sprite.body.team;
             Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
-            sprite.play('idle');
+            sprite.play(sprite.idle);
             return;
         }
 
@@ -187,7 +193,7 @@ export class buildingManager{
                     Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
                     sprite.task = null;
                     sprite.timer = null; 
-                    sprite.play('idle');
+                    sprite.play(sprite.idle);
                     Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
                     return;
                 }
@@ -201,17 +207,26 @@ export class buildingManager{
                     sprite.direction = dy > 0 ? 'down' : 'up';
                 }
                 
-                sprite.play('action');
+                sprite.play(sprite.action);
                 task.duration -= 50;
     
                 if (task.duration <= 0) {
-                    if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;
-                    buildingManager.scene.updateMoney(-1*task.type.price);
+                    // if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;
+                    // buildingManager.scene.updateMoney(-1*task.type.price);
                     Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
-                    sprite.play('idle');
+                    sprite.play(sprite.idle);
                     sprite.timer = null;
                     console.log("Done building.");
-                    Map.handleMapClick(task.x*SQUARESIZE, task.y*SQUARESIZE, task.type)
+                    const cost = task.type.cost;
+                    if (cost && !this.hasRequiredMaterials(cost, teamNumber)) {
+                        console.log("Not enough resources to build!");
+                        sprite.play(sprite.idle);
+                        sprite.timer = null;
+                        sprite.task = null;
+                        return;
+                    }
+                    this.consumeRequiredMaterials(cost, teamNumber);
+                    this.handlePlacement(task);
                     let blockTiles = []
                     let startY = task.y
                     let startX = task.x
@@ -234,10 +249,22 @@ export class buildingManager{
         }
     }
 
+    static handlePlacement(task){
+        if(task.type == TILE_TYPES.clayOven){
+            new ClayOven(task.x, task.y, 1);
+        }else if(task.type == TILE_TYPES.storage){
+            new StorageBuilding(task.x, task.y, 1);
+        }else if(task.type == TILE_TYPES.house1 || task.type == TILE_TYPES.house2){
+            new House(task.x, task.y, task.type, 1);
+        }else{
+            Map.handleMapClick(task.x*SQUARESIZE, task.y*SQUARESIZE, task.type);
+        }
+    }
+
     static assingTroopsToDestroy(teamNumber){
         let destroyList = Teams.teamLists[`${teamNumber}`].destroyStates;
         const force = Player.selected.length? true : false;
-        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].builderList;
         Manager.assignTroopsToAction(troops, destroyList, CONTROL_STATES.DESTROY_MODE, force);
     }
 
@@ -252,7 +279,7 @@ export class buildingManager{
             sprite.timer = null; 
             let teamNumber = sprite.body.team;
             Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
-            sprite.play('idle');
+            sprite.play(sprite.idle);
             return;
         }
     
@@ -272,13 +299,13 @@ export class buildingManager{
                 }
 
                 task.duration -= 50;
-                sprite.play('action');
+                sprite.play(sprite.action);
                 
                 if (task.duration <= 0) {
                     sprite.timer.remove(false);
                     sprite.timer = null;
                     console.log("Done Destroying.");
-                    sprite.play('idle')
+                    sprite.play(sprite.idle)
                     task.value.destroy()
                     let blockTiles = []
                     for(let i =  task.y; i < task.type.lenY + task.y; i++){
@@ -305,15 +332,30 @@ export class buildingManager{
     }
 
     static removeBuildingFromArray(x, y) {
-    for (let i = 0; i < buildingArray.length; i++) {
-        const [bx, by] = buildingArray[i];
-        if (bx === x && by === y) {
-            console.log(`REMOVED BUILDING at ${bx},${by}`)
-            buildingArray.splice(i, 1);
-            return true;
+        for (let i = 0; i < buildingArray.length; i++) {
+            const [bx, by] = buildingArray[i];
+            if (bx === x && by === y) {
+                console.log(`REMOVED BUILDING at ${bx},${by}`)
+                buildingArray.splice(i, 1);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static hasRequiredMaterials(costObj, teamNumber) {
+        for (const [res, count] of Object.entries(costObj)) {
+            if (!StorageBuilding.hasTeamMaterials(res, count, teamNumber)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static consumeRequiredMaterials(costObj, teamNumber) {
+        for (const [res, count] of Object.entries(costObj)) {
+            StorageBuilding.removeTeamMaterials(res, count, teamNumber);
+            DailyNeedsTracker.updateUIItems(res, count);
         }
     }
-    return false;
-}
-
 }

@@ -1,6 +1,6 @@
 import { CONTROL_STATES } from "./constants"
 import Phaser from "phaser"
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 import { Teams } from "./Teams";
 import { Manager } from "./Manager/Manager";
 import { Projectile } from "./Projectile";

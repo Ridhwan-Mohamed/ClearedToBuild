@@ -1,8 +1,7 @@
-import { buildingManager } from "../buildingManager";
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
+import { buildingManager } from "./buildingManager";
+import { CONTROL_STATES, SQUARESIZE } from "../constants";
 import { Map } from "../map";
-import { mapView } from "../mapView";
-import { Player } from "../Player";
+import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 
 export class Manager {
@@ -15,10 +14,11 @@ export class Manager {
             for(let task of taskList){
                 if(this.buildType(state)){
                     if(this.tooManyAssigned(task, state)) continue;
+                    if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
                     let approachTile;
                     if(state == CONTROL_STATES.BUILD_MODE_T){
                         approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
-                    }else if(state == CONTROL_STATES.BUILD_MODE_B || state == CONTROL_STATES.DESTROY_MODE){
+                    }else if(this.blockType(state)){
                         approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                     }
                     if(approachTile){
@@ -74,10 +74,11 @@ export class Manager {
         for(let task of taskList){
             if(this.buildType(state)){
                 if(this.tooManyAssigned(task, state)) continue;
+                if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
                 let approachTile;
                 if(state == CONTROL_STATES.BUILD_MODE_T){
                     approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
-                }else if(state == CONTROL_STATES.BUILD_MODE_B || state == CONTROL_STATES.DESTROY_MODE){
+                }else if(this.blockType(state)){
                     approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                 }
                 if(approachTile){
@@ -113,13 +114,17 @@ export class Manager {
                     let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                     if (newX === -1) {
                         console.log("No valid start tile nearby");
+                        return false;
                     } else {
-                        troopX = newX;
-                        troopY = newY;
+                        troopX = newX*SQUARESIZE+SQUARESIZE/2;
+                        troopY = newY*SQUARESIZE+SQUARESIZE/2;
                         console.log("New valid tile:", newX, newY);
                     }
+                }else{
+                    troopX = troop.x;
+                    troopY = troop.y
                 }
-                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
                 return true;
             }
         }
@@ -147,11 +152,38 @@ export class Manager {
     static buildType(state){
         return state == CONTROL_STATES.BUILD_MODE_B ||
             state == CONTROL_STATES.BUILD_MODE_T || 
-            state == CONTROL_STATES.DESTROY_MODE;
+            state == CONTROL_STATES.DESTROY_MODE ||
+            state == CONTROL_STATES.GET_FROM_OVEN ||
+            state == CONTROL_STATES.SEND_TO_OVEN ||
+            state == CONTROL_STATES.GET_FROM_STORAGE ||
+            state == CONTROL_STATES.SEND_TO_STORAGE;
     }
 
-    static tooManyAssigned(task, state){
-        return (task.assigned > 0 && (state != CONTROL_STATES.BUILD_MODE_B && state != CONTROL_STATES.DESTROY_MODE)) || 
-            (task.assigned > 5 && (state == CONTROL_STATES.BUILD_MODE_B || state == CONTROL_STATES.DESTROY_MODE))
+    static blockType(state){
+        return state == CONTROL_STATES.BUILD_MODE_B ||
+            state == CONTROL_STATES.DESTROY_MODE ||
+            state == CONTROL_STATES.GET_FROM_OVEN ||
+            state == CONTROL_STATES.SEND_TO_OVEN ||
+            state == CONTROL_STATES.GET_FROM_STORAGE ||
+            state == CONTROL_STATES.SEND_TO_STORAGE;
     }
+
+    static tooManyAssigned(task, state) {
+        if (state === CONTROL_STATES.GET_FROM_OVEN || state === CONTROL_STATES.GET_FROM_STORAGE) {
+            return task.assigned >= task.amount;
+        }
+
+        if(state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE){
+            return task.remaining <= task.assigned;
+        }
+
+        // Allow many for build/destroy
+        if (state === CONTROL_STATES.BUILD_MODE_B || state === CONTROL_STATES.DESTROY_MODE) {
+            return task.assigned > 5;
+        }
+
+        // All other tasks: only 1 assignment allowed
+        return task.assigned > 0;
+    }
+
 }

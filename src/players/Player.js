@@ -1,15 +1,22 @@
-import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert, UIDEPTH, clearTaskPlusTimer } from "./constants";
+import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert, UIDEPTH, clearTaskPlusTimer } from "../constants";
 import Phaser from "phaser";
-import { Map } from "./map";
-import { steer, avoid, calculateSeparationForce } from './steering';
-import { tillManager } from "./tillManager";
-import { Teams } from "./Teams";
-import { buildingManager } from "./buildingManager";
-import { weapons } from "./weapons";
-import { fightManager } from "./fightManager";
-import { seedManager } from "./seedManager";
-import { Manager } from "./Manager/Manager";
-import { Projectile } from "./Projectile";
+import { Map } from "../map";
+import { steer, avoid, calculateSeparationForce } from '../steering';
+import { tillManager } from "../Manager/tillManager";
+import { Teams } from "../Teams";
+import { buildingManager } from "../Manager/buildingManager";
+import { weapons } from "../weapons";
+import { fightManager } from "../fightManager";
+import { seedManager } from "../Manager/seedManager";
+import { Manager } from "../Manager/Manager";
+import { Projectile } from "../Projectile";
+import { Farmer } from "./Farmer";
+import { Forager } from "./Forager";
+import { Fireman } from "./Fireman";
+import { Gunslinger } from "./Gunslinger";
+import { StorageManager } from "../Manager/StorageManager";
+import { Builder } from "./Builder";
+import { UI_ITEM_TYPES } from "../UI/UIConstants";
 
 export class Player {
 
@@ -33,6 +40,8 @@ export class Player {
         this.createAnim('gun1Walk', 'gun1',0,2);
         this.createAnim('gun1Idle', 'gun1',0,0);
         this.createAnim('action','playerAction',0,2,-1,10);
+        this.createAnim('carryWalk', 'playerCarry', 0, 2)
+        this.createAnim('carryIdle', 'playerCarry', 0, 0)
         this.setUpBackToTown()
     }
 
@@ -48,18 +57,17 @@ export class Player {
         newCube.body.team = team;
         team == 1 ? newCube.health = 200 : newCube.health = 100;
         team == 1 ? newCube.speed = 100 : newCube.speed = 50;
-        this.applyDefaultTint(newCube)
+        this.applyDefaultTint(newCube);
         newCube.body.pushable = false;
-        newCube.animState = idle
+        newCube.animState = idle;
         newCube.walk = walk;
         newCube.idle = idle;
         newCube.action = action;
         newCube.oldState = null;
-        Teams.movePlayerState(newCube, CONTROL_STATES.TRACK_MODE)
-        newCube.weapon = weapon
+        Teams.movePlayerState(newCube, CONTROL_STATES.TRACK_MODE);
+        newCube.weapon = weapon;
         this.characters.add(newCube);
         this.troops.push(newCube);
-        this.characters.add(newCube);
         this.configureCubeInteractivity(newCube);
         Teams.addPlayer(team, newCube);
         return newCube;
@@ -99,6 +107,7 @@ export class Player {
             if(Player.scene.berryMode){
                 if(!Player.scene.checkSufficientBerries(1)) return;
                 Player.scene.updateBerry(-1);
+                StorageManager.consumeItemFromStorage(cube.body.team, UI_ITEM_TYPES.seedBerry);
                 cube.health += 30;
                 this.updateDetailsTab(cube);
                 return;
@@ -331,11 +340,30 @@ export class Player {
         else if(sprite.state == CONTROL_STATES.R_FARM_MODE){
             tillManager.harvestCrop(sprite)
         }
+        else if(sprite.state == CONTROL_STATES.WATER_CROPS_MODE){
+            tillManager.beginWatering(sprite);
+        }
         else if(sprite.state == CONTROL_STATES.USER_MODE){
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         }
         else if(sprite.state == CONTROL_STATES.BACK_TO_TOWN){
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+        }
+        else if (sprite.state === CONTROL_STATES.GET_WATER_MODE) {
+            if(sprite.isFireman) Fireman.firemanCompleteWaterPickup(sprite)
+            else Farmer.giveTroopWater(sprite)
+        }
+        else if(sprite.state === CONTROL_STATES.GET_FROM_STORAGE){
+            StorageManager.tryPickupFromStorage(sprite);
+        }
+        else if (sprite.state === CONTROL_STATES.SEND_TO_STORAGE){
+            StorageManager.handleStorageDropoff(sprite)
+        }
+        else if(sprite.state == CONTROL_STATES.SEND_TO_OVEN){
+            Fireman.deliverToOven(sprite)
+        }
+        else if(sprite.state == CONTROL_STATES.GET_FROM_OVEN){
+            Fireman.handleOvenPickupComplete(sprite);
         }
     }
 
@@ -551,8 +579,6 @@ export class Player {
           const teamNumber = playerDict[key];
           // create the sprite
           if(teamNumber){
-            this.addPlayer(x, y, teamNumber, 'gun1', 'gun1Walk', 'gun1Idle', 'gun1Idle', weapons.pistol);
-          }else{
             this.addPlayer(x, y, teamNumber);
           }
           // remove from the dict
@@ -649,43 +675,43 @@ export class Player {
         return;
     }
 
+    static updateTracking(troop){
+        const inView = Map.cameraBounds.contains(troop.x, troop.y);
+        troop.setVisible(inView); // Will not draw if false
+        let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
+        let reTrack = this.mostClosestEnemy(troop, neighbours);
+        if(reTrack){
+            troop.roam = false;
+            this.handleStateIntteruptStart(troop)
+            let troopX = Math.floor(troop.x/SQUARESIZE)
+            let troopY = Math.floor(troop.y/SQUARESIZE)
+            if(Map.navGrid[troopY][troopX] == 0){
+                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                if (newX === -1) {
+                    console.log("No valid start tile nearby");
+                } else {
+                    console.log("New valid tile:", newX, newY);
+                    troopX = newX;
+                    troopY = newY;
+                }
+            }
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: troop.track[1].x, y: troop.track[1].y }));
+        }
+    }
+
     static update(){
-        this.troops.forEach((troop, index) => {
-            if(!troop.active){this.troops.splice(index, 1); return}
-            const inView = Map.cameraBounds.contains(troop.x, troop.y);
-            troop.setVisible(inView); // Will not draw if false
-            let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
-            let reTrack = this.mostClosestEnemy(troop, neighbours);
-            if(reTrack){
-                troop.roam = false;
-                this.handleStateIntteruptStart(troop)
-                let troopX = Math.floor(troop.x/SQUARESIZE)
-                let troopY = Math.floor(troop.y/SQUARESIZE)
-                if(Map.navGrid[troopY][troopX] == 0){
-                    let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                    if (newX === -1) {
-                        console.log("No valid start tile nearby");
-                    } else {
-                        console.log("New valid tile:", newX, newY);
-                        troopX = newX;
-                        troopY = newY;
-                    }
-                }
-                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: troop.track[1].x, y: troop.track[1].y }));
+        this.troops.forEach( troop => {
+            if(Player.scene.clock.paused){
+                troop.body.setVelocity(0, 0);
+                return;        
             }
-            else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
-                if(Teams.teamLists['1'].TeamFarmSpots.length && troop.body.team){
-                    Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
-                }/*else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && Teams.farFromCenter(troop)){
-                    Teams.sendTroopToTown(troop);
-                }*/else{
-                    this.roam(troop);
-                }
-            }
-            else if(troop.state == CONTROL_STATES.R_FARM_MODE && !Teams.teamLists['1'].TeamFarmSpots.length){
-                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-            }
-            this.followPath(troop);  
+            if(troop.isGunslinger) { Gunslinger.update(troop) }
+            else if(troop.isFarmer) { Farmer.update(troop) }
+            else if(troop.isForager) { Forager.update(troop) }
+            else if (troop.isFireman) { Fireman.update(troop) }
+            else if (troop.isBuilder) { Builder.update(troop) }
+            else{ this.updateTracking(troop) } // for enemies
+            this.followPath(troop);
         })
     }
 
@@ -703,127 +729,120 @@ export class Player {
     }
 
     static showDetailsTab(player) {
-        if(player == this.curPlayerDetails) return;
+        if (player == this.curPlayerDetails) return;
         const scene = Player.scene;
         const cam = scene.cameras.main;
         const width = cam.width;
         const height = cam.height;
         this.curPlayerDetails = player;
 
-        // close existing
         if (Player.detailsContainer) {
-            Player.hideDetailsTab()
+            Player.hideDetailsTab();
         }
 
-        // dimensions & padding
-        const PANEL_W = 200;
-        const PANEL_H = 150;
-        const PAD = 10;
+        const PANEL_W = 250;
+        const PANEL_H = 180;
+        const PAD = 20;
         const IMG_W = 60, IMG_H = 50;
-      
-        // start off-screen (below bottom)
+
         const container = scene.add
-          .container(width - PANEL_W - PAD, height + PANEL_H)
-          .setDepth(UIDEPTH)
-          .setScrollFactor(0);
-        
-        // background
+            .container(width - PANEL_W - PAD, height + PANEL_H)
+            .setDepth(UIDEPTH)
+            .setScrollFactor(0);
+
         const bg = scene.add.graphics().setDepth(UIDEPTH);
         bg.fillStyle(0x000000, 0.8);
-        bg.fillRoundedRect(0, 0, PANEL_W, PANEL_H, 12);  // 12px corner radius      
+        bg.fillRoundedRect(0, 0, PANEL_W, PANEL_H, 12);
 
-        const outlineColor = player.body.team === 1 ? 0x00ff00 : 0xff0000;
-        const outline = scene.add.graphics()
-          .setDepth(UIDEPTH)
-          .setScrollFactor(0);
-        outline.lineStyle(2, outlineColor, 1);
+        const outlineColor = player.unitTint;
+        const outline = scene.add.graphics().setDepth(UIDEPTH).setScrollFactor(0);
+        outline.lineStyle(4, outlineColor, 1);
         outline.strokeRoundedRect(0, 0, PANEL_W, PANEL_H, 12);
-        container.add(outline);
 
-        // placeholder image at top-left of panel
+        // Portrait
         const portraitKey = player.health > 50 ? 'char' : 'charHurt';
-
-        // create the portrait sprite centered in the 100×100 area
         const portrait = scene.add.sprite(
-          PAD + IMG_W / 2,
-          PAD + IMG_H / 2,
-          portraitKey
+            PAD + IMG_W / 2,
+            PAD + IMG_H / 2,
+            portraitKey
         )
-        .setOrigin(0.5, 0.5)
-        .setDepth(UIDEPTH)
-        .setScrollFactor(0);
-        
-        // if you have a looping animation on 'char' or 'charHurt', play it:
-        portrait.play(portraitKey);       
-      
-        // texts below image, left-aligned
-        const textStartY = PAD + IMG_H + 5;
-        const lvlText = scene.add
-          .text(PAD, textStartY, `Lvl: ${player.level || 1}`, { fontSize: '16px', fill: '#ffffff' })
-          .setOrigin(0, 0)
-          .setDepth(UIDEPTH);
-      
-        const healthText = scene.add
-          .text(PAD, textStartY + 20, `Health: ${player.health}`, { fontSize: '16px', fill: '#ffffff' })
-          .setOrigin(0, 0)
-          .setDepth(UIDEPTH);
-      
-        const weaponText = scene.add
-          .text(PAD, textStartY + 40, `Weapon: ${player.weapon?.name || 'None'}`, { fontSize: '16px', fill: '#ffffff' })
-          .setOrigin(0, 0)
-          .setDepth(UIDEPTH);
+            .setOrigin(0.5)
+            .setDepth(UIDEPTH)
+            .setScrollFactor(0);
 
-        
-        const teamText = scene.add.text(
+        portrait.play(portraitKey);
+
+        // ✅ New: Player Name
+        const textStartY = PAD + IMG_H + 20;
+        let textY = textStartY - 20;  // ✅ reserve a row above level for name
+
+        const nameText = scene.add.text(
             PAD,
-            textStartY + 60,
-            `Team: ${player.body.team}`,
+            textY,
+            `Name: ${player.name || 'Unnamed'}`,
             { fontSize: '16px', fill: '#ffffff' }
-        )
-        .setOrigin(0, 0)
-        .setDepth(UIDEPTH);      
-        // close button top-right
-        const closeBtn = scene.add
-          .text(PANEL_W - PAD, PAD, 'x', { fontSize: '18px', fill: '#ffffff' })
-          .setOrigin(1, 0)
-          .setDepth(UIDEPTH)
-          .setInteractive()
-          .setScrollFactor(0)
-        closeBtn
-            .on('pointerover', () => {
-            closeBtn.setStyle({ fill: '#ff3333' });  // red on hover
-            })
-            .on('pointerout', () => {
-            closeBtn.setStyle({ fill: '#ffffff' });  // back to white
-            });
-        
-        closeBtn.on('pointerdown', () => {
-            Player.scene.tweens.add({
-              targets: container,
-              y: height + PANEL_H + PAD,
-              duration: 300,
-              ease: 'Cubic.easeIn',
-              onComplete: () => {
-                container.destroy();
-                if (Player.detailsContainer === container) {
-                  Player.detailsContainer = null;
-                }
-              }
-            });
-          });
+        ).setOrigin(0, 0).setDepth(UIDEPTH);
 
-        container.add([bg, lvlText, healthText, weaponText, teamText, closeBtn, portrait, outline]);
-        Player.detailsContainer = container;
-      
-        // animate panel up into bottom-right view
-        scene.tweens.add({
-          targets: container,
-          y: height - PANEL_H - PAD - 50,
-          duration: 300,
-          ease: 'Cubic.easeOut'
+
+        const lvlText = scene.add.text(PAD, textY + 20, `Lvl: ${player.level || 1}`, {
+            fontSize: '16px', fill: '#ffffff'
+        }).setOrigin(0, 0).setDepth(UIDEPTH);
+
+        const healthText = scene.add.text(PAD, textStartY + 20, `Health: ${player.health}`, {
+            fontSize: '16px', fill: '#ffffff'
+        }).setOrigin(0, 0).setDepth(UIDEPTH);
+
+        const weaponText = scene.add.text(PAD, textStartY + 40, `Weapon: ${player.weapon?.name || 'None'}`, {
+            fontSize: '16px', fill: '#ffffff'
+        }).setOrigin(0, 0).setDepth(UIDEPTH);
+
+        const teamText = scene.add.text(PAD, textStartY + 60, `Team: ${player.body.team}`, {
+            fontSize: '16px', fill: '#ffffff'
+        }).setOrigin(0, 0).setDepth(UIDEPTH);
+
+        const closeBtn = scene.add.text(PANEL_W - PAD, PAD, 'x', {
+            fontSize: '18px', fill: '#ffffff'
+        }).setOrigin(1, 0).setDepth(UIDEPTH).setInteractive().setScrollFactor(0);
+
+        closeBtn.on('pointerover', () => {
+            closeBtn.setStyle({ fill: '#ff3333' });
+        }).on('pointerout', () => {
+            closeBtn.setStyle({ fill: '#ffffff' });
         });
 
-        Player.detailsLvlText    = lvlText;
+        closeBtn.on('pointerdown', () => {
+            scene.tweens.add({
+                targets: container,
+                y: height + PANEL_H + PAD,
+                duration: 300,
+                ease: 'Cubic.easeIn',
+                onComplete: () => {
+                    container.destroy();
+                    if (Player.detailsContainer === container) {
+                        Player.detailsContainer = null;
+                    }
+                }
+            });
+        });
+
+        container.add([
+            bg, outline,
+            portrait,
+            nameText,  // ✅ Add name text here
+            lvlText, healthText, weaponText, teamText,
+            closeBtn
+        ]);
+
+        Player.detailsContainer = container;
+
+        scene.tweens.add({
+            targets: container,
+            y: height - PANEL_H - PAD - 100,
+            duration: 300,
+            ease: 'Cubic.easeOut'
+        });
+
+        Player.detailsLvlText = lvlText;
         Player.detailsHealthText = healthText;
         Player.detailsWeaponText = weaponText;
         Player.detailsPortrait = portrait;
@@ -931,11 +950,35 @@ export class Player {
     }
       
     static applyDefaultTint(cube) {
-        const color = cube.body.team === 1
-          ? 0x64ff32   // your green
-          : 0xff0000;  // your red for others
-        cube.setTint(color);
+        let tint;
+
+        switch (true) {
+            case cube.isFarmer:
+                tint = 0x8B5A2B; // Brown for farmers
+                break;
+            case cube.isForager:
+                tint = 0x228B22;
+                break;
+            case cube.isFireman:
+                tint = 0xff9933;
+                break;
+            case cube.isGunslinger:
+                tint = 0x9999ff;
+                break;
+            case cube.isBuilder:
+                tint = 0x4433ff;
+                break;
+            case cube.body.team === 1:
+                tint = 0x64ff32; // Green for your team
+                break;
+            default:
+                tint = 0xff0000; // Red for others
+                break;
+        }
+
+        cube.setTint(tint);
     }
+
 
     static setUpBackToTown(){
         this.scene.input.keyboard.on('keydown-B', () => {

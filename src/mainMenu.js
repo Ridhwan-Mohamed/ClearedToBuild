@@ -8,7 +8,7 @@ import { Map } from './map.js';
 import { Teams } from './Teams.js';
 
 const teamSetupArray = {
-    smallTeam: [TILE_TYPES.house1, TILE_TYPES.house2],
+    smallTeam: [TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.house2, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 
@@ -52,6 +52,19 @@ class MainMenu extends Phaser.Scene {
         
         // ✅ Listen to Phaser's internal resize event
         this.scale.on('resize', this.updateLayout, this);
+
+        // === VERSION LABEL ===
+        this.versionText = this.add.text(this.scale.width - 75, this.scale.height - 20, 'v0.0.1', {
+            fontSize: '18px',
+            fill: '#ffffff',
+            fontStyle: 'bold'
+        }).setOrigin(0, 1); // Bottom-left anchor
+
+        // Keep it in position on resize
+        this.scale.on('resize', () => {
+            this.versionText.setPosition(this.scale.width - 75, this.scale.height - 20);
+        });
+
     }
 
     updateLayout() {
@@ -117,7 +130,10 @@ class MainMenu extends Phaser.Scene {
                         well: 0xADD8E6,
                         grassCrop: 0x33cc33,
                         grassBerry: 0x33cc33,
+                        grassWood: 0x33cc33,
+                        grassRock: 0x33cc33,
                         spawn: 0x333333,
+                        storage: 0x7d4900
                     }[type] || 0xffffff;
         
                     const index = y * gridWidth + x;
@@ -148,7 +164,7 @@ class MainMenu extends Phaser.Scene {
                             
                             const freshGrid = structuredClone(this.baseGridData);
                             const freshNavGrid = structuredClone(this.oldNavGrid)
-                            this.gridData = generateTown(freshGrid, teamSetupArray.bigTeam, 1, x, y, freshNavGrid);
+                            this.gridData = generateTown(freshGrid, teamSetupArray.smallTeam, 1, x, y, freshNavGrid);
                             Map.navGrid = freshNavGrid
                             drawGrid(false);
 

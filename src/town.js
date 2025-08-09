@@ -1,7 +1,9 @@
 import { SQUARESIZE, TILE_MAP, TILE_TYPES, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "./constants";
+import { QuadtreeNode } from "./lib/QuadTreeNode";
 import { Map } from "./map";
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 import { Teams } from "./Teams";
+import { WaveCollapse } from "./waveCollapse";
 
 export var playerDict = {}
 export var townBounds = {}
@@ -15,6 +17,7 @@ export function clearPlayerDict(){
 }
 
 export var buildingArray = []
+export var waterSourcesQuadTree;
 
 export function clearBuildingArray(){
     buildingArray.length = 0;
@@ -103,13 +106,14 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                     buildings.splice(i, 1);
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding, teamNumber);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
-                    if(curBuilding.name == TILE_TYPES.house1.name || curBuilding.name == TILE_TYPES.house2.name) placePlayers(roads, teamNumber);
+                    // if(curBuilding.name == TILE_TYPES.house1.name || curBuilding.name == TILE_TYPES.house2.name) placePlayers(roads, teamNumber);
                     outerRoadsSucesss = true;
                     break; // Move to next building after placing
                 }
             }
         }
         if(!outerRoadsSucesss) outerRoads.splice(0,1)
+        buildWaterQuadtree(grid)
     }
 
     const myBuildings = buildingArray.slice(firstIndex);
@@ -332,6 +336,29 @@ function canPlaceBuildingAtAnyCorner(grid, x, y, building) {
     return { success: false };
 }
 
+function buildWaterQuadtree(grid) {
+    waterSourcesQuadTree = new QuadtreeNode({ x: 0, y: 0, width: grid[0].length, height: grid.length });
+
+    const isWalkable = (tile) => {
+        if(Array.isArray(tile)){
+            return !TILE_TYPES[TILE_MAP(tile[1])]?.block;
+        }
+        return !TILE_TYPES[TILE_MAP(tile)]?.block;
+    }
+    const directions = [[0,1],[1,0],[-1,0],[0,-1]];
+
+    for (let y = 0; y < grid.length; y++) {
+        for (let x = 0; x < grid[y].length; x++) {
+            if (grid[y][x] !== TILE_TYPES.water.grid) continue;
+            for (let [dx, dy] of directions) {
+                const nx = x + dx, ny = y + dy;
+                if (grid[ny]?.[nx] !== undefined && isWalkable(grid[ny][nx])) {
+                    waterSourcesQuadTree.insert({ x: nx, y: ny }); // ✅ Insert walkable tile
+                }
+            }
+        }
+    }
+}
 
 function getValidCenterTile(startX,startY,type){
 

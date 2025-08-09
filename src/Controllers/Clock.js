@@ -1,6 +1,9 @@
-import { UIDEPTH } from "./constants";
-import { openPowerupScreen } from "./Powerups";
-import { spawnAndSend } from "./spawn";
+import { UIDEPTH } from "../constants";
+import { openPowerupScreen } from "../UI/Powerups";
+import { Teams } from "../Teams";
+import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
+import { spawnAndSend } from "../Manager/spawnManager";
+
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
@@ -12,8 +15,8 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 12;
-        this.minutes = 0;
+        this.hours = 5;
+        this.minutes = 59;
         this.day = 1;
 
         this.waveAmount = 1;
@@ -103,6 +106,10 @@ export class Clock {
         } else if (this.isDayStart() && !this.powerupScreenShown){
             this.powerupScreenShown = true;   // ✅ prevent re-trigger
             openPowerupScreen(this.scene);
+            DailyNeedsTracker.consumeResources();
+            DailyNeedsTracker.render();
+            Teams.growWateredCrops(1); 
+            Teams.resetDailyWatering(1);
             this.pause()
         } else {
             this.lastSend = null;

@@ -1,16 +1,17 @@
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH, WORLD_DIMENSIONX } from "./constants";
-import { Manager } from "./Manager/Manager";
-import { Map } from "./map";
-import { mapView } from "./mapView";
-import { Player } from "./Player";
-import { Teams } from "./Teams";
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH, WORLD_DIMENSIONX } from "../constants";
+import { Manager } from "./Manager";
+import { StorageManager } from "./StorageManager";
+import { Map } from "../map";
+import { Player } from "../players/Player";
+import { Teams } from "../Teams";
+import { UI_ITEM_TYPES } from "../UI/UIConstants";
 
 export class seedManager {
     static scene;
 
     static assignSeedsToTroops(teamNumber) {
         const force = Player.selected.length? true : false;
-        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].playerList;
+        const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].foragerList;
         const seedList = Teams.teamLists[`${teamNumber}`].seedList;
         Manager.assignTroopsToAction(troops, seedList, CONTROL_STATES.SEED_MODE, force);
     }
@@ -37,18 +38,24 @@ export class seedManager {
     static onSeedingDone(sprite) {
         let x = sprite.task.x;
         let y = sprite.task.y;
-        if(Map.grid[y][x] == TILE_TYPES.grassCrop.grid){
-            seedManager.scene.updateSeeds(1);
-        }else if(Map.grid[y][x] == TILE_TYPES.grassBerry.grid){
-            seedManager.scene.updateBerry(1);
+        // Determine item type
+        let itemType = null;
+        if (Map.grid[y][x] == TILE_TYPES.grassCrop.grid) {
+            itemType = UI_ITEM_TYPES.seedCrop;
+        } else if (Map.grid[y][x] == TILE_TYPES.grassBerry.grid) {
+            itemType = UI_ITEM_TYPES.seedBerry;
+        } else if (Map.grid[y][x] == TILE_TYPES.grassWood.grid){
+            itemType = UI_ITEM_TYPES.wood;
+        } else if (Map.grid[y][x] == TILE_TYPES.grassRock.grid){
+            itemType = UI_ITEM_TYPES.stone;
         }
+
+        const added = StorageManager.addCarriedItem(sprite, itemType)
         Map.grid[y][x] = 1;
         if(Map.cameraBounds.contains(sprite.task.x*SQUARESIZE,sprite.task.y*SQUARESIZE)){
             Map.drawGridValue(x,y);
         }
         sprite.task = null;
-        let seedList = Teams.teamLists[`${sprite.body.team}`].seedList;
-        const nextTile = Manager.assignOneTroopToAction(sprite, seedList, CONTROL_STATES.SEED_MODE);
     }
 
     static makeClickable(x, y, block) {

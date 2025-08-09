@@ -1,6 +1,8 @@
 import { TILE_TYPES } from "./constants";
 import { Noise } from 'noisejs'; // Ensure you have noisejs for Perlin noise
 import { Map } from "./map";
+
+
 export class WaveCollapse {
     static noise = new Noise(Math.random()); // Initialize Perlin noise
 
@@ -11,19 +13,22 @@ export class WaveCollapse {
         pine: ["grass"]
     };
 
+
     static generateGrid(width, height, ratio = 0.8) {
-        const noise = new Noise(Math.random()); // Re-seed each time
-    
+        const noise = new Noise(Math.random());
         let grid = Array.from({ length: height }, () =>
-            Array.from({ length: width }, () => Object.keys(this.rules))
+        Array.from({ length: width }, () => Object.keys(this.rules))
         );
-    
+
         this.seedTerrain(grid, width, height, noise, ratio);
-        grid = this.convertToGridValues(grid)
-        this.scatterOnGrass(grid)
-        this.scatterOnGrass(grid, 10, TILE_TYPES.grassBerry.grid)
+        grid = this.convertToGridValues(grid);
+        this.scatterOnGrass(grid);
+        this.scatterOnGrass(grid, 10, TILE_TYPES.grassBerry.grid);
+        this.scatterOnGrass(grid, 10, TILE_TYPES.grassWood.grid);
+        this.scatterOnGrass(grid, 10, TILE_TYPES.grassRock.grid);
         return grid;
     }
+
 
     static seedTerrain(grid, width, height, noise, ratio = 0.8) {
         // Ratio = [0.3 ... 0.8] → map to waterThreshold (lower = more water)

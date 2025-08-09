@@ -1,4 +1,4 @@
-import { Player } from "./Player";
+import { Player } from "./players/Player";
 
 export function create2DArray(rows, cols) {
     let array = new Array(rows);
@@ -24,7 +24,16 @@ export const CONTROL_STATES = {
     R_FARM_MODE: 11,
     BACK_TO_TOWN: 12,
     TRACK_TARGET: 13,
+    SEND_TO_STORAGE: 14, //general send item to store
+    WATER_CROPS_MODE: 15,
+    GET_WATER_MODE: 16,
+    COOK_MODE: 18,
+    GET_FROM_STORAGE: 19, //from storage
+    SEND_TO_OVEN: 20, //to oven
+    GET_FROM_OVEN: 21 //obtain from oven
 }
+
+export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
 export var WORLD_DIMENSIONX = 70;
 export var WORLD_DIMENSIONY = 70;
 export const UIDEPTH = 10
@@ -154,7 +163,7 @@ export const TILE_TYPES = {
         depth: BLOCKDEPTH,
         lenX: 4,
         lenY: 4,
-        price: 1000
+        cost: { wood : 4, stone: 4 }
     },
     house2:{
         name: "house2",
@@ -167,7 +176,7 @@ export const TILE_TYPES = {
         depth: BLOCKDEPTH,
         lenX: 4,
         lenY: 4,
-        price: 5000
+        cost: { wood : 4, stone: 4 }
     },
     well:{
         name: "well",
@@ -237,7 +246,51 @@ export const TILE_TYPES = {
         depth: BLOCKDEPTH,
         lenX: 4,
         lenY: 4
-    }
+    },
+    clayOven: {
+        name: "clayOven",
+        value: "clayOven",
+        spriteSheet: true,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 40,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4,
+        cost: { stone: 4 }
+    },
+    storage: {
+        name: "storage",
+        value: "storage",
+        spriteSheet: false,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 41,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4,
+        cost: { wood: 4 }
+    },
+    grassWood : {
+        name: "grassWood",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 42,
+        depth: FLOORDEPTH,
+        interactable: true
+    },
+    grassRock : {
+        name: "grassRock",
+        spread: true,
+        block: false,
+        complex: false,
+        grid: 43,
+        depth: FLOORDEPTH,
+        interactable: true
+    },
 };
 
 export const TILE_ARR = [
@@ -280,7 +333,11 @@ export const TILE_ARR = [
     'crops',
     'grassCrop',
     'grassBerry',
-    'spawn'
+    'spawn',
+    'clayOven',
+    'storage',
+    'grassWood',
+    'grassRock'
 ];
 
 export function TILE_MAP(val){
@@ -299,6 +356,10 @@ export function TILE_MAP(val){
     else if(val == 37){return "grassCrop"}
     else if(val == 38){return "grassBerry"}
     else if(val == 39){return "spawn"}
+    else if(val == 40){return "clayOven"}
+    else if(val == 41){return "storage"}
+    else if(val == 42){return "grassWood"}
+    else if(val == 43){return "grassRock"}
     else{return}
 }
 

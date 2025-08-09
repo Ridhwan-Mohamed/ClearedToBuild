@@ -15,6 +15,7 @@ import TRCWater from '../assets/water/TRCWater.png'
 import BRCWater from '../assets/water/BRCWater.png'
 import TLCWater from '../assets/water/TLCWater.png'
 import BLCWater from '../assets/water/BLCWater.png'
+import waterParticle from '../assets/waterParticle.png'
 import crops from '../assets/crops.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
@@ -22,28 +23,41 @@ import { NavMesh } from './lib/navmesh/navmesh.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
-import { Player } from './Player.js';
+import { Player } from './players/Player.js';
 import { Projectile } from './Projectile.js';
 import player from '../assets/Players/player.png'
 import gun1 from '../assets/Players/gun1.png'
 import playerAction from '../assets/Players/playerAction.png'
+import playerCarry from '../assets/Players/playerCarry.png'
 import { playerDict, setupTownBoundsToggle } from './town.js';
-import { tillManager } from './tillManager.js'
+import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
-import { buildingManager } from './buildingManager.js';
+import { buildingManager } from './Manager/buildingManager.js';
 import { NavMeshUpdater } from './NavMeshUpdater.js';
 import monies from '../assets/monies.png'
 import seeds from '../assets/seeds.png'
 import { fightManager } from './fightManager.js';
-import { seedManager } from './seedManager.js';
+import { seedManager } from './Manager/seedManager.js';
 import char from '../assets/char.png'
 import charHurt from '../assets/charHurt.png'
 import berry from '../assets/berry.png'
 import spawn from '../assets/hole.png'
-import { Manager } from './Manager/Manager.js';
-import { recalculateDestroyTasksFromPoint } from './spawn.js';
-import { Clock } from './Clock.js';
-import { openPowerupScreen } from './Powerups.js';
+import { recalculateDestroyTasksFromPoint } from './Manager/spawnManager.js';
+import { Clock } from './Controllers/Clock.js';
+import clayOven from '../assets/clayOven.png'
+import { ClayOven } from './buildings/ClayOven.js';
+import { DailyNeedsTracker } from './UI/DailyNeedsTracker.js';
+import foodIcon from '../assets/foodIcon.png'
+import waterIcon from '../assets/waterIcon.png'
+import woodIcon from '../assets/woodIcon.png'
+import stoneIcon from '../assets/stoneIcon.png'
+import uncleanWaterIcon from '../assets/uncleanWaterIcon.png'
+import { ClayOvenUI } from './UI/ClayOvenUI.js';
+import { StorageBuilding } from './buildings/Storage.js';
+import { StorageUI } from './UI/StorageUI.js';
+import { StorageManager } from './Manager/StorageManager.js';
+import { House } from './buildings/House.js';
+import { GameStart } from './Controllers/GameStart.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -58,7 +72,10 @@ export class mapView extends Phaser.Scene {
         buildingManager.scene = this;
         fightManager.scene = this;
         seedManager.scene = this;
+        StorageManager.scene = this;
+        ClayOven.scene = this;
         itemTab.mapRef = this;
+        House.scene = this;
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
@@ -66,8 +83,12 @@ export class mapView extends Phaser.Scene {
         this.isBrushActive = false;  
         this.farmMode = false;
         this.harvestMode = false;
-        this.money = 300; // Starting amount
+        this.money = 1300; // Starting amount
         this.seeds = 0;
+        this.foodAmnt = 15;
+        this.cleanWaterAmnt = 15;
+        this.woodAmnt = 0;
+        this.stoneAmnt = 0;
         this.berries = 0;
         this.berryMode = false;
         this.seedGridMode = false;
@@ -84,6 +105,7 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('player', player, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('gun1', gun1, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('playerAction', playerAction, { frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('playerCarry', playerCarry, { frameWidth: 16, frameHeight: 16});
         this.load.image('barrier', gray);  // Load a barrier image
         this.load.image('worldMap', worldMap);
         this.load.image('cube', black);  // Make sure the path and filename are correct
@@ -95,6 +117,12 @@ export class mapView extends Phaser.Scene {
         this.load.image('seeds', seeds);
         this.load.image('berry', berry);
         this.load.image('spawn', spawn);
+        this.load.image('foodIcon', foodIcon);
+        this.load.image('waterIcon', waterIcon);
+        this.load.image('woodIcon', woodIcon);
+        this.load.image('stoneIcon', stoneIcon);
+        this.load.image('uncleanWaterIcon', uncleanWaterIcon);
+        this.load.image('sparkle', waterParticle);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
@@ -107,9 +135,14 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('char', char, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('charHurt', charHurt, {frameWidth: 60, frameHeight: 50});
+        this.load.spritesheet('clayOven', clayOven, { frameWidth: 64, frameHeight: 64});
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
+        DailyNeedsTracker.init(this);
+        ClayOvenUI.init(this); // once in your main scene's create()
+        StorageBuilding.scene = this;
+        StorageUI.init(this);
     }
 
     create() {
@@ -122,12 +155,14 @@ export class mapView extends Phaser.Scene {
         this.createAnim('brcwater')
         this.createAnim('tlcwater')
         this.createAnim('blcwater')
-        this.createAnim('crops',0,0.05)
+        this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
 
         Player.init(this);
-        let grid = this.gridData
+        Player.createAnim('oven_idle', 'clayOven', 0, 0, -1, 1);
+        Player.createAnim('oven_cooking', 'clayOven', 1, 2, -1, 3);
+        let grid = this.gridData;
         Map.grid = grid;
         console.log(Map.navGrid)
         setupTownBoundsToggle(this);
@@ -139,7 +174,7 @@ export class mapView extends Phaser.Scene {
         buildingManager.NavMeshUpdater = this.navMeshUpdater;
         console.log(Map.navMesh);
         Map.drawBuildings();
-        Player.drawPlayers(playerDict);
+        GameStart.placePlayers();
         console.log(Teams.teamLists[1].stateLists);
         this.cursors = this.input.keyboard.createCursorKeys();
         this.clock = new Clock(this);
@@ -165,12 +200,15 @@ export class mapView extends Phaser.Scene {
         this.registry.set('image','init');
         this.registry.events.on('changedata-image', (parent, value) => {
             console.log(`Registry key 'image' updated to value:`, value);
-            const item = itemTab.itemValues(value);
+            const item = TILE_TYPES[value];
             if(item.spread){
                 // this.gridPlace = true;
             }
             else if(item == TILE_TYPES.turret){
                 Turret.placeItem(item)
+            }
+            else if(item == TILE_TYPES.clayOven){
+                ClayOven.beginPlacing(this, 1)
             }
             else{
                 Map.beginPlacing(item)
@@ -226,6 +264,7 @@ export class mapView extends Phaser.Scene {
         });
         // Add a mouse click listener
         this.input.on('pointerdown', (pointer) => {
+
             let cam = this.cameras.main;
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
             if (clickedOnPlayer.length > 0) {
@@ -233,13 +272,13 @@ export class mapView extends Phaser.Scene {
                 return;
             }
             if(Map.placingItem && !Map.placingItem.blocked){
-                const items = itemTab.itemValues(this.registry.get('image'))
-                if(items.price){
-                    if(!this.checkSufficientFunds(items.price)){
-                        showAlert(this, 'insufficient Funds', "#ff0000");
-                        return;
-                    }
-                }
+                const items = TILE_TYPES[this.registry.get('image')]
+                // if(items.price){
+                //     if(!this.checkSufficientFunds(items.price)){
+                //         showAlert(this, 'insufficient Funds', "#ff0000");
+                //         return;
+                //     }
+                // }
                 let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
@@ -541,7 +580,8 @@ export class mapView extends Phaser.Scene {
         else if(mode == 3){
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
-                    if(Map.grid[y][x] == TILE_TYPES.grassCrop.grid || Map.grid[y][x] == TILE_TYPES.grassBerry.grid){
+                    let tileType = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))];
+                    if(tileType.interactable){
                         Teams.addSeedSpots(1, x, y);
                     }
                 }
@@ -927,10 +967,13 @@ export class mapView extends Phaser.Scene {
     }
     
     update() {
+        if(!this.clock.paused){
+            Turret.update();
+            this.clock.update();
+            this.handleKeyboardCameraMovement();
+        }
         Player.update();
-        Turret.update();
-        this.clock.update();
-        this.handleKeyboardCameraMovement();
+        ClayOvenUI.updateAllOvens(1);
     }
 
     showSaveNotification() {

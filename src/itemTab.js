@@ -35,6 +35,9 @@ import road from '../assets/road.png'
 import house1Img from '../assets/house1Img.png'
 import grassCrop from '../assets/grassCrop.png'
 import grassBerry from '../assets/grassBerry.png'
+import grassRock from '../assets/grassRock.png'
+import grassWood from '../assets/grassWood.png'
+import storage from '../assets/storage.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -83,10 +86,12 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('road', road); 
         scene.load.image('grassCrop', grassCrop);
         scene.load.image('grassBerry', grassBerry);
+        scene.load.image('grassWood', grassWood);
+        scene.load.image('grassRock', grassRock);
+        scene.load.image('storage', storage);
     }
 
     create() {
-
         // Create a container for the dialog box
         const dialogContainer = this.add.container(0, 0);
         const dialogWidth = 800;

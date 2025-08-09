@@ -1,10 +1,10 @@
 import { buildingManager } from "./buildingManager";
-import { CONTROL_STATES } from "./constants";
-import { Manager } from "./Manager/Manager";
-import { Player } from "./Player";
-import { Teams } from "./Teams";
-import { buildingArray, spawnPoints } from "./town";
-import { Map } from "./map";
+import { CONTROL_STATES } from "../constants";
+import { Manager } from "./Manager";
+import { Player } from "../players/Player";
+import { Teams } from "../Teams";
+import { buildingArray, spawnPoints } from "../town";
+
 
 export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = '0') {
     const targetsAdded = new Set();

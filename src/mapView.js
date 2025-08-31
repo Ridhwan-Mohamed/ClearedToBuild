@@ -1,22 +1,22 @@
 import Phaser, { Plugins } from 'phaser';
-import worldMap from '../assets/worldMap.png'
-import black from '../assets/black.png'
-import gray from '../assets/gray.png'
-import green from '../assets/green.png'
-import leader from '../assets/purple.png'
-import hammer from '../assets/hammer.png'
-import grass from '../assets/grass.png'
-import Water from '../assets/water/water.png'
-import TWater from '../assets/water/TWater.png'
-import BWater from '../assets/water/BWater.png'
-import RWater from '../assets/water/RWater.png'
-import LWater from '../assets/water/LWater.png'
-import TRCWater from '../assets/water/TRCWater.png'
-import BRCWater from '../assets/water/BRCWater.png'
-import TLCWater from '../assets/water/TLCWater.png'
-import BLCWater from '../assets/water/BLCWater.png'
-import waterParticle from '../assets/waterParticle.png'
-import crops from '../assets/crops.png'
+import worldMap from 'url:../assets/worldMap.png'
+import black from 'url:../assets/black.png'
+import gray from 'url:../assets/gray.png'
+import green from 'url:../assets/green.png'
+import leader from 'url:../assets/purple.png'
+import hammer from 'url:../assets/hammer.png'
+import grass from 'url:../assets/grass.png'
+import Water from 'url:../assets/water/water.png'
+import TWater from 'url:../assets/water/TWater.png'
+import BWater from 'url:../assets/water/BWater.png'
+import RWater from 'url:../assets/water/RWater.png'
+import LWater from 'url:../assets/water/LWater.png'
+import TRCWater from 'url:../assets/water/TRCWater.png'
+import BRCWater from 'url:../assets/water/BRCWater.png'
+import TLCWater from 'url:../assets/water/TLCWater.png'
+import BLCWater from 'url:../assets/water/BLCWater.png'
+import waterParticle from 'url:../assets/waterParticle.png'
+import crops from 'url:../assets/crops.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
 import { NavMesh } from './lib/navmesh/navmesh.js';
@@ -25,39 +25,41 @@ import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY,
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Projectile } from './Projectile.js';
-import player from '../assets/Players/player.png'
-import gun1 from '../assets/Players/gun1.png'
-import playerAction from '../assets/Players/playerAction.png'
-import playerCarry from '../assets/Players/playerCarry.png'
-import { playerDict, setupTownBoundsToggle } from './town.js';
+import player from 'url:../assets/Players/player.png'
+import gun1 from 'url:../assets/Players/gun1.png'
+import playerAction from 'url:../assets/Players/playerAction.png'
+import playerCarry from 'url:../assets/Players/playerCarry.png'
+import { playerDict, setupTownBoundsToggle, townBounds } from './town.js';
 import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './Manager/buildingManager.js';
-import { NavMeshUpdater } from './NavMeshUpdater.js';
-import monies from '../assets/monies.png'
-import seeds from '../assets/seeds.png'
-import { fightManager } from './fightManager.js';
+import monies from 'url:../assets/monies.png'
+import seeds from 'url:../assets/seeds.png'
+import { fightManager } from './Manager/fightManager.js';
 import { seedManager } from './Manager/seedManager.js';
-import char from '../assets/char.png'
-import charHurt from '../assets/charHurt.png'
-import berry from '../assets/berry.png'
-import spawn from '../assets/hole.png'
+import char from 'url:../assets/char.png'
+import charHurt from 'url:../assets/charHurt.png'
+import berry from 'url:../assets/berry.png'
+import spawn from 'url:../assets/hole.png'
 import { recalculateDestroyTasksFromPoint } from './Manager/spawnManager.js';
 import { Clock } from './Controllers/Clock.js';
-import clayOven from '../assets/clayOven.png'
+import clayOven from 'url:../assets/clayOven.png'
 import { ClayOven } from './buildings/ClayOven.js';
 import { DailyNeedsTracker } from './UI/DailyNeedsTracker.js';
-import foodIcon from '../assets/foodIcon.png'
-import waterIcon from '../assets/waterIcon.png'
-import woodIcon from '../assets/woodIcon.png'
-import stoneIcon from '../assets/stoneIcon.png'
-import uncleanWaterIcon from '../assets/uncleanWaterIcon.png'
+import foodIcon from 'url:../assets/foodIcon.png'
+import waterIcon from 'url:../assets/waterIcon.png'
+import woodIcon from 'url:../assets/woodIcon.png'
+import stoneIcon from 'url:../assets/stoneIcon.png'
+import uncleanWaterIcon from 'url:../assets/uncleanWaterIcon.png'
 import { ClayOvenUI } from './UI/ClayOvenUI.js';
 import { StorageBuilding } from './buildings/Storage.js';
 import { StorageUI } from './UI/StorageUI.js';
 import { StorageManager } from './Manager/StorageManager.js';
 import { House } from './buildings/House.js';
 import { GameStart } from './Controllers/GameStart.js';
+import { ZoomMixer } from './UI/ZoomMixer.js';
+import { MainMenu } from './mainMenu.js';
+import { blockResourceManager } from './Manager/BlockResourceManager.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -65,17 +67,19 @@ const screenW = window.innerWidth
 export class mapView extends Phaser.Scene {
     constructor() {
         super('mapView');
-        console.log(NavMesh)
+        mapView.scene = this;
         Map.scene = this;
         Turret.scene = this;
         tillManager.scene = this;
         buildingManager.scene = this;
+        blockResourceManager.scene = this;
         fightManager.scene = this;
         seedManager.scene = this;
         StorageManager.scene = this;
         ClayOven.scene = this;
         itemTab.mapRef = this;
         House.scene = this;
+        ZoomMixer.scene = this;
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
@@ -95,10 +99,6 @@ export class mapView extends Phaser.Scene {
         this.selectingEnemies = false;
         this.enemySelectStart = null;
         this.enemySelectionRect = null;
-    }
-
-    init(data){
-        this.gridData = data
     }
 
     preload() {
@@ -143,6 +143,7 @@ export class mapView extends Phaser.Scene {
         ClayOvenUI.init(this); // once in your main scene's create()
         StorageBuilding.scene = this;
         StorageUI.init(this);
+        MainMenu.attach(this);
     }
 
     create() {
@@ -158,26 +159,21 @@ export class mapView extends Phaser.Scene {
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
+        ZoomMixer.initMapIconContainer();
 
         Player.init(this);
         Player.createAnim('oven_idle', 'clayOven', 0, 0, -1, 1);
         Player.createAnim('oven_cooking', 'clayOven', 1, 2, -1, 3);
-        let grid = this.gridData;
-        Map.grid = grid;
-        console.log(Map.navGrid)
+        // Bind this scene to MainMenu and build the menu phase in *this* scene
+        // UI camera once (top of create)
+        this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+        this.uiCamera.setScroll(0, 0).setZoom(1).setBackgroundColor('rgba(0,0,0,0)');
+        this.scale.on('resize', ({ width, height }) => this.uiCamera.setSize(width, height));
+
+        // Bind menu to this scene and build menu UI (grid, towns, icons, Play)
+        MainMenu.startMenuPhase();
         setupTownBoundsToggle(this);
-        Map.initMap();
-        Map.mapFromData(Map.grid);
-        Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
-        this.navMeshUpdater = new NavMeshUpdater(Map.navMesh, this);
-        this.navMeshUpdater.setupAddAndRemove();
-        buildingManager.NavMeshUpdater = this.navMeshUpdater;
-        console.log(Map.navMesh);
-        Map.drawBuildings();
-        GameStart.placePlayers();
-        console.log(Teams.teamLists[1].stateLists);
         this.cursors = this.input.keyboard.createCursorKeys();
-        this.clock = new Clock(this);
         recalculateDestroyTasksFromPoint();
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
@@ -244,9 +240,11 @@ export class mapView extends Phaser.Scene {
                 Map.placingItem = null;
             }
         });
+        this.clock = {paused: true};
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
+        this.keyboardSpeed = 10;
         this.input.keyboard.on('keydown-F', () => {
             this.farmMode = !this.farmMode;
         });
@@ -267,6 +265,7 @@ export class mapView extends Phaser.Scene {
 
             let cam = this.cameras.main;
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
+            if(this.clock.paused) return;
             if (clickedOnPlayer.length > 0) {
                 console.log("hit player");
                 return;
@@ -352,8 +351,9 @@ export class mapView extends Phaser.Scene {
                     `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY][posX]}\ngrid: ${Map.grid[posY][posX]}`, 
                     { fontSize: '14px', fill: '#ffffff' }
                 )
-                .setScrollFactor(0)                // Stick to camera
-                .setDepth(UIDEPTH);
+                    .setScrollFactor(0)                // Stick to camera
+                    .setDepth(UIDEPTH);
+                this.cameras.main.ignore([selectionCountText, currentText]);
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
@@ -386,12 +386,11 @@ export class mapView extends Phaser.Scene {
         });
         this.input.on('pointermove', (pointer) => this.onPointerMove(pointer, SQUARESIZE));
         this.input.on('pointerup', () => this.onPointerUp());
-        this.sceneButtons()
     }
 
     handleKeyboardCameraMovement() {
         const camera = this.cameras.main;
-        const speed = 10; // Camera movement speed
+        const speed = this.keyboardSpeed; // Camera movement speed
         const { width, height } = camera;
     
         // Check keyboard inputs for WASD or arrow keys
@@ -427,7 +426,7 @@ export class mapView extends Phaser.Scene {
     
         if (deviationX > EDGE_RATIO || deviationY > EDGE_RATIO) {
             this.oldMapCenter = [centerChunkX, centerChunkY]; // Update old center
-            Map.reDraw(); // Trigger a redraw
+            if(this.zoomMixer.mode == 'detailed') Map.reDraw(); // Trigger a redraw
         }
 
     }
@@ -543,7 +542,7 @@ export class mapView extends Phaser.Scene {
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
-                    if(type.spread && type.name != "water" && type.name != 'crops'){
+                    if(type.spread && type.name != "water" && type.name != 'crops' && type.name != 'road'){
                         tillList.push( {
                             x,
                             y,
@@ -840,8 +839,50 @@ export class mapView extends Phaser.Scene {
                 }
             }
         });
-        
+
+        // One-line HUD container with your actual objects:
+        this.hud = this.add.container(0, 0, [
+        topBar, bottomBar,
+        moneyIcon, this.moneyText,
+        seedsIcon, this.seedsText,
+        berryIcon, this.berryText,
+        itemTab, brushToggleButton, farmButton,
+        this.breakItems,
+        saveButton, saveText,
+        loadButton, loadText
+        ]);
+
+        // Important: HUD is screen-space UI, so lock it to camera
+        this.hud.setScrollFactor(0);
+
+        // Route rendering:
+        // - main camera: show world only (ignore HUD)
+        // - ui camera: show HUD only (ignore world)
+        this.cameras.main.ignore(this.hud);
     }
+
+    static refreshUICameraIgnores() {
+        const scene = mapView.scene;
+        if (!scene || !scene.uiCamera) return;
+
+        // UI = scrollFactor 0/0; World = everything else
+        const uiObjs = [];
+        const worldObjs = [];
+
+        for (const go of scene.children.list) {
+            const sfx = ('scrollFactorX' in go) ? go.scrollFactorX : 1;
+            const sfy = ('scrollFactorY' in go) ? go.scrollFactorY : 1;
+            if (sfx === 0 && sfy === 0) uiObjs.push(go);
+            else worldObjs.push(go);
+        }
+
+        // Main camera shows world (ignores UI)
+        scene.cameras.main.ignore(uiObjs);
+
+        // UI camera shows UI (ignores world)
+        scene.uiCamera.ignore(worldObjs);
+    }
+
 
     updateMoney(amountDelta) {
         const oldAmount = this.money;
@@ -967,7 +1008,7 @@ export class mapView extends Phaser.Scene {
     }
     
     update() {
-        if(!this.clock.paused){
+        if(!this.clock?.paused){
             Turret.update();
             this.clock.update();
             this.handleKeyboardCameraMovement();
@@ -1053,3 +1094,23 @@ export class mapView extends Phaser.Scene {
 
 
 
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundColor: '#00a8f3',
+    scene: [mapView, itemTab],
+    scale: {
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+    },
+    physics: {
+        default: 'arcade',
+        arcade: {
+            debug: false
+        }
+    },
+ 
+};
+
+new Phaser.Game(config);

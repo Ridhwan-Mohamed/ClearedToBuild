@@ -156,7 +156,8 @@ export class Manager {
             state == CONTROL_STATES.GET_FROM_OVEN ||
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
-            state == CONTROL_STATES.SEND_TO_STORAGE;
+            state == CONTROL_STATES.SEND_TO_STORAGE ||
+            state == CONTROL_STATES.GET_BLOCK_RESOURCE;
     }
 
     static blockType(state){
@@ -165,7 +166,8 @@ export class Manager {
             state == CONTROL_STATES.GET_FROM_OVEN ||
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
-            state == CONTROL_STATES.SEND_TO_STORAGE;
+            state == CONTROL_STATES.SEND_TO_STORAGE ||
+            state == CONTROL_STATES.GET_BLOCK_RESOURCE;
     }
 
     static tooManyAssigned(task, state) {
@@ -173,7 +175,7 @@ export class Manager {
             return task.assigned >= task.amount;
         }
 
-        if(state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE){
+        if(state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE || state == CONTROL_STATES.GET_BLOCK_RESOURCE){
             return task.remaining <= task.assigned;
         }
 

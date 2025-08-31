@@ -1,43 +1,47 @@
 import Phaser from "phaser";
 import { FLOORDEPTH, UIDEPTH, TILE_TYPES, showAlert } from "./constants";
-import sand from '../assets/sand.png'
-import flower from '../assets/flower.png'
-import pine from '../assets/pine.png'
-import rock from '../assets/rock.png'
-import brick from '../assets/wall/brick.png'
-import dirtImg from '../assets/Dirt/dirtImg.png'
-import turretBase from '../assets/turretBase.png'
-import turret from '../assets/turret.png'
-import Wall from '../assets/wall/Wall.png'
-import TWall from '../assets/wall/TWall.png'
-import BWall from '../assets/wall/BWall.png'
-import RWall from '../assets/wall/RWall.png'
-import LWall from '../assets/wall/LWall.png'
-import TRCWall from '../assets/wall/TRCWall.png'
-import BRCWall from '../assets/wall/BRCWall.png'
-import TLCWall from '../assets/wall/TLCWall.png'
-import BLCWall from '../assets/wall/BLCWall.png'
-import Dirt from '../assets/Dirt/Dirt.png'
-import TDirt from '../assets/Dirt/TDirt.png'
-import BDirt from '../assets/Dirt/BDirt.png'
-import RDirt from '../assets/Dirt/RDirt.png'
-import LDirt from '../assets/Dirt/LDirt.png'
-import TRCDirt from '../assets/Dirt/TRCDirt.png'
-import BRCDirt from '../assets/Dirt/BRCDirt.png'
-import TLCDirt from '../assets/Dirt/TLCDirt.png'
-import BLCDirt from '../assets/Dirt/BLCDirt.png'
-import WaterImg from '../assets/water/waterImg.png'
-import playerImg from '../assets/Players/playerImg.png'
-import house1 from '../assets/house1.png'
-import house2 from '../assets/house2.png'
-import well from '../assets/well.png'
-import road from '../assets/road.png'
-import house1Img from '../assets/house1Img.png'
-import grassCrop from '../assets/grassCrop.png'
-import grassBerry from '../assets/grassBerry.png'
-import grassRock from '../assets/grassRock.png'
-import grassWood from '../assets/grassWood.png'
-import storage from '../assets/storage.png'
+import sand from 'url:../assets/sand.png'
+import flower from 'url:../assets/flower.png'
+import pine from 'url:../assets/pine.png'
+import rock3 from 'url:../assets/rock3.png'
+import brick from 'url:../assets/wall/brick.png'
+import dirtImg from 'url:../assets/Dirt/dirtImg.png'
+import turretBase from 'url:../assets/turretBase.png'
+import turret from 'url:../assets/turret.png'
+import Wall from 'url:../assets/wall/Wall.png'
+import TWall from 'url:../assets/wall/TWall.png'
+import BWall from 'url:../assets/wall/BWall.png'
+import RWall from 'url:../assets/wall/RWall.png'
+import LWall from 'url:../assets/wall/LWall.png'
+import TRCWall from 'url:../assets/wall/TRCWall.png'
+import BRCWall from 'url:../assets/wall/BRCWall.png'
+import TLCWall from 'url:../assets/wall/TLCWall.png'
+import BLCWall from 'url:../assets/wall/BLCWall.png'
+import Dirt from 'url:../assets/Dirt/Dirt.png'
+import TDirt from 'url:../assets/Dirt/TDirt.png'
+import BDirt from 'url:../assets/Dirt/BDirt.png'
+import RDirt from 'url:../assets/Dirt/RDirt.png'
+import LDirt from 'url:../assets/Dirt/LDirt.png'
+import TRCDirt from 'url:../assets/Dirt/TRCDirt.png'
+import BRCDirt from 'url:../assets/Dirt/BRCDirt.png'
+import TLCDirt from 'url:../assets/Dirt/TLCDirt.png'
+import BLCDirt from 'url:../assets/Dirt/BLCDirt.png'
+import WaterImg from 'url:../assets/water/waterImg.png'
+import playerImg from 'url:../assets/Players/playerImg.png'
+import house1 from 'url:../assets/house1.png'
+import house2 from 'url:../assets/house2.png'
+import well from 'url:../assets/well.png'
+import road from 'url:../assets/road.png'
+import house1Img from 'url:../assets/house1Img.png'
+import grassCrop from 'url:../assets/grassCrop.png'
+import grassBerry from 'url:../assets/grassBerry.png'
+import grassRock from 'url:../assets/grassRock.png'
+import grassWood from 'url:../assets/grassWood.png'
+import storage from 'url:../assets/storage.png'
+import pine2 from 'url:../assets/pine2.png'
+import pine1 from 'url:../assets/pine1.png'
+import rock2 from 'url:../assets/rock2.png'
+import rock1 from 'url:../assets/rock1.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -52,11 +56,15 @@ export class itemTab extends Phaser.Scene {
 
     static preload(scene) {
         scene.load.image('image1', sand);  // Make sure the path and filename are correct
-        scene.load.image('image2', rock);
+        scene.load.image('rock3', rock3);
+        scene.load.image('rock2', rock2);
+        scene.load.image('rock1', rock1);
         scene.load.image('image3', flower);
         scene.load.image('image4', brick);
         scene.load.image('image5', dirtImg);
-        scene.load.image('image6', pine);
+        scene.load.image('pine3', pine);
+        scene.load.image('pine2', pine2);
+        scene.load.image('pine1', pine1);
         scene.load.image('image7', turretBase)
         scene.load.image('image7a', turret)
         scene.load.image('image8', WaterImg); //water image

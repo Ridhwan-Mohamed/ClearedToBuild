@@ -17,7 +17,7 @@ export function clearPlayerDict(){
 }
 
 export var buildingArray = []
-export var waterSourcesQuadTree;
+
 
 export function clearBuildingArray(){
     buildingArray.length = 0;
@@ -67,8 +67,8 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
     // Step 1: Start with a random town seed within grid bounds
     let townCenterX;
     let townCenterY;
-    if(teamNumber == 1 && startX != -1 && startY != -1){
-        if(!canPlaceBuildingAtAnyCorner(grid, startX, startY, buildings[0]).success) return;
+    if (startX != -1 && startY != -1) {
+        if (!canPlaceBuildingAtAnyCorner(grid, startX, startY, buildings[0]).success) return;
         townCenterX = startX;
         townCenterY = startY;
     }
@@ -83,7 +83,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
         }
     }
     const firstIndex = buildingArray.length;
-    placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid);
+    placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid, teamNumber);
     const center = getValidCenterTile(townCenterX, townCenterY, buildings[0])
     Teams.teamLists[`${teamNumber}`].center[0] = center.tx
     Teams.teamLists[`${teamNumber}`].center[1] = center.ty
@@ -102,7 +102,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                 if(canFit.success){
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
                     if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
-                    placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid);
+                    placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid, teamNumber);
                     buildings.splice(i, 1);
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding, teamNumber);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
@@ -113,7 +113,6 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
             }
         }
         if(!outerRoadsSucesss) outerRoads.splice(0,1)
-        buildWaterQuadtree(grid)
     }
 
     const myBuildings = buildingArray.slice(firstIndex);
@@ -132,7 +131,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
     maxy = Math.min(gridHeight - 1, maxy + 10); //extend by 1 in all directions
     // Store in the global townBounds dictionary under this team number
     townBounds[teamNumber] = { minx, miny, maxx, maxy };
-    buildingArray.push(placeSpawns(grid, navGrid));
+    // buildingArray.push(placeSpawns(grid, navGrid));
     return grid;
 }
 
@@ -224,27 +223,13 @@ export function placeSpawns(grid, navGrid) {
 }
 
 // Function to place a building
-function placeBuilding(grid, x, y, building, navGrid) {
-    buildingArray.push([x,y,building,null])
+function placeBuilding(grid, x, y, building, navGrid, teamNumber) {
+    buildingArray.push([x,y,building,teamNumber])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [35,building.grid]; // Mark as building
             navGrid[y + i][x + j] = 0
         }
-    }
-}
-
-function placePlayers(roads, teamNumber){
-    for(let i = 0; i < PLAYERS_PER_HOUSE; i++){
-        // Convert set to array and select a random spot
-        let spotStr = Phaser.Utils.Array.GetRandom(Array.from(roads));
-        let [x, y] = spotStr.split(',').map(Number);
-
-        // Use as key
-        playerDict[`${x},${y}`] = teamNumber;
-
-        // Remove from the set
-        roads.delete(spotStr);
     }
 }
 
@@ -334,30 +319,6 @@ function canPlaceBuildingAtAnyCorner(grid, x, y, building) {
     }
 
     return { success: false };
-}
-
-function buildWaterQuadtree(grid) {
-    waterSourcesQuadTree = new QuadtreeNode({ x: 0, y: 0, width: grid[0].length, height: grid.length });
-
-    const isWalkable = (tile) => {
-        if(Array.isArray(tile)){
-            return !TILE_TYPES[TILE_MAP(tile[1])]?.block;
-        }
-        return !TILE_TYPES[TILE_MAP(tile)]?.block;
-    }
-    const directions = [[0,1],[1,0],[-1,0],[0,-1]];
-
-    for (let y = 0; y < grid.length; y++) {
-        for (let x = 0; x < grid[y].length; x++) {
-            if (grid[y][x] !== TILE_TYPES.water.grid) continue;
-            for (let [dx, dy] of directions) {
-                const nx = x + dx, ny = y + dy;
-                if (grid[ny]?.[nx] !== undefined && isWalkable(grid[ny][nx])) {
-                    waterSourcesQuadTree.insert({ x: nx, y: ny }); // ✅ Insert walkable tile
-                }
-            }
-        }
-    }
 }
 
 function getValidCenterTile(startX,startY,type){

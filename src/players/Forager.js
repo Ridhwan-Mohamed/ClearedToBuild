@@ -1,13 +1,14 @@
-import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES } from '../constants.js';
+import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
 import { Manager } from '../Manager/Manager.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
-
-const MAX_CARRY = 1;
-
+import { weapons } from '../weapons.js';
+import { blockResourceManager } from '../Manager/BlockResourceManager.js';
+ 
 export class Forager {
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
         sprite.setInteractive();
@@ -27,29 +28,34 @@ export class Forager {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.name = NameGenerator.generate();
-
-        sprite.carrying = null; 
+        sprite.weapon = weapons.hands;
+        sprite.carrying = null;
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-
         Player.characters.add(sprite);
         Player.troops.push(sprite);
         Player.configureCubeInteractivity(sprite);
-
         sprite.isForager = true;
         Teams.addPlayer(teamNumber, sprite);
-
         Teams.teamLists[teamNumber].foragerList.push(sprite);
+        sprite.destroySelf = () => Forager.destroy(sprite);
         return sprite;
     }
 
     static update(forager){
         if(forager.task) return
+
+        // 1.5. check for nearby enemies and flee in case.
+        Player.updateTracking(forager);
         const seedList = Teams.teamLists['1'].seedList;
-        if(seedList.length && !StorageManager.isCarrying(forager)){
-            return Manager.assignOneTroopToAction(forager, seedList, CONTROL_STATES.SEED_MODE);
-        }
+        const blockResList = Teams.teamLists['1'].blockResourceList;
         if(StorageManager.isCarrying(forager)){
             return StorageManager.tryCreateStorageDeliveryTask(forager);
+        }
+        if(blockResList.length){
+            return blockResourceManager.assingTroopsToGetBlockResources(1);
+        }
+        if(seedList.length){
+            return Manager.assignOneTroopToAction(forager, seedList, CONTROL_STATES.SEED_MODE);
         }
         if(!forager.task && forager.state == CONTROL_STATES.TRACK_MODE && !forager.roam){
             Player.roam(forager);
@@ -72,11 +78,9 @@ export class Forager {
             troop.timer = null;
         }
 
-        troop.task = null;
-        troop.carrying = null;
-
-        // Remove sprite from the scene
-        troop.body.sprite.destroy();
+        // Clear references
+        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        if (troop.carrying) troop.carrying = null;
     }
 
 }

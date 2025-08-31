@@ -3,7 +3,7 @@
 import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
-import { weapons, Weapons } from '../weapons.js';
+import { weapons } from '../weapons.js';
 import { NameGenerator } from './NameGenerator.js';
 
 export class Gunslinger {
@@ -47,6 +47,7 @@ export class Gunslinger {
         Player.configureCubeInteractivity(sprite);
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
+        sprite.destroySelf = () => Gunslinger.destroy(sprite);
 
         return sprite;
     }
@@ -64,8 +65,6 @@ export class Gunslinger {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
 
-        Player.destroyPlayer(troop);
-
         if (team?.fighterList) {
             const index = team.fighterList.indexOf(troop);
             if (index !== -1) {
@@ -73,8 +72,13 @@ export class Gunslinger {
             }
         }
 
-        troop.task = null;
-        troop.carrying = [];
-        troop.body.sprite?.destroy();
+        if (troop.timer) {
+            troop.timer.remove(false);
+            troop.timer = null;
+        }
+
+        // Clear references
+        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        if (troop.carrying) troop.carrying = null;
     }
 }

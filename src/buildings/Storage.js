@@ -14,7 +14,7 @@ export class StorageBuilding {
         const item = TILE_TYPES.storage;
         this.sprite = StorageBuilding.scene.add.sprite((x+ Math.floor(item.lenX/2))*SQUARESIZE, (y + Math.floor(item.lenY/2))*SQUARESIZE, 'storage')
             .setDepth(BLOCKDEPTH);
-        Map.drawRoadAround(x,y,item)
+        Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
         this.x = x;
         this.y = y;

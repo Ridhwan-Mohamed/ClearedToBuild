@@ -1,8 +1,7 @@
 import Phaser from "phaser";
 import { CONTROL_STATES, SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
 import { Map } from "./map";
-import { weapons } from "./weapons";
-import { fightManager } from "./fightManager";
+import { fightManager } from "./Manager/fightManager";
 import { Player } from "./players/Player";
 import { Teams } from "./Teams";
 
@@ -82,7 +81,6 @@ export class Projectile {
                 Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE)
                 Teams.removeFromStateArray(1, "fightingList", target);
                 projectile.player.track = null;
-                Player.handleStateIntteruptComplete(projectile.player);
                 projectile.player.timer.remove(false);
                 projectile.player.timer = null;
                 Player.setAnimState(projectile.player, projectile.player.idle);

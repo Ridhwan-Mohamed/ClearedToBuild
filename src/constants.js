@@ -1,4 +1,4 @@
-import { Player } from "./players/Player";
+import { UI_ITEM_TYPES } from "./UI/UIConstants";
 
 export function create2DArray(rows, cols) {
     let array = new Array(rows);
@@ -30,12 +30,13 @@ export const CONTROL_STATES = {
     COOK_MODE: 18,
     GET_FROM_STORAGE: 19, //from storage
     SEND_TO_OVEN: 20, //to oven
-    GET_FROM_OVEN: 21 //obtain from oven
+    GET_FROM_OVEN: 21, //obtain from oven
+    GET_BLOCK_RESOURCE: 22,
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
-export var WORLD_DIMENSIONX = 70;
-export var WORLD_DIMENSIONY = 70;
+export var WORLD_DIMENSIONX = 500;
+export var WORLD_DIMENSIONY = 500;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
@@ -87,15 +88,17 @@ export const TILE_TYPES = {
     },
     pine: {
         name: "pine",
-        value: 'image6',
+        value: 'pine3',
         price: 50,
         spread: false,
         block: true,
         complex: false,
         grid: 12,
-        lenX: 2,
-        lenY: 2,
-        depth: BLOCKDEPTH+2
+        lenX: 3,
+        lenY: 3,
+        depth: BLOCKDEPTH+2,
+        resource: UI_ITEM_TYPES.wood,
+        images: ['pine1', 'pine2', 'pine3']
     },
     turret: {
         name: "turret",
@@ -291,7 +294,25 @@ export const TILE_TYPES = {
         depth: FLOORDEPTH,
         interactable: true
     },
+    rock: {
+        name: "rock",
+        value: 'rock3',
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 44,
+        lenX: 2,
+        lenY: 2,
+        depth: BLOCKDEPTH+2,
+        resource: UI_ITEM_TYPES.stone,
+        images: ['rock1', 'rock2', 'rock3']
+    },
 };
+
+export const teamSetupArray = {
+    smallTeam: [TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
+    bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
+}
 
 export const TILE_ARR = [
     0,
@@ -306,7 +327,7 @@ export const TILE_ARR = [
     'blcWall',              // Top-left corner wall
     'brcWall',              // Bottom-left corner wall
     'image1',               // sand
-    'image6',               // pine
+    'pine3',               // pine
     ['image7', 'image7a'],  // Turret
     'Dirt',                 // Interior Dirt
     'tDirt',                // Top Dirt
@@ -337,7 +358,8 @@ export const TILE_ARR = [
     'clayOven',
     'storage',
     'grassWood',
-    'grassRock'
+    'grassRock',
+    'rock3'
 ];
 
 export function TILE_MAP(val){
@@ -360,6 +382,7 @@ export function TILE_MAP(val){
     else if(val == 41){return "storage"}
     else if(val == 42){return "grassWood"}
     else if(val == 43){return "grassRock"}
+    else if(val == 44){return "rock"}
     else{return}
 }
 
@@ -424,3 +447,26 @@ export function clearTaskPlusTimer(sprite){
         sprite.timer = null;
     }
 }
+
+export const gridColors = {
+    water:  0x00a8f3,
+    dirt:   0x4c2b18,
+    grass:  0x33cc33,
+    house1: 0x8b0000,
+    house2: 0x006400,
+    road:   0x555555,
+    well:   0xADD8E6,
+    grassCrop: 0x33cc33,
+    grassBerry:0x33cc33,
+    grassWood: 0x33cc33,
+    grassRock: 0x33cc33,
+    spawn:  0x333333,
+    storage:0x7d4900,
+    pine: 0x006400,
+    rock: 0x5a682b
+};
+
+export const colorFor = (cell) => {
+    const type = Array.isArray(cell) ? TILE_MAP(cell[1]) : TILE_MAP(cell);
+    return gridColors[type] || 0xffffff;
+};

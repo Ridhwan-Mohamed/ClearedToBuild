@@ -1,4 +1,4 @@
-import { TILE_TYPES, UIDEPTH } from '../constants.js';
+import { UIDEPTH } from '../constants.js';
 import { seedManager } from '../Manager/seedManager.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { Teams } from '../Teams.js';
@@ -90,7 +90,8 @@ export class DailyNeedsTracker {
             .setScrollFactor(0)
             .setDepth(UIDEPTH);
 
-            this.uiElements.push(icon, text);
+            this.uiElements.push(icon, text );
+            this.scene.cameras.main.ignore(this.uiElements)
         });
     }
 

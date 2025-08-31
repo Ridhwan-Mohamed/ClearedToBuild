@@ -49,7 +49,6 @@ export class seedManager {
         } else if (Map.grid[y][x] == TILE_TYPES.grassRock.grid){
             itemType = UI_ITEM_TYPES.stone;
         }
-
         const added = StorageManager.addCarriedItem(sprite, itemType)
         Map.grid[y][x] = 1;
         if(Map.cameraBounds.contains(sprite.task.x*SQUARESIZE,sprite.task.y*SQUARESIZE)){

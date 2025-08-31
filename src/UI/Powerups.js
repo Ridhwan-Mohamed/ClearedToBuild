@@ -27,6 +27,9 @@ export function openPowerupScreen(scene) {
     const yOffset = 100;
 
     const uiContainer = scene.add.container(0, 0).setDepth(2000);
+
+    scene.cameras.main.ignore(uiContainer);  // hide from world camera
+    scene.uiCamera.ignore([]);               // UI cam will see it by default
     uiContainer.setScrollFactor(0); // lock container to camera
 
     // === Background ===

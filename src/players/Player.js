@@ -6,7 +6,7 @@ import { tillManager } from "../Manager/tillManager";
 import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
 import { weapons } from "../weapons";
-import { fightManager } from "../fightManager";
+import { fightManager } from "../Manager/fightManager";
 import { seedManager } from "../Manager/seedManager";
 import { Manager } from "../Manager/Manager";
 import { Projectile } from "../Projectile";
@@ -17,6 +17,7 @@ import { Gunslinger } from "./Gunslinger";
 import { StorageManager } from "../Manager/StorageManager";
 import { Builder } from "./Builder";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { blockResourceManager } from "../Manager/BlockResourceManager";
 
 export class Player {
 
@@ -75,6 +76,15 @@ export class Player {
 
     static destroyPlayer(player) {
         if(!player || !player.body) return;
+        // Call the troop-specific destroy logic if defined
+        if (typeof player.destroySelf === 'function') {
+            player.destroySelf();
+        }
+
+        this.characters.remove(player);
+        const index = Player.troops.indexOf(player);
+        if (index !== -1) Player.troops.splice(index, 1);
+
         const teamNum = player.body.team;
         const team = Teams.teamLists[`${teamNum}`];
         if (!team) return;
@@ -365,6 +375,9 @@ export class Player {
         else if(sprite.state == CONTROL_STATES.GET_FROM_OVEN){
             Fireman.handleOvenPickupComplete(sprite);
         }
+        else if(sprite.state == CONTROL_STATES.GET_BLOCK_RESOURCE){
+            blockResourceManager.beginFarmingBlockResource(sprite);
+        }
     }
 
     static mostThreatening(troop, neighbours) {
@@ -652,33 +665,10 @@ export class Player {
         return;
     }
 
-    static handleStateIntteruptComplete(troop){
-        Teams.movePlayerState(troop, troop.oldState)
-        if(troop.oldState == CONTROL_STATES.FARM_MODE){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].tileList, CONTROL_STATES.FARM_MODE)
-        }else if(troop.oldState == CONTROL_STATES.SEED_MODE){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].seedList, CONTROL_STATES.SEED_MODE)
-        }else if(troop.oldState == CONTROL_STATES.HARVEST_MODE){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].cropList, CONTROL_STATES.HARVEST_MODE)
-        }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_T){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].buildingTileStates, CONTROL_STATES.BUILD_MODE_T)
-        }else if(troop.oldState == CONTROL_STATES.DESTROY_MODE){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.DESTROY_MODE)
-        }else if(troop.oldState == CONTROL_STATES.BUILD_MODE_B){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B)
-        }else if(troop.oldState == CONTROL_STATES.R_FARM_MODE){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE)
-        }else if(troop.oldState == CONTROL_STATES.TRACK_TARGET){
-            Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].fightingList, CONTROL_STATES.TRACK_TARGET)
-        }
-        troop.oldState = null;
-        return;
-    }
-
     static updateTracking(troop){
-        const inView = Map.cameraBounds.contains(troop.x, troop.y);
+        const inView = Map.cameraBounds?.contains(troop.x, troop.y);
         troop.setVisible(inView); // Will not draw if false
-        let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100)
+        let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100);
         let reTrack = this.mostClosestEnemy(troop, neighbours);
         if(reTrack){
             troop.roam = false;

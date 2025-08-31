@@ -6,8 +6,6 @@ import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
 import { ClayOvenUI } from "../UI/ClayOvenUI";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
-import { Farmer } from "../players/Farmer";
-import { Fireman } from "../players/Fireman";
 
 export class ClayOven {
 
@@ -18,7 +16,7 @@ export class ClayOven {
         const item = TILE_TYPES.clayOven
         this.sprite = ClayOven.scene.add.sprite((x+ Math.floor(item.lenX/2))*SQUARESIZE, (y + Math.floor(item.lenY/2))*SQUARESIZE, 'clayOven')
             .setDepth(BLOCKDEPTH);
-        Map.drawRoadAround(x,y,item)
+        Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
 
         this.sprite.anims.play('oven_idle');
@@ -80,16 +78,13 @@ export class ClayOven {
     static findFreeCookingSlot(itemType, teamNumber) {
         const ovens = Teams.teamLists[teamNumber]?.ovenList || [];
         const ovenDeliveryItems = Teams.teamLists[teamNumber].ovenDeliveryItems;
-
         for (const oven of ovens) {
             let emptyCandidate = null;
-
             for (let i = 0; i < oven.cookingSlots.length; i++) {
                 const slot = oven.cookingSlots[i];
                 const existingTask = ovenDeliveryItems.find(task =>
                     task.oven === oven && task.inputidx === i
                 );
-
                 if (slot && slot.item === itemType) {
                     if (existingTask &&
                         (existingTask.item.name !== itemType.name ||
@@ -101,7 +96,6 @@ export class ClayOven {
                         return { oven, idx: i, remaining: spotsLeft };
                     }
                 }
-
                 if (!slot && !emptyCandidate) {
                     if (existingTask &&
                         (existingTask.item.name !== itemType.name ||
@@ -111,10 +105,8 @@ export class ClayOven {
                     emptyCandidate = { oven, idx: i, remaining: itemType.stacks };
                 }
             }
-
             if (emptyCandidate) return emptyCandidate;
         }
-
         return null;
     }
 

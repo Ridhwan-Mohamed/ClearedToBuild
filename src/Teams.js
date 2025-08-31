@@ -20,6 +20,7 @@ export class Teams {
         tileList: [],
         seedList: [],
         seedStates: {},
+        blockResourceList: [],
         cropList: [],
         crops: [],
         wateringList: [],

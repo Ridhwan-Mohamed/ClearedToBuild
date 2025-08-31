@@ -8,18 +8,21 @@ import { buildingManager } from "./Manager/buildingManager";
 import { seedManager } from "./Manager/seedManager";
 import { House } from "./buildings/House";
 import { StorageBuilding } from "./buildings/Storage";
+import { blockResourceManager } from "./Manager/BlockResourceManager";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
     blue: { r: 0, g: 168, b: 243 },
-    white: { r: 255, g: 255, b: 255 },
-    brownishYellow: { r: 204, g: 153, b: 0 },
-    gray : {r: 195, g: 195, b: 195}
+    gray : {r: 88, g: 88, b: 88},
+    brown: {r: 76, g: 43, b: 24},
+    lightGray : {r: 195, g: 195, b: 195},
+    darkGreen: {r: 0, g: 100, b: 0},
+    darkRed: {r: 139, g: 0, b: 0},
+    lightBrown: {r: 125, g: 73, b: 0},
+    rockGray: {r: 90, g: 104, b: 43}
 };
 
-
 export class Map{
-
     static barrier;
     static graphics;
     static grid;
@@ -33,6 +36,8 @@ export class Map{
     static cropDict = {};  // add at top of map.js
     static waterBlocks = [];
     static cameraBounds;
+    static worldPines = [];
+    static worldStones = [];
 
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
@@ -63,39 +68,28 @@ export class Map{
     }
 
     static MapFromImage(canvas, image){
-        this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         const context = canvas.getContext('2d');
         context.drawImage(image, 0, 0);
         this.imageData = context.getImageData(0, 0, image.width, image.height);
 
-        this.graphics = this.scene.add.graphics();
         for (let y = 0; y < this.imageData.height; y++) {
             for (let x = 0; x < this.imageData.width; x++) {
-                const index = (x + y * this.imageData.width) * 4;
-                const r = this.imageData.data[index];
-                const g = this.imageData.data[index + 1];
-                const b = this.imageData.data[index + 2];
-                const a = this.imageData.data[index + 3] / 255;
-
                 let sample = this.sample(x,y);
                 this.grid[y][x] = sample;
-                if (sample == 0) {
-                    let barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'barrier');
-                    barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE);
-                    this.barrier.add(barrierBlock);
-                } else {
-                    this.graphics.fillStyle(Phaser.Display.Color.GetColor(r, g, b), a);
-                    this.graphics.fillRect(x * SQUARESIZE, y * SQUARESIZE, SQUARESIZE, SQUARESIZE);
+                if(sample == TILE_TYPES.water.grid || sample == TILE_TYPES.wall.grid){
+                    this.navGrid[y][x] = 0
+                }else{
+                    this.navGrid[y][x] = 1
                 }
             }
         }
         this.imageData = null;
+        return this.grid;
     }
 
     static mapFromData(data){
         this.grid = data;
         this.initGrid();
-        this.reDraw(data[0].length, data.length);
     }
 
     static beginPlacing(item){
@@ -171,7 +165,7 @@ export class Map{
         });
     }
 
-    static drawRoadAround(x, y, item) {
+    static drawRoadAround(x, y, item, team) {
         const startX = x - 1;
         const startY = y - 1;
         const endX = x + item.lenX;
@@ -196,21 +190,12 @@ export class Map{
                     Map.drawGridValue(col, row);
 
                     if (isEdge) {
-                        townRoads['1'].push([col, row]);
+                        townRoads[team].push([col, row]);
                         validEdgeTiles.push([col, row]);
                     }
                 }
             }
         }
-
-        // 🚶‍♂️ Place 2 neutral players if house
-        // const isHouse = item.value === 'house1' || item.value === 'house2';
-        // if (isHouse && validEdgeTiles.length >= 2) {
-        //     const chosen = Phaser.Utils.Array.Shuffle(validEdgeTiles).slice(0, 2);
-        //     for (const [px, py] of chosen) {
-        //         Player.addPlayer(px, py, 1);
-        //     }
-        // }
     }
 
 
@@ -275,14 +260,11 @@ export class Map{
         for (let y = posY; y < posY + item.lenY; y++) {
             for (let x = posX; x < posX + item.lenX; x++) {
                 this.checkAndPlace(x,y,item.grid,item.depth)
-                // this.addValToIndex(x,y,item.grid)
-                // this.grid[y][x] = item.grid;
                 if(item.block){
                     let barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'barrier');
                     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(FLOORDEPTH).setAlpha(0);
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
-                    // this.blocks[y*WORLD_DIMENSIONX+x] = barrierBlock; // Add to an array for tracking        
                 }
             }
         }
@@ -343,12 +325,33 @@ export class Map{
 
     static drawBuildings(){
         for(let i = 0; i < buildingArray.length; i++){
-            console.log(buildingArray[i][2])
-            if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],1);
-            else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],1);
+            if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],buildingArray[i][3]);
+            else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
             else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
+    }
+
+    static deleteAllGridElements(){
+        this.graphics.clear();
+        this.blocks.forEach(child => {
+            if (Array.isArray(child)) {
+                for (let i = 0; i < child.length; i++) {
+                    if(Array.isArray(child[i])){
+                        child[i][0].destroy();
+                        child[i][1].destroy();
+                    }
+                    else{
+                        child[i]?.destroy();
+                    }
+                }
+            } else {
+                if(child) child.destroy();
+            }
+        });
+        this.blocks = [];
+        this.waterBlocks.forEach(child => child.destroy());
+        this.barrier.clear(true);
     }
 
     static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
@@ -361,7 +364,7 @@ export class Map{
                         child[i][1].destroy();
                     }
                     else{
-                        child[i].destroy();
+                        child[i]?.destroy();
                     }
                 }
             } else {
@@ -640,11 +643,15 @@ export class Map{
     static sample(x, y){
         let rgb = this.getPixelRGBA(x,y);
         const distances = {
-            1: this.colorDistance(rgb, colors.green),
-            3: this.colorDistance(rgb, colors.blue),
-            4: this.colorDistance(rgb, colors.white),
-            5: this.colorDistance(rgb, colors.brownishYellow),
-            0: this.colorDistance(rgb, colors.gray)
+            1 : this.colorDistance(rgb, colors.green),
+            2 : this.colorDistance(rgb, colors.lightGray),
+            23: this.colorDistance(rgb, colors.blue),
+            35: this.colorDistance(rgb, colors.gray),
+            14: this.colorDistance(rgb, colors.brown),
+            41: this.colorDistance(rgb, colors.lightBrown),
+            32: this.colorDistance(rgb, colors.darkRed),
+            12: this.colorDistance(rgb, colors.darkGreen),
+            44: this.colorDistance(rgb, colors.rockGray)
         };
 
         // Find the color category with the smallest distance to the given rgb color
@@ -678,7 +685,7 @@ export class Map{
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
             itemToPlace.on('pointerover', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
+            if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
                 }
             });
@@ -701,16 +708,45 @@ export class Map{
         else{
             this.placingItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value)
                 .setDepth(item.depth) // Ensure it's above everything
-                .setInteractive();
+                .setInteractive({ cursor: 'pointer' });
             this.addBlockItem(posX,posY,item)
             const itemToPlace = this.placingItem
-            itemToPlace.setInteractive();
             itemToPlace.sx = posX + Math.floor(item.lenX)
             itemToPlace.sy = posY + Math.floor(item.lenY)
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
             if(item == TILE_TYPES.spawn) spawnPoints.push([posX, posY, itemToPlace])
             if(index>-1) buildingArray[index][3] = itemToPlace;
+            if (item.name === 'pine' || item.name === 'rock') {
+                itemToPlace.resourceType = item.name;
+                itemToPlace.health = 3;
+                itemToPlace.on('pointerdown', () => {
+                    const teamList = Teams.teamLists['1'].blockResourceList;
+                    if (!itemToPlace.task) {
+                        // Create a new task if none exists
+                        const task = {
+                            x: posX,
+                            y: posY,
+                            type: item,
+                            resource: item.resource,
+                            value: itemToPlace,
+                            assigned: 0,
+                            remaining: itemToPlace.health
+                        };
+                        itemToPlace.task = task;
+                        teamList.push(task);
+                    } else {
+                        // Ensure the task is still in the blockResourceList
+                        const stillInList = teamList.includes(itemToPlace.task);
+                        if (!stillInList) {
+                            teamList.push(itemToPlace.task);
+                        }
+                    }
+                    blockResourceManager.assingTroopsToGetBlockResources(1);
+                });
+                if (item.name === 'pine') Map.worldPines.push(itemToPlace);
+                if (item.name === 'rock') Map.worldStones.push(itemToPlace);
+            }
             itemToPlace.on('pointerover', () => {
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
                     itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover

@@ -5,6 +5,7 @@ import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { NameGenerator } from './NameGenerator.js';
+import { weapons } from '../weapons.js';
 
 export class Builder {
     constructor(x, y, teamNumber) {
@@ -34,6 +35,7 @@ export class Builder {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.carry = 'carry';
+        sprite.weapon = weapons.hands;
 
         sprite.isBuilder = true;
 
@@ -44,9 +46,10 @@ export class Builder {
         Player.configureCubeInteractivity(sprite);
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].builderList.push(sprite);
+        sprite.destroySelf = () => Builder.destroy(sprite);
         return sprite
     }
-
+ 
     static update(troop) {
         Player.updateTracking(troop);
 
@@ -69,8 +72,6 @@ export class Builder {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
 
-        Player.destroyPlayer(troop);
-
         if (team?.builderList) {
             const index = team.builderList.indexOf(troop);
             if (index !== -1) {
@@ -78,8 +79,13 @@ export class Builder {
             }
         }
 
-        troop.task = null;
-        troop.carrying = [];
-        troop.body.sprite?.destroy();
+        // Clear references
+        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        if (troop.carrying) troop.carrying = null;
+        
+        if (troop.timer) {
+            troop.timer.remove(false);
+            troop.timer = null;
+        }
     }
 }

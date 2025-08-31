@@ -3,11 +3,10 @@ import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES } from '../constants
 import { Manager } from '../Manager/Manager.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
-import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
-import { waterSourcesQuadTree } from '../town.js';
 import { weapons } from '../weapons.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
+import { waterSourcesQuadTree } from '../mainMenu.js';
 
 export class Farmer {
     constructor(x, y, teamNumber) {
@@ -41,13 +40,17 @@ export class Farmer {
         Teams.addPlayer(teamNumber, farmer);
         farmer.isFarmer = true;
         Teams.teamLists[teamNumber].farmerList.push(farmer);
+        farmer.destroySelf = () => Farmer.destroy(farmer);
         return farmer;
     }
-
+ 
     static update(troop){
-        const teamData = Teams.teamLists[troop.body.team];
         // 1. If manually assigned via tilling or harvesting
         if (troop.task) return;
+
+        // 1.5. check for nearby enemies and flee in case.
+        Player.updateTracking(troop);
+        const teamData = Teams.teamLists[troop.body.team];
         // 2. if carrying, go and store
         if(StorageManager.isCarrying(troop)){
             const assigned = StorageManager.tryCreateStorageDeliveryTask(troop);
@@ -56,8 +59,14 @@ export class Farmer {
         // 3. Harvest ready crops
         const readyCrop = teamData.TeamFarmSpots?.[0];
         if (readyCrop && !StorageManager.isCarrying(troop)) {
-            Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
-            return;
+            const isHarvesting = Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
+            if(isHarvesting) return;
+        }
+        // 3.5. Check if plotting is needed
+        const tillSpots = teamData.tileList
+        if(tillSpots.length){
+            const isFarming = Manager.assignOneTroopToAction(troop, tillSpots, CONTROL_STATES.FARM_MODE);
+            if(isFarming) return
         }
         // 4. Water crops
         const cropNeedingWater = Teams.getCropsNeedingWater(troop.body.team);
@@ -66,8 +75,8 @@ export class Farmer {
                 this.assignWaterTask(troop);
                 return;
             }
-            Manager.assignOneTroopToAction(troop, cropNeedingWater, CONTROL_STATES.WATER_CROPS_MODE);
-            return;
+            const isWatering = Manager.assignOneTroopToAction(troop, cropNeedingWater, CONTROL_STATES.WATER_CROPS_MODE);
+            if(isWatering) return;
         }
         // 5. roam
         else if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
@@ -120,5 +129,22 @@ export class Farmer {
         sprite.waterBucket = { count: 3 };
         sprite.task = null;
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+    }
+
+    static destroy(farmer) {
+        const teamList = Teams.teamLists[farmer.body.team];
+        
+        // Remove from farmerList
+        const index = teamList.farmerList.indexOf(farmer);
+        if (index !== -1) teamList.farmerList.splice(index, 1);
+
+        // Clear references
+        if (farmer.task) {farmer.task.assigned--; farmer.task = null;}
+        if (farmer.carrying) farmer.carrying = null;
+
+        if (farmer.timer) {
+            farmer.timer.remove(false);
+            farmer.timer = null;
+        }
     }
 }

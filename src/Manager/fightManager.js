@@ -1,10 +1,10 @@
-import { CONTROL_STATES } from "./constants"
+import { CONTROL_STATES } from "../constants"
 import Phaser from "phaser"
-import { Player } from "./players/Player";
-import { Teams } from "./Teams";
-import { Manager } from "./Manager/Manager";
-import { Projectile } from "./Projectile";
-import { weapons } from "./weapons";
+import { Player } from "../players/Player";
+import { Teams } from "../Teams";
+import { Manager } from "./Manager";
+import { Projectile } from "../Projectile";
+import { weapons } from "../weapons";
 
 export class fightManager{
 
@@ -22,7 +22,6 @@ export class fightManager{
         if(!target || !target.active){
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
-            Player.handleStateIntteruptComplete(sprite);
             return;
         }
         const weapon = sprite.weapon;
@@ -36,7 +35,6 @@ export class fightManager{
         if (!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject.active || dist > weapon.range) {
             sprite.track = null;
             sprite.state = CONTROL_STATES.TRACK_MODE;
-            Player.handleStateIntteruptComplete(sprite);
             return;
         }
 
@@ -56,7 +54,6 @@ export class fightManager{
                 if(!sprite.track || !sprite.track[0] || !sprite.track[0].gameObject || !sprite.track[0].gameObject.active || sprite.track[0].gameObject.health <= 0 || dist > weapon.range){
                     sprite.track = null;
                     Player.setAnimState(sprite, sprite.idle);
-                    Player.handleStateIntteruptComplete(sprite);
                     return;
                 }
 
@@ -120,7 +117,6 @@ export class fightManager{
                     Player.destroyPlayer(target);
                     sprite.track = null;
                     Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
-                    Player.handleStateIntteruptComplete(sprite);
                     sprite.timer = null;
                     Player.setAnimState(sprite, sprite.idle);
                 } else {

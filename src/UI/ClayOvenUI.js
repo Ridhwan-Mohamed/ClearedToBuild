@@ -67,8 +67,6 @@ export class ClayOvenUI {
         });
     }
 
-
-
     // === Minor UI (hover) ===
     static showMinor(oven) {
         if (oven.minorUI) return;

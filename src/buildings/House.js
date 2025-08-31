@@ -18,7 +18,7 @@ export class House {
             .setDepth(BLOCKDEPTH)
             .setInteractive();
         Map.addBlockItem(x,y,houseType);
-        Map.drawRoadAround(x,y,houseType);
+        Map.drawRoadAround(x,y,houseType,team);
 
         this.sprite.on('pointerover', () => this.updateIcons());
         this.sprite.on('pointerout', () => this.clearIcons());
@@ -48,7 +48,6 @@ export class House {
     assignPlayer(player) {
         if (!this.canAcceptPlayer()) return false;
         this.occupants.push(player);
-        this.updateIcons();
         return true;
     }
 

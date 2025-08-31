@@ -2,7 +2,6 @@ import { UIDEPTH } from "../constants";
 import { openPowerupScreen } from "../UI/Powerups";
 import { Teams } from "../Teams";
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
-import { spawnAndSend } from "../Manager/spawnManager";
 
 
 const NIGHT_START = 18;
@@ -15,8 +14,8 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 5;
-        this.minutes = 59;
+        this.hours = 6;
+        this.minutes = 1;
         this.day = 1;
 
         this.waveAmount = 1;
@@ -51,6 +50,7 @@ export class Clock {
             stroke: "#000000",
             strokeThickness: 2
         }).setDepth(UIDEPTH).setScrollFactor(0);
+        scene.cameras.main.ignore([this.overlay,this.clockText, this.dayText])
     }
 
     update() {
@@ -98,17 +98,17 @@ export class Clock {
 
     events() {
         if (this.isNight()) {
-            if (this.lastSend !== this.hours && this.spawnedThisNight < this.waveAmount) {
-                spawnAndSend();
-                this.spawnedThisNight++;
-                this.lastSend = this.hours;
-            }
+            // if (this.day > 3 && this.lastSend !== this.hours && this.spawnedThisNight < this.waveAmount) {
+            //     spawnAndSend();
+            //     this.spawnedThisNight++;
+            //     this.lastSend = this.hours;
+            // }
         } else if (this.isDayStart() && !this.powerupScreenShown){
             this.powerupScreenShown = true;   // ✅ prevent re-trigger
             openPowerupScreen(this.scene);
             DailyNeedsTracker.consumeResources();
             DailyNeedsTracker.render();
-            Teams.growWateredCrops(1); 
+            Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
             this.pause()
         } else {

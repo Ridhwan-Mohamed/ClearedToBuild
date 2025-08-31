@@ -7,10 +7,10 @@ import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { Manager } from '../Manager/Manager.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
-import { StorageBuilding } from '../buildings/Storage.js';
-import { waterSourcesQuadTree } from '../town.js';
+import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ClayOven } from '../buildings/ClayOven.js';
 import { buildingManager } from '../Manager/buildingManager.js';
+import { weapons } from '../weapons.js';
 
 const MAX_CARRY = 1;
 
@@ -35,7 +35,8 @@ export class Fireman {
         sprite.action = 'action';
         sprite.name = NameGenerator.generate();
         sprite.skip = false; //flag for manager task allocation
-
+        sprite.weapon = weapons.hands;
+ 
         sprite.carrying = null; // [{ item, count }]
         sprite.isFireman = true;
 
@@ -46,11 +47,15 @@ export class Fireman {
         Teams.addPlayer(teamNumber, sprite);
 
         Teams.teamLists[teamNumber].firemanList.push(sprite);
+        sprite.destroySelf = () => Fireman.destroy(sprite);
         return sprite;
     }
 
     static update(troop) {
         if (troop.task) return;
+
+        // check for nearby enemies and flee in case.
+        Player.updateTracking(troop);
 
         const outputList = Teams.teamLists['1'].ovenPickupItems;
         if (outputList) {
@@ -217,8 +222,8 @@ export class Fireman {
             troop.timer = null;
         }
 
-        troop.task = null;
-        troop.carrying = [];
-        troop.body.sprite.destroy();
+        // Clear references
+        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        if (troop.carrying) troop.carrying = null;
     }
 }

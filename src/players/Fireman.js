@@ -11,6 +11,7 @@ import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ClayOven } from '../buildings/ClayOven.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { weapons } from '../weapons.js';
+import { ZoomMixer } from '../UI/ZoomMixer.js';
 
 const MAX_CARRY = 1;
 
@@ -25,7 +26,10 @@ export class Fireman {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 80;
+        sprite.speed = 100;
+        sprite.stamina = 100;
+        sprite.maxStamina = 100;
+        sprite.baseSpeed = sprite.speed;
         sprite.setTint(0xff9933); // orange tint
         sprite.unitTint = 0xff9933;
         sprite.body.pushable = false;
@@ -40,6 +44,7 @@ export class Fireman {
         sprite.carrying = null; // [{ item, count }]
         sprite.isFireman = true;
 
+        ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
         Player.troops.push(sprite);
@@ -57,7 +62,7 @@ export class Fireman {
         // check for nearby enemies and flee in case.
         Player.updateTracking(troop);
 
-        const outputList = Teams.teamLists['1'].ovenPickupItems;
+        const outputList = Teams.teamLists[troop.body.team].ovenPickupItems;
         if (outputList) {
             const unassignedTask = outputList.find(val => val.assigned < val.amount);
             if(unassignedTask) {
@@ -85,14 +90,16 @@ export class Fireman {
             }
         }
 
-        const nearest = waterSourcesQuadTree.nearest(Math.floor(troop.x/SQUARESIZE), Math.floor(troop.y/SQUARESIZE));
-        if (!carrying && nearest){
-            troop.skip = true;
-            const canReserve = this.maybeAssignOvenDeliveryTask(troop, UI_ITEM_TYPES.unclean_water, 1)
-            if(canReserve){
-                Teams.movePlayerState(troop, CONTROL_STATES.GET_WATER_MODE);
-                Player.moveTo(troop, Player.pathTo(troop, nearest.x, nearest.y));
-                return;
+        if (!carrying){
+            const nearest = waterSourcesQuadTree.nearest(Math.floor(troop.x/SQUARESIZE), Math.floor(troop.y/SQUARESIZE));
+            if(nearest){
+                troop.skip = true;
+                const canReserve = this.maybeAssignOvenDeliveryTask(troop, UI_ITEM_TYPES.unclean_water, 1)
+                if(canReserve){
+                    Teams.movePlayerState(troop, CONTROL_STATES.GET_WATER_MODE);
+                    Player.moveTo(troop, Player.pathTo(troop, nearest.x, nearest.y));
+                    return;
+                }
             }
         }
 
@@ -102,7 +109,7 @@ export class Fireman {
     }
 
     static maybeAssignOvenDeliveryTask(troop, item, count = 1) {
-        const freeSlotInfo = ClayOven.findFreeCookingSlot(UI_ITEM_TYPES.unclean_water, 1)
+        const freeSlotInfo = ClayOven.findFreeCookingSlot(UI_ITEM_TYPES.unclean_water, troop.body.team)
         if (!freeSlotInfo) return false;
 
         const { oven, idx, remaining } = freeSlotInfo;

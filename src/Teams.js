@@ -236,11 +236,11 @@ export class Teams {
         Teams.teamLists[`${teamNumber}`].cropList = cropList
     }
 
-    static addSeedSpots(teamNumber, x, y) {
+    static addSeedSpots(teamNumber, x, y, block) {
         const list = Teams.teamLists[`${teamNumber}`].seedList;
         const exists = list.some(e => e.x === x && e.y === y);
         if (!exists) {
-          list.push({ x, y, assigned: 0 });
+          list.push({ x, y, assigned: 0, block });
         }
     }
 
@@ -330,10 +330,18 @@ export class Teams {
       if (!crop) return;
 
       crop.dailyWatered = false;
-      crop.growthStage = 0;
-      this.setCropForWatering(crop);
-      // Reset the sprite frame and animation
-      crop.sprite.setFrame(0);
+
+      // 40% chance to auto-reseed
+      if (Math.random() < 0.4) {
+        crop.hasSeed = true;
+        crop.growthStage = 0;
+        crop.sprite.setFrame(1); // show seeded soil
+        Teams.setCropForWatering(crop);
+      } else {
+        crop.hasSeed = false;
+        crop.growthStage = 0;
+        crop.sprite.setFrame(0); // show bare dirt
+      }
     }
 
     static setCropForWatering(crop){
@@ -347,15 +355,25 @@ export class Teams {
     } 
 
     static growWateredCrops(teamNumber) {
-        const crops = this.teamLists[teamNumber].crops;
-        for (let crop of crops) {
-            if (crop.dailyWatered && crop.sprite && crop.sprite.active) {
-                crop.growthStage = Math.min(crop.growthStage + 1, MAX_CROP_GROWTH_STAGE);
-                crop.sprite.setFrame(crop.growthStage);
-                if (crop.growthStage === MAX_CROP_GROWTH_STAGE) {
-                    this.addFarmSpots(crop.sprite, crop.x, crop.y); // Ready to harvest
-                }
-            }
+      const crops = this.teamLists[teamNumber].crops;
+      for (let crop of crops) {
+        if (!crop.hasSeed) continue; // 🚫 skip until reseeded
+
+        if (crop.dailyWatered && crop.sprite && crop.sprite.active) {
+          crop.growthStage = Math.min(crop.growthStage + 1, MAX_CROP_GROWTH_STAGE);
+
+          // Map growthStage to frame:
+          // 0 = just seeded soil (frame 1)
+          // 1 = growing (frame 2)
+          // 2 = fully grown (frame 3)
+          let frame = 1 + crop.growthStage;
+          crop.sprite.setFrame(frame);
+
+          if (frame === 3) {
+            this.addFarmSpots(crop.sprite, crop.x, crop.y);
+          }
         }
+      }
     }
+
 }

@@ -50,6 +50,7 @@ import foodIcon from 'url:../assets/foodIcon.png'
 import waterIcon from 'url:../assets/waterIcon.png'
 import woodIcon from 'url:../assets/woodIcon.png'
 import stoneIcon from 'url:../assets/stoneIcon.png'
+import playerIcon from 'url:../assets/playerIcon.png'
 import uncleanWaterIcon from 'url:../assets/uncleanWaterIcon.png'
 import { ClayOvenUI } from './UI/ClayOvenUI.js';
 import { StorageBuilding } from './buildings/Storage.js';
@@ -60,6 +61,7 @@ import { GameStart } from './Controllers/GameStart.js';
 import { ZoomMixer } from './UI/ZoomMixer.js';
 import { MainMenu } from './mainMenu.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
+import { HouseUI } from './UI/HouseUI.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -84,15 +86,15 @@ export class mapView extends Phaser.Scene {
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
         this.isBrushMode = false; // Track if brush mode is active
-        this.isBrushActive = false;  
+        this.isBrushActive = false;
         this.farmMode = false;
         this.harvestMode = false;
         this.money = 1300; // Starting amount
-        this.seeds = 0;
+        this.seeds = 4;
         this.foodAmnt = 15;
         this.cleanWaterAmnt = 15;
-        this.woodAmnt = 0;
-        this.stoneAmnt = 0;
+        this.woodAmnt = 4;
+        this.stoneAmnt = 4;
         this.berries = 0;
         this.berryMode = false;
         this.seedGridMode = false;
@@ -121,6 +123,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('waterIcon', waterIcon);
         this.load.image('woodIcon', woodIcon);
         this.load.image('stoneIcon', stoneIcon);
+        this.load.image('playerIcon', playerIcon);
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
         this.load.image('sparkle', waterParticle);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
@@ -143,6 +146,7 @@ export class mapView extends Phaser.Scene {
         ClayOvenUI.init(this); // once in your main scene's create()
         StorageBuilding.scene = this;
         StorageUI.init(this);
+        HouseUI.init(this);
         MainMenu.attach(this);
     }
 
@@ -272,12 +276,6 @@ export class mapView extends Phaser.Scene {
             }
             if(Map.placingItem && !Map.placingItem.blocked){
                 const items = TILE_TYPES[this.registry.get('image')]
-                // if(items.price){
-                //     if(!this.checkSufficientFunds(items.price)){
-                //         showAlert(this, 'insufficient Funds', "#ff0000");
-                //         return;
-                //     }
-                // }
                 let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
@@ -371,6 +369,7 @@ export class mapView extends Phaser.Scene {
                         let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                         if (newX === -1) {
                             console.log("No valid start tile nearby");
+                            return;
                         } else {
                             console.log("New valid tile:", newX, newY);
                             troopX = newX
@@ -379,7 +378,9 @@ export class mapView extends Phaser.Scene {
                     }
                     else if(Map.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
+                        return;
                     }
+                    troop.roam = false;
                     Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX+SQUARESIZE/2, y: targetY+SQUARESIZE/2 }));
                 });
             }
@@ -504,7 +505,7 @@ export class mapView extends Phaser.Scene {
         }
         else if (this.startCell && this.endCell) {
             // Get all selected grid cells
-            this.getSelectedCells();    
+            this.getSelectedCells();
         }
         this.startCell = null;
         this.endCell = null;
@@ -542,12 +543,22 @@ export class mapView extends Phaser.Scene {
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
-                    if(type.spread && type.name != "water" && type.name != 'crops' && type.name != 'road'){
+                    if(type.spread && type.name != "water" && type.name != 'road'){
                         tillList.push( {
                             x,
                             y,
                             assigned: 0
                         });
+                    }
+                    else if(type.name == 'crops'){
+                        const crop = Teams.getCropAt(x,y,1);
+                        if(crop && !crop.hasSeed){
+                            tillList.push( {
+                                x,
+                                y,
+                                assigned: 0
+                            });
+                        }
                     }
                 }
             }
@@ -686,7 +697,7 @@ export class mapView extends Phaser.Scene {
         brushToggleButton.setDepth(UIDEPTH);
     
         // Add the top bar
-        const topBar = this.add.rectangle(0, 0, camera.width, 50, 0x808080, 0.5) // Gray and transparent
+        const topBar = this.add.rectangle(0, -1, camera.width, 50, 0x808080, 0.5) // Gray and transparent
             .setOrigin(0, 0)
             .setScrollFactor(0) // Sticks to the camera
             .setDepth(UIDEPTH - 1);

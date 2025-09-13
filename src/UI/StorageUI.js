@@ -37,6 +37,7 @@ export class StorageUI {
         text._uiUpdate = updatePosition;
 
         storage.minorUI = [bg, text];
+        this.scene.uiCamera.ignore(storage.minorUI)
     }
 
     static refreshMinor(storage) {
@@ -143,6 +144,7 @@ export class StorageUI {
         
         container.add([closeBtn, title, itemLabel])
         this.openUIs.set(storage, container);
+        this.scene.uiCamera.ignore(container);
     }
 
     static refreshMajor(storage) {

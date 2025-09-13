@@ -3,6 +3,7 @@
 
 import { colorFor, UIDEPTH } from "../constants";
 import { Map } from "../map";
+import { Player } from "../players/Player";
 
 export class ZoomMixer {
   /** assign once from your scene: ZoomMixer.scene = this */
@@ -91,9 +92,12 @@ export class ZoomMixer {
       .setOrigin(0, 0)
       .setDisplaySize(worldW, worldH)
       .setScrollFactor(1)
-      .setDepth(0)       // put this under your gameplay layers
+      .setDepth(UIDEPTH - 2)       // put this under your gameplay layers
       .setAlpha(0)
       .setVisible(false);
+
+    // Make sure UI camera doesn't render the overlay
+    scene.uiCamera?.ignore(this.overviewImage);
   }
 
   // Zoom to targetZoom around the camera center (no pointer reference)
@@ -238,8 +242,8 @@ export class ZoomMixer {
     // Hover label
     const label = scene.add.text(x, y - 20, description, {
       fontSize: '14px',
-      fill: '#000000',
-      stroke: '#ffffff',
+      fill: '#ffffff',
+      stroke: '#000000',
       strokeThickness: 3,
       backgroundColor: 'rgba(0,0,0,0.3)',
       padding: { x: 4, y: 2 }
@@ -264,6 +268,37 @@ export class ZoomMixer {
     });
 
     ZoomMixer.mapIconContainer.add([icon, label]);
+    return icon;
+  }
+
+  static createPlayerMoniker(troop) {
+    const color = troop.body.team === 1 ? 0x00ff00 : 0xff0000; // example team colors
+    const icon = ZoomMixer.createZoomInvariantIcon(
+      'playerIcon',
+      troop.name,   // description on hover
+      troop.x, troop.y,
+      { baseScale: 0.8 }
+    );
+
+    // Tint per team
+    icon.setTint(troop.unitTint);
+
+    // On click: select troop, open details window
+    icon.on('pointerdown', () => {
+      Player.selected = [troop];
+      Player.showDetailsTab(troop);
+    });
+
+    // Keep following troop in world space
+    ZoomMixer.scene.events.on('update', () => {
+        if (icon.followingHouse) {
+            // do nothing, its position is pinned by StaminaManager
+        } else {
+            icon.setPosition(troop.x, troop.y);
+        }
+    });
+
+
     return icon;
   }
 

@@ -25,6 +25,9 @@ export class StorageBuilding {
         // this.addItem(UI_ITEM_TYPES.unclean_water, 15);
         this.addItem(UI_ITEM_TYPES.clean_water, 15)
         this.addItem(UI_ITEM_TYPES.food, 15);
+        this.addItem(UI_ITEM_TYPES.wood, 4);
+        this.addItem(UI_ITEM_TYPES.stone, 4);
+        this.addItem(UI_ITEM_TYPES.seedCrop, 4);
 
         // Register into the team
         Teams.teamLists[teamNumber].storageList.push(this);

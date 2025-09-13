@@ -6,6 +6,7 @@ import { Teams } from '../Teams.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { weapons } from '../weapons.js';
+import { ZoomMixer } from '../UI/ZoomMixer.js';
 
 export class Builder {
     constructor(x, y, teamNumber) {
@@ -27,7 +28,10 @@ export class Builder {
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 80;
+        sprite.speed = 100;
+        sprite.stamina = 100;
+        sprite.maxStamina = 100;
+        sprite.baseSpeed = sprite.speed;
         sprite.body.pushable = false;
 
         sprite.animState = 'idle';
@@ -40,6 +44,7 @@ export class Builder {
         sprite.isBuilder = true;
 
         // === Register with systems ===
+        ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
         Player.troops.push(sprite);

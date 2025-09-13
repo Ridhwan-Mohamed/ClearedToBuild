@@ -18,6 +18,8 @@ import { StorageManager } from "../Manager/StorageManager";
 import { Builder } from "./Builder";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
+import { ZoomMixer } from "../UI/ZoomMixer";
+import { StaminaManager } from "../Manager/staminaManager";
 
 export class Player {
 
@@ -27,7 +29,7 @@ export class Player {
     static characters;
     static selected = [];
     static detailsContainer = null;
-    static detailsLvlText = null;
+    static detailsStaminaText = null;
     static detailsHealthText = null;
     static detailsWeaponText = null;
     static curPlayerDetails = null;
@@ -274,19 +276,14 @@ export class Player {
         }
         this.setAnimState(sprite, sprite.walk)
         let nextPoint = sprite.currentPath[0]; // Get the next point in the path
-        //check if new path is needed
-        // const nextTileX = Math.floor(nextPoint.x / SQUARESIZE);
-        // const nextTileY = Math.floor(nextPoint.y / SQUARESIZE);
-        // if (
-        //     nextTileY >= 0 && nextTileY < Map.navGrid.length &&
-        //     nextTileX >= 0 && nextTileX < Map.navGrid[0].length &&
-        //     Map.navGrid[nextTileY][nextTileX] === 0
-        //     ){
-        //     console.log(`Sprite: ${sprite.id} on team ${sprite.body.team} has to recalculate path due to ${nextTileX},${nextTileY} not being a valid point anymore`)
-        //     const rePathed = this.handleReMap(sprite)
-        //     if(!rePathed) return;
-        // }
-        const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y).setLength(sprite.speed);
+
+        // Scale speed by stamina ratio
+        const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina); 
+        const currentSpeed = sprite.baseSpeed * staminaFactor;
+        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - 0.02); this.updateDetailsTab(sprite)};  
+
+        const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y)
+            .setLength(currentSpeed);
         // Calculate new velocity
         let newVelocity = new Phaser.Math.Vector2(
             desired.x,
@@ -297,11 +294,6 @@ export class Player {
         if (newVelocity.length() > 0) {
             sprite.rotation = Phaser.Math.Angle.Between(0, 0, newVelocity.x, newVelocity.y); // Calculate angle
         }
-        // if(sprite.state == CONTROL_STATES.DESTROY_MODE){
-        //     let val = Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y);
-        //     console.log(`sprite: ${sprite.id} this far away: ${val}, currentPath.length: ${sprite.currentPath.length}`)
-        // }
-        //hack fix belowLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL-fds09as
         if ((sprite.state == CONTROL_STATES.TRACK_MODE || sprite.state == CONTROL_STATES.TRACK_TARGET) && !sprite.roam && sprite.track && sprite.track[0].gameObject && Phaser.Math.Distance.Between(sprite.x, sprite.y, sprite.track[0].gameObject.x, sprite.track[0].gameObject.y) < sprite.weapon.range && (!sprite.weapon.projectile || Projectile.hasLineOfSight(sprite, sprite.track[0].gameObject))) {
             sprite.body.setVelocity(0, 0);
             sprite.currentPath.length = 0;
@@ -377,6 +369,14 @@ export class Player {
         }
         else if(sprite.state == CONTROL_STATES.GET_BLOCK_RESOURCE){
             blockResourceManager.beginFarmingBlockResource(sprite);
+        }
+        else if (sprite.state == CONTROL_STATES.GO_HOME_MODE) {
+            if (sprite.home) {
+                StaminaManager.arriveAtHome(sprite);
+            }
+        }
+        else if (sprite.state == CONTROL_STATES.SLEEP_MODE) {
+            // do nothing, stamina regen handled in StaminaManager.updateTroop
         }
     }
 
@@ -701,7 +701,8 @@ export class Player {
             else if (troop.isFireman) { Fireman.update(troop) }
             else if (troop.isBuilder) { Builder.update(troop) }
             else{ this.updateTracking(troop) } // for enemies
-            this.followPath(troop);
+            StaminaManager.updateTroop(troop);
+            if (troop.state != CONTROL_STATES.SLEEP_MODE) this.followPath(troop);
         })
     }
 
@@ -774,7 +775,7 @@ export class Player {
         ).setOrigin(0, 0).setDepth(UIDEPTH);
 
 
-        const lvlText = scene.add.text(PAD, textY + 20, `Lvl: ${player.level || 1}`, {
+        const staminaText = scene.add.text(PAD, textY + 20, `Stamina: ${player.stamina}`, {
             fontSize: '16px', fill: '#ffffff'
         }).setOrigin(0, 0).setDepth(UIDEPTH);
 
@@ -819,9 +820,10 @@ export class Player {
             bg, outline,
             portrait,
             nameText,  // ✅ Add name text here
-            lvlText, healthText, weaponText, teamText,
+            staminaText, healthText, weaponText, teamText,
             closeBtn
         ]);
+        scene.cameras.main.ignore(container);
 
         Player.detailsContainer = container;
 
@@ -832,7 +834,7 @@ export class Player {
             ease: 'Cubic.easeOut'
         });
 
-        Player.detailsLvlText = lvlText;
+        Player.detailsStaminaText = staminaText;
         Player.detailsHealthText = healthText;
         Player.detailsWeaponText = weaponText;
         Player.detailsPortrait = portrait;
@@ -891,27 +893,28 @@ export class Player {
         }
         Player.detailsHealthText.setText(`Health:  ${player.health}`);
     
-        // Level delta
-        const prevLvl = parseInt(Player.detailsLvlText.text.split(':')[1].trim(), 10);
-        const deltaLvl = (player.level || 1) - prevLvl;
-        if (deltaLvl !== 0) {
-            const msg = deltaLvl > 0 ? `+${deltaLvl}` : `${deltaLvl}`;
-            const col = deltaLvl > 0 ? '#00ff00' : '#ff3333';
-            const worldX = container.x + Player.detailsLvlText.x + 75;
-            const worldY = container.y + Player.detailsLvlText.y;
-            const ghost = Player.scene.add.text(worldX, worldY, msg, {
-                fontSize: '16px', fill: col, stroke: '#000000', strokeThickness: 2
-            }).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
-            Player.scene.tweens.add({
-                targets: ghost,
-                y: ghost.y - 20,
-                alpha: 0,
-                duration: 800,
-                ease: 'Cubic.easeOut',
-                onComplete: () => ghost.destroy()
-            });
+        // Stamina delta
+        const prevStamina = parseInt(Player.detailsStaminaText.text.split(':')[1].split('/')[0].trim(), 10);
+        const currentStamina = Math.floor(player.stamina);
+        const deltaStamina = currentStamina - prevStamina;
+        if (deltaStamina !== 0) {
+        const msg = deltaStamina > 0 ? `+${deltaStamina}` : `${deltaStamina}`;
+        const col = deltaStamina > 0 ? '#00ff00' : '#ff3333';
+        const worldX = container.x + Player.detailsStaminaText.x + 75;
+        const worldY = container.y + Player.detailsStaminaText.y;
+        const ghost = Player.scene.add.text(worldX, worldY, msg, {
+            fontSize: '16px', fill: col, stroke: '#000000', strokeThickness: 2
+        }).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
+        Player.scene.tweens.add({
+            targets: ghost,
+            y: ghost.y - 20,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ghost.destroy()
+        });
         }
-        Player.detailsLvlText.setText(`Lvl:     ${player.level || 1}`);
+        Player.detailsStaminaText.setText(`Stamina: ${currentStamina}/${player.maxStamina}`);
     
         // Weapon (no ghost)
         Player.detailsWeaponText.setText(`Weapon:  ${player.weapon?.name || 'None'}`);

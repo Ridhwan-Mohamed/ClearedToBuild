@@ -5,6 +5,7 @@ import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
 import { weapons } from '../weapons.js';
 import { NameGenerator } from './NameGenerator.js';
+import { ZoomMixer } from '../UI/ZoomMixer.js';
 
 export class Gunslinger {
     constructor(x, y, teamNumber) {
@@ -26,6 +27,9 @@ export class Gunslinger {
         sprite.body.team = teamNumber;
         sprite.health = 200;
         sprite.speed = 100;
+        sprite.stamina = 100;
+        sprite.maxStamina = 100;
+        sprite.baseSpeed = sprite.speed;
         sprite.body.pushable = false;
         sprite.name = NameGenerator.generate();
 
@@ -41,6 +45,7 @@ export class Gunslinger {
         sprite.weapon = pistol;
 
         // === Register with systems ===
+        ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
         Player.troops.push(sprite);

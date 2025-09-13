@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES } from "./constants";
+import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./players/Player";
@@ -443,7 +443,8 @@ export class Map{
             if(type.spriteSheet){
                 block = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
                 if (tileKey === 'crops') {
-                    block.setFrame(0); // Start at frame 0 (or first stage)
+                    block.setFrame(1); // Start at frame 0 (or first stage)
+                    block.hasSeed = true;
                 } else {
                     block.play(tileKey);
                 }
@@ -470,7 +471,8 @@ export class Map{
                 x: x,
                 y: y,
                 dailyWatered: false,
-                growthStage: 0
+                growthStage: 0,
+                hasSeed: true
             });
             Teams.teamLists['1'].wateringList.push({
                 x: x,
@@ -720,10 +722,20 @@ export class Map{
             if (item.name === 'pine' || item.name === 'rock') {
                 itemToPlace.resourceType = item.name;
                 itemToPlace.health = 3;
+                // 🟡 outline persists until resource is destroyed
+
                 itemToPlace.on('pointerdown', () => {
                     const teamList = Teams.teamLists['1'].blockResourceList;
                     if (!itemToPlace.task) {
                         // Create a new task if none exists
+                        if (!itemToPlace.queuedOutline) {
+                            itemToPlace.queuedOutline = Map.scene.add.graphics();
+                            itemToPlace.queuedOutline.setDepth(UIDEPTH);
+                            itemToPlace.queuedOutline.lineStyle(2, 0xffff00, 1);
+                            const xStart = itemToPlace.x-(itemToPlace.lenX/2*SQUARESIZE)
+                            const yStart = itemToPlace.y-(itemToPlace.lenY/2*SQUARESIZE)
+                            itemToPlace.queuedOutline.strokeRect(xStart, yStart, SQUARESIZE*itemToPlace.lenX, SQUARESIZE*itemToPlace.lenY);
+                        }
                         const task = {
                             x: posX,
                             y: posY,

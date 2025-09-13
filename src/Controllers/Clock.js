@@ -29,9 +29,9 @@ export class Clock {
 
         // Dark overlay setup
         const camera = scene.cameras.main;
-        this.overlay = scene.add.rectangle(0, 0, camera.width, camera.height, 0x000000, 1)
+        this.overlay = scene.add.rectangle(-1, -1, camera.width+1, camera.height+1, 0x000000, 1)
             .setOrigin(0, 0)
-            .setDepth(1000)
+            .setDepth(UIDEPTH-2)
             .setScrollFactor(0)
             .setAlpha(0);
 
@@ -50,7 +50,8 @@ export class Clock {
             stroke: "#000000",
             strokeThickness: 2
         }).setDepth(UIDEPTH).setScrollFactor(0);
-        scene.cameras.main.ignore([this.overlay,this.clockText, this.dayText])
+        scene.cameras.main.ignore([this.clockText, this.dayText])
+        scene.uiCamera.ignore([this.overlay]);   // overlay is only seen by main cam
     }
 
     update() {
@@ -110,7 +111,7 @@ export class Clock {
             DailyNeedsTracker.render();
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
-            this.pause()
+            this.pause();
         } else {
             this.lastSend = null;
         }

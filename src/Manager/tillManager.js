@@ -1,5 +1,5 @@
 import { StorageBuilding } from "../buildings/Storage";
-import { BLOCKDEPTH, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
 import { Manager } from "./Manager";
 import { StorageManager } from "./StorageManager";
 import { Map } from "../map";
@@ -44,26 +44,40 @@ export class tillManager {
     }
 
     static beginTilling(sprite) {
-        const x = sprite.task.x;
-        const y = sprite.task.y;
-        const task = sprite.task;
-        if(!this.scene.checkSufficientSeeds(1)) return;
+        const {x, y} = sprite.task;
+        if (!this.scene.checkSufficientSeeds(1)) return;
+
         sprite.timer = this.scene.time.delayedCall(1000, () => {
-            if(!this.scene.checkSufficientSeeds(1)) return;
-            if(!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) return;
-            Teams.removeFromStateArray(1, "tileList", task);
-            if (sprite) {
-                this.scene.updateSeeds(-1);
-                StorageManager.consumeItemFromStorage(sprite.body.team, UI_ITEM_TYPES.seedCrop);
+            if (!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) return;
+
+            const existingCrop = Teams.getCropAt(x, y, sprite.body.team);
+
+            if (existingCrop) {
+            // reseed existing crop
+                existingCrop.hasSeed = true;
+                existingCrop.growthStage = 0;
+                existingCrop.dailyWatered = false;
+                existingCrop.sprite.setFrame(1); // seeded soil
+                Teams.setCropForWatering(existingCrop);
+            } else {
+                // plant new crop
+                Map.grid[y][x] = TILE_TYPES.crops.grid;
+                Map.drawGridValue(x,y);
+                // add to Teams.teamLists[team].crops as usual, with sprite frame 1
             }
-            Map.grid[y][x] = TILE_TYPES.crops.grid
-            Map.drawGridValue(x,y)
-            // Map.addSpreadArr(x, y, TILE_TYPES.crops, 0);
-            sprite.timer = null;
+
+
+            this.scene.updateSeeds(-1);
+            StorageManager.consumeItemFromStorage(sprite.body.team, UI_ITEM_TYPES.seedCrop);
+
+            Teams.removeFromStateArray(1, "tileList", sprite.task);
             sprite.task = null;
+            sprite.timer = null;
+
             Manager.assignOneTroopToAction(sprite, Teams.teamLists[`${sprite.body.team}`].tileList, CONTROL_STATES.FARM_MODE);
         });
     }
+
 
     static beginWatering(sprite){
         const x = sprite.task.x;

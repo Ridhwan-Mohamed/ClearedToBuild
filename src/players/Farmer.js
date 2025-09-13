@@ -7,6 +7,7 @@ import { weapons } from '../weapons.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
+import { ZoomMixer } from '../UI/ZoomMixer.js';
 
 export class Farmer {
     constructor(x, y, teamNumber) {
@@ -21,6 +22,9 @@ export class Farmer {
         farmer.body.team = teamNumber;
         farmer.health = 100;
         farmer.speed = 100
+        farmer.stamina = 100;
+        farmer.maxStamina = 100;
+        farmer.baseSpeed = farmer.speed;
         farmer.setTint(0x8B5A2B)
         farmer.unitTint = 0x8B5A2B;
         farmer.body.pushable = false;
@@ -32,6 +36,7 @@ export class Farmer {
         farmer.carrying = null;
         farmer.waterBucket = {count: 0};
         farmer.oldState = null;
+        ZoomMixer.createPlayerMoniker(farmer);
         Teams.movePlayerState(farmer, CONTROL_STATES.TRACK_MODE);
         farmer.weapon = weapons.hands;
         Player.characters.add(farmer);
@@ -59,7 +64,7 @@ export class Farmer {
         // 3. Harvest ready crops
         const readyCrop = teamData.TeamFarmSpots?.[0];
         if (readyCrop && !StorageManager.isCarrying(troop)) {
-            const isHarvesting = Manager.assignOneTroopToAction(troop, Teams.teamLists['1'].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
+            const isHarvesting = Manager.assignOneTroopToAction(troop, Teams.teamLists[troop.body.team].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
             if(isHarvesting) return;
         }
         // 3.5. Check if plotting is needed

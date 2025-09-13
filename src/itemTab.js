@@ -33,6 +33,7 @@ import house2 from 'url:../assets/house2.png'
 import well from 'url:../assets/well.png'
 import road from 'url:../assets/road.png'
 import house1Img from 'url:../assets/house1Img.png'
+import construction from 'url:../assets/construction.png'
 import grassCrop from 'url:../assets/grassCrop.png'
 import grassBerry from 'url:../assets/grassBerry.png'
 import grassRock from 'url:../assets/grassRock.png'
@@ -90,6 +91,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('blcDirt', BLCDirt); // Bottom-left corner Dirt
         scene.load.image('house1', house1); 
         scene.load.image('house2', house2); 
+        scene.load.image('construction', construction);
         scene.load.image('well', well); 
         scene.load.image('road', road); 
         scene.load.image('grassCrop', grassCrop);

@@ -32,6 +32,8 @@ export const CONTROL_STATES = {
     SEND_TO_OVEN: 20, //to oven
     GET_FROM_OVEN: 21, //obtain from oven
     GET_BLOCK_RESOURCE: 22,
+    SLEEP_MODE: 23,
+    GO_HOME_MODE: 24,
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
@@ -307,6 +309,17 @@ export const TILE_TYPES = {
         resource: UI_ITEM_TYPES.stone,
         images: ['rock1', 'rock2', 'rock3']
     },
+    construction: {
+        name: "construction",
+        value: 'construction',
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 45,
+        lenX: 4,
+        lenY: 4,
+        depth: BLOCKDEPTH+2,
+    }
 };
 
 export const teamSetupArray = {
@@ -359,7 +372,8 @@ export const TILE_ARR = [
     'storage',
     'grassWood',
     'grassRock',
-    'rock3'
+    'rock3',
+    'construction'
 ];
 
 export function TILE_MAP(val){
@@ -383,6 +397,7 @@ export function TILE_MAP(val){
     else if(val == 42){return "grassWood"}
     else if(val == 43){return "grassRock"}
     else if(val == 44){return "rock"}
+    else if(val == 45){return "construction"}
     else{return}
 }
 
@@ -463,7 +478,8 @@ export const gridColors = {
     spawn:  0x333333,
     storage:0x7d4900,
     pine: 0x006400,
-    rock: 0x5a682b
+    rock: 0x5a682b,
+    crops: 0xFCF55F,
 };
 
 export const colorFor = (cell) => {

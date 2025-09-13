@@ -57,6 +57,10 @@ export class blockResourceManager{
                     const idx = Math.max(0, task.remaining - 1);
                     task.value.setTexture(frames[idx]);
                 } else {
+                    if (task.value.queuedOutline) {
+                        task.value.queuedOutline.destroy();
+                        task.value.queuedOutline = null;
+                    }
                     task.value.destroy();
                     let blockTiles = [];
                     for(let i = task.y; i < task.type.lenY + task.y; i++){

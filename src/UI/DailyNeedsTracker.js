@@ -102,7 +102,8 @@ export class DailyNeedsTracker {
         this.uiElements = [];
     }
 
-    static updateUIItems(item, count){
+    static updateUIItems(item, count, decrease=false){
+        if(decrease) count *= -1;
         if (item == UI_ITEM_TYPES.seedCrop) {
             seedManager.scene.updateSeeds(count);
         }

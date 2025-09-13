@@ -1,13 +1,11 @@
 // navmeshUpdater.js
 import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from './constants.js';
 import { Map } from './map.js';
-import jsastar from "javascript-astar";
 import Vector2 from "./lib/navmesh/math/vector-2";
 import { NavMesh } from './lib/navmesh/navmesh.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import NavPoly from './lib/navmesh/navpoly.js';
 import Polygon from './lib/navmesh/math/polygon.js';
-import { Teams } from './Teams.js';
 
 export class NavMeshUpdater {
     constructor(navMesh, scene) {
@@ -185,7 +183,8 @@ export class NavMeshUpdater {
         // Step 7: Build NavPoly instances
         const newNavPolys = newPolygons.map((polyPoints, i) => {
             const polygon = new Polygon(polyPoints.map(p => new Vector2(p.x, p.y)));
-            return new NavPoly(Map.navMesh.navPolygons.length + i, polygon);
+            const id = Map.navMesh._nextPolyId++;
+            return new NavPoly(id, polygon);
         });
     
         // Step 9: Remove old polys
@@ -200,6 +199,7 @@ export class NavMeshUpdater {
 
         const allPolys = newNavPolys.concat(Array.from(neighborPolys));
         Map.navMesh.calculateNewNeighbors(allPolys);
+        Map.navMesh.rebuild()
     
         if (this.debugEnabled) this.drawDebug();
     }

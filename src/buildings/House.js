@@ -1,6 +1,7 @@
-import { BLOCKDEPTH, SQUARESIZE } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, UIDEPTH } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
+import { HouseUI } from "../UI/HouseUI";
 
 export class House {
 
@@ -12,13 +13,17 @@ export class House {
         this.y = y;
         this.team = team;
         this.occupants = [];
+        this.uiContainer = House.scene.add.container(0, 0).setDepth(UIDEPTH);
 
         this.sprite = House.scene.add.image(x * SQUARESIZE, y * SQUARESIZE, houseType.name)
             .setOrigin(0)
             .setDepth(BLOCKDEPTH)
-            .setInteractive();
-        Map.addBlockItem(x,y,houseType);
+            .setInteractive()
+            .on('pointerdown', () => {
+                HouseUI.toggleMajor(this);
+            });
         Map.drawRoadAround(x,y,houseType,team);
+        Map.addBlockItem(x,y,houseType);
 
         this.sprite.on('pointerover', () => this.updateIcons());
         this.sprite.on('pointerout', () => this.clearIcons());
@@ -44,10 +49,10 @@ export class House {
         return true;
     }
 
-
     assignPlayer(player) {
         if (!this.canAcceptPlayer()) return false;
         this.occupants.push(player);
+        player.home = this;   // 🔑 reference to their house
         return true;
     }
 
@@ -63,6 +68,7 @@ export class House {
             0x000000,
             0.6
         ).setOrigin(0.5).setDepth(9).setStrokeStyle(1, 0xffffff, 0.4);
+        this.uiContainer.add(this.iconBg);
 
         this.uiIcons = this.occupants.map((p, i) => {
             const icon = this.scene.add.image(
@@ -70,10 +76,12 @@ export class House {
                 this.sprite.y - 14,
                 'char'
             ).setDepth(10).setScale(0.4);
-
+            this.uiContainer.add(icon);
             icon.setTint(p.tint);
             return icon;
         });
+
+        this.scene.uiCamera.ignore([this.uiContainer])
     }
 
     clearIcons() {
@@ -85,6 +93,8 @@ export class House {
         for (const icon of this.uiIcons) {
             if (icon) icon.destroy();
         }
+
+        this.uiContainer.removeAll(true);
 
         this.uiIcons = [];
     }

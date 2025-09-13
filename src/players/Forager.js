@@ -6,6 +6,7 @@ import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { weapons } from '../weapons.js';
 import { blockResourceManager } from '../Manager/BlockResourceManager.js';
+import { ZoomMixer } from '../UI/ZoomMixer.js';
  
 export class Forager {
 
@@ -19,7 +20,10 @@ export class Forager {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 90;
+        sprite.speed = 100;
+        sprite.stamina = 100;
+        sprite.maxStamina = 100;
+        sprite.baseSpeed = sprite.speed;
         sprite.setTint(0x228B22); // greenish tint for foragers
         sprite.unitTint = 0x228B22;
         sprite.body.pushable = false;
@@ -30,6 +34,7 @@ export class Forager {
         sprite.name = NameGenerator.generate();
         sprite.weapon = weapons.hands;
         sprite.carrying = null;
+        ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
         Player.troops.push(sprite);
@@ -46,8 +51,8 @@ export class Forager {
 
         // 1.5. check for nearby enemies and flee in case.
         Player.updateTracking(forager);
-        const seedList = Teams.teamLists['1'].seedList;
-        const blockResList = Teams.teamLists['1'].blockResourceList;
+        const seedList = Teams.teamLists[forager.body.team].seedList;
+        const blockResList = Teams.teamLists[forager.body.team].blockResourceList;
         if(StorageManager.isCarrying(forager)){
             return StorageManager.tryCreateStorageDeliveryTask(forager);
         }

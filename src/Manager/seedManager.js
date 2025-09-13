@@ -50,6 +50,10 @@ export class seedManager {
             itemType = UI_ITEM_TYPES.stone;
         }
         const added = StorageManager.addCarriedItem(sprite, itemType)
+        if (sprite.task && sprite.task.block && sprite.task.block.queuedOutline) {
+            sprite.task.block.queuedOutline.destroy();
+            sprite.task.block.queuedOutline = null;
+        }
         Map.grid[y][x] = 1;
         if(Map.cameraBounds.contains(sprite.task.x*SQUARESIZE,sprite.task.y*SQUARESIZE)){
             Map.drawGridValue(x,y);
@@ -74,10 +78,19 @@ export class seedManager {
         });
 
         block.on('pointerdown', () => {
-            Teams.addSeedSpots(1, x, y);
+            Teams.addSeedSpots(1, x, y, block);
             seedManager.assignSeedsToTroops(1);
-        })
-      
+
+            // 🟡 outline persists until picked up
+            if (!block.queuedOutline) {
+                const size = SQUARESIZE;
+                block.queuedOutline = scene.add.graphics();
+                block.queuedOutline.setDepth(UIDEPTH);
+                block.queuedOutline.lineStyle(2, 0xffff00, 1);
+                block.queuedOutline.strokeRect(x * size, y * size, size, size);
+            }
+        });
+  
         block.on('pointerout', () => {
           // remove the outline when the pointer leaves
           if (outline) {

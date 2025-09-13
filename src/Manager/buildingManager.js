@@ -1,13 +1,15 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
 import { StorageBuilding } from "../buildings/Storage"
 import { House } from "../buildings/House"
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
+import { UI_ITEM_TYPES } from "../UI/UIConstants"
+import { ZoomMixer } from "../UI/ZoomMixer"
 export class buildingManager{
 
     static NavMeshUpdater;
@@ -163,7 +165,7 @@ export class buildingManager{
                 return { tx: candidate.tx, ty: candidate.ty, path };
             }
         }
-    
+        
         return null; // ❌ No valid path found
     }
 
@@ -183,8 +185,22 @@ export class buildingManager{
             return;
         }
 
+        if (!task.constructionSprite) {
+            task.constructionSprite = Map.scene.add.image(
+                task.x * SQUARESIZE + (task.type.lenX * SQUARESIZE) / 2,
+                task.y * SQUARESIZE + (task.type.lenY * SQUARESIZE) / 2,
+                'construction'
+            ).setDepth(BLOCKDEPTH);
+
+            task.constructionSprite.setDisplaySize(
+                task.type.lenX * SQUARESIZE,
+                task.type.lenY * SQUARESIZE
+            );
+        }
+
+
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(1000, () => {
+            sprite.timer = this.scene.time.delayedCall(250, () => {
                 console.log(`sprite: ${sprite.id} starting timer, duration: ${task.duration}`)
                 if(!sprite.active || sprite.state != CONTROL_STATES.BUILD_MODE_B) return;
                 let teamNumber = sprite.body.team;
@@ -208,12 +224,14 @@ export class buildingManager{
                 }
                 
                 sprite.play(sprite.action);
-                task.duration -= 50;
+                task.duration -= 2;
+                sprite.stamina = Math.max(0, sprite.stamina - 0.2);
+                Player.updateDetailsTab(sprite)
     
                 if (task.duration <= 0) {
                     // if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;
                     // buildingManager.scene.updateMoney(-1*task.type.price);
-                    Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
+                    Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
                     sprite.play(sprite.idle);
                     sprite.timer = null;
                     console.log("Done building.");
@@ -226,6 +244,10 @@ export class buildingManager{
                         return;
                     }
                     this.consumeRequiredMaterials(cost, teamNumber);
+                    if (task.constructionSprite) {
+                        task.constructionSprite.destroy();
+                        task.constructionSprite = null;
+                    }
                     this.handlePlacement(task);
                     let blockTiles = []
                     let startY = task.y
@@ -235,6 +257,9 @@ export class buildingManager{
                             blockTiles.push({x: j, y: i})
                         }
                     }
+                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => {
+                        return colorFor(cell); // or however you resolve colors
+                    });
                     this.NavMeshUpdater.blockTiles(blockTiles)
                     Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
                     sprite.task = null;
@@ -315,6 +340,9 @@ export class buildingManager{
                             Map.navGrid[i][j] = 1;
                         }
                     }
+                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => {
+                        return colorFor(cell); // or however you resolve colors
+                    });
                     this.NavMeshUpdater.blockTiles(blockTiles, true)
                     Teams.removeFromStateArray(teamNumber, "destroyStates", sprite.task);
                     sprite.task = null;
@@ -355,7 +383,7 @@ export class buildingManager{
     static consumeRequiredMaterials(costObj, teamNumber) {
         for (const [res, count] of Object.entries(costObj)) {
             StorageBuilding.removeTeamMaterials(res, count, teamNumber);
-            DailyNeedsTracker.updateUIItems(res, count);
+            DailyNeedsTracker.updateUIItems(UI_ITEM_TYPES[res], count, true);
         }
     }
 }

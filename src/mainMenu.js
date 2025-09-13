@@ -41,7 +41,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.1.1', {
+        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.2.0', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
@@ -57,11 +57,42 @@ export class MainMenu {
         // Make button pulse a little
         scene.tweens.add({
             targets: scene.startButton,
-            alpha: 0.5,
+            alpha: 0.25,
             duration: 600,
             yoyo: true,
             repeat: -1
         });
+
+        // Float
+        scene.tweens.add({
+        targets: scene.logo,
+        y: centerY - 10,
+        duration: 1200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+        });
+
+        // Wiggle
+        scene.tweens.add({
+        targets: scene.logo,
+        angle: { from: -2, to: 2 },
+        duration: 1500,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+        });
+
+        // Pulse
+        scene.tweens.add({
+        targets: scene.logo,
+        scale: { from: 1, to: 1.05 },
+        duration: 1200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Quad.easeInOut'
+        });
+
 
         scene.startButton.on('pointerdown', () => {
             // Animate logo up and shrink
@@ -96,6 +127,36 @@ export class MainMenu {
 
         scene.logoMini = scene.add.image(centerX, 55, 'logoMini').setOrigin(0.5).setAlpha(0);
         scene.tweens.add({ targets: scene.logoMini, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
+
+        // Drop / bob down slightly
+        scene.tweens.add({
+            targets: scene.logoMini,
+            y: 65,                   // lower than its initial 55
+            duration: 2000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Wiggle side to side
+        scene.tweens.add({
+            targets: scene.logoMini,
+            angle: { from: -1.5, to: 1.5 },
+            duration: 2500,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
+        // Pulse scale gently
+        scene.tweens.add({
+            targets: scene.logoMini,
+            scale: { from: 1, to: 1.04 },
+            duration: 1800,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Quad.easeInOut'
+        });
 
         // === Build Map.grid from already-loaded map image ===
         const img = scene.textures.get('worldMap').getSourceImage(); // 500x500
@@ -438,6 +499,8 @@ export class MainMenu {
             Map.initMap();
             Map.mapFromData(scene.gridData);
             Map.navMesh = new NavMesh(polys);
+            // when you create the navmesh, after constructor:
+            Map.navMesh._nextPolyId = Math.max(...Map.navMesh.navPolygons.map(p => p.id)) + 1;
             scene.navMeshUpdater = new NavMeshUpdater(Map.navMesh, scene);
             scene.navMeshUpdater.setupAddAndRemove();
             buildingManager.NavMeshUpdater = scene.navMeshUpdater;
@@ -465,8 +528,19 @@ export class MainMenu {
                         const cx = (b.minx + b.maxx) / 2 * SQUARESIZE;
                         const cy = (b.miny + b.maxy) / 2 * SQUARESIZE;
                         Map.reDraw()
-                        scene.cameras.main.pan(cx, cy, 1200, 'Cubic.easeInOut');
-                        scene.zoomMixer.smoothCenterZoomTo(1.0, 1200, 'Cubic.easeInOut');
+                        const cam = scene.cameras.main;
+                        scene.tweens.add({
+                            targets: cam,
+                            scrollX: cx - cam.width / 2,
+                            scrollY: cy - cam.height / 2,
+                            zoom: 1.0,
+                            duration: 1000,
+                            ease: 'Quad.easeInOut',
+                            onComplete: () => {
+                                scene.zoomMixer.swapMode('detailed');
+                            }
+                        });
+
                     }
                     scene.zoomMixer.hookWheel();
                     scene.zoomMixer.hookKeys();
@@ -479,432 +553,3 @@ export class MainMenu {
     }
 
 }
-
-// class MainMenu extends Phaser.Scene {
-//     constructor() {
-//         super('MainMenu');
-//     }
-
-//     preload() {
-//         this.load.image('logo', logo);
-//         this.load.image('mapImg', worldMap); // <— move here
-//         this.load.image('townIcon', townIcon);
-//     }
-
-//     create() {
-//         const origTextFactory = Phaser.GameObjects.GameObjectFactory.prototype.text;
-//         // override it so that any call missing fontFamily will get your default:
-//         Phaser.GameObjects.GameObjectFactory.prototype.text = function(x, y, content, style) {
-//         style = style || {};
-//         if (!style.fontFamily) {
-//             style.fontFamily = 'Georgia, serif';
-//         }
-//         return origTextFactory.call(this, x, y, content, style);
-//         };
-
-//         this.logo = this.add.image(0, 0, 'logo').setOrigin(0.5, 0.5).setScale(1);
-//         this.startText = this.add.text(0, 0, 'START', {
-//             fontSize: '30px',
-//             fill: '#ffffff',
-//         }).setOrigin(0.5).setInteractive({ cursor: 'pointer' });  // 👈 makes mouse show a hand;
-
-//         this.tweens.add({
-//             targets: this.startText,
-//             alpha: 0.3,
-//             yoyo: true,
-//             repeat: -1,
-//             duration: 500
-//         });
-
-//         this.updateLayout(); // Initial layout positioning
-
-//         this.startText.on('pointerdown', () => this.startGame());
-        
-//         // ✅ Listen to Phaser's internal resize event
-//         this.scale.on('resize', this.updateLayout, this);
-
-//         // === VERSION LABEL ===
-//         this.versionText = this.add.text(this.scale.width - 75, this.scale.height - 20, 'v0.0.1', {
-//             fontSize: '18px',
-//             fill: '#ffffff',
-//             fontStyle: 'bold'
-//         }).setOrigin(0, 1); // Bottom-left anchor
-
-//         // Keep it in position on resize
-//         this.scale.on('resize', () => {
-//             this.versionText.setPosition(this.scale.width - 75, this.scale.height - 20);
-//         });
-
-//     }
-
-//     updateLayout() {
-//         const { width, height } = this.scale;
-//         this.logo.setPosition(width / 2, height / 2);
-//         this.startText.setPosition(width / 2, height / 2 + 250);
-//     }
-
-//     startGame() {
-//         const { width } = this.scale;
-//         const targetY = 80;
-
-//         this.tweens.add({
-//             targets: this.logo,
-//             y: targetY,
-//             scale: 0.3,
-//             duration: 1000,
-//             ease: 'Cubic.easeInOut',
-//             onComplete: () => {
-//                 // Once logo animation is complete, show grid + buttons
-//                 this.showGridAndButtons();
-//             }
-//         });
-
-//         this.tweens.add({
-//             targets: this.startText,
-//             alpha: 0,
-//             duration: 300,
-//             ease: 'Linear',
-//             onComplete: () => {
-//                 this.startText.destroy();
-//             }
-//         });
-//     }
-
-//     showGridAndButtons() {
-//         const gridColors = {
-//             water:  0x00a8f3,
-//             dirt:   0x4c2b18,
-//             grass:  0x33cc33,
-//             house1: 0x8b0000,
-//             house2: 0x006400,
-//             road:   0x555555,
-//             well:   0xADD8E6,
-//             grassCrop: 0x33cc33,
-//             grassBerry:0x33cc33,
-//             grassWood: 0x33cc33,
-//             grassRock: 0x33cc33,
-//             spawn:  0x333333,
-//             storage:0x7d4900,
-//             pine: 0x006400,
-//             rock: 0x5a682b
-//         };
-
-//         const colorFor = (cell) => {
-//             const type = Array.isArray(cell) ? TILE_MAP(cell[1]) : TILE_MAP(cell);
-//             return gridColors[type] || 0xffffff;
-//         };
-
-//         const centerX = this.scale.width / 2;
-//         const centerY = this.scale.height / 2;
-
-//         // === Build Map.grid from preloaded image ===
-//         const img = this.textures.get('mapImg').getSourceImage(); // HTMLImageElement (500x500)
-//         const srcW = img.naturalWidth || img.width;
-//         const srcH = img.naturalHeight || img.height;
-
-//         // Offscreen canvas for sampling
-//         const canvas = document.createElement('canvas');
-//         canvas.width  = srcW;
-//         canvas.height = srcH;
-
-//         Map.grid    = create2DArray(srcW, srcH);
-//         Map.navGrid = create2DArray(srcW, srcH);
-
-//         this.gridData = Map.MapFromImage(canvas, img);  // fills Map.grid/navGrid
-
-//         // === CanvasTexture preview (one draw call)
-//         const texKey = 'mapPreview';
-//         if (this.textures.exists(texKey)) this.textures.remove(texKey);
-
-//         const tilePx = 1;
-//         const tex = this.textures.createCanvas(texKey, srcW * tilePx, srcH * tilePx);
-//         const ctx = tex.getContext();
-
-//         for (let y = 0; y < srcH; y++) {
-//             for (let x = 0; x < srcW; x++) {
-//                 let value;
-//                 Array.isArray(this.gridData[y][x]) ? value = this.gridData[y][x][1] : value = this.gridData[y][x]
-//                 const c = colorFor(value);
-//                 const type = TILE_TYPES[TILE_MAP(value)]
-//                 if((type == TILE_TYPES.pine || type == TILE_TYPES.rock) && !Array.isArray(this.gridData[y][x])){
-//                     buildingArray.push([x,y,type,null])
-//                     for(let i = y; i < y + type.lenY; i++){
-//                         for(let j = x; j < x + type.lenX; j++){
-//                             this.gridData[i][j] = [TILE_TYPES.grass.grid, type.grid]
-//                             if(type.block) Map.navGrid[i][j] = 0;
-//                         }
-//                     }
-//                 }
-//                 ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
-//                 ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
-//             }
-//         }
-//         tex.refresh();
-
-//         // existing code
-//         const preview = this.add.image(centerX, centerY + 50, texKey).setOrigin(0.5);
-//         const maxW = this.scale.width  * 0.9;
-//         const maxH = this.scale.height * 0.7;
-//         const scale = Math.min(maxW / (srcW * tilePx), maxH / (srcH * tilePx));
-//         preview.setDisplaySize(srcW * tilePx * scale, srcH * tilePx * scale);
-
-//         // ✅ Fade-in effect
-//         preview.setAlpha(0); // start invisible
-//         this.tweens.add({
-//             targets: preview,
-//             alpha: 1,
-//             duration: 800,
-//             ease: 'Quad.easeInOut'
-//         });
-
-//         // screen↔texture helpers
-//         const screenToTex = {
-//             x0: preview.x - preview.displayWidth / 2,
-//             y0: preview.y - preview.displayHeight / 2,
-//             sx: preview.displayWidth  / (srcW * tilePx),
-//             sy: preview.displayHeight / (srcH * tilePx)
-//         };
-//         const gridToScreen = (gx, gy) => {
-//             const px = screenToTex.x0 + (gx * tilePx + 0.5) * screenToTex.sx;
-//             const py = screenToTex.y0 + (gy * tilePx + 0.5) * screenToTex.sy;
-//             return [px, py];
-//         };
-
-//         const repaintBounds = (b) => {
-//             for (let y = b.miny; y <= b.maxy; y++) {
-//             for (let x = b.minx; x <= b.maxx; x++) {
-//                 const c = colorFor(this.gridData[y][x]);
-//                 ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
-//                 ctx.fillRect(x * tilePx, y * tilePx, tilePx, tilePx);
-//             }
-//             }
-//             tex.refresh();
-//         };
-
-//         // Simple round icon used as hover/click handle
-//         const iconKey = 'townIcon';
-//         if (!this.textures.exists(iconKey)) {
-//             const g = this.add.graphics();
-//             g.fillStyle(0xffffff, 1);
-//             g.fillCircle(12, 12, 10);
-//             g.lineStyle(2, 0x000000, 1);
-//             g.strokeCircle(12, 12, 10);
-//             g.generateTexture(iconKey, 24, 24);
-//             g.destroy();
-//         }
-
-//         // === Your 4 seeds & teams (first is Player/Team 1)
-//         const seeds = [
-//             [132, 384], // team 1 (player default)
-//             [381, 397], // team 2
-//             [129, 167], // team 3
-//             [364, 152]  // team 4
-//         ];
-//         const teams = [1, 2, 3, 4];
-
-//         Teams.newTeam(1); Teams.newTeam(2); Teams.newTeam(3); Teams.newTeam(4);
-
-//         // Place towns
-//         seeds.forEach(([sx, sy], idx) => {
-//             const team = teams[idx];
-//             this.gridData = generateTown(
-//                 this.gridData,
-//                 teamSetupArray.smallTeam,
-//                 team,
-//                 sx, sy,
-//                 Map.navGrid
-//             );
-//             if (!this.gridData) return;
-
-//             const b = townBounds[team];
-//             if (!b) return;
-
-//             // Make sure all buildings placed in that bbox have correct team in buildingArray[3]
-//             for (let i = 0; i < buildingArray.length; i++) {
-//             const e = buildingArray[i];
-//             if (!e || e.length < 4) continue;
-//             const [bx, by] = e;
-//             if (bx >= b.minx && bx <= b.maxx && by >= b.miny && by <= b.maxy) {
-//                 buildingArray[i][3] = team;
-//             }
-//             }
-
-//             repaintBounds(b);
-//         });
-
-
-//         // === Status label (put this BEFORE creating icons)
-//         const label = this.add.text(preview.x, preview.y - preview.displayHeight / 2 + 100, '', {
-//         fontSize: '16px', fill: '#ffffff'
-//         }).setOrigin(0.5).setAlpha(0.9);
-
-//         const townIcons = {};
-
-//         const makeIconForTeam = (team) => {
-//         const b = townBounds[team];
-//         if (!b) return null;
-
-//         const [ix, iy] = gridToScreen(
-//             Math.round((b.minx + b.maxx) / 2),
-//             Math.round((b.miny + b.maxy) / 2)
-//         );
-
-//         const icon = this.add.image(ix, iy, 'townIcon')
-//             .setOrigin(0.5)
-//             .setScale(0.9)
-//             .setInteractive({ cursor: 'pointer' });
-
-//         // Default all icons to dark grey
-//         icon.setTint(0x141414);
-
-//         townIcons[team] = icon;
-
-//         icon.on('pointerover', () => icon.setScale(1.05));
-//         icon.on('pointerout',  () => icon.setScale(0.9));
-
-//         icon.on('pointerdown', () => {
-//         if (team === 1) return; // already the player town
-
-//         // --- swap ownership between clicked team and team 1 ---
-//         const bSel = townBounds[team];
-//         const bPly = townBounds[1];
-//         if (!bSel || !bPly) return;
-
-//         // 1) Mark clicked team's buildings (inside its bounds) to TEMP tag
-//         for (let i = 0; i < buildingArray.length; i++) {
-//             const e = buildingArray[i];
-//             if (!e || e.length < 4) continue;
-//             const [bx, by, , curTeam] = e;
-//             if (curTeam === team &&
-//                 bx >= bSel.minx && bx <= bSel.maxx &&
-//                 by >= bSel.miny && by <= bSel.maxy) {
-//             buildingArray[i][3] = -999; // temp marker
-//             }
-//         }
-
-//         // 2) Move player buildings (inside player bounds) → clicked team
-//         for (let i = 0; i < buildingArray.length; i++) {
-//             const e = buildingArray[i];
-//             if (!e || e.length < 4) continue;
-//             const [bx, by, , curTeam] = e;
-//             if (curTeam === 1 &&
-//                 bx >= bPly.minx && bx <= bPly.maxx &&
-//                 by >= bPly.miny && by <= bPly.maxy) {
-//             buildingArray[i][3] = team;
-//             }
-//         }
-
-//         // 3) Move temp-marked (clicked team’s) → player team(1)
-//         for (let i = 0; i < buildingArray.length; i++) {
-//             const e = buildingArray[i];
-//             if (!e || e.length < 4) continue;
-//             if (e[3] === -999) e[3] = 1;
-//         }
-
-//         // 4) Swap town bounds so future clicks/centering use the right areas
-//         const tmpB = townBounds[1];
-//         townBounds[1]   = bSel;
-//         townBounds[team] = tmpB;
-
-//         // 5) Swap road arrays by reference so spawns/pathing follow towns
-//         const t1   = '1';
-//         const tSel = String(team);
-//         const tmpR = townRoads[t1];
-//         townRoads[t1]   = townRoads[tSel];
-//         townRoads[tSel] = tmpR;
-
-//         // (Optional) swap team centers if you track them
-//         if (Teams?.teamLists?.['1'] && Teams?.teamLists?.[tSel]) {
-//             const c1 = Teams.teamLists['1'].center;
-//             Teams.teamLists['1'].center     = Teams.teamLists[tSel].center;
-//             Teams.teamLists[tSel].center    = c1;
-//         }
-
-//         // 6) Repaint just the two towns' bounds on the preview (if you have repaintBounds)
-//         if (typeof repaintBounds === 'function') {
-//             repaintBounds(townBounds[1]);
-//             repaintBounds(townBounds[team]);
-//         }
-
-//         // 7) Tints: all dark grey; selected (now player) clears tint
-//         Object.values(townIcons).forEach(ic => ic.setTint(0x141414));
-//         icon.clearTint();
-
-//         // 8) HUD message back
-//         label.setText(`Selected Team ${team} as Player`).setAlpha(1);
-//         this.time.delayedCall(1200, () => label.setAlpha(0));
-//         });
-
-//         return icon;
-//         };
-
-//         [1,2,3,4].forEach(makeIconForTeam);
-
-//         // Auto-highlight team 1 initially
-//         if (townIcons[1]) townIcons[1].clearTint();
-
-
-        
-//         WaveCollapse.scatterOnGrass(this.gridData, 200, TILE_TYPES.grassWood.grid);
-//         WaveCollapse.scatterOnGrass(this.gridData, 200, TILE_TYPES.grassRock.grid);
-
-//         // Create icons for teams 1..4 (player icon is still clickable but no-op)
-//         buildWaterQuadtree(this.gridData);
-//         // === Play button
-//         const buttonStyle = {
-//             fontSize: '16px',
-//             fill: '#ffffff',
-//             backgroundColor: '#00a8f3',
-//             padding: { x: 10, y: 5 }
-//         };
-//         const playBtn = this.add.text(
-//         centerX,
-//         preview.y + preview.displayHeight / 2 + 30,
-//         'Play',
-//         buttonStyle
-//         )
-//         .setOrigin(0.5)
-//         .setInteractive({ cursor: 'pointer' })
-//         .on('pointerdown', () => {
-//         // Fade out "START" only; keep logo + preview so player sees continuity
-//         this.tweens.add({ targets: this.startText, alpha: 0, duration: 200, onComplete: () => this.startText.destroy() });
-
-//         // Show a simple loading overlay
-//         const loadingUI = this.add.container(0, 0).setDepth(9999);
-//         const bg = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x000000, 0.35).setOrigin(0);
-//         const msg = this.add.text(this.scale.width/2, this.scale.height/2 + 180, 'Loading...', {
-//         fontSize: '22px', fill: '#ffffff', stroke: '#000', strokeThickness: 3
-//         }).setOrigin(0.5);
-//         const bar = this.add.rectangle(this.scale.width/2 - 150, this.scale.height/2 + 210, 300, 8, 0x333333).setOrigin(0,0.5);
-//         const fill = this.add.rectangle(this.scale.width/2 - 150, this.scale.height/2 + 210, 1, 8, 0xffffff).setOrigin(0,0.5);
-//         loadingUI.add([bg, msg, bar, fill]);
-
-//         // Let the UI paint, then do the heavy work
-//         this.time.delayedCall(30, () => {
-//         // if you haven’t precomputed polys yet, do it here; otherwise keep your stored this.prebuiltPolys
-//         if (!this.prebuiltPolys) {
-//             this.prebuiltPolys = buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0);
-//         }
-//         // fake a tiny progress animation so the bar moves (optional)
-//         this.tweens.add({ targets: fill, width: 300, duration: 250, onComplete: () => {
-//             // fade out logo + version + preview smoothly
-//             this.tweens.add({
-//             targets: [this.logo, this.versionText],
-//             alpha: 0, duration: 250, onComplete: () => {
-//                 // start map with both the grid and the shared texture key
-//                 this.scene.start('mapView', {
-//                 gridData: this.gridData,
-//                 prebuiltPolys: this.prebuiltPolys,
-//                 mapTexKey: 'mapPreview'  // 👈 reuse this exact texture in mapView overlay
-//                 });
-//             }
-//             });
-//         }});
-//         });
-
-//         });
-
-//         }
-
-
-// }

@@ -17,20 +17,26 @@ import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { teamSetupArray } from './constants';
 import { Clock } from './Controllers/Clock.js';
 import { buildWaterQuadtree } from './lib/waterQuadTree.js'
+import start from 'url:../assets/start.png'
+import playButton from 'url:../assets/playButton.png'
+import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
+import { StorageBuilding } from './buildings/Storage.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
-  static scene = null;
+    static scene = null;
 
-  /** Bind the live Phaser scene so static methods can use it */
-  static attach(scene) {
-    MainMenu.scene = scene;
-    console.log(worldMap)
-    scene.load.image('logo', logo);
-    scene.load.image('worldMap', worldMap)
-    scene.load.image('townIcon', townIcon)
-    scene.load.image('logoMini', logoMini)
-  }
+    /** Bind the live Phaser scene so static methods can use it */
+    static attach(scene) {
+        MainMenu.scene = scene;
+        console.log(worldMap)
+        scene.load.image('logo', logo);
+        scene.load.image('worldMap', worldMap)
+        scene.load.image('townIcon', townIcon)
+        scene.load.image('logoMini', logoMini)
+        scene.load.image('startBtn', start);
+        scene.load.image('playBtn', playButton);
+    }
 
     /** Build the preview/selection UI in screen space (on UI camera) */
     static startMenuPhase() {
@@ -46,13 +52,20 @@ export class MainMenu {
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
 
-        scene.startButton = scene.add.text(centerX, centerY + 240, 'START', {
-            fontSize: '28px',
-            fill: '#ffffff',
-            backgroundColor: '#00a8f3',
-            padding: { x: 16, y: 8 }
-        }).setOrigin(0.5).setInteractive({ cursor: 'pointer' });
+        scene.startButton = scene.add.image(centerX, centerY + 260, 'startBtn')
+            .setOrigin(0.5)
+            .setInteractive({ cursor: 'pointer' });
         scene.menu.add(scene.startButton);
+
+        // Wiggle animation
+        scene.tweens.add({
+            targets: scene.startButton,
+            angle: { from: -2, to: 2 },
+            duration: 2000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
 
         // Make button pulse a little
         scene.tweens.add({
@@ -239,10 +252,21 @@ export class MainMenu {
         MainMenu.buildTeamSelectUI_OnMenuPreview(srcW, srcH, scale);
 
         // Play button (UI)
-        const play = scene.add.text(centerX, scene.scale.height - 40, 'Play', {
-        fontSize:'18px', fill:'#ffffff', backgroundColor:'#00a8f3', padding:{x:10,y:5}
-        }).setOrigin(0.5).setInteractive({ cursor:'pointer' });
+        const play = scene.add.image(centerX, scene.scale.height - 40, 'playBtn')
+        .setOrigin(0.5)
+        .setInteractive({ cursor:'pointer' });
         scene.menu.add(play);
+
+        // Wiggle animation
+        scene.tweens.add({
+            targets: play,
+            angle: { from: -3, to: 3 },
+            duration: 1000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut'
+        });
+
         play.on('pointerdown', () => {
             scene.tweens.add({
                 targets: [play, scene.menu],
@@ -256,6 +280,13 @@ export class MainMenu {
             });
         });
 
+        // Hover darken effect
+        play.on('pointerover', () => {
+        play.setTint(0xaaaaaa);   // darker shade
+        });
+        play.on('pointerout', () => {
+        play.clearTint();         // restore original
+        });
 
         // Route cameras now that menu exists
         scene.cameras.main.ignore(scene.menu); // main cam: world-only
@@ -506,6 +537,7 @@ export class MainMenu {
             buildingManager.NavMeshUpdater = scene.navMeshUpdater;
             blockResourceManager.NavMeshUpdater = scene.navMeshUpdater;
             Map.drawBuildings();
+            CreateBottomBar(scene);
             GameStart.placePlayers();
             scene.sceneButtons();
             scene.clock = new Clock(scene);

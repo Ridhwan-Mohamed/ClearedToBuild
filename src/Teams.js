@@ -18,9 +18,8 @@ export class Teams {
         houseList: [],
         TeamFarmSpots: [],
         tileList: [],
-        seedList: [],
-        seedStates: {},
-        blockResourceList: [],
+        // seedStates: {},
+        foragerQueue: [],
         cropList: [],
         crops: [],
         wateringList: [],
@@ -30,12 +29,14 @@ export class Teams {
         fightingList: [],
         center: [0, 0],
         ovenList: [],
+        ovenJobs: [],
         storageList: [],
         ovenPickupItems: [],
+        ovenFuelJobs: [],
+        ovenFuelDeliveryItems: [],
         ovenDeliveryItems: [],
         storagePickupItems: [],
         storageDeliveryItems: [],
-        // per‐state buckets
         stateLists: {}
       };
   

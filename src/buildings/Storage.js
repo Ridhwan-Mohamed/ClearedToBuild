@@ -35,7 +35,11 @@ export class StorageBuilding {
         this.sprite.setInteractive({ useHandCursor: true });
         this.sprite.on('pointerover', () => StorageUI.showMinor(this));
         this.sprite.on('pointerout', () => StorageUI.hideMinor(this));
-        this.sprite.on('pointerdown', () => StorageUI.toggleMajor(this));
+        this.sprite.on('pointerdown', () => {
+            const bar = StorageBuilding.scene.uiBottomBar;
+            bar.pages.swapPage('storage');
+            bar.pages.storageTab.selectFromWorld(this);
+        });
     }
 
     get totalStored() {
@@ -74,9 +78,10 @@ export class StorageBuilding {
 
         // 3. Refresh UI if needed
         if (changed) {
-            StorageUI.refreshMajor?.(this);
             StorageUI.refreshMinor?.(this);
             DailyNeedsTracker.AddResources(itemDef, OGAmnt - amount);
+            const scene = StorageBuilding.scene;
+            scene.events.emit("storage:updated", this);
         }
 
         return amount <= 0;  // True if all items were added
@@ -109,8 +114,9 @@ export class StorageBuilding {
 
         // 2. Refresh UI if any slot changed
         if (changed) {
-            StorageUI.refreshMajor?.(this);
             StorageUI.refreshMinor?.(this);
+            const scene = StorageBuilding.scene;
+            scene.events.emit("storage:updated", this);
         }
 
         return remaining <= 0; // true if full amount was removed

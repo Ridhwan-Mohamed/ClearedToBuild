@@ -12,6 +12,8 @@ export class Manager {
         for(let troop of troopList){
             if(!force && !Player.playerAvailible(troop)) continue;
             for(let task of taskList){
+                if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
+                else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
                 if(this.buildType(state)){
                     if(this.tooManyAssigned(task, state)) continue;
                     if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
@@ -72,6 +74,8 @@ export class Manager {
 
     static assignOneTroopToAction(troop, taskList, state){
         for(let task of taskList){
+            if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
+            else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
             if(this.buildType(state)){
                 if(this.tooManyAssigned(task, state)) continue;
                 if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 

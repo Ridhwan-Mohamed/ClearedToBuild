@@ -9,6 +9,7 @@ import { seedManager } from "./Manager/seedManager";
 import { House } from "./buildings/House";
 import { StorageBuilding } from "./buildings/Storage";
 import { blockResourceManager } from "./Manager/BlockResourceManager";
+import { ClayOven } from "./buildings/ClayOven";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -327,6 +328,7 @@ export class Map{
         for(let i = 0; i < buildingArray.length; i++){
             if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],buildingArray[i][3]);
             else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
+            else if(buildingArray[i][2].name === TILE_TYPES.clayOven.name) new ClayOven(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
             else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
@@ -726,6 +728,7 @@ export class Map{
 
                 itemToPlace.on('pointerdown', () => {
                     const teamList = Teams.teamLists['1'].blockResourceList;
+                    const foragerQueue = Teams.teamLists['1'].foragerQueue
                     if (!itemToPlace.task) {
                         // Create a new task if none exists
                         if (!itemToPlace.queuedOutline) {
@@ -743,10 +746,11 @@ export class Map{
                             resource: item.resource,
                             value: itemToPlace,
                             assigned: 0,
-                            remaining: itemToPlace.health
+                            remaining: itemToPlace.health,
+                            forageType: 'block'
                         };
                         itemToPlace.task = task;
-                        teamList.push(task);
+                        foragerQueue.push(task);
                     } else {
                         // Ensure the task is still in the blockResourceList
                         const stillInList = teamList.includes(itemToPlace.task);

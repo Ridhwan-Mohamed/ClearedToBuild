@@ -36,9 +36,7 @@ export class StorageBuilding {
         this.sprite.on('pointerover', () => StorageUI.showMinor(this));
         this.sprite.on('pointerout', () => StorageUI.hideMinor(this));
         this.sprite.on('pointerdown', () => {
-            const bar = StorageBuilding.scene.uiBottomBar;
-            bar.pages.swapPage('storage');
-            bar.pages.storageTab.selectFromWorld(this);
+            StorageBuilding.scene.openDetailPage('storage', tab => tab.selectFromWorld(this));
         });
     }
 

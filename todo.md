@@ -9,7 +9,6 @@
 
 🔹 Define Tabs
 - [✔️] Create tabs: Players | Ovens | Storages | Functions
-- [ ] Style tabs: tab labels, background, selected tab indicator
 - [✔️] Make tab switching logic (change content when tab clicked)
 
 🔹 Content of Each Tab
@@ -44,9 +43,15 @@
 
 🔹 Polishing
 - [✔️] Key shortcut for pulling up and down tab bar 
-
+- [✔️] Fix shortcuts keys
+- [✔️] Fix drop down starting up 
+- [✔️] Add pull up bar functionality to clicking ovens/storages
+- [✔️] DailyNeedsTracker update end of day 
+- [✔️] Fix farmer logic
+ 
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
+    - ⚠️ Make sure UIIgnoreRefresh isn;t growing WorldObj's infinetly
     - 🍽️ Decrease health / increase stamina based on food/water on EOD 
     - 🔄 fix redraw (OAFA)
     - 🚰 needs a switch to stop producing water unnecessarily (3 / maybe subtask in larger Player UI reconfig)

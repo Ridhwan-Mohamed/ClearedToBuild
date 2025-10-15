@@ -250,15 +250,6 @@ export class mapView extends Phaser.Scene {
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
         this.keyboardSpeed = 10;
-        this.input.keyboard.on('keydown-F', () => {
-            this.farmMode = !this.farmMode;
-        });
-        this.input.keyboard.on('keydown-C', () => {
-            this.harvestMode = !this.harvestMode;
-        });
-        this.input.keyboard.on('keydown-V', () => {
-            this.seedGridMode = !this.seedGridMode;
-        });
         this.input.keyboard.on('keydown-K', () => {
             this.selectingEnemies = true;
             this.enemySelectStart = this.input.activePointer.positionToCamera(this.cameras.main).clone();
@@ -484,16 +475,13 @@ export class mapView extends Phaser.Scene {
         }
         else if(this.farmMode){
             this.getSelectedCells(1)
-            this.farmMode = false;
             this.events.emit('mode:completed', 'Farm');
         }
         else if(this.harvestMode){
             this.getSelectedCells(2)
-            this.harvestMode = false;
         }
         else if(this.seedGridMode){
             this.getSelectedCells(3)
-            this.seedGridMode = false;
             this.events.emit('mode:completed', 'Seed');
         }
         else if (this.isBrushMode && this.isBrushActive) {
@@ -547,6 +535,8 @@ export class mapView extends Phaser.Scene {
             let tillList = Teams.teamLists['1'].tileList;
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
+                    this.farmMode = false;
+                    this.functionTab.updateVisuals();
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
                     if(type.spread && type.name != "water" && type.name != 'road'){
                         tillList.push( {
@@ -595,6 +585,8 @@ export class mapView extends Phaser.Scene {
         else if (mode == 3) {
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
+                    this.seedGridMode = false;
+                    this.functionTab.updateVisuals();
                     let tileType = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))];
                     if (tileType.interactable) {
                         const block = Map.blocks[y * WORLD_DIMENSIONX + x];
@@ -624,104 +616,110 @@ export class mapView extends Phaser.Scene {
 
     sceneButtons() {
         const camera = this.cameras.main;
+        const W = camera.width;
+        const H = 36;
 
-        // === MONEY UI (Top Center) ===
-        const topCenterX = this.cameras.main.width / 2;
-        const moneyIcon = this.add.image(topCenterX - 20, 25, 'monies')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-
-        this.moneyText = this.add.text(topCenterX + 5, 18, `$${this.money}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-        .setScrollFactor(0)
-        .setDepth(UIDEPTH);
-
-        // === SEEDS UI (Top Center) ===
-        const seedsIcon = this.add.image(topCenterX - 80, 25, 'seeds')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-
-        // seeds text
-        this.seedsText = this.add.text(topCenterX - 65, 18, `${this.seeds}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-        .setScrollFactor(0)
-        .setDepth(UIDEPTH);
-
-        // === SEEDS UI (Top Center) ===
-        const berryIcon = this.add.image(topCenterX - 140, 25, 'berry')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-    
-        this.berryText = this.add.text(topCenterX - 125, 18, `${this.berries}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-            .setScrollFactor(0)
-            .setDepth(UIDEPTH);
-
-        let berryOutline = null;
-        berryIcon
-              .setInteractive()
-              .on('pointerdown', () => {
-                this.berryMode = !this.berryMode;
-            
-                if (this.berryMode) {
-                  // draw a white outline around the berry icon
-                  berryOutline = this.add.graphics()
-                    .setScrollFactor(0)
-                    .setDepth(UIDEPTH);
-                  berryOutline.lineStyle(2, 0xffffff, 1);
-                  const b = berryIcon.getBounds();
-                  berryOutline.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
-                } else {
-                  // remove the outline
-                  if (berryOutline) {
-                    berryOutline.destroy();
-                    berryOutline = null;
-                  }
-                }
-              });
-    
-        // Add the top bar
-        const topBar = this.add.rectangle(0, -1, camera.width, 50, 0x808080, 0.5) // Gray and transparent
+        // 🔳 Background
+        const bar = this.add.rectangle(0, 0, W, H, 0x222222, 0.7)
             .setOrigin(0, 0)
-            .setScrollFactor(0) // Sticks to the camera
+            .setScrollFactor(0)
             .setDepth(UIDEPTH - 1);
+        this.cameras.main.ignore(bar);
 
-        // Automatically scale the bars if the window resizes
-        this.scale.on('resize', (gameSize) => {
-            const { width, height } = gameSize;
-            topBar.setSize(width, 50);
-        });
+        this.scale.on("resize", ({ width }) => bar.setSize(width, H));
 
-        // One-line HUD container with your actual objects:
-        this.hud = this.add.container(0, 0, [
-            topBar, moneyIcon, this.moneyText,
-            seedsIcon, this.seedsText,
-            berryIcon, this.berryText
-        ]);
+        const makeIcon = (x, key) =>
+            this.add.image(x, H / 2, key)
+            .setDisplaySize(20, 20)
+            .setOrigin(0, 0.5)
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
 
-        // Important: HUD is screen-space UI, so lock it to camera
-        this.hud.setScrollFactor(0);
+        const makeText = (x, text, color = "#fff") =>
+            this.add.text(x, H / 2, text, {
+            fontSize: "14px",
+            fill: color,
+            fontFamily: "monospace",
+            stroke: "#000",
+            strokeThickness: 2,
+            }).setOrigin(0, 0.5)
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
 
-        // Route rendering:
-        // - main camera: show world only (ignore HUD)
-        // - ui camera: show HUD only (ignore world)
-        this.cameras.main.ignore(this.hud);
+        let x = 12;
+        const spacing = 8;
+        const iconSize = 20;
+
+        // === Daily Needs Section ===
+        const needs = DailyNeedsTracker.getValues();
+        this.topHudElements = [];
+
+        for (const item of needs) {
+            const icon = makeIcon(x, item.key);
+            x += iconSize + 4;
+            const display = item.need
+                ? `${item.have}/${item.need}`
+                : `${item.have}`;
+            const color = item.need
+                ? (item.have >= item.need ? "#00ff00" : "#ff3333")
+                : (item.have > 0 ? "#00ff00" : "#ff3333");
+            const text = makeText(x, display, color);
+            x += text.width + spacing;
+
+            // 🟢 store references
+            if (item.key === "foodIcon") this.foodText = text;
+            if (item.key === "waterIcon") this.waterText = text;
+
+            this.topHudElements.push(icon, text);
+        }
+
+        // === Resource Section ===
+        const resources = [
+            { key: "seeds", value: this.seeds },
+            { key: "berry", value: this.berries },
+            { key: "woodIcon", value: this.woodAmnt },
+            { key: "stoneIcon", value: this.stoneAmnt },
+        ];
+
+        for (const r of resources) {
+            const icon = makeIcon(x, r.key);
+            x += iconSize + 4;
+            const text = makeText(x, `${r.value}`);
+            text.name = r.key; // 🟢 give each text a name for lookup
+            x += text.width + spacing;
+
+            switch (r.key) {
+                case "seeds": this.seedsText = text; break;
+                case "berry": this.berryText = text; break;
+                case "woodIcon": this.woodText = text; break;
+                case "stoneIcon": this.stoneText = text; break;
+                case "waterIcon": this.waterText = text; break;
+            }
+
+            this.topHudElements.push(icon, text);
+        }
+
+        // === Money (centered) ===
+        const centerX = W / 2;
+        const moneyIcon = makeIcon(centerX - 30, "monies");
+        this.moneyText = makeText(centerX - 4, `$${this.money}`);
+        this.topHudElements.push(moneyIcon, this.moneyText);
+
+        // === Clock (right) ===
+        const clockX = W - 160;
+        this.clock = new Clock(this);
+        this.clockText = makeText(clockX, this.clock.formatTimeWithDay());
+        this.clock.externalText = this.clockText; // pass reference
+        this.topHudElements.push(this.clockText);
+
+
+        this.topHud = this.add.container(0, 0, [bar, ...this.topHudElements])
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
+        this.cameras.main.ignore(this.topHud);
     }
+
+
 
     static refreshUICameraIgnores() {
         const scene = mapView.scene;

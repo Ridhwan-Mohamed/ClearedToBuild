@@ -9,12 +9,14 @@ const NIGHT_END = 6;
 
 
 export class Clock {
+
+    static overlay;
     constructor(scene) {
         this.scene = scene;
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 6;
+        this.hours = 18;
         this.minutes = 1;
         this.day = 1;
 
@@ -29,29 +31,27 @@ export class Clock {
 
         // Dark overlay setup
         const camera = scene.cameras.main;
-        this.overlay = scene.add.rectangle(-1, -1, camera.width+1, camera.height+1, 0x000000, 1)
+        const worldScale = 1 / 0.3; // pretend zoomed out fully
+        const bleed = 0.25;          // bleed margin on each side
+        const w = camera.width * worldScale * (1 + bleed * 2);
+        const h = camera.height * worldScale * (1 + bleed * 2);
+
+        Clock.overlay = scene.add.rectangle(
+        -camera.width * worldScale * (bleed+0.15),
+        -camera.height * worldScale * (bleed+0.15),
+        w,
+        h,
+        0x000000,
+        1
+        )
             .setOrigin(0, 0)
-            .setDepth(UIDEPTH-2)
+            .setDepth(UIDEPTH - 2)
             .setScrollFactor(0)
             .setAlpha(0);
 
-        this.clockText = scene.add.text(camera.width - 120, 10, this.formatTime(), {
-            fontSize: '18px',
-            fill: '#ffffff',
-            fontFamily: 'monospace',
-            stroke: "#000000",
-            strokeThickness: 2
-        }).setDepth(UIDEPTH).setScrollFactor(0);
+        this.externalText = null;
 
-        this.dayText = scene.add.text(camera.width - 120, 30, `Day ${this.day}`, {
-            fontSize: '16px',
-            fill: '#ffffff',
-            fontFamily: 'monospace',
-            stroke: "#000000",
-            strokeThickness: 2
-        }).setDepth(UIDEPTH).setScrollFactor(0);
-        scene.cameras.main.ignore([this.clockText, this.dayText])
-        scene.uiCamera.ignore([this.overlay]);   // overlay is only seen by main cam
+        scene.uiCamera.ignore([Clock.overlay]);   // overlay is only seen by main cam
     }
 
     update() {
@@ -62,8 +62,7 @@ export class Clock {
         }
 
         this.events();
-        this.clockText.setText(this.formatTime());
-        this.dayText.setText(`Day ${this.day}`);
+        this.externalText.setText(this.formatTimeWithDay());
         this.updateLighting();
     }
 
@@ -108,7 +107,6 @@ export class Clock {
             this.powerupScreenShown = true;   // ✅ prevent re-trigger
             openPowerupScreen(this.scene);
             DailyNeedsTracker.consumeResources();
-            DailyNeedsTracker.render();
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
             this.pause();
@@ -117,11 +115,11 @@ export class Clock {
         }
     }
 
-    formatTime() {
+    formatTimeWithDay() {
         const hour12 = this.hours % 12 === 0 ? 12 : this.hours % 12;
         const ampm = this.hours < 12 ? 'AM' : 'PM';
         const minutesStr = String(this.minutes).padStart(2, '0');
-        return `${hour12}:${minutesStr} ${ampm}`;
+        return `Day ${this.day} — ${hour12}:${minutesStr} ${ampm}`;
     }
 
     updateLighting() {
@@ -140,7 +138,7 @@ export class Clock {
             alpha = t * 0.6;
         }
 
-        this.overlay.setAlpha(alpha);
+        Clock.overlay.setAlpha(alpha);
     }
 
     pause() {

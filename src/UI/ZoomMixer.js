@@ -2,6 +2,7 @@
 // Smooth pointer-centric zoom with crossfade between detailed and overview layers.
 
 import { colorFor, UIDEPTH } from "../constants";
+import { Clock } from "../Controllers/Clock";
 import { Map } from "../map";
 import { Player } from "../players/Player";
 
@@ -105,49 +106,39 @@ export class ZoomMixer {
     const scene = ZoomMixer.scene;
     const cam   = scene.cameras.main;
 
-    // world-space point at the camera's center BEFORE zoom
-    const mid   = cam.midPoint;          // { x, y } in world coords
-    const cx    = mid.x;
-    const cy    = mid.y;
+    const mid = cam.midPoint;
+    const cx  = mid.x;
+    const cy  = mid.y;
 
-    // compute scroll after zoom so that cx,cy stays at the view center
-    let targetScrollX = cx - (cam.width  / (2 * targetZoom));
+    // compute final scroll
+    let targetScrollX = cx - (cam.width / (2 * targetZoom));
     let targetScrollY = cy - (cam.height / (2 * targetZoom));
 
-    // clamp to camera bounds (requires cam.setBounds(...) in your scene)
     const bounds = cam.getBounds();
-    const viewW  = cam.width  / targetZoom;
+    const viewW  = cam.width / targetZoom;
     const viewH  = cam.height / targetZoom;
-
-    const minX = bounds.x;
-    const minY = bounds.y;
-    const maxX = bounds.right  - viewW;
-    const maxY = bounds.bottom - viewH;
-
-    if (maxX < minX) targetScrollX = minX + (bounds.width  - viewW) * 0.5;
-    else             targetScrollX = Phaser.Math.Clamp(targetScrollX, minX, maxX);
-    if (maxY < minY) targetScrollY = minY + (bounds.height - viewH) * 0.5;
-    else             targetScrollY = Phaser.Math.Clamp(targetScrollY, minY, maxY);
+    targetScrollX = Phaser.Math.Clamp(targetScrollX, bounds.x, bounds.right  - viewW);
+    targetScrollY = Phaser.Math.Clamp(targetScrollY, bounds.y, bounds.bottom - viewH);
 
     scene.tweens.killTweensOf(cam);
 
+    // 🔹 camera zoom tween
     const self = this;
     scene.tweens.add({
       targets: cam,
-      zoom:    targetZoom,
+      zoom: targetZoom,
       duration,
       ease,
-      onComplete() {
-        // ✅ switch modes only once zoom finishes
-        if (targetZoom <= self.OUT_THRESHOLD && self.mode !== 'overview') {
-          self.swapMode('overview');
-        } else if (targetZoom >= self.IN_THRESHOLD && self.mode !== 'detailed') {
-          self.swapMode('detailed');
+      onComplete: () => {
+        // 🔁 restore mode-swap logic
+        if (targetZoom <= self.OUT_THRESHOLD && self.mode !== "overview") {
+          self.swapMode("overview");
+        } else if (targetZoom >= self.IN_THRESHOLD && self.mode !== "detailed") {
+          self.swapMode("detailed");
         }
       }
     });
   }
-
 
   swapMode(mode, duration = 350) {
     if (this.mode === mode) return;

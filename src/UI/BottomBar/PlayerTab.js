@@ -285,7 +285,9 @@ export default class PlayerTab {
     this.rows.clear();
 
     // "your team" is team 1 in your codebase
-    const team1 = Player.troops.filter(t => t?.active && t.body?.team === 1);
+    // Instead of Player.troops...
+    const team1 = Teams.teamLists['1'].playerList
+
     // sort by type then name for stability
     team1.sort((a, b) => (this.typeOf(a).localeCompare(this.typeOf(b))) || (a.name || '').localeCompare(b.name || ''));
 
@@ -429,8 +431,7 @@ export default class PlayerTab {
         this.rebuildList();      // refresh list
     }
 
-
-  // --------- tick / refresh ---------
+    // --------- tick / refresh ---------
     tick() {
         // skip if Players page not open
         const isActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('players');

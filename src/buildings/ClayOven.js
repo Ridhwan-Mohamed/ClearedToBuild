@@ -36,7 +36,7 @@ export class ClayOven {
 
         this.sprite.on('pointerover', () => ClayOvenUI.showMinor(this));
         this.sprite.on('pointerout', () => ClayOvenUI.hideMinor(this));
-        this.sprite.on('pointerdown', () => ClayOvenUI.toggleMajor(this));
+        this.sprite.on('pointerdown', () => ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this)));
 
         ClayOven.scene.events.emit('oven:added', this);
     }

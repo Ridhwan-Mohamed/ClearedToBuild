@@ -16,7 +16,7 @@ const START_OPEN  = false; // start expanded?
 export function CreateBottomBar(scene) {
     const ui = CreateTabPage(scene)
         .setOrigin(0.5, 1)
-        .setPosition(scene.scale.width / 2, scene.scale.height)
+        .setPosition(scene.scale.width / 2, scene.scale.height + EXPANDED - COLLAPSED + 95)
         .setMinSize(scene.scale.width, EXPANDED)   // <-- force width
         .layout();
 
@@ -61,8 +61,8 @@ export function CreateBottomBar(scene) {
             duration: 200,
             ease: 'Cubic.easeOut',
             onComplete: () => {
-            expanded = open;
-            tween = null;
+                expanded = open;
+                tween = null;
             }
         });
     }
@@ -72,8 +72,22 @@ export function CreateBottomBar(scene) {
     }
 
     // expose to scene
-    scene.toggleBottomBar = toggleBottomBar;
     scene.setBottomBar = setBottomBar;
+    scene.openDetailPage = function(pageKey, callback) {
+        const bar = scene.uiBottomBar;
+        if (!bar) return;
+        // Always swap to the requested page
+        bar.pages.swapPage(pageKey);
+        if (!bar.expanded) scene.setBottomBar(true);
+        // Handle mismatched tab names
+        let tab = bar.pages[pageKey + 'Tab'] 
+            || bar.pages.tabs?.[pageKey]
+            || (pageKey === 'ovens' ? bar.pages.clayTab : null)
+            || (pageKey === 'storage' ? bar.pages.storageTab : null)
+            || null;
+        if (callback && tab) callback(tab);
+    };
+
 
     // 🔹 space bar toggle
     scene.input.keyboard.on('keydown-SPACE', () => {

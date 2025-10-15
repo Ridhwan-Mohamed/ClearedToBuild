@@ -12,87 +12,13 @@ export class DailyNeedsTracker {
         this.uiElements = [];
     }
 
-    static render() {
-        this.clearUI();
-
-        const troopCount = Teams.teamLists['1'].playerList.length;
-        const foodNeeded = troopCount;
-        const waterNeeded = troopCount;
-
-        const foodHave = this.scene.foodAmnt;
-        const waterHave = this.scene.cleanWaterAmnt;
-        const woodHave = this.scene.woodAmnt;
-        const stoneHave = this.scene.stoneAmnt;
-
-        const iconSize = 40;
-        const iconSpacing = 10; // space between rows
-        const rowHeight = iconSize + iconSpacing;
-
-        const startX = 30;
-        const startY = 70;
-
-        const data = [
-            {
-                icon: 'foodIcon',
-                amount: foodNeeded,
-                have: foodHave,
-                showNeed: true
-            },
-            {
-                icon: 'waterIcon',
-                amount: waterNeeded,
-                have: waterHave,
-                showNeed: true
-            },
-            {
-                icon: 'woodIcon',
-                amount: null,
-                have: woodHave,
-                showNeed: false
-            },
-            {
-                icon: 'stoneIcon',
-                amount: null,
-                have: stoneHave,
-                showNeed: false
-            }
+    static getValues() {
+        const team = Teams.teamLists["1"];
+        const troopCount = team?.playerList?.length || 0;
+        return [
+            { key: 'foodIcon', have: this.scene.foodAmnt, need: troopCount },
+            { key: 'waterIcon', have: this.scene.cleanWaterAmnt, need: troopCount },
         ];
-
-        data.forEach((entry, i) => {
-            const iconY = startY + i * rowHeight;
-
-            const icon = this.scene.add.image(startX, iconY, entry.icon)
-                .setDisplaySize(iconSize, iconSize)
-                .setScrollFactor(0)
-                .setDepth(UIDEPTH);
-
-            const displayText = entry.showNeed
-                ? `${entry.have}/${entry.amount}`
-                : `${entry.have}`;
-
-            const textColor = entry.showNeed
-                ? (entry.have >= entry.amount ? '#00ff00' : '#ff4444')
-                : (entry.have > 0 ? '#00ff00' : '#ff4444');
-
-            const text = this.scene.add.text(
-                startX + iconSize + 8, // icon + margin
-                iconY,
-                displayText,
-                {
-                    fontSize: '14px',
-                    fontFamily: 'monospace',
-                    fill: textColor,
-                    stroke: '#000000',
-                    strokeThickness: 2
-                }
-            )
-            .setOrigin(0, 0.5) // vertically center the text relative to icon
-            .setScrollFactor(0)
-            .setDepth(UIDEPTH);
-
-            this.uiElements.push(icon, text );
-            this.scene.cameras.main.ignore(this.uiElements)
-        });
     }
 
     static clearUI() {
@@ -102,42 +28,90 @@ export class DailyNeedsTracker {
         this.uiElements = [];
     }
 
-    static updateUIItems(item, count, decrease=false){
-        if(decrease) count *= -1;
-        if (item == UI_ITEM_TYPES.seedCrop) {
-            seedManager.scene.updateSeeds(count);
-        }
-        else if(item == UI_ITEM_TYPES.seedBerry){
-            seedManager.scene.updateBerry(count);
-        }
-        else if(item == UI_ITEM_TYPES.clean_water){
-            this.scene.cleanWaterAmnt += count;
-            this.render();
-        }
-        else if(item == UI_ITEM_TYPES.wood){
-            this.scene.woodAmnt += count;
-            this.render();
-        }
-        else if(item == UI_ITEM_TYPES.stone){
-            this.scene.stoneAmnt += count;
-            this.render();
+    static updateUIItems(item, count, decrease = false) {
+        if (!this.scene?.topHudElements) return;
+        if (decrease) count *= -1;
+
+        const type = item.name || item;
+        const s = this.scene;
+        const team = Teams.teamLists["1"];
+        const troopCount = team?.playerList?.length || 0;
+
+        // Helper for colorized update
+        const updateNeedText = (textObj, have, need) => {
+            const color = have >= need ? "#00ff00" : "#ff3333";
+            textObj.setColor(color);
+            textObj.setText(`${have}/${need}`);
+        };
+
+        const adjust = (key, delta) => {
+            s[key] = (s[key] ?? 0) + delta;
+            const textObj = s.topHudElements.find(
+                el => el.name === key && el instanceof Phaser.GameObjects.Text
+            );
+            if (textObj) textObj.setText(`${s[key]}`);
+        };
+
+        switch (type) {
+            case UI_ITEM_TYPES.clean_water.name: {
+                const have = s.cleanWaterAmnt;
+                const need = troopCount;
+                if (s.waterText) updateNeedText(s.waterText, have, need);
+                break;
+            }
+            case UI_ITEM_TYPES.food.name: {
+                const have = s.foodAmnt;
+                const need = troopCount;
+                if (s.foodText) updateNeedText(s.foodText, have, need);
+                break;
+            }
+            case UI_ITEM_TYPES.wood.name: {
+                s.woodAmnt = (s.woodAmnt ?? 0) + count;
+                if (s.woodText) {
+                    s.woodText.setText(`${s.woodAmnt}`);
+                }
+                break;
+            }
+            case UI_ITEM_TYPES.stone.name: {
+                s.stoneAmnt = (s.stoneAmnt ?? 0) + count;
+                if (s.stoneText) {
+                    s.stoneText.setText(`${s.stoneAmnt}`);
+                }
+                break;
+            }
+            case UI_ITEM_TYPES.seedCrop.name:
+                s.updateSeeds(count);
+                break;
+            case UI_ITEM_TYPES.seedBerry.name:
+                s.updateBerry(count);
+                break;
+            default:
+                break;
         }
     }
 
+
+
     static consumeResources() {
-        const troopCount = Teams.teamLists['1'].playerList.length;
+        const team = Teams.teamLists['1'];
+        if (!team) return;
+        const troopCount = team.playerList.length;
+
         const foodConsumed = StorageManager.consumeItemFromStorage(1, UI_ITEM_TYPES.food, troopCount);
         const waterConsumed = StorageManager.consumeItemFromStorage(1, UI_ITEM_TYPES.clean_water, troopCount);
-        // Update global amounts (if they exist for UI or logic tracking)
+
         this.scene.foodAmnt = Math.max(0, this.scene.foodAmnt - foodConsumed);
         this.scene.cleanWaterAmnt = Math.max(0, this.scene.cleanWaterAmnt - waterConsumed);
-        this.render(); // re-render UI to reflect changes
+
+        // 🔄 Update UI incrementally
+        this.updateUIItems(UI_ITEM_TYPES.food, foodConsumed, true);
+        this.updateUIItems(UI_ITEM_TYPES.clean_water, waterConsumed, true);
     }
+
 
     static AddResources(item, amount){
         if(item.food){
             this.scene.foodAmnt += item.foodValue * amount;
         }
-        this.render();
     }
 }

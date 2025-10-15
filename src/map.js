@@ -10,6 +10,7 @@ import { House } from "./buildings/House";
 import { StorageBuilding } from "./buildings/Storage";
 import { blockResourceManager } from "./Manager/BlockResourceManager";
 import { ClayOven } from "./buildings/ClayOven";
+import { mapView } from "./mapView";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },

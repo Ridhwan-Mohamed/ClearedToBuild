@@ -378,6 +378,25 @@ export default class ClayOvenTab {
     return row;
   }
 
+  // ---------- BEHAVIOR ----------
+  selectOven(oven) {
+    this.selected = oven;
+    if (this.detail?.setOven) {
+      this.detail.setOven(oven);
+    }
+  }
+
+  centerCameraOnOven(oven) {
+    if (!oven?.sprite) return;
+    const cam = this.scene.cameras.main;
+    cam.centerOn(oven.sprite.x, oven.sprite.y);
+  }
+
+  // Allow map clicks to open the detail view directly
+  selectFromWorld(oven) {
+    this.selectOven(oven);
+    // no camera move on world click
+  }
 
   updateCard(oven) {
     const row = this.cardByOven.get(oven);

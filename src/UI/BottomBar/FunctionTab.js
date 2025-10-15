@@ -24,6 +24,7 @@ export default class FunctionTab {
 
     // keep container out of main camera
     scene.cameras.main.ignore(this.container);
+    scene.functionTab = this;
   }
 
   createButtons() {

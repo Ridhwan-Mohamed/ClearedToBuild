@@ -128,7 +128,8 @@ export class StorageManager {
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             return;
         }
-
+        
+        DailyNeedsTracker.updateUIItems(task.item, 1, true);
         this.addCarriedItem(troop, task.item);
 
         task.assigned--;

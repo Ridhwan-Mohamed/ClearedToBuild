@@ -8,6 +8,7 @@ import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
+import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 
 export class Farmer {
     constructor(x, y, teamNumber) {
@@ -123,6 +124,7 @@ export class Farmer {
 
         const storage = task.storage;
         storage.addItem(troop.carrying.item, troop.carrying.count);
+        DailyNeedsTracker.updateUIItems(troop.carrying.item, troop.carrying.count);
 
         // Cleanup
         troop.carrying = null;

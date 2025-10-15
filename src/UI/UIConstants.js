@@ -21,6 +21,14 @@ export const UI_ITEM_TYPES = {
         label: "Food",
         stacks: 15
     },
+    rawFood: {
+        name: "rawFood",
+        icon: "foodIcon",
+        description: "Uncooked rations",
+        label: "Raw Food",
+        cooksTo: "food",
+        stacks: 15
+    },
     wood: {
         name: "wood",
         icon: "woodIcon",

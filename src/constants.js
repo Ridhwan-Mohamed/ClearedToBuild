@@ -323,7 +323,7 @@ export const TILE_TYPES = {
 };
 
 export const teamSetupArray = {
-    smallTeam: [TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
+    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.clayOven, TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 

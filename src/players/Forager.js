@@ -51,16 +51,12 @@ export class Forager {
 
         // 1.5. check for nearby enemies and flee in case.
         Player.updateTracking(forager);
-        const seedList = Teams.teamLists[forager.body.team].seedList;
-        const blockResList = Teams.teamLists[forager.body.team].blockResourceList;
         if(StorageManager.isCarrying(forager)){
             return StorageManager.tryCreateStorageDeliveryTask(forager);
         }
-        if(blockResList.length){
-            return blockResourceManager.assingTroopsToGetBlockResources(1);
-        }
-        if(seedList.length){
-            return Manager.assignOneTroopToAction(forager, seedList, CONTROL_STATES.SEED_MODE);
+        const queue = Teams.teamLists[forager.body.team].foragerQueue;
+        if (queue.length) {
+            Manager.assignOneTroopToAction(forager, queue, CONTROL_STATES.TRACK_MODE);
         }
         if(!forager.task && forager.state == CONTROL_STATES.TRACK_MODE && !forager.roam){
             Player.roam(forager);

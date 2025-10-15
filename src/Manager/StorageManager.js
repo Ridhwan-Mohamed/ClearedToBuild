@@ -1,3 +1,4 @@
+import { walkUpBindingElementsAndPatterns } from "typescript";
 import { StorageBuilding } from "../buildings/Storage";
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
 import { Fireman } from "../players/Fireman";
@@ -5,6 +6,7 @@ import { Teams } from "../Teams";
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 import { StorageUI } from "../UI/StorageUI";
 import { Manager } from "./Manager";
+import { UI_ITEM_TYPES } from "../UI/UIConstants";
 
 export class StorageManager {
     static scene;
@@ -70,7 +72,7 @@ export class StorageManager {
                 troop.task = newTask;
             }
             
-            return Manager.assignOneTroopToAction(troop, Teams.teamLists[troop.body.team].storagePickupItems, CONTROL_STATES.GET_FROM_STORAGE);;
+            return Manager.assignOneTroopToAction(troop, Teams.teamLists[troop.body.team].storagePickupItems, CONTROL_STATES.GET_FROM_STORAGE);
         }
 
         return false;
@@ -126,23 +128,35 @@ export class StorageManager {
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             return;
         }
-
+        
+        DailyNeedsTracker.updateUIItems(task.item, 1, true);
         this.addCarriedItem(troop, task.item);
 
         task.assigned--;
         task.remaining--;
 
-        if (task.remaining <= 0 || task.assigned <= 0) {
+        if (task.remaining <= 0) {
             Teams.removeFromStateArray(troop.body.team, 'storagePickupItems', task);
         }
 
-        if(troop.isFireman){
-            const assigned = Fireman.maybeAssignOvenDeliveryTask(troop, task.item, 1);
+        if (troop.isFireman){
+            //Hack fix for fuel
+            let assigned;
+            if (troop.pendingFuelJob && troop.carrying === UI_ITEM_TYPES.wood) {
+                    Fireman.goRefuelOven(troop, troop.pendingFuelJob);
+                    return;
+            }
+            else{
+                assigned = troop.pendingOvenJob
+                    ? Fireman.maybeAssignOvenJobDelivery(troop, troop.pendingOvenJob, task.item)
+                    : false;
+            }
             if (!assigned) {
                 troop.task = null;
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             }
-        }else{
+        }
+        else{
             troop.task = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         }

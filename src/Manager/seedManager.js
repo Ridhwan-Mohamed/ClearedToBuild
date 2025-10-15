@@ -22,12 +22,10 @@ export class seedManager {
             sprite.task = null;
             return;
         }
-        let x = task.x;
-        let y = task.y;
         sprite.play('action')
         sprite.timer = this.scene.time.delayedCall(1000, () => {
             if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) return;
-            Teams.removeFromStateArray(1, "seedList", task);
+            Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
             if (sprite) {
                 this.onSeedingDone(sprite);
             }
@@ -78,8 +76,7 @@ export class seedManager {
         });
 
         block.on('pointerdown', () => {
-            Teams.addSeedSpots(1, x, y, block);
-            seedManager.assignSeedsToTroops(1);
+            Teams.teamLists['1'].foragerQueue.push({ x, y, block, forageType: 'seed', assigned: 0 })
 
             // 🟡 outline persists until picked up
             if (!block.queuedOutline) {

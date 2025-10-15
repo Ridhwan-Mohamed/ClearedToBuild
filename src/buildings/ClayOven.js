@@ -30,13 +30,15 @@ export class ClayOven {
         this.outputSlots = [null, null, null];      // same structure
         this.cookTimers = [0, 0, 0];                // track elapsed time
         this.cookDurations = [0, 0, 0];             // required time
-        this.fuel = 10;
+        this.fuel = 0;
 
         this.sprite.setInteractive();
 
         this.sprite.on('pointerover', () => ClayOvenUI.showMinor(this));
         this.sprite.on('pointerout', () => ClayOvenUI.hideMinor(this));
-        this.sprite.on('pointerdown', () => ClayOvenUI.toggleMajor(this));
+        this.sprite.on('pointerdown', () => ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this)));
+
+        ClayOven.scene.events.emit('oven:added', this);
     }
 
     hasFreeSlotForItem(itemType, amount) {
@@ -112,12 +114,12 @@ export class ClayOven {
 
     addItemToCook(itemType, count) {
         const cooksTo = itemType.cooksTo;
-        if (!cooksTo || this.fuel <= 0 || count <= 0) return false;
+        if (!cooksTo || count <= 0) return false;   // allow queuing with 0 fuel
 
         const maxPerSlot = itemType.stacks || 1;
         let inserted = 0;
 
-        for (let i = 0; i < 3 && count > 0 && this.fuel > 0; i++) {
+        for (let i = 0; i < 3 && count > 0; i++) {
             const slot = this.cookingSlots[i];
 
             // Empty slot
@@ -140,6 +142,9 @@ export class ClayOven {
             }
         }
 
+        if (inserted > 0) {
+            ClayOven.scene.events.emit('oven:updated', this);
+        }
         return inserted > 0 ? inserted : false;
     }
 
@@ -157,6 +162,7 @@ export class ClayOven {
             slots[index] = null;
         }
 
+        ClayOven.scene.events.emit('oven:updated', this);
         return slot.item;
     }
 
@@ -253,14 +259,35 @@ export class ClayOven {
 
     updateCooking(delta) {
         let anyCooking = false;
+        let changed = false;
 
         for (let i = 0; i < 3; i++) {
             const slot = this.cookingSlots[i];
             if (!slot) continue;
 
-            this.cookTimers[i] += delta;
+            // Need a duration to cook this slot (set when items were added)
+            const dur = this.cookDurations[i] || 0;
+            if (dur <= 0) continue;
+
+            // If this cook cycle is just starting (timer==0), consume 1 fuel.
+            if (this.cookTimers[i] === 0) {
+                if (this.fuel > 0) {
+                this.fuel -= 1;         // 🔥 consume wood
+                changed = true;         // fuel changed → UI update
+                this.cookTimers[i] += delta;   // now we can begin progressing
+                anyCooking = true;
+                } else {
+                // No fuel: do not progress this timer.
+                continue;
+                }
+            } else {
+                // Already in-flight this cycle: keep progressing
+                this.cookTimers[i] += delta;
+                anyCooking = true;
+            }
 
             if (this.cookTimers[i] >= this.cookDurations[i]) {
+                changed = true;
                 const cookedName = UI_ITEM_TYPES[slot.item.name].cooksTo;
                 const cookedItem = UI_ITEM_TYPES[cookedName];
 
@@ -305,11 +332,10 @@ export class ClayOven {
                     }
                 }
             }
+        }
 
-            // If any slot is cooking, flag it
-            if (this.cookingSlots[i]) {
-                anyCooking = true;
-            }
+        if (changed) {
+           ClayOven.scene.events.emit('oven:updated', this);
         }
 
         // Only switch animation if needed
@@ -319,9 +345,15 @@ export class ClayOven {
         }
     }
 
+    addFuel(amount = 1) {
+        this.fuel = Math.min(this.maxFuel || 100, this.fuel + amount);
+        ClayOven.scene.events.emit('oven:updated', this);
+        return true;
+    }
 
     destroy() {
         this.stopAllCooking();
+        ClayOven.scene.events.emit('oven:removed', this);
         if (this.sprite) this.sprite.destroy();
     }
 }

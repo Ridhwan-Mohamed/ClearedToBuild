@@ -22,6 +22,10 @@ export class blockResourceManager{
         Manager.assignTroopsToAction(troops, blockList, CONTROL_STATES.GET_BLOCK_RESOURCE, force);
     }
 
+    static assignTroopToGetBlockResource(troop, task){
+        Manager.assignOneTroopToAction(troop, task, CONTROL_STATES.GET_BLOCK_RESOURCE);
+    }
+
     static beginFarmingBlockResource(sprite) {
         let task = sprite.task;
 
@@ -37,7 +41,6 @@ export class blockResourceManager{
         if (!sprite.timer) {
             sprite.timer = this.scene.time.delayedCall(1000, () => {
                 if(!sprite.active || sprite.state != CONTROL_STATES.GET_BLOCK_RESOURCE) return;
-                let teamNumber = sprite.body.team;
                 const dx = sprite.x - sprite.task.x*SQUARESIZE;
                 const dy = sprite.y - sprite.task.y*SQUARESIZE;
 
@@ -76,7 +79,7 @@ export class blockResourceManager{
                 sprite.play(sprite.idle);
                 sprite.timer = null;
                 if(task.assigned <= 0 || task.remaining < 0){
-                    Teams.removeFromStateArray(1, "blockResourceList", sprite.task);
+                    Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
                 }
                 sprite.task = null;
             });

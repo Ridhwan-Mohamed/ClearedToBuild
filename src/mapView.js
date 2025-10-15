@@ -62,6 +62,7 @@ import { ZoomMixer } from './UI/ZoomMixer.js';
 import { MainMenu } from './mainMenu.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { HouseUI } from './UI/HouseUI.js';
+import UIPlugin from 'phaser3-rex-plugins/templates/ui/ui-plugin.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -249,15 +250,6 @@ export class mapView extends Phaser.Scene {
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
         this.keyboardSpeed = 10;
-        this.input.keyboard.on('keydown-F', () => {
-            this.farmMode = !this.farmMode;
-        });
-        this.input.keyboard.on('keydown-C', () => {
-            this.harvestMode = !this.harvestMode;
-        });
-        this.input.keyboard.on('keydown-V', () => {
-            this.seedGridMode = !this.seedGridMode;
-        });
         this.input.keyboard.on('keydown-K', () => {
             this.selectingEnemies = true;
             this.enemySelectStart = this.input.activePointer.positionToCamera(this.cameras.main).clone();
@@ -478,18 +470,19 @@ export class mapView extends Phaser.Scene {
                 this.enemySelectionRect.destroy();
                 this.enemySelectionRect = null;
             }
+
+            this.events.emit('mode:completed', 'Attack');
         }
         else if(this.farmMode){
             this.getSelectedCells(1)
-            this.farmMode = false;
+            this.events.emit('mode:completed', 'Farm');
         }
         else if(this.harvestMode){
             this.getSelectedCells(2)
-            this.harvestMode = false;
         }
         else if(this.seedGridMode){
             this.getSelectedCells(3)
-            this.seedGridMode = false;
+            this.events.emit('mode:completed', 'Seed');
         }
         else if (this.isBrushMode && this.isBrushActive) {
             this.isBrushActive = false
@@ -542,6 +535,8 @@ export class mapView extends Phaser.Scene {
             let tillList = Teams.teamLists['1'].tileList;
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
+                    this.farmMode = false;
+                    this.functionTab.updateVisuals();
                     let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
                     if(type.spread && type.name != "water" && type.name != 'road'){
                         tillList.push( {
@@ -585,18 +580,32 @@ export class mapView extends Phaser.Scene {
                     }
                 }
             }
-            tillManager.assignCropsToTroops(1)
+            tillManager.assignCropsToTroops(1);
         }
-        else if(mode == 3){
+        else if (mode == 3) {
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
+                    this.seedGridMode = false;
+                    this.functionTab.updateVisuals();
                     let tileType = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))];
-                    if(tileType.interactable){
-                        Teams.addSeedSpots(1, x, y);
+                    if (tileType.interactable) {
+                        const block = Map.blocks[y * WORLD_DIMENSIONX + x];
+                        // register the seed task AND bind the block to it
+                        const task = { x, y, block, forageType: 'seed', assigned: 0 };
+                        Teams.teamLists["1"].foragerQueue.push(task);
+                        // 🟡 draw persistent yellow outline
+                        if (block && !block.queuedOutline) {
+                            const size = SQUARESIZE;
+                            const outline = Map.scene.add.graphics();
+                            outline.setDepth(UIDEPTH);
+                            outline.lineStyle(2, 0xffff00, 1);
+                            outline.strokeRect(x * size, y * size, size, size);
+                            block.queuedOutline = outline;
+                        }
                     }
                 }
             }
-            seedManager.assignSeedsToTroops(1)
+            // seedManager.assignSeedsToTroops(1);
         }
         else{
             const item = itemTab.itemValues(this.registry.get('image'));
@@ -607,270 +616,110 @@ export class mapView extends Phaser.Scene {
 
     sceneButtons() {
         const camera = this.cameras.main;
+        const W = camera.width;
+        const H = 36;
 
-        // === MONEY UI (Top Center) ===
-        const topCenterX = this.cameras.main.width / 2;
-        const moneyIcon = this.add.image(topCenterX - 20, 25, 'monies')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-
-        this.moneyText = this.add.text(topCenterX + 5, 18, `$${this.money}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-        .setScrollFactor(0)
-        .setDepth(UIDEPTH);
-
-        // === SEEDS UI (Top Center) ===
-        const seedsIcon = this.add.image(topCenterX - 80, 25, 'seeds')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-
-        // seeds text
-        this.seedsText = this.add.text(topCenterX - 65, 18, `${this.seeds}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-        .setScrollFactor(0)
-        .setDepth(UIDEPTH);
-
-        // === SEEDS UI (Top Center) ===
-        const berryIcon = this.add.image(topCenterX - 140, 25, 'berry')
-            .setScrollFactor(0)
-            .setScale(0.5)
-            .setDepth(UIDEPTH);
-    
-        this.berryText = this.add.text(topCenterX - 125, 18, `${this.berries}`, {
-            fontSize: '18px',
-            fill: '#ffffff',
-            stroke: "#000000",
-            strokeThickness: 2,
-        })
-            .setScrollFactor(0)
-            .setDepth(UIDEPTH);
-
-        let berryOutline = null;
-        berryIcon
-              .setInteractive()
-              .on('pointerdown', () => {
-                this.berryMode = !this.berryMode;
-            
-                if (this.berryMode) {
-                  // draw a white outline around the berry icon
-                  berryOutline = this.add.graphics()
-                    .setScrollFactor(0)
-                    .setDepth(UIDEPTH);
-                  berryOutline.lineStyle(2, 0xffffff, 1);
-                  const b = berryIcon.getBounds();
-                  berryOutline.strokeRect(b.x - 2, b.y - 2, b.width + 4, b.height + 4);
-                } else {
-                  // remove the outline
-                  if (berryOutline) {
-                    berryOutline.destroy();
-                    berryOutline = null;
-                  }
-                }
-              });            
-
-        // Add a button on the bottom bar
-        const brushToggleButton = this.add.text(230, window.innerHeight - 40, 'Brush Mode: OFF', {
-            fontSize: '22px',
-            fill: '#ffffff'
-        })
-            .setInteractive()
-            .on('pointerdown', () => {
-                if(this.isBrushMode){
-                    this.isBrushMode = false;
-                    this.gridPlace = true;
-                } else {this.isBrushMode = true; this.gridPlace = false;}
-                brushToggleButton.setText(`Brush Mode: ${this.isBrushMode ? 'ON' : 'OFF'}`);
-            });
-
-        // Ensure the button sticks to the bottom bar
-        brushToggleButton.setScrollFactor(0);
-        brushToggleButton.setDepth(UIDEPTH);
-    
-        // Add the top bar
-        const topBar = this.add.rectangle(0, -1, camera.width, 50, 0x808080, 0.5) // Gray and transparent
+        // 🔳 Background
+        const bar = this.add.rectangle(0, 0, W, H, 0x222222, 0.7)
             .setOrigin(0, 0)
-            .setScrollFactor(0) // Sticks to the camera
+            .setScrollFactor(0)
             .setDepth(UIDEPTH - 1);
-    
-        // Add the bottom bar
-        const bottomBar = this.add.rectangle(0, camera.height - 50, camera.width, 50, 0x808080, 0.5) // Opaque black
-            .setOrigin(0, 0)
-            .setScrollFactor(0) // Sticks to the camera
-            .setDepth(UIDEPTH - 1);
-            
-    
-        // Add "Layout" button
-        const itemTab = this.add.text(10, camera.height - 40, 'Layout', { fontSize: '22px', fill: '#ffffff' })
-            .setInteractive()
-            .setScrollFactor(0) // Sticks to the camera
-            .setDepth(UIDEPTH)
-            .on('pointerdown', () => {
-                this.selectMode = false;
-                this.input.stopPropagation();
-                this.gridPlace = false;
-                this.scene.switch('itemTab');
-            });
-        itemTab.setStroke('#000000', 3);
+        this.cameras.main.ignore(bar);
 
-        // Add "Farm" Button on Bottom Right
-        const farmButton = this.add.text(screenW - 100, camera.height - 40, 'Farm', {
-            fontSize: '22px',
-            fill: '#ffffff',
-        })
-        .setInteractive()
-        .setScrollFactor(0)
-        .setDepth(UIDEPTH)
-        .on('pointerdown', () => {
-            this.farmMode = true;
-        });
-    
-        // Add "Delete/Place" button
-        this.breakItems = this.add.text(120, camera.height - 40, 'Delete', { fontSize: '22px', fill: '#ffffff' })
-            .setInteractive()
-            .setScrollFactor(0) // Sticks to the camera
-            .setDepth(UIDEPTH)
-            .on('pointerdown', () => {
-                if (this.breakItems.text === 'Delete') {
-                    this.selectMode = false;
-                    this.breakItems.setText('Place');
-                    this.input.setDefaultCursor('none');
-                    this.customCursor = this.add.sprite(0, 0, 'hammer').setDepth(UIDEPTH + 1).setScrollFactor(0); // Stick cursor to camera
-                    this.input.on('pointermove', (pointer) => {
-                        if (this.customCursor) {
-                            this.customCursor.setPosition(pointer.x, pointer.y); // ← screen-space position
-                        }
-                    });
-                } else if (this.breakItems.text === 'Place') {
-                    this.selectMode = true;
-                    this.breakItems.setText('Delete');
-                    this.input.setDefaultCursor('default');
-                    if (this.customCursor) {
-                        this.customCursor.destroy();
-                        this.customCursor = null;
-                    }
-                }
-            });
-        this.breakItems.setStroke('#000000', 3);
+        this.scale.on("resize", ({ width }) => bar.setSize(width, H));
 
-        // Automatically scale the bars if the window resizes
-        this.scale.on('resize', (gameSize) => {
-            const { width, height } = gameSize;
-            topBar.setSize(width, 50);
-            bottomBar.setSize(width, 100).setY(height - 100);
-        });
-
-        // Add Save and Load Buttons
-        const buttonWidth = 80;
-        const buttonHeight = 30;
-        const buttonMargin = 10;
-
-        // Save Button
-        const saveButton = this.add.graphics();
-        saveButton.fillStyle(0x00ff00, 1); // Green fill
-        saveButton.fillRoundedRect(buttonMargin, buttonMargin, buttonWidth, buttonHeight, 10); // Rounded rectangle
-        saveButton.setScrollFactor(0).setDepth(UIDEPTH);
-
-        // Add Save Text
-        const saveText = this.add.text(buttonMargin + buttonWidth / 2, buttonMargin + buttonHeight / 2, 'Save', {
-            fontSize: '14px',
-            fill: '#ffffff',
-            align: 'center',
-        })
-            .setOrigin(0.5, 0.5)
+        const makeIcon = (x, key) =>
+            this.add.image(x, H / 2, key)
+            .setDisplaySize(20, 20)
+            .setOrigin(0, 0.5)
             .setScrollFactor(0)
             .setDepth(UIDEPTH);
 
-        // Make Save Button Interactive
-        const saveButtonHitArea = new Phaser.Geom.Rectangle(buttonMargin, buttonMargin, buttonWidth, buttonHeight);
-        saveButton.setInteractive(saveButtonHitArea, Phaser.Geom.Rectangle.Contains);
-        saveButton.on('pointerdown', () => {
-            console.log('Save button clicked');
-            
-            // Convert Map.grid to a JSON string and copy it to clipboard
-            const gridData = JSON.stringify(Map.grid);
-            navigator.clipboard.writeText(gridData).then(() => {
-                this.showSaveNotification()
-            }).catch(err => {
-                console.error('Failed to copy grid to clipboard:', err);
-            });
-        });
-
-        // Load Button
-        const loadButton = this.add.graphics();
-        loadButton.fillStyle(0x0000ff, 1); // Blue fill
-        loadButton.fillRoundedRect(buttonMargin + buttonWidth + buttonMargin, buttonMargin, buttonWidth, buttonHeight, 10); // Rounded rectangle
-        loadButton.setScrollFactor(0).setDepth(UIDEPTH);
-
-        // Add Load Text
-        const loadText = this.add.text(buttonMargin + buttonWidth * 1.5 + buttonMargin, buttonMargin + buttonHeight / 2, 'Load', {
-            fontSize: '14px',
-            fill: '#ffffff',
-            align: 'center'
-        })
-            .setOrigin(0.5, 0.5)
+        const makeText = (x, text, color = "#fff") =>
+            this.add.text(x, H / 2, text, {
+            fontSize: "14px",
+            fill: color,
+            fontFamily: "monospace",
+            stroke: "#000",
+            strokeThickness: 2,
+            }).setOrigin(0, 0.5)
             .setScrollFactor(0)
             .setDepth(UIDEPTH);
-        // Make Load Button Interactive
-        const loadButtonHitArea = new Phaser.Geom.Rectangle(buttonMargin + buttonWidth + buttonMargin, buttonMargin, buttonWidth, buttonHeight);
-        loadButton.setInteractive(loadButtonHitArea, Phaser.Geom.Rectangle.Contains);
-        // Load Button
-        loadButton.on('pointerdown', () => {
-            console.log('Load button clicked');
-        
-            // Create a prompt to paste the grid data
-            const gridData = prompt('Paste your grid data here (JSON format):');
-            if (gridData) {
-                try {
-                    // Parse the JSON string and update Map.grid
-                    let newGrid = JSON.parse(gridData);
-                    const copyGrid = structuredClone(newGrid)
-                    // Ensure the new grid is a valid 2D array
-                    if (Array.isArray(newGrid) && newGrid.every(row => Array.isArray(row))) {
-                        Map.grid = newGrid; // Update the grid
-                        Map.reDraw();       // Redraw the map
-                        Map.grid = copyGrid
-                        newGrid = null;
-                        console.log('Grid successfully loaded and redrawn.');
-                    } else {
-                        alert('Invalid grid format. Ensure it is a 2D array.');
-                    }
-                } catch (err) {
-                    alert(`Error parsing grid data: ${err.message}`);
-                    console.error('Failed to load grid:', err);
-                }
+
+        let x = 12;
+        const spacing = 8;
+        const iconSize = 20;
+
+        // === Daily Needs Section ===
+        const needs = DailyNeedsTracker.getValues();
+        this.topHudElements = [];
+
+        for (const item of needs) {
+            const icon = makeIcon(x, item.key);
+            x += iconSize + 4;
+            const display = item.need
+                ? `${item.have}/${item.need}`
+                : `${item.have}`;
+            const color = item.need
+                ? (item.have >= item.need ? "#00ff00" : "#ff3333")
+                : (item.have > 0 ? "#00ff00" : "#ff3333");
+            const text = makeText(x, display, color);
+            x += text.width + spacing;
+
+            // 🟢 store references
+            if (item.key === "foodIcon") this.foodText = text;
+            if (item.key === "waterIcon") this.waterText = text;
+
+            this.topHudElements.push(icon, text);
+        }
+
+        // === Resource Section ===
+        const resources = [
+            { key: "seeds", value: this.seeds },
+            { key: "berry", value: this.berries },
+            { key: "woodIcon", value: this.woodAmnt },
+            { key: "stoneIcon", value: this.stoneAmnt },
+        ];
+
+        for (const r of resources) {
+            const icon = makeIcon(x, r.key);
+            x += iconSize + 4;
+            const text = makeText(x, `${r.value}`);
+            text.name = r.key; // 🟢 give each text a name for lookup
+            x += text.width + spacing;
+
+            switch (r.key) {
+                case "seeds": this.seedsText = text; break;
+                case "berry": this.berryText = text; break;
+                case "woodIcon": this.woodText = text; break;
+                case "stoneIcon": this.stoneText = text; break;
+                case "waterIcon": this.waterText = text; break;
             }
-        });
 
-        // One-line HUD container with your actual objects:
-        this.hud = this.add.container(0, 0, [
-        topBar, bottomBar,
-        moneyIcon, this.moneyText,
-        seedsIcon, this.seedsText,
-        berryIcon, this.berryText,
-        itemTab, brushToggleButton, farmButton,
-        this.breakItems,
-        saveButton, saveText,
-        loadButton, loadText
-        ]);
+            this.topHudElements.push(icon, text);
+        }
 
-        // Important: HUD is screen-space UI, so lock it to camera
-        this.hud.setScrollFactor(0);
+        // === Money (centered) ===
+        const centerX = W / 2;
+        const moneyIcon = makeIcon(centerX - 30, "monies");
+        this.moneyText = makeText(centerX - 4, `$${this.money}`);
+        this.topHudElements.push(moneyIcon, this.moneyText);
 
-        // Route rendering:
-        // - main camera: show world only (ignore HUD)
-        // - ui camera: show HUD only (ignore world)
-        this.cameras.main.ignore(this.hud);
+        // === Clock (right) ===
+        const clockX = W - 160;
+        this.clock = new Clock(this);
+        this.clockText = makeText(clockX, this.clock.formatTimeWithDay());
+        this.clock.externalText = this.clockText; // pass reference
+        this.topHudElements.push(this.clockText);
+
+
+        this.topHud = this.add.container(0, 0, [bar, ...this.topHudElements])
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
+        this.cameras.main.ignore(this.topHud);
     }
+
+
 
     static refreshUICameraIgnores() {
         const scene = mapView.scene;
@@ -1105,6 +954,8 @@ export class mapView extends Phaser.Scene {
 
 
 
+
+
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
@@ -1115,13 +966,20 @@ const config = {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH
     },
+    plugins: {
+        scene: [
+            {
+                key: 'rexUI',
+                plugin: UIPlugin,
+                mapping: 'rexUI'
+            }
+        ]
+    },
     physics: {
         default: 'arcade',
-        arcade: {
-            debug: false
-        }
-    },
- 
+        arcade: { debug: false }
+    }
 };
+
 
 new Phaser.Game(config);

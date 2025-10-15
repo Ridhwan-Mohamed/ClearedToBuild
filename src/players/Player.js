@@ -362,7 +362,11 @@ export class Player {
             StorageManager.handleStorageDropoff(sprite)
         }
         else if(sprite.state == CONTROL_STATES.SEND_TO_OVEN){
-            Fireman.deliverToOven(sprite)
+            if (sprite.task?.taskType === 'ovenFuelDelivery') {
+                Fireman.deliverFuelToOven(sprite);
+            }else{
+                Fireman.deliverToOven(sprite)
+            }
         }
         else if(sprite.state == CONTROL_STATES.GET_FROM_OVEN){
             Fireman.handleOvenPickupComplete(sprite);

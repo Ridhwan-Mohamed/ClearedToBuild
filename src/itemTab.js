@@ -19,19 +19,23 @@ import TLCWall from 'url:../assets/wall/TLCWall.png'
 import BLCWall from 'url:../assets/wall/BLCWall.png'
 import Dirt from 'url:../assets/Dirt/Dirt.png'
 import TDirt from 'url:../assets/Dirt/TDirt.png'
-import BDirt from 'url:../assets/Dirt/BDirt.png'
-import RDirt from 'url:../assets/Dirt/RDirt.png'
-import LDirt from 'url:../assets/Dirt/LDirt.png'
-import TRCDirt from 'url:../assets/Dirt/TRCDirt.png'
-import BRCDirt from 'url:../assets/Dirt/BRCDirt.png'
+import iDirt from 'url:../assets/Dirt/iDirt.png'
+// import BDirt from 'url:../assets/Dirt/BDirt.png'
+// import RDirt from 'url:../assets/Dirt/RDirt.png'
+// import LDirt from 'url:../assets/Dirt/LDirt.png'
+// import TRCDirt from 'url:../assets/Dirt/TRCDirt.png'
+// import BRCDirt from 'url:../assets/Dirt/BRCDirt.png'
 import TLCDirt from 'url:../assets/Dirt/TLCDirt.png'
-import BLCDirt from 'url:../assets/Dirt/BLCDirt.png'
+// import BLCDirt from 'url:../assets/Dirt/BLCDirt.png'
 import WaterImg from 'url:../assets/water/waterImg.png'
 import playerImg from 'url:../assets/Players/playerImg.png'
 import house1 from 'url:../assets/house1.png'
 import house2 from 'url:../assets/house2.png'
 import well from 'url:../assets/well.png'
-import road from 'url:../assets/road.png'
+import road_interior from 'url:../assets/Roads/road.png'
+import road_edge from 'url:../assets/Roads/road_edge.png'
+import road_corner from 'url:../assets/Roads/road_corner.png'
+import road_island from 'url:../assets/Roads/road_island.png'
 import house1Img from 'url:../assets/house1Img.png'
 import construction from 'url:../assets/construction.png'
 import grassCrop from 'url:../assets/grassCrop.png'
@@ -81,19 +85,23 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('tlcWall', TLCWall); // Top-left corner wall
         scene.load.image('blcWall', BLCWall); // Bottom-left corner wall
         scene.load.image('Dirt', Dirt);
-        scene.load.image('tDirt', TDirt); // Top Dirt
-        scene.load.image('bDirt', BDirt); // Bottom Dirt
-        scene.load.image('rDirt', RDirt); // Right Dirt
-        scene.load.image('lDirt', LDirt); // Left Dirt
-        scene.load.image('trcDirt', TRCDirt); // Top-right corner Dirt
-        scene.load.image('brcDirt', BRCDirt); // Bottom-right corner Dirt
-        scene.load.image('tlcDirt', TLCDirt); // Top-left corner Dirt
-        scene.load.image('blcDirt', BLCDirt); // Bottom-left corner Dirt
+        scene.load.image('dirt_edge', TDirt); // Top Dirt
+        scene.load.image('dirt_island', iDirt); // Top Dirt
+        // scene.load.image('bDirt', BDirt); // Bottom Dirt
+        // scene.load.image('rDirt', RDirt); // Right Dirt
+        // scene.load.image('lDirt', LDirt); // Left Dirt
+        // scene.load.image('trcDirt', TRCDirt); // Top-right corner Dirt
+        // scene.load.image('brcDirt', BRCDirt); // Bottom-right corner Dirt
+        scene.load.image('dirt_corner', TLCDirt); // Top-left corner Dirt
+        // scene.load.image('blcDirt', BLCDirt); // Bottom-left corner Dirt
         scene.load.image('house1', house1); 
         scene.load.image('house2', house2); 
         scene.load.image('construction', construction);
         scene.load.image('well', well); 
-        scene.load.image('road', road); 
+        scene.load.image('road_interior', road_interior); 
+        scene.load.image('road_edge', road_edge); 
+        scene.load.image('road_corner', road_corner); 
+        scene.load.image('road_island', road_island);
         scene.load.image('grassCrop', grassCrop);
         scene.load.image('grassBerry', grassBerry);
         scene.load.image('grassWood', grassWood);

@@ -15,12 +15,11 @@ import { GameStart } from './Controllers/GameStart.js';
 import { buildingManager } from './Manager/buildingManager.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { teamSetupArray } from './constants';
-import { Clock } from './Controllers/Clock.js';
 import { buildWaterQuadtree } from './lib/waterQuadTree.js'
 import start from 'url:../assets/start.png'
 import playButton from 'url:../assets/playButton.png'
 import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
-import { StorageBuilding } from './buildings/Storage.js';
+import { VisibilitySystem } from './UI/VisibilitySystem.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
@@ -47,7 +46,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.3.0', {
+        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.4.0', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
@@ -540,6 +539,7 @@ export class MainMenu {
             GameStart.placePlayers();
             CreateBottomBar(scene);
             scene.sceneButtons();
+            VisibilitySystem.init(scene);           // build blockers + occlusion from the map
 
             // Fade out everything in menu + loading UI
             const fadeTargets = [scene.menu, scene.logoMini, loading];

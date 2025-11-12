@@ -1,15 +1,11 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
-import { Map } from "../map"
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
 import { Manager } from "./Manager"
-import { buildingArray } from "../town"
-import { ClayOven } from "../buildings/ClayOven"
-import { StorageBuilding } from "../buildings/Storage"
-import { House } from "../buildings/House"
-import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 import { buildingManager } from "./buildingManager"
 import { StorageManager } from "./StorageManager"
+import { VisibilitySystem } from "../UI/VisibilitySystem"
+
 export class blockResourceManager{
 
     static NavMeshUpdater;
@@ -50,21 +46,30 @@ export class blockResourceManager{
                 } else {
                     sprite.direction = dy > 0 ? 'down' : 'up';
                 }
-                
                 sprite.play(sprite.action);
                 task.remaining--;
                 task.value.health = task.remaining;  // keep sprite.health updated
                 task.assigned--;
-                const frames = task.type.images;
+                // If this is a layered/complex resource (like PineTree), use its adapter.
+                // Else fall back to the old single-sprite frames logic.
                 if (task.remaining > 0) {
-                    const idx = Math.max(0, task.remaining - 1);
-                    task.value.setTexture(frames[idx]);
-                } else {
-                    if (task.value.queuedOutline) {
-                        task.value.queuedOutline.destroy();
-                        task.value.queuedOutline = null;
+                    if (typeof task.value?.applyBlockDamage === 'function') {
+                        task.value.applyBlockDamage(task.remaining);
+                    } else {
+                        const frames = task.type.images;
+                        const idx = Math.max(0, task.remaining - 1);
+                        task.value.setTexture(frames[idx]);
                     }
-                    task.value.destroy();
+                } else {
+                    if (typeof task.value?.applyBlockDamage === 'function') {
+                        task.value.applyBlockDamage(0); // will self-destroy + clean the outline
+                    } else {
+                        if (task.value.queuedOutline) {
+                            task.value.queuedOutline.destroy();
+                            task.value.queuedOutline = null;
+                        }
+                        task.value.destroy();
+                    }
                     let blockTiles = [];
                     for(let i = task.y; i < task.type.lenY + task.y; i++){
                         for(let j = task.x; j < task.type.lenX + task.x; j++){
@@ -73,13 +78,16 @@ export class blockResourceManager{
                     }
                     this.NavMeshUpdater.blockTiles(blockTiles, true);
                     buildingManager.removeBuildingFromArray(task.x, task.y);
+                    VisibilitySystem.onOccluderChangedRect(task.x, task.y, task.type.lenX, task.type.lenY, /*isBlock=*/false);
                 }
                 StorageManager.addCarriedItem(sprite, task.resource);
                 Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
                 sprite.play(sprite.idle);
                 sprite.timer = null;
-                if(task.assigned <= 0 || task.remaining < 0){
+                if(task.remaining < 0){
                     Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
+                    task.value.queuedOutline.destroy();
+                    value.queuedOutline = null;
                 }
                 sprite.task = null;
             });

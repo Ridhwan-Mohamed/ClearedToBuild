@@ -9,6 +9,7 @@ import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 export class Farmer {
     constructor(x, y, teamNumber) {
@@ -148,6 +149,11 @@ export class Farmer {
         // Clear references
         if (farmer.task) {farmer.task.assigned--; farmer.task = null;}
         if (farmer.carrying) farmer.carrying = null;
+
+        if (farmer.visionId != null) {
+            VisibilitySystem.removeVisionBubble(farmer.visionId);
+            farmer.visionId = null;
+        }
 
         if (farmer.timer) {
             farmer.timer.remove(false);

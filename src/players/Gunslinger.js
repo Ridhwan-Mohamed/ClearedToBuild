@@ -6,6 +6,7 @@ import { Teams } from '../Teams.js';
 import { weapons } from '../weapons.js';
 import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 export class Gunslinger {
     constructor(x, y, teamNumber) {
@@ -80,6 +81,11 @@ export class Gunslinger {
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
+        }
+
+        if (troop.visionId != null) {
+            VisibilitySystem.removeVisionBubble(troop.visionId);
+            troop.visionId = null;
         }
 
         // Clear references

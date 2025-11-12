@@ -2,6 +2,7 @@ import { BLOCKDEPTH, SQUARESIZE, UIDEPTH } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { HouseUI } from "../UI/HouseUI";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class House {
 
@@ -24,6 +25,15 @@ export class House {
             });
         Map.drawRoadAround(x,y,houseType,team);
         Map.addBlockItem(x,y,houseType);
+
+        if(team == 1){
+            const cx = x + Math.floor(houseType.lenX/2);
+            const cy = y + Math.floor(houseType.lenY/2);
+            // Vision bubble so nearby tiles are slightly brighter
+            this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.10 });
+            // Optional: small porch light (trim or remove if you don’t want light)
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 0.6 });
+        }
 
         this.sprite.on('pointerover', () => this.updateIcons());
         this.sprite.on('pointerout', () => this.clearIcons());
@@ -98,5 +108,13 @@ export class House {
 
         this.uiIcons = [];
     }
+
+    destroy() {
+        if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
+        if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
+        this.sprite?.destroy();
+        this.clearIcons?.();
+    }
+
 
 }

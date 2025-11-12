@@ -1,60 +1,36 @@
 📈 Advancing TODOS
 
-🎛️ Tab Page UI Tasks
+🌲 Trees
+    🧩 3-piece images ✔️
+    🎞️ Animate each ✔️
+    💥 Destroy code ✔️
 
-🔹 Setup & Integration
-- [✔️] Install or import rexTabPage plugin or module (from rex-notes UIs)
-- [✔️] Ensure scene has rex UI scene support (load plugin, etc.)
-- [✔️] Define tab page container UI component
+🪨 Rock
+    ✏️ Redesign ✔️
 
-🔹 Define Tabs
-- [✔️] Create tabs: Players | Ovens | Storages | Functions
-- [✔️] Make tab switching logic (change content when tab clicked)
+🌫️ Fog ✔️
+    🕳️ Occlusion fog ✔️
+    🌙 Night fog ✔️
+    💡 Respect light sources ✔️
 
-🔹 Content of Each Tab
+👀 Visibility
+    🫧 Visibility Bubbles ✔️
+    ⚙️ Visibility logic (see objects in bubble, not see stuff outsde of bubble) ✔️
 
-  • Players Tab
-    - [✔️] List all players (cards/rows) with name, health, stamina
-    - [✔️] Include buttons for Sleep/Awaken, Sell
+🗺️ Map Edit Tasks
+    🌱 Fix seeds interactibility ✔️
+    🛣️ Add road tiles ✔️
+    🌱 redesign grass and seed crops
 
-  • Ovens Tab
-    - [✔️] List all clay ovens, status (idle / cooking / etc.)
-    - [✔️] Show queue / pending items
-    - [✔️] Buttons for actions: start cooking jobs, cancel jobs
-
-  • Fireman
-    - [✔️] Do only jobs that are asked, not place water infinitly
-    - [✔️] refuel
-
-  • Forager
-    - [✔️] Fix issue where block resources are priotized (by order instead)
-
-  • Storages Tab
-    - [✔️] List all storages, current contents (# of seeds / wood / etc.)
-
-  • Functions Tab
-    - [✔️] Buttons for “Farm / Harvest”, “Get Seeds”, “Get Block Resources”
-    - [✔️] Show status / progress of these functions if running
-
-🔹 UX / Behavior
-- [✔️] Each tab content should scroll if content overflow
-- [✔️] Maintain state: remember which tab was open last
-- [✔️] Close or hide tab UI when clicking outside or via close button
-
-🔹 Polishing
-- [✔️] Key shortcut for pulling up and down tab bar 
-- [✔️] Fix shortcuts keys
-- [✔️] Fix drop down starting up 
-- [✔️] Add pull up bar functionality to clicking ovens/storages
-- [✔️] DailyNeedsTracker update end of day 
-- [✔️] Fix farmer logic
- 
+💡 Lights
+    🏠 Buildings naturally emit ✔️
+    🔦➕ Add more light structures (non-blocking) ✔️
+    📦 make added buildings have lights and visibility bubbles ✔️
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
-    - ⚠️ Make sure UIIgnoreRefresh isn;t growing WorldObj's infinetly
-    - 🍽️ Decrease health / increase stamina based on food/water on EOD 
-    - 🔄 fix redraw (OAFA)
-    - 🚰 needs a switch to stop producing water unnecessarily (3 / maybe subtask in larger Player UI reconfig)
+    - ⚠️ Stop UICamera from rendering map
+    - 🍽️ Decrease health / increase stamina based on food/water on EOD
+    - 🔄 Make redraw a webworker and handle edge cases
 ----------------------------------------------------------------------------------------------------------------------------------
 ⏳ Down the Line
     - 🎨 Art Overhaul

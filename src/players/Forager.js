@@ -7,6 +7,7 @@ import { NameGenerator } from './NameGenerator.js';
 import { weapons } from '../weapons.js';
 import { blockResourceManager } from '../Manager/BlockResourceManager.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
  
 export class Forager {
 
@@ -77,6 +78,11 @@ export class Forager {
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
+        }
+
+        if (troop.visionId != null) {
+            VisibilitySystem.removeVisionBubble(troop.visionId);
+            troop.visionId = null;
         }
 
         // Clear references

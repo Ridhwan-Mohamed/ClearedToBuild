@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH } from "./constants";
+import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, showAlert } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./players/Player";
@@ -11,6 +11,8 @@ import { StorageBuilding } from "./buildings/Storage";
 import { blockResourceManager } from "./Manager/BlockResourceManager";
 import { ClayOven } from "./buildings/ClayOven";
 import { mapView } from "./mapView";
+import { PineTree } from "./buildings/pineTree";
+import { VisibilitySystem } from "./UI/VisibilitySystem";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -46,25 +48,35 @@ export class Map{
         this.graphics = this.scene.add.graphics();
     }
 
-    static initGrid(){ //makes tile types into correct orientation
-        for (let y = 0; y < this.grid.length; y++) {
-            for (let x = 0; x < this.grid[0].length; x++) {
-                let item = TILE_MAP(this.grid[y][x])
-                if(Array.isArray(this.grid[y][x])){
-                    item = TILE_MAP(this.grid[y][x][0])
-                    let btmTile = TILE_MAP(this.grid[y][x][0])
-                    let topTile = TILE_MAP(this.grid[y][x][1])
-                    if(TILE_TYPES[btmTile].complex){
-                        this.determineTileType(x,y,item,0,0)
-                    }
-                }
-                else if (item == "water") {
-                    this.determineTileType(x,y,item,-1,0)
-                    this.grid[y][x] = [1, this.grid[y][x]]
-                }
-                else if(TILE_TYPES[item].complex) {
-                    this.determineTileType(x,y,item,-1,0)
-                }
+    static initGrid(){ // precompute oriented frames + minimal base/top pairing
+        const H = this.grid.length, W = this.grid[0].length;
+
+        for (let y=0; y<H; y++){
+            for (let x=0; x<W; x++){
+            const cell = this.grid[y][x];
+
+            if (Array.isArray(cell)) {
+                const btm = TILE_MAP(cell[0]);
+                const top = TILE_MAP(cell[1]);
+                if (btm && TILE_TYPES[btm].complex) this.determineTileType(x,y,btm,0,0);
+                if (top && TILE_TYPES[top].complex)  this.determineTileType(x,y,top,1,0);
+                continue;
+            }
+
+            const name = TILE_MAP(cell);
+            if (!name) continue;
+
+            // Water always sits on base (avoid seams), even if interior
+            if (name === 'water') {
+                this.determineTileType(x,y,'water',-1,0);
+            }
+
+            // Complex floors (dirt): orient; pair only if non-interior (edges/corners/island)
+            if (TILE_TYPES[name].complex) {
+                this.determineTileType(x,y,name,-1,0);
+            }
+
+            // Non-complex: leave as-is
             }
         }
     }
@@ -170,32 +182,82 @@ export class Map{
     static drawRoadAround(x, y, item, team) {
         const startX = x - 1;
         const startY = y - 1;
-        const endX = x + item.lenX;
-        const endY = y + item.lenY;
+        const endX   = x + item.lenX;
+        const endY   = y + item.lenY;
 
-        const validEdgeTiles = [];
+        if (VisibilitySystem.viewRect == null) return;
 
+        const roadList = (team != null && townRoads[team]) ? townRoads[team] : null;
+
+        const inBounds = (gx, gy) =>
+            gy >= 0 && gx >= 0 && gy < Map.grid.length && gx < Map.grid[0].length;
+
+        // Floor-only gate: allow painting floor where base isn't blocking.
+        const canWriteFloorHere = (gx, gy) => {
+            if (!inBounds(gx, gy)) return false;
+            const cell    = Map.grid[gy][gx];
+            const baseVal = Array.isArray(cell) ? Map._pickFloorValFromCell(cell) : cell;
+            const baseTyp = TILE_TYPES[TILE_MAP(baseVal)];
+            return !baseTyp?.block; // floor must not be blocking
+        };
+
+        // 1) UNDERLAY: fill the whole building footprint with ROAD INTERIOR on the floor layer
+        //    (so the building sits on road, like your old behavior)
+        const roadInterior = TILE_TYPES.road.interior;
+        for (let row = y; row < y + item.lenY; row++) {
+            for (let col = x; col < x + item.lenX; col++) {
+            if (!canWriteFloorHere(col, row)) continue;
+
+            // Write a floor road interior, regardless of any other floor at this cell
+            // (uses your depth-aware writer; okay to overwrite floor here)
+            this.checkAndPlace(col, row, roadInterior, FLOORDEPTH);
+            this.drawGridValue(col, row);
+            }
+        }
+
+        // 2) RING: auto-tile the perimeter roads using placeTile (edges/corners/islands + neighbor updates)
+        const ringCanLay = (gx, gy) => {
+            if (!inBounds(gx, gy)) return false;
+
+            const cell    = Map.grid[gy][gx];
+            const baseVal = Array.isArray(cell) ? Map._pickFloorValFromCell(cell) : cell;
+            const topVal  = Array.isArray(cell) ? (cell[0] === baseVal ? cell[1] : cell[0]) : null;
+
+            const baseType = TILE_TYPES[TILE_MAP(baseVal)];
+            const topType  = topVal != null ? TILE_TYPES[TILE_MAP(topVal)] : null;
+
+            // skip if a blocking top (building, wall, etc.)
+            if (topType?.block) return false;
+            // skip if base already road (no need to repaint)
+            if (TILE_MAP(baseVal) === 'road') return false;
+            // skip if base itself is blocking
+            if (baseType?.block) return false;
+
+            return true;
+        };
+
+        // Pass 1: lay ring roads
         for (let row = startY; row <= endY; row++) {
             for (let col = startX; col <= endX; col++) {
-                const isEdge =
-                    row === startY || row === endY ||
-                    col === startX || col === endX;
+            const isEdge = (row === startY || row === endY || col === startX || col === endX);
+            if (!isEdge) continue;
 
-                if (row < 0 || col < 0 ||
-                    row >= Map.grid.length || col >= Map.grid[0].length) continue;
+            if (ringCanLay(col, row)) {
+                this.placeTile(col, row, 'road'); // lets your auto-tiler pick edge/corner/island
+                if (roadList) roadList.push([col, row]);
+            }
+            }
+        }
 
-                const cell = Map.grid[row][col];
-                const mapped = TILE_MAP(Array.isArray(cell) ? cell[0] : cell);
+        // Pass 2: light re-touch to finalize ring corners after full ring exists
+        for (let row = startY; row <= endY; row++) {
+            for (let col = startX; col <= endX; col++) {
+            const isEdge = (row === startY || row === endY || col === startX || col === endX);
+            if (!isEdge) continue;
 
-                if (!Array.isArray(cell) && !TILE_TYPES[mapped].block) {
-                    Map.grid[row][col] = TILE_TYPES.road.grid;
-                    Map.drawGridValue(col, row);
-
-                    if (isEdge) {
-                        townRoads[team].push([col, row]);
-                        validEdgeTiles.push([col, row]);
-                    }
-                }
+            const cell    = Map.grid[row][col];
+            const baseVal = Array.isArray(cell) ? Map._pickFloorValFromCell(cell) : cell;
+            if (TILE_MAP(baseVal) === 'road') this.placeTile(col, row, 'road');
             }
         }
     }
@@ -211,28 +273,53 @@ export class Map{
         }
     }
 
-    static checkBlockPositionGen(posX, posY, lenX, lenY){
+    // Helper: does a single numeric tile value block?
+    static _tileIsBlocking(val){
+        if (val == null) return false;
+        const name = TILE_MAP(val);
+        if (!name) return false;
+        const t = TILE_TYPES[name];
+        return !!t?.block;
+    }
+
+    // Helper: does the cell at (x,y) block? (handles [floor, top] arrays)
+    static _cellIsBlocking(x, y){
+        const row = this.grid[y];
+        if (!row) return true;              // out-of-bounds → treat as blocked
+        const cell = row[x];
+        if (cell == null) return true;      // null/undefined → treat as blocked
+
+        if (Array.isArray(cell)) {
+            // Block if either layer is blocking; allow if both are non-blocking
+            return this._tileIsBlocking(cell[0]) || this._tileIsBlocking(cell[1]);
+        }
+        return this._tileIsBlocking(cell);
+    }
+
+    // New array-aware placement check (used for buildings/turrets preview)
+    static checkBlockPosition(posX, posY, lenX, lenY, turret = 0){
         for (let y = posY; y < posY + lenY; y++) {
             for (let x = posX; x < posX + lenX; x++) {
-                if(TILE_TYPES[TILE_MAP(this.grid[y][x])].block){
-                    return true;
-                }
+            if (this._cellIsBlocking(x, y)) {
+                if (turret) Turret.topItem.blocked = true;
+                else this.placingItem.blocked = true;
+                return Phaser.Display.Color.GetColor(200, 49, 19); // red
+            }
+            }
+        }
+        if (turret) Turret.topItem.blocked = false;
+        else this.placingItem.blocked = false;
+        return Phaser.Display.Color.GetColor(14, 209, 69); // green
+        }
+
+        // (Optional) make the generator check consistent with the new rules
+        static checkBlockPositionGen(posX, posY, lenX, lenY){
+        for (let y = posY; y < posY + lenY; y++) {
+            for (let x = posX; x < posX + lenX; x++) {
+            if (this._cellIsBlocking(x, y)) return true;
             }
         }
         return false;
-    }
-    
-    static checkBlockPosition(posX, posY, lenX, lenY, turret=0){
-        for (let y = posY; y < posY + lenY; y++) {
-            for (let x = posX; x < posX + lenX; x++) {
-                if(TILE_TYPES[TILE_MAP(this.grid[y][x])].block){
-                    turret ? Turret.topItem.blocked = true : this.placingItem.blocked = true;
-                    return Phaser.Display.Color.GetColor(200, 49, 19);
-                }
-            }
-        }
-        turret ? Turret.topItem.blocked = false : this.placingItem.blocked = false;
-        return Phaser.Display.Color.GetColor(14, 209, 69);
     }
 
     static checkSpreadPosition(posX, posY, endX, endY){
@@ -272,29 +359,79 @@ export class Map{
         }
     }
 
-    static placeTile(x, y, tileType, index=-1) {
-        // Place the tile in the this.grid
-        this.determineTileType(x, y, tileType, index);
-        let depth = TILE_TYPES[TILE_MAP(this.grabIndex(this.grid[y][x],index))].depth
-        index = depth == FLOORDEPTH? 0 : 1;
-        // Update neighbors to ensure correct transitions
-        if (this.grid[y - 1] && TILE_MAP(this.grabDepth(this.grid[y - 1][x], depth)) === tileType) {
-            if (Array.isArray(this.grid[y - 1][x])) this.checkAndPlace(x, y - 1, this.determineTileType(x, y - 1, tileType, index), depth); // Above
-            else this.grid[y - 1][x] = this.determineTileType(x, y - 1, tileType); // Above
-        }
-        if (this.grid[y + 1] && TILE_MAP(this.grabDepth(this.grid[y + 1][x], depth)) === tileType) {
-            if (Array.isArray(this.grid[y + 1][x])) this.checkAndPlace(x, y + 1, this.determineTileType(x, y + 1, tileType, index), depth); // Above
-            else this.grid[y + 1][x] = this.determineTileType(x, y + 1, tileType); // Above
-        }
-        if (this.grid[y][x - 1] && TILE_MAP(this.grabDepth(this.grid[y][x - 1], depth)) === tileType) {
-            if (Array.isArray(this.grid[y][x - 1])) this.checkAndPlace(x - 1, y, this.determineTileType(x - 1, y, tileType, index), depth); // Above
-            else this.grid[y][x - 1] = this.determineTileType(x - 1, y, tileType); // Above
-        }
-        if (this.grid[y][x + 1] && TILE_MAP(this.grabDepth(this.grid[y][x + 1], depth)) === tileType) {
-            if (Array.isArray(this.grid[y][x + 1])) this.checkAndPlace(x + 1, y, this.determineTileType(x + 1, y, tileType, index), depth); // Above
-            else this.grid[y][x + 1] = this.determineTileType(x + 1, y, tileType); // Above
-        }
+    // Return whichever layer in `cell` is floor-depth; if both are floor, prefer [0].
+    static _pickFloorValFromCell(cell){
+        if (!Array.isArray(cell)) return cell;
+        const v0 = cell[0], v1 = cell[1];
+        const t0 = TILE_TYPES[TILE_MAP(v0)];
+        const t1 = TILE_TYPES[TILE_MAP(v1)];
+        const d0 = t0?.depth, d1 = t1?.depth;
+        if (d0 === FLOORDEPTH && d1 !== FLOORDEPTH) return v0;
+        if (d1 === FLOORDEPTH && d0 !== FLOORDEPTH) return v1;
+        return v1; // both floor (or neither): default to [0]
     }
+
+    // Choose which layer index to write to in an existing array cell.
+    // Prefer the layer that already holds `preferTypeName`; else the one matching `depth`.
+    // If both match depth (two floors), prefer the layer that already contains the same type;
+    // if still ambiguous, prefer index 1 for "overlay" feel; else fallback to 0.
+    static _chooseLayerIndexForExistingCell(cell, depth, preferTypeName){
+        const m0 = TILE_MAP(cell[0]);
+        const m1 = TILE_MAP(cell[1]);
+        if (preferTypeName) {
+            if (m0 === preferTypeName) return 0;
+            if (m1 === preferTypeName) return 1;
+        }
+        const d0 = TILE_TYPES[m0]?.depth, d1 = TILE_TYPES[m1]?.depth;
+        const z0 = d0 === depth, z1 = d1 === depth;
+        if (z0 && !z1) return 0;
+        if (z1 && !z0) return 1;
+        if (z0 && z1) {
+            // both same depth (e.g., two floors). If one already matches the type, we’d have caught it above.
+            return 1; // treat [1] as overlay by convention
+        }
+        return 0;
+    }
+
+    // Convenience: resolve index for (x,y)
+    static _layerIndexFor(x, y, depth, preferTypeName){
+        const cell = this.grid[y]?.[x];
+        if (!Array.isArray(cell)) return depth === FLOORDEPTH ? 0 : 1;
+        return this._chooseLayerIndexForExistingCell(cell, depth, preferTypeName);
+    }
+
+    static placeTile(x, y, tileType, index = -1) {
+        // 1) Write current cell (let determineTileType auto-pair if needed)
+        this.determineTileType(x, y, tileType, index);
+
+        // 2) Depth comes from the type we just placed (don’t infer from cell)
+        const depth = TILE_TYPES[tileType].depth;
+
+        // 3) For each neighbor that contains this tileType in ANY layer, re-orient it.
+        const upd = (gx, gy) => {
+            if (!this.grid[gy]) return;
+            if (!this._hasTypeAt(gx, gy, tileType)) return;
+
+            // choose the correct layer in the neighbor to rewrite
+            const nIdx = this._layerIndexFor(gx, gy, depth, tileType);
+
+            if (Array.isArray(this.grid[gy][gx])) {
+            // compute the oriented numeric code AND write it into the chosen layer
+            const oriented = this.determineTileType(gx, gy, tileType, nIdx);
+            // ensure the numeric gets stored in the chosen layer, preserving the other
+            this.checkAndPlace(gx, gy, oriented, depth, tileType);
+            } else {
+            // scalar cell → just rewrite it
+            this.grid[gy][gx] = this.determineTileType(gx, gy, tileType);
+            }
+        };
+
+        upd(x, y - 1); // up
+        upd(x, y + 1); // down
+        upd(x - 1, y); // left
+        upd(x + 1, y); // right
+    }
+
 
     static removeTile(posX, posY, lenX, lenY) {
         // Reset the tile
@@ -330,50 +467,97 @@ export class Map{
             if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],buildingArray[i][3]);
             else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
             else if(buildingArray[i][2].name === TILE_TYPES.clayOven.name) new ClayOven(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
+            else if(buildingArray[i][2].name === TILE_TYPES.pine.name) {
+                const level = 1; // or derive from map/seed
+                const pine = new PineTree(buildingArray[i][0], buildingArray[i][1], level);
+                this.worldPines.push(pine);
+            }
             else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
+        // map.js — after the draw loop inside drawBuildings(), add:
+        const townLightSources = [];
+        for (let i = 0; i < buildingArray.length; i++) {
+            const [gx, gy, tileType, teamNumber] = buildingArray[i];
+            const name = tileType?.name;
+
+            // skip resource occluders — we light everything else
+            if (name === 'pine' || name === 'rock') continue;
+
+            const lenX = tileType.lenX || 1;
+            const lenY = tileType.lenY || 1;
+
+            // center of the building in GRID coords
+            const cx = gx + lenX/2;
+            const cy = gy + lenY/2;
+
+            // heuristic radius: scale a bit with footprint, but keep bounded
+            const r = Math.max(3, Math.min(7, Math.round((lenX + lenY) / 2 + 3)));
+            const brightness = 1.75;
+
+            townLightSources.push({ x: cx, y: cy, r, brightness });
+        }
+
+        // merge with existing lights (torches/players/etc.)
+        const merged = (VisibilitySystem.lightSources || []).concat(townLightSources);
+
+        // this rebuilds the chunk index:
+        VisibilitySystem.setLightSources(merged);
+
+        for (let i = 0; i < buildingArray.length; i++) {
+            const [gx, gy, tileType] = buildingArray[i];
+            const name = tileType?.name;
+            if (name === 'pine' || name === 'rock') continue; // skip occluders
+
+            const lenX = tileType.lenX || 1;
+            const lenY = tileType.lenY || 1;
+            const cx = gx + lenX / 2;
+            const cy = gy + lenY / 2;
+
+            // Use a similar radius as the building light
+            const r = Math.max(3, Math.min(9, Math.round((lenX + lenY) / 2 + 5)));
+
+            // slight visibility boost over ambient (0.1)
+            if (buildingArray[i][3] === 1) {
+                VisibilitySystem.addVisionBubble({ x: cx, y: cy, r, boost: 0.1 }, /*noRepaint=*/true);
+            }else{
+                continue;
+            }
+        }
+        // finally rebuild once
+        VisibilitySystem._rebuildViewFull();
     }
 
     static deleteAllGridElements(){
         this.graphics.clear();
-        this.blocks.forEach(child => {
-            if (Array.isArray(child)) {
-                for (let i = 0; i < child.length; i++) {
-                    if(Array.isArray(child[i])){
-                        child[i][0].destroy();
-                        child[i][1].destroy();
-                    }
-                    else{
-                        child[i]?.destroy();
-                    }
-                }
-            } else {
-                if(child) child.destroy();
-            }
-        });
+        this.blocks.forEach(Map._destroyNode);
         this.blocks = [];
         this.waterBlocks.forEach(child => child.destroy());
         this.barrier.clear(true);
     }
 
+    static _destroyNode(node){
+        if(!node) return;
+        if (Array.isArray(node)) { node.forEach(Map._destroyNode); return; }
+        if (node.destroy) node.destroy();
+    }
+
+    static _storeAt(x,y,layerIndex,sprites){ // 0=floor, 1=block
+        const idx = y*WORLD_DIMENSIONX + x;
+        if (!Array.isArray(this.blocks[idx])) {
+            // nuke old single sprite if present and ensure [floor,block] shape
+            if (this.blocks[idx]?.destroy) this.blocks[idx].destroy();
+            this.blocks[idx] = [null, null];
+        }
+        // clear old content at that layer (can be sprite or array)
+        this._destroyNode(this.blocks[idx][layerIndex]);
+        this.blocks[idx][layerIndex] = sprites;
+    }
+
+
     static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
         this.graphics.clear();
-        this.blocks.forEach(child => {
-            if (Array.isArray(child)) {
-                for (let i = 0; i < child.length; i++) {
-                    if(Array.isArray(child[i])){
-                        child[i][0].destroy();
-                        child[i][1].destroy();
-                    }
-                    else{
-                        child[i]?.destroy();
-                    }
-                }
-            } else {
-                if(child) child.destroy();
-            }
-        });
+        this.blocks.forEach(Map._destroyNode);
         this.blocks = [];
         this.waterBlocks.forEach(child => child.destroy());
         this.barrier.clear(true);
@@ -386,6 +570,10 @@ export class Map{
         
         const bottomRightX = Math.max(topLeftX + CHUNK_SIZE, topLeftX + Math.floor(window.innerWidth/SQUARESIZE))
         const bottomRightY = topLeftY + CHUNK_SIZE
+
+        PineTree.rebuildVisibleForGridRange(topLeftX, topLeftY, bottomRightX, bottomRightY);
+        VisibilitySystem.setViewRect(topLeftX, topLeftY, bottomRightX-topLeftX, bottomRightY-topLeftY);
+        VisibilitySystem._rebuildViewFull();
 
         this.cameraBounds = new Phaser.Geom.Rectangle(
             topLeftX * SQUARESIZE,
@@ -424,45 +612,186 @@ export class Map{
         }
     }
 
-    static drawGridValue(x,y,index=-1){
-        let tileKey, type;
-        if(index > -1) {tileKey = TILE_ARR[this.grid[y][x][index]];type = TILE_TYPES[TILE_MAP(this.grid[y][x][index])]}
-        else {tileKey = TILE_ARR[this.grid[y][x]]; type = TILE_TYPES[TILE_MAP(this.grid[y][x])]}
-        if(!type.spread){
-            let barrierBlock;
-            if(type.spriteSheet){
-                barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                barrierBlock.play(tileKey).setDepth(type.depth);
+    static _shapeAndAngle(def, val) {
+        // Map the stored number to (shape, angle) for NESW
+        if (val === def.interior) return { shape: 'interior', angle: 0 };
+        if (def.island != null && val === def.island) return { shape: 'island', angle: 0 };
+
+        // sides
+        if (val === def.sides?.up)    return { shape: 'edge',   angle: 0   };
+        if (val === def.sides?.right) return { shape: 'edge',   angle: 90  };
+        if (val === def.sides?.down)  return { shape: 'edge',   angle: 180 };
+        if (val === def.sides?.left)  return { shape: 'edge',   angle: 270 };
+
+        // corners (we treat sprites as "top-left" rotated; adjust to your atlas)
+        if (val === def.corners?.topLeft)     return { shape: 'corner', angle: 0   };
+        if (val === def.corners?.topRight)    return { shape: 'corner', angle: 90  };
+        if (val === def.corners?.bottomRight) return { shape: 'corner', angle: 180 };
+        if (val === def.corners?.bottomLeft)  return { shape: 'corner', angle: 270 };
+
+        return { shape: 'interior', angle: 0 };
+    }
+
+    static _spawnSpec(cx, cy, depth, spec, angle = 0) {
+        const node = spec.sheet
+            ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth).play(spec.anim || spec.key)
+            : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
+        if (angle) node.setAngle(angle);
+        return node;
+    }
+
+    static drawGridValue(x, y, index = -1) {
+        const cell = this.grid[y]?.[x];
+        if (cell == null) return;
+
+        const paired = Array.isArray(cell);
+        const baseVal = paired ? cell[0] : cell;
+        const topVal  = paired ? cell[1] : null;
+
+        const isCrops = (val) => TILE_MAP(val) === 'crops';
+
+        // --- CROPS (legacy seed + team logic)
+        const cropsCandidate =
+            index === 1 ? topVal :
+            index === 0 ? baseVal :
+            (paired ? (isCrops(topVal) ? topVal : (isCrops(baseVal) ? baseVal : null))
+                    : (isCrops(baseVal) ? baseVal : null));
+
+        if (cropsCandidate && isCrops(cropsCandidate)) {
+            const key = `${x},${y}`;
+            if (!this.cropDict[key]) {
+                const def = TILE_TYPES.crops;
+                const cx  = x * SQUARESIZE + SQUARESIZE / 2;
+                const cy  = y * SQUARESIZE + SQUARESIZE / 2;
+                const block = this.scene.add.sprite(cx, cy, 'crops').setDepth(def.depth);
+                block.setFrame(1);
+                block.hasSeed = true;
+                this.handleGridDelete(block, def, x, y);
             }
-            else{
-                barrierBlock = this.scene.physics.add.staticImage(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(type.depth);
-            }
-            if(type.block) this.barrier.add(barrierBlock);
-            this.handleGridDelete(barrierBlock, type, x, y)
+            return;
         }
-        else{
-            let block;
-            if(type.spriteSheet){
-                block = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, tileKey);
-                if (tileKey === 'crops') {
-                    block.setFrame(1); // Start at frame 0 (or first stage)
-                    block.hasSeed = true;
-                } else {
-                    block.play(tileKey);
-                }
-                block.setDepth(type.depth);
+        // --- /CROPS
+
+        const drawOne = (val) => {
+            const name = TILE_MAP(val);
+            const def  = TILE_TYPES[name];
+            const cx = x * SQUARESIZE + SQUARESIZE / 2;
+            const cy = y * SQUARESIZE + SQUARESIZE / 2;
+            let node;
+
+            if (def.assets && def.complex) {
+                const { shape, angle } = Map._shapeAndAngle(def, val);
+                const a = def.assets;
+                if (shape === 'interior') node = this._spawnSpec(cx, cy, def.depth, a.interior);
+                else if (shape === 'island') node = this._spawnSpec(cx, cy, def.depth, a.island);
+                else if (shape === 'edge') node = this._spawnSpec(cx, cy, def.depth, a.edge, angle);
+                else node = this._spawnSpec(cx, cy, def.depth, a.corner, angle);
+            } else {
+                const tileKey = TILE_ARR[val];
+                node = def.spriteSheet
+                    ? this.scene.add.sprite(cx, cy, tileKey).setDepth(def.depth).play(tileKey)
+                    : this.scene.add.image(cx, cy, tileKey).setDepth(def.depth);
             }
-            else{
-                block = this.scene.add.image(
-                    x * SQUARESIZE + SQUARESIZE / 2, 
-                    y * SQUARESIZE + SQUARESIZE / 2, 
-                    tileKey
-                );
+
+            // Basic rotation logic preserved
+            if (def.block) {
+                node.setDisplaySize(SQUARESIZE, SQUARESIZE);
+                this.barrier.add(node);
             }
-            block.setDepth(type.depth); // Scale to fit the grid
-            this.handleGridDelete(block, type, x, y)
+
+            // ✅ handle interactable seed-type logic here
+            if (def.interactable) {
+                // link to seedManager
+                seedManager.makeClickable(x, y, node);
+            }
+
+            return node;
+        };
+
+        // --- draw layers
+        if (index === 0) {
+            const n = drawOne(baseVal);
+            this._storeAt(x, y, 0, n);
+            return;
         }
+        if (index === 1 && paired) {
+            const n = drawOne(topVal);
+            this._storeAt(x, y, 1, n);
+            return;
+        }
+
+        const floorNode = drawOne(baseVal);
+        if (paired) {
+            const topNode = drawOne(topVal);
+            this._storeAt(x, y, 0, floorNode);
+            this._storeAt(x, y, 1, topNode);
+        } else {
+            this._storeAt(x, y, 0, floorNode);
+        }
+    }
+
+    static _sameAs(x,y,typeName){
+        const cell = this.grid[y]?.[x];
+        if (cell == null) return false;
+        const top  = Array.isArray(cell) ? TILE_MAP(cell[1]) : null;
+        const base = Array.isArray(cell) ? TILE_MAP(cell[0]) : TILE_MAP(cell);
+        return (top === typeName) || (base === typeName);
+    }
+
+    static _texExists(key){ return this.scene.textures.exists(key); }
+
+    static _overlaySpec(spec) {
+        // Accept legacy string ('shore_edge') or object {key, sheet, anim}
+        if (!spec) return null;
+        return (typeof spec === 'string') ? { key: spec, sheet: false } : spec;
+    }
+
+    static _addOverlayAt(cx, cy, depth, spec, angle) {
+        if (!spec || !spec.key) return null;
+        const node = spec.sheet
+            ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth)
+            : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
+        if (spec.sheet) node.play(spec.anim || spec.key);
+        node.setAngle(angle);
+        return node;
+    }
+
+    static _stampOverlays(x, y, type){
+        const specEdge   = this._overlaySpec(type.overlay?.edge);
+        const specCorner = this._overlaySpec(type.overlay?.corner);
+        if (!specEdge && !specCorner) return [];
+
+        const cx = x * SQUARESIZE + SQUARESIZE/2;
+        const cy = y * SQUARESIZE + SQUARESIZE/2;
+
+        const n  = this._sameAs(x, y-1, type.name);
+        const s  = this._sameAs(x, y+1, type.name);
+        const w  = this._sameAs(x-1, y, type.name);
+        const e  = this._sameAs(x+1, y, type.name);
+        const nw = this._sameAs(x-1, y-1, type.name);
+        const ne = this._sameAs(x+1, y-1, type.name);
+        const sw = this._sameAs(x-1, y+1, type.name);
+        const se = this._sameAs(x+1, y+1, type.name);
+
+        const overlays = [];
+
+        // Edges (rotate one north-facing strip): 0=N, 90=E, 180=S, 270=W
+        if (specEdge) {
+            if (!n) overlays.push(this._addOverlayAt(cx, cy, type.depth, specEdge,   0));
+            if (!e) overlays.push(this._addOverlayAt(cx, cy, type.depth, specEdge,  90));
+            if (!s) overlays.push(this._addOverlayAt(cx, cy, type.depth, specEdge, 180));
+            if (!w) overlays.push(this._addOverlayAt(cx, cy, type.depth, specEdge, 270));
+        }
+
+        // Corners (rotate one top-left quarter)
+        if (specCorner) {
+            if ( n &&  w && !nw) overlays.push(this._addOverlayAt(cx, cy, type.depth, specCorner,   0)); // TL
+            if ( n &&  e && !ne) overlays.push(this._addOverlayAt(cx, cy, type.depth, specCorner,  90)); // TR
+            if ( s &&  e && !se) overlays.push(this._addOverlayAt(cx, cy, type.depth, specCorner, 180)); // BR
+            if ( s &&  w && !sw) overlays.push(this._addOverlayAt(cx, cy, type.depth, specCorner, 270)); // BL
+        }
+
+        return overlays.filter(Boolean);
     }
 
     static handleGridDelete(block, type, x, y){
@@ -521,75 +850,116 @@ export class Map{
         }
     }
 
-    static determineTileType(x, y, tileType,index = -1, draw = 1) {
-        if(TILE_TYPES[tileType].name == "water" && (x == 0 || x == this.grid[0].length - 1
-            || y == 0 || y == this.grid.length - 1
-        )){
-            // Default fallback for interior
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
-            else this.grid[y][x] = TILE_TYPES[tileType].interior;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].interior; // Default to interior
+    static _hasTypeAt(gx, gy, typeName) {
+        const c = this.grid[gy]?.[gx];
+        if (c == null) return false;
+        if (Array.isArray(c)) {
+            // check top and base; either can be this type
+            return TILE_MAP(c[0]) === typeName || TILE_MAP(c[1]) === typeName;
         }
-        let depth = TILE_TYPES[tileType].depth
-        const above = TILE_MAP(this.grabDepth(this.grid[y - 1]?.[x], depth)) === tileType;
-        const below = TILE_MAP(this.grabDepth(this.grid[y + 1]?.[x], depth)) === tileType;
-        const left = TILE_MAP(this.grabDepth(this.grid[y]?.[x - 1], depth)) === tileType;
-        const right = TILE_MAP(this.grabDepth(this.grid[y]?.[x + 1], depth)) === tileType;
-    
-        if (!above && !below && !left && !right) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
-            else this.grid[y][x] = TILE_TYPES[tileType].interior;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].interior; // Isolated tile type
-        } else if (!above && left && right) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.up;
-            else this.grid[y][x] = TILE_TYPES[tileType].sides.up;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].sides.up; // Side - up
-        } else if (!below && left && right) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.down;
-            else this.grid[y][x] = TILE_TYPES[tileType].sides.down;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].sides.down; // Side - down
-        } else if (!left && above && below) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.left;
-            else this.grid[y][x] = TILE_TYPES[tileType].sides.left;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].sides.left; // Side - left
-        } else if (!right && above && below) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].sides.right;
-            else this.grid[y][x] = TILE_TYPES[tileType].sides.right;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].sides.right; // Side - right
-        } else if (!above && !left) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.topLeft;
-            else this.grid[y][x] = TILE_TYPES[tileType].corners.topLeft;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].corners.topLeft; // Corner - top left
-        } else if (!above && !right) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.topRight;
-            else this.grid[y][x] = TILE_TYPES[tileType].corners.topRight;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].corners.topRight; // Corner - top right
-        } else if (!below && !left) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.bottomLeft;
-            else this.grid[y][x] = TILE_TYPES[tileType].corners.bottomLeft;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].corners.bottomLeft; // Corner - bottom left
-        } else if (!below && !right) {
-            if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].corners.bottomRight;
-            else this.grid[y][x] = TILE_TYPES[tileType].corners.bottomRight;
-            if (draw) this.drawGridValue(x,y,index)
-            return TILE_TYPES[tileType].corners.bottomRight; // Corner - bottom right
-        } 
-        
-        // Default fallback for interior
-        if(index > -1) this.grid[y][x][index] = TILE_TYPES[tileType].interior;
-        else this.grid[y][x] = TILE_TYPES[tileType].interior;
-        if (draw) this.drawGridValue(x,y,index)
-        return TILE_TYPES[tileType].interior; // Default to interior
+        return TILE_MAP(c) === typeName;
     }
+
+
+    static determineTileType(x, y, tileType, index = -1, draw = 1) {
+        const def = TILE_TYPES[tileType];
+        // inside determineTileType(...)
+        const write = (val, pairUnderForced) => {
+            if (index > -1) {
+                this.grid[y][x][index] = val;
+                if (draw) this.drawGridValue(x,y,index);
+                return val;
+            }
+
+            // Auto-pair only when needed (non-interior complex tiles)
+            let pairUnder = pairUnderForced;
+            if (pairUnder === undefined && def.complex && val !== def.interior) {
+                // figure out shape+angle from the numeric code we just chose
+                const { shape, angle } = Map._shapeAndAngle(def, val);
+
+                // NESW delta by angle
+                const dNESW = a => (a===0 ? [0,-1] : a===90 ? [1,0] : a===180 ? [0,1] : [-1,0]);
+                // diagonal delta by angle (0=TL, 90=TR, 180=BR, 270=BL)
+                const dDiag = a => (a===0 ? [-1,-1] : a===90 ? [1,-1] : a===180 ? [1,1] : [-1,1]);
+
+                // neighbor booleans (you already computed depth above)
+                const A = this._hasTypeAt(x, y-1, tileType); // above
+                const B = this._hasTypeAt(x, y+1, tileType); // below
+                const L = this._hasTypeAt(x-1, y, tileType); // left
+                const R = this._hasTypeAt(x+1, y, tileType); // right
+
+                // pick neighbor cell to sample based on the decided shape/orientation
+                let nx = x, ny = y;
+                if (shape === 'edge') {
+                    const [dx,dy] = dNESW(angle); nx += dx; ny += dy;
+                } else if (shape === 'corner') {
+                    const isRightVariant = (angle === 90 || angle === 180); // TR or BR
+                    nx += isRightVariant ? 1 : -1; // move horizontally only
+                    // ny unchanged
+                } else if (shape === 'island') {
+                    // opposite of the sole attachment
+                    if      (A) ny += 1;
+                    else if (R) nx -= 1;
+                    else if (B) ny -= 1;
+                    else if (L) nx += 1;
+                }
+                // ...
+                const neigh = this.grid[ny]?.[nx];
+                const neighVal = this._pickFloorValFromCell(neigh);
+                const neighName = TILE_MAP(neighVal);
+                const neighDef  = neighName ? TILE_TYPES[neighName] : null;
+
+                pairUnder = (neighDef && neighDef.depth === FLOORDEPTH)
+                ? (neighDef.interior ?? neighDef.grid)
+                : TILE_TYPES.grass.grid;
+            }
+
+            this.grid[y][x] = (pairUnder != null) ? [pairUnder, val] : val;
+            if (draw) this.drawGridValue(x,y);
+            return val;
+        };
+
+        // bounds guard for water
+        if (def.name === "water" && (x === 0 || y === 0 || x === this.grid[0].length-1 || y === this.grid.length-1)) {
+            return write(def.interior);
+        }
+
+        const A = this._hasTypeAt(x, y-1, tileType); // above
+        const B = this._hasTypeAt(x, y+1, tileType); // below
+        const L = this._hasTypeAt(x-1, y, tileType); // left
+        const R = this._hasTypeAt(x+1, y, tileType); // right
+        const cnt = (A?1:0) + (B?1:0) + (L?1:0) + (R?1:0);
+
+        // 0 neighbors → interior
+        if (cnt === 0) return write(def.interior);
+
+        // 1 neighbor → ATTACHED-ISLAND (dirt only), else a side
+        if (cnt === 1) {
+            if (def.island != null) return write(def.island);   // dirt & water islands
+            if (A) return write(def.sides.up);
+            if (R) return write(def.sides.right);
+            if (B) return write(def.sides.down);
+            return write(def.sides.left);
+        }
+
+        // 2 neighbors: orthogonal → corner; opposite → interior run
+        if (A && L && !R && !B) return write(def.corners.bottomRight);
+        if (A && R && !L && !B) return write(def.corners.bottomLeft);
+        if (B && L && !R && !A) return write(def.corners.topRight);
+        if (B && R && !L && !A) return write(def.corners.topLeft);
+        if (A && B && !L && !R) return write(def.interior);
+        if (L && R && !A && !B) return write(def.interior);
+
+        // 3 neighbors → side facing the missing one
+        if (!A && L && R && B) return write(def.sides.up);
+        if (!R && A && B && L) return write(def.sides.right);
+        if (!B && L && R && A) return write(def.sides.down);
+        if (!L && A && B && R) return write(def.sides.left);
+
+        // 4 neighbors → interior
+        return write(def.interior);
+    }
+
     
     static addSpreadArr(x, y, newItem, index){
         if(newItem.block){Map.navGrid[y][x] = 0}
@@ -648,16 +1018,17 @@ export class Map{
     static sample(x, y){
         let rgb = this.getPixelRGBA(x,y);
         const distances = {
-            1 : this.colorDistance(rgb, colors.green),
-            2 : this.colorDistance(rgb, colors.lightGray),
-            23: this.colorDistance(rgb, colors.blue),
-            35: this.colorDistance(rgb, colors.gray),
-            14: this.colorDistance(rgb, colors.brown),
-            41: this.colorDistance(rgb, colors.lightBrown),
-            32: this.colorDistance(rgb, colors.darkRed),
-            12: this.colorDistance(rgb, colors.darkGreen),
-            44: this.colorDistance(rgb, colors.rockGray)
+            1  : this.colorDistance(rgb, colors.green),      // grass
+            2  : this.colorDistance(rgb, colors.lightGray),  // wall
+            24 : this.colorDistance(rgb, colors.blue),       // water interior
+            37 : this.colorDistance(rgb, colors.gray),       // road  (shifted from 36)
+            14 : this.colorDistance(rgb, colors.brown),      // dirt interior
+            43 : this.colorDistance(rgb, colors.lightBrown), // storage (shifted from 42)
+            34 : this.colorDistance(rgb, colors.darkRed),    // house1 (shifted from 33)
+            12 : this.colorDistance(rgb, colors.darkGreen),  // pine
+            46 : this.colorDistance(rgb, colors.rockGray)    // rock (shifted from 45)
         };
+
 
         // Find the color category with the smallest distance to the given rgb color
         return Number(Object.keys(distances).reduce((a, b) => distances[a] < distances[b] ? a : b));
@@ -730,6 +1101,11 @@ export class Map{
                 itemToPlace.on('pointerdown', () => {
                     const teamList = Teams.teamLists['1'].blockResourceList;
                     const foragerQueue = Teams.teamLists['1'].foragerQueue
+                    // ✅ accessibility gate for legacy sprites (pine/rock)
+                    if (!buildingManager.isBlockAccessible(posX, posY, item)) {
+                        showAlert(this.scene, "Can't reach that resource");
+                        return;
+                    }
                     if (!itemToPlace.task) {
                         // Create a new task if none exists
                         if (!itemToPlace.queuedOutline) {

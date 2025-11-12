@@ -45,281 +45,288 @@ export const BLOCKDEPTH = FLOORDEPTH+1
 export const SQUARESIZE = 16;
 export const CHUNK_SIZE = 60
 export const EDGE_RATIO = CHUNK_SIZE/8
+// --- TILE_TYPES (full) ---
 export const TILE_TYPES = {
-    grass : {
-        name: "grass",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 1,
-        depth: FLOORDEPTH
-    },
-    wall : {
-        name: "wall",
-        interior: 2, // Incremented by 1
-        sides: {
-            up: 3,
-            down: 4,
-            left: 5,
-            right: 6,
-        },
-        corners: {
-            topLeft: 7,
-            topRight: 8,
-            bottomLeft: 9,
-            bottomRight: 10,
-        },
-        complex: true,
-        price: 5,
-        spread: true,
-        block: true,
-        grid: 2,
-        depth: BLOCKDEPTH
-    },
-    sand: {
-        name: "sand",
-        value: 'image1',
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 11,
-        lenX: 3,
-        lenY: 3,
-        price: 10,
-        depth: BLOCKDEPTH
-    },
-    pine: {
-        name: "pine",
-        value: 'pine3',
-        price: 50,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 12,
-        lenX: 3,
-        lenY: 3,
-        depth: BLOCKDEPTH+2,
-        resource: UI_ITEM_TYPES.wood,
-        images: ['pine1', 'pine2', 'pine3']
-    },
-    turret: {
-        name: "turret",
-        value: ['image7','image7a'],
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 13,
-        lenX: 3,
-        lenY: 3,
-        price: 20000,
-        depth: BLOCKDEPTH
-    },
-    dirt : {
-        name: "dirt",
-        spread: true,
-        block: false,
-        complex: true,
-        interior: 14, // Incremented by 1
-        sides: {
-            up: 15,
-            down: 16,
-            left: 17,
-            right: 18,
-        },
-        corners: {
-            topLeft: 19,
-            topRight: 20,
-            bottomLeft: 21,
-            bottomRight: 22,
-        },
-        grid: 14,
-        depth: FLOORDEPTH
-    },
-    water : {
-        name: "water",
-        spriteSheet: true,
-        spread: true,
-        block: true,
-        complex: true,
-        interior: 23, // Incremented by 1
-        sides: {
-            up: 24,
-            down: 25,
-            left: 26,
-            right: 27,
-        },
-        corners: {
-            topLeft: 28,
-            topRight: 29,
-            bottomLeft: 30,
-            bottomRight: 31,
-        },
-        grid: 23,
-        depth: BLOCKDEPTH
-    },
-    house1:{
-        name: "house1",
-        value: "house1",
-        spriteSheet: false,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 32,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4,
-        cost: { wood : 4, stone: 4 }
-    },
-    house2:{
-        name: "house2",
-        value: "house2",
-        spriteSheet: false,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 33,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4,
-        cost: { wood : 4, stone: 4 }
-    },
-    well:{
-        name: "well",
-        value: "well",
-        spriteSheet: false,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 34,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4
-    },
-    road : {
-        name: "road",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 35,
-        depth: FLOORDEPTH
-    },
-    player:{
-        name: "player",
-        block: true,
-        value: 'image9',
-        depth: BLOCKDEPTH+1,
-        lenX: 1,
-        lenY: 1,
-    },
-    crops: {
-        name: "crops",
-        block: false,
-        value: 'crops',
-        spriteSheet: true,
-        depth: FLOORDEPTH,
-        spread: true,
-        complex: false,
-        price: 5,
-        grid: 36
-    },
-    grassCrop : {
-        name: "grassCrop",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 37,
-        depth: FLOORDEPTH,
-        interactable: true
-    },
-    grassBerry : {
-        name: "grassBerry",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 38,
-        depth: FLOORDEPTH,
-        interactable: true
-    },
-    spawn: {
-        name: "spawn",
-        value: "spawn",
-        spriteSheet: false,
-        spread: false,
-        block: false,
-        complex: false,
-        grid: 39,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4
-    },
-    clayOven: {
-        name: "clayOven",
-        value: "clayOven",
-        spriteSheet: true,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 40,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4,
-        cost: { stone: 4 }
-    },
-    storage: {
-        name: "storage",
-        value: "storage",
-        spriteSheet: false,
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 41,
-        depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4,
-        cost: { wood: 4 }
-    },
-    grassWood : {
-        name: "grassWood",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 42,
-        depth: FLOORDEPTH,
-        interactable: true
-    },
-    grassRock : {
-        name: "grassRock",
-        spread: true,
-        block: false,
-        complex: false,
-        grid: 43,
-        depth: FLOORDEPTH,
-        interactable: true
-    },
-    rock: {
-        name: "rock",
-        value: 'rock3',
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 44,
-        lenX: 2,
-        lenY: 2,
-        depth: BLOCKDEPTH+2,
-        resource: UI_ITEM_TYPES.stone,
-        images: ['rock1', 'rock2', 'rock3']
-    },
-    construction: {
-        name: "construction",
-        value: 'construction',
-        spread: false,
-        block: true,
-        complex: false,
-        grid: 45,
-        lenX: 4,
-        lenY: 4,
-        depth: BLOCKDEPTH+2,
+  grass : {
+    name: "grass",
+    spread: true,
+    block: false,
+    complex: false,
+    grid: 1,
+    depth: FLOORDEPTH
+  },
+
+  wall : {
+    name: "wall",
+    interior: 2,
+    sides: { up: 3, down: 4, left: 5, right: 6 },
+    corners: { topLeft: 7, topRight: 8, bottomLeft: 9, bottomRight: 10 },
+    complex: true,
+    price: 5,
+    spread: true,
+    block: true,
+    grid: 2,
+    depth: BLOCKDEPTH
+  },
+
+  sand: {
+    name: "sand",
+    value: 'image1',
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 11,
+    lenX: 3, lenY: 3,
+    price: 10,
+    depth: BLOCKDEPTH
+  },
+
+  pine: {
+    name: "pine",
+    value: 'pine3',
+    price: 50,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 12,
+    lenX: 3, lenY: 3,
+    depth: BLOCKDEPTH+2,
+    resource: UI_ITEM_TYPES.wood,
+    images: ['pine1','pine2','pine3']
+  },
+
+  turret: {
+    name: "turret",
+    value: ['image7','image7a'],
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 13,
+    lenX: 3, lenY: 3,
+    price: 20000,
+    depth: BLOCKDEPTH
+  },
+
+  // ── Dirt (complex, numbered + island; draw uses assets, not TILE_ARR) ──
+  dirt : {
+    name: "dirt",
+    spread: true,
+    block: false,
+    complex: true,
+    grid: 14,                 // interior code
+    interior: 14,             // interior
+    island:   15,             // island (cap)
+    sides:    { up: 16, down: 17, left: 18, right: 19 },
+    corners:  { topLeft: 20, topRight: 21, bottomLeft: 22, bottomRight: 23 },
+    depth: FLOORDEPTH,
+    assets: {
+      interior: { key: 'Dirt',        sheet: false },
+      island:   { key: 'dirt_island', sheet: false },
+      edge:     { key: 'dirt_edge',   sheet: false },
+      corner:   { key: 'dirt_corner', sheet: false }
     }
+  },
+
+  // ── Water (complex, numbered + island; draw uses assets, not TILE_ARR) ──
+  water : {
+    name: "water",
+    spriteSheet: true, // interior is animated
+    spread: true,
+    block: true,
+    complex: true,
+    grid: 24,                 // interior code
+    interior: 24,             // interior
+    island:   25,             // island (cap)
+    sides:    { up: 26, down: 27, left: 28, right: 29 },
+    corners:  { topLeft: 30, topRight: 31, bottomLeft: 32, bottomRight: 33 },
+    depth: BLOCKDEPTH,
+    assets: {
+      interior: { key: 'water',        sheet: true,  anim: 'water' },
+      island:   { key: 'shore_island', sheet: true,  anim: 'shore_island' },
+      edge:     { key: 'shore_edge',   sheet: true,  anim: 'shore_edge' },
+      corner:   { key: 'shore_corner', sheet: true,  anim: 'shore_corner' }
+    }
+  },
+
+  house1:{
+    name: "house1",
+    value: "house1",
+    spriteSheet: false,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 34,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4,
+    cost: { wood: 4, stone: 4 }
+  },
+
+  house2:{
+    name: "house2",
+    value: "house2",
+    spriteSheet: false,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 35,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4,
+    cost: { wood: 4, stone: 4 }
+  },
+
+  well:{
+    name: "well",
+    value: "well",
+    spriteSheet: false,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 36,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4
+  },
+
+  // ── Road (NEW: complex, interior/edge/corner/island; interior kept at 37) ──
+  road : {
+    name: "road",
+    spread: true,
+    block: false,
+    complex: true,
+    grid: 37,                 // interior code (kept the same)
+    interior: 37,             // interior
+    island:   48,             // island (cap)
+    sides:    { up: 49, down: 50, left: 51, right: 52 },
+    corners:  { topLeft: 53, topRight: 54, bottomLeft: 55, bottomRight: 56 },
+    depth: FLOORDEPTH,
+    assets: {
+      interior: { key: 'road_interior', sheet: false },
+      island:   { key: 'road_island',   sheet: false },
+      edge:     { key: 'road_edge',     sheet: false },
+      corner:   { key: 'road_corner',   sheet: false }
+    }
+  },
+
+  player:{
+    name: "player",
+    block: true,
+    value: 'image9',
+    depth: BLOCKDEPTH+1,
+    lenX: 1, lenY: 1,
+  },
+
+  crops: {
+    name: "crops",
+    block: false,
+    value: 'crops',
+    spriteSheet: true,
+    depth: FLOORDEPTH,
+    spread: true,
+    complex: false,
+    price: 5,
+    grid: 38
+  },
+
+  grassCrop : {
+    name: "grassCrop",
+    spread: true,
+    block: false,
+    complex: false,
+    grid: 39,
+    depth: FLOORDEPTH,
+    interactable: true
+  },
+
+  grassBerry : {
+    name: "grassBerry",
+    spread: true,
+    block: false,
+    complex: false,
+    grid: 40,
+    depth: FLOORDEPTH,
+    interactable: true
+  },
+
+  spawn: {
+    name: "spawn",
+    value: "spawn",
+    spriteSheet: false,
+    spread: false,
+    block: false,
+    complex: false,
+    grid: 41,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4
+  },
+
+  clayOven: {
+    name: "clayOven",
+    value: "clayOven",
+    spriteSheet: true,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 42,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4,
+    cost: { stone: 4 }
+  },
+
+  storage: {
+    name: "storage",
+    value: "storage",
+    spriteSheet: false,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 43,
+    depth: BLOCKDEPTH,
+    lenX: 4, lenY: 4,
+    cost: { wood: 4 }
+  },
+
+  grassWood : {
+    name: "grassWood",
+    spread: true,
+    block: false,
+    complex: false,
+    grid: 44,
+    depth: FLOORDEPTH,
+    interactable: true
+  },
+
+  grassRock : {
+    name: "grassRock",
+    spread: true,
+    block: false,
+    complex: false,
+    grid: 45,
+    depth: FLOORDEPTH,
+    interactable: true
+  },
+
+  rock: {
+    name: "rock",
+    value: 'rock3',
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 46,
+    lenX: 2, lenY: 2,
+    depth: BLOCKDEPTH+2,
+    resource: UI_ITEM_TYPES.stone,
+    images: ['rock1','rock2','rock3']
+  },
+
+  construction: {
+    name: "construction",
+    value: 'construction',
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 47,
+    lenX: 4, lenY: 4,
+    depth: BLOCKDEPTH+2,
+  }
 };
 
 export const teamSetupArray = {
@@ -328,78 +335,111 @@ export const teamSetupArray = {
 }
 
 export const TILE_ARR = [
-    0,
-    'grass',                // grass
-    'wall',                 // Interior wall
-    'tWall',                // Top wall
-    'bWall',                // Bottom wall
-    'lWall',                // Right wall
-    'rWall',                // Left wall
-    'tlcWall',              // Top-right corner wall
-    'trcWall',              // Bottom-right corner wall
-    'blcWall',              // Top-left corner wall
-    'brcWall',              // Bottom-left corner wall
-    'image1',               // sand
-    'pine3',               // pine
-    ['image7', 'image7a'],  // Turret
-    'Dirt',                 // Interior Dirt
-    'tDirt',                // Top Dirt
-    'bDirt',                // Bottom Dirt
-    'lDirt',                // Right Dirt
-    'rDirt',                // Left Dirt
-    'tlcDirt',              // Top-right corner Dirt
-    'trcDirt',              // Bottom-right corner Dirt
-    'blcDirt',              // Top-left corner Dirt
-    'brcDirt',              // Bottom-left corner Dirt
-    'water',                 // Interior water
-    'twater',                // Top water
-    'bwater',                // Bottom water
-    'lwater',                // Right water
-    'rwater',                // Left water
-    'tlcwater',              // Top-right corner water
-    'trcwater',              // Bottom-right corner water
-    'blcwater',              // Top-left corner water
-    'brcwater',              // Bottom-left corner water
-    'house1',
-    'house2',
-    'well',
-    'road',
-    'crops',
-    'grassCrop',
-    'grassBerry',
-    'spawn',
-    'clayOven',
-    'storage',
-    'grassWood',
-    'grassRock',
-    'rock3',
-    'construction'
+  0,
+  'grass',                // 1  grass
+
+  // wall (2..10)
+  'wall',                 // 2  interior
+  'tWall',                // 3
+  'bWall',                // 4
+  'lWall',                // 5
+  'rWall',                // 6
+  'tlcWall',              // 7
+  'trcWall',              // 8
+  'blcWall',              // 9
+  'brcWall',              // 10
+
+  'image1',               // 11 sand
+  'pine3',                // 12 pine
+  ['image7','image7a'],   // 13 turret
+
+  // dirt (14..23) — compatibility only (draw uses assets)
+  'Dirt',     // 14
+  'iDirt',    // 15
+  'tDirt',    // 16
+  'bDirt',    // 17
+  'lDirt',    // 18
+  'rDirt',    // 19
+  'tlcDirt',  // 20
+  'trcDirt',  // 21
+  'blcDirt',  // 22
+  'brcDirt',  // 23
+
+  // water (24..33) — compatibility only (draw uses assets)
+  'water',     // 24
+  'iwater',    // 25
+  'twater',    // 26
+  'bwater',    // 27
+  'lwater',    // 28
+  'rwater',    // 29
+  'tlcwater',  // 30
+  'trcwater',  // 31
+  'blcwater',  // 32
+  'brcwater',  // 33
+
+  'house1',     // 34
+  'house2',     // 35
+  'well',       // 36
+
+  // road interior kept as 37 for legacy sampling
+  'road_interior', // 37
+
+  'crops',      // 38
+  'grassCrop',  // 39
+  'grassBerry', // 40
+  'spawn',      // 41
+  'clayOven',   // 42
+  'storage',    // 43
+  'grassWood',  // 44
+  'grassRock',  // 45
+  'rock3',      // 46
+  'construction', // 47
+
+  // road (48..56) — compatibility only (draw uses assets + rotation)
+  'road_island',  // 48
+  'road_edge',    // 49 (N)
+  'road_edge',    // 50 (S)
+  'road_edge',    // 51 (L/W)
+  'road_edge',    // 52 (R/E)
+  'road_corner',  // 53 (TL)
+  'road_corner',  // 54 (TR)
+  'road_corner',  // 55 (BL)
+  'road_corner'   // 56 (BR)
 ];
 
+// --- TILE_MAP (full) ---
 export function TILE_MAP(val){
-    if(val == 1){return "grass"}
-    else if(val >= 2 && val <= 10){return "wall"}
-    else if(val == 11){return "sand"}
-    else if(val == 12){return "pine"}
-    else if(val == 13){return "turret"}
-    else if(val >= 14 && val <= 22){return "dirt"}
-    else if(val >= 23 && val <= 31){return "water"}
-    else if(val == 32){return "house1"}
-    else if(val == 33){return "house2"}
-    else if(val == 34){return "well"}
-    else if(val == 35){return "road"}
-    else if(val == 36){return "crops"}
-    else if(val == 37){return "grassCrop"}
-    else if(val == 38){return "grassBerry"}
-    else if(val == 39){return "spawn"}
-    else if(val == 40){return "clayOven"}
-    else if(val == 41){return "storage"}
-    else if(val == 42){return "grassWood"}
-    else if(val == 43){return "grassRock"}
-    else if(val == 44){return "rock"}
-    else if(val == 45){return "construction"}
-    else{return}
+  if (val == 1) return "grass";
+  else if (val >= 2 && val <= 10) return "wall";
+  else if (val == 11) return "sand";
+  else if (val == 12) return "pine";
+  else if (val == 13) return "turret";
+
+  // dirt 14..23
+  else if (val >= 14 && val <= 23) return "dirt";
+
+  // water 24..33
+  else if (val >= 24 && val <= 33) return "water";
+
+  else if (val == 34) return "house1";
+  else if (val == 35) return "house2";
+  else if (val == 36) return "well";
+
+  // road interior (37) + road variants 48..56
+  else if (val == 37 || (val >= 48 && val <= 56)) return "road";
+
+  else if (val == 38) return "crops";
+  else if (val == 39) return "grassCrop";
+  else if (val == 40) return "grassBerry";
+  else if (val == 41) return "spawn";
+  else if (val == 42) return "clayOven";
+  else if (val == 43) return "storage";
+  else if (val == 44) return "grassWood";
+  else if (val == 45) return "grassRock";
+  else if (val == 46) return "rock";
+  else if (val == 47) return "construction";
 }
+
 
 export function gridPos(x, y){
     return {

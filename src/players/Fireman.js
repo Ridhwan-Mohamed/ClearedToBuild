@@ -12,6 +12,7 @@ import { ClayOven } from '../buildings/ClayOven.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { weapons } from '../weapons.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 const MAX_CARRY = 1;
 
@@ -380,6 +381,11 @@ export class Fireman {
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
+        }
+
+        if (troop.visionId != null) {
+            VisibilitySystem.removeVisionBubble(troop.visionId);
+            troop.visionId = null;
         }
 
         // Clear references

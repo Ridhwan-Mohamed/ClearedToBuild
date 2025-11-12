@@ -4,6 +4,7 @@ import { Teams } from '../Teams.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { StorageUI } from '../UI/StorageUI.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 export class StorageBuilding {
     static scene;
@@ -16,6 +17,16 @@ export class StorageBuilding {
             .setDepth(BLOCKDEPTH);
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
+
+        if(teamNumber == 1){
+            const cx = x + Math.floor(item.lenX/2);
+            const cy = y + Math.floor(item.lenY/2);
+            // Vision bubble: keep storage area slightly visible
+            this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.10 });
+            // Utility light: a bit dimmer than oven
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 0.7 });
+        }
+
         this.x = x;
         this.y = y;
 
@@ -25,9 +36,9 @@ export class StorageBuilding {
         // this.addItem(UI_ITEM_TYPES.unclean_water, 15);
         this.addItem(UI_ITEM_TYPES.clean_water, 15)
         this.addItem(UI_ITEM_TYPES.food, 15);
-        this.addItem(UI_ITEM_TYPES.wood, 4);
-        this.addItem(UI_ITEM_TYPES.stone, 4);
-        this.addItem(UI_ITEM_TYPES.seedCrop, 4);
+        this.addItem(UI_ITEM_TYPES.wood, 10);
+        this.addItem(UI_ITEM_TYPES.stone, 10);
+        this.addItem(UI_ITEM_TYPES.seedCrop, 10);
 
         // Register into the team
         Teams.teamLists[teamNumber].storageList.push(this);
@@ -224,6 +235,8 @@ export class StorageBuilding {
 
     destroy() {
         this.sprite?.destroy();
+        if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
+        if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         Teams.removeFromStateArray(this.teamNumber, 'storageList', this);
     }
 }

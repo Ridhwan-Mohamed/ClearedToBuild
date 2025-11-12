@@ -8,20 +8,19 @@ import hammer from 'url:../assets/hammer.png'
 import grass from 'url:../assets/grass.png'
 import Water from 'url:../assets/water/water.png'
 import TWater from 'url:../assets/water/TWater.png'
-import BWater from 'url:../assets/water/BWater.png'
-import RWater from 'url:../assets/water/RWater.png'
-import LWater from 'url:../assets/water/LWater.png'
-import TRCWater from 'url:../assets/water/TRCWater.png'
-import BRCWater from 'url:../assets/water/BRCWater.png'
+// import BWater from 'url:../assets/water/BWater.png'
+// import RWater from 'url:../assets/water/RWater.png'
+// import LWater from 'url:../assets/water/LWater.png'
+// import TRCWater from 'url:../assets/water/TRCWater.png'
+// import BRCWater from 'url:../assets/water/BRCWater.png'
 import TLCWater from 'url:../assets/water/TLCWater.png'
-import BLCWater from 'url:../assets/water/BLCWater.png'
+import iWater from 'url:../assets/water/iwater.png'
+// import BLCWater from 'url:../assets/water/BLCWater.png'
 import waterParticle from 'url:../assets/waterParticle.png'
 import crops from 'url:../assets/crops.png'
 import { Map } from './map.js';
 import { Turret } from './Turret.js';
-import { NavMesh } from './lib/navmesh/navmesh.js';
-import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
-import { create2DArray, UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
+import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Projectile } from './Projectile.js';
@@ -63,6 +62,14 @@ import { MainMenu } from './mainMenu.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { HouseUI } from './UI/HouseUI.js';
 import UIPlugin from 'phaser3-rex-plugins/templates/ui/ui-plugin.js';
+import fullBasePine from 'url:../assets/trees/fullBasePine.png';
+import fullMiddlePine from 'url:../assets/trees/fullMiddlePine.png';
+import fullTopPine from 'url:../assets/trees/fullTopPine.png';
+import mediumBasePine from 'url:../assets/trees/mediumBasePine.png';
+import mediumMiddlePine from 'url:../assets/trees/mediumMiddlePine.png';
+import mediumTopPine from 'url:../assets/trees/mediumTopPine.png';
+import { PineTree } from './buildings/pineTree.js';
+import { VisibilitySystem } from './UI/VisibilitySystem.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -91,7 +98,7 @@ export class mapView extends Phaser.Scene {
         this.farmMode = false;
         this.harvestMode = false;
         this.money = 1300; // Starting amount
-        this.seeds = 4;
+        this.seeds = 10;
         this.foodAmnt = 15;
         this.cleanWaterAmnt = 15;
         this.woodAmnt = 4;
@@ -128,18 +135,27 @@ export class mapView extends Phaser.Scene {
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
         this.load.image('sparkle', waterParticle);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
-        this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
-        this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
-        this.load.spritesheet('rwater', RWater, { frameWidth: 16, frameHeight: 16}); // Right Water
-        this.load.spritesheet('lwater', LWater, { frameWidth: 16, frameHeight: 16}); // Left Water
-        this.load.spritesheet('trcwater', TRCWater, { frameWidth: 16, frameHeight: 16}); // Top-right corner Water
-        this.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
-        this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
-        this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
+        // this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
+        this.load.spritesheet('shore_edge', TWater, { frameWidth: 16, frameHeight: 16 });
+        this.load.spritesheet('shore_corner', TLCWater, { frameWidth: 16, frameHeight: 16 });
+        this.load.spritesheet('shore_island', iWater, { frameWidth: 16, frameHeight: 16 });
+        // this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
+        // this.load.spritesheet('rwater', RWater, { frameWidth: 16, frameHeight: 16}); // Right Water
+        // this.load.spritesheet('lwater', LWater, { frameWidth: 16, frameHeight: 16}); // Left Water
+        // this.load.spritesheet('trcwater', TRCWater, { frameWidth: 16, frameHeight: 16}); // Top-right corner Water
+        // this.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
+        // this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
+        // this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
         this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('char', char, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('charHurt', charHurt, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('clayOven', clayOven, { frameWidth: 64, frameHeight: 64});
+        this.load.image('fullBasePine', fullBasePine);
+        this.load.image('fullMiddlePine', fullMiddlePine);
+        this.load.image('fullTopPine', fullTopPine);
+        this.load.image('mediumBasePine', mediumBasePine);
+        this.load.image('mediumMiddlePine', mediumMiddlePine);
+        this.load.image('mediumTopPine', mediumTopPine);
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
@@ -149,18 +165,21 @@ export class mapView extends Phaser.Scene {
         StorageUI.init(this);
         HouseUI.init(this);
         MainMenu.attach(this);
+        PineTree.init(this);
     }
 
     create() {
         this.createAnim('water')
-        this.createAnim('twater')
-        this.createAnim('bwater')
-        this.createAnim('rwater')
-        this.createAnim('lwater')
-        this.createAnim('trcwater')
-        this.createAnim('brcwater')
-        this.createAnim('tlcwater')
-        this.createAnim('blcwater')
+        this.createAnim('shore_edge')
+        this.createAnim('shore_corner')
+        this.createAnim('shore_island')
+        // this.createAnim('bwater')
+        // this.createAnim('rwater')
+        // this.createAnim('lwater')
+        // this.createAnim('trcwater')
+        // this.createAnim('brcwater')
+        // this.createAnim('tlcwater')
+        // this.createAnim('blcwater')
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
@@ -190,7 +209,7 @@ export class mapView extends Phaser.Scene {
             (player, bullet) => bullet.team !== player.body.team, // Only collide if teams are different
             this
         );
-        
+
         this.cursors = this.input.keyboard.createCursorKeys();
 
         // Variable to store the current text object
@@ -872,6 +891,7 @@ export class mapView extends Phaser.Scene {
             Turret.update();
             this.clock.update();
             this.handleKeyboardCameraMovement();
+            PineTree.updateAll(this.time.now);
         }
         Player.update();
         ClayOvenUI.updateAllOvens(1);

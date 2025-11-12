@@ -1,7 +1,7 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, showAlert, SQUARESIZE, TILE_TYPES } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
@@ -123,6 +123,28 @@ export class buildingManager{
         }
     }
 
+    // Is there at least one walkable perimeter tile around the block footprint?
+    static isBlockAccessible(x, y, type) {
+        // perimeter around [x..x+lenX-1] × [y..y+lenY-1]
+        for (let dy = -1; dy <= type.lenY; dy++) {
+            for (let dx = -1; dx <= type.lenX; dx++) {
+            const tx = x + dx;
+            const ty = y + dy;
+
+            const inside = (dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY);
+            if (inside) continue;
+
+            if (ty < 0 || tx < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
+            if (Map.navGrid[ty][tx]) {
+                // found at least one walkable tile adjacent to the block
+                return true;
+            }
+            }
+        }
+        return false;
+    }
+
+
     static findBuildApproachBlock(x, y, type, troop) {
         const candidates = [];
     
@@ -226,7 +248,6 @@ export class buildingManager{
                 sprite.play(sprite.action);
                 task.duration -= 2;
                 sprite.stamina = Math.max(0, sprite.stamina - 0.2);
-                Player.updateDetailsTab(sprite)
     
                 if (task.duration <= 0) {
                     // if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;

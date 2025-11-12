@@ -227,14 +227,14 @@ function placeBuilding(grid, x, y, building, navGrid, teamNumber) {
     buildingArray.push([x,y,building,teamNumber])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
-            grid[y + i][x + j] = [35,building.grid]; // Mark as building
+            grid[y + i][x + j] = [TILE_TYPES.road.grid,building.grid]; // Mark as building
             navGrid[y + i][x + j] = 0
         }
     }
 }
 
 function expandRoads(grid, startX, startY, building, teamNumber) {
-    let roadValue = 35;
+    let roadValue = TILE_TYPES.road.grid;
     let roadTiles = new Set();
     let surroundingTiles = new Set();
 

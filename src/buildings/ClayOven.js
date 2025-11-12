@@ -6,6 +6,7 @@ import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
 import { ClayOvenUI } from "../UI/ClayOvenUI";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class ClayOven {
 
@@ -18,6 +19,16 @@ export class ClayOven {
             .setDepth(BLOCKDEPTH);
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
+
+        if(teamNumber == 1){
+            const cx = x + Math.floor(item.lenX/2);
+            const cy = y + Math.floor(item.lenY/2);
+            // Vision bubble: small boost over ambient
+            this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.15 });
+
+            // Warm light around oven
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 0.9 });
+        }
 
         this.sprite.anims.play('oven_idle');
         this.x = x;
@@ -355,5 +366,7 @@ export class ClayOven {
         this.stopAllCooking();
         ClayOven.scene.events.emit('oven:removed', this);
         if (this.sprite) this.sprite.destroy();
+        if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
+        if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
     }
 }

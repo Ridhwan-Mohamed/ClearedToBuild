@@ -2,11 +2,11 @@ import { UIDEPTH } from "../constants";
 import { openPowerupScreen } from "../UI/Powerups";
 import { Teams } from "../Teams";
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
-
+import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { Player } from "../players/Player";
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
-
 
 export class Clock {
 
@@ -16,7 +16,7 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 18;
+        this.hours = 16;
         this.minutes = 1;
         this.day = 1;
 
@@ -25,33 +25,33 @@ export class Clock {
         this.lastSend = null;
         this.wasNight = false; // <== track night state
 
-        this.minuteStep = 1;
+        this.minuteStep = 0.5;
         this.ticksPerMinute = 1;
         this.tickCount = 0;
 
-        // Dark overlay setup
-        const camera = scene.cameras.main;
-        const worldScale = 1 / 0.3; // pretend zoomed out fully
-        const bleed = 0.25;          // bleed margin on each side
-        const w = camera.width * worldScale * (1 + bleed * 2);
-        const h = camera.height * worldScale * (1 + bleed * 2);
+        // // Dark overlay setup
+        // const camera = scene.cameras.main;
+        // const worldScale = 1 / 0.3; // pretend zoomed out fully
+        // const bleed = 0.25;          // bleed margin on each side
+        // const w = camera.width * worldScale * (1 + bleed * 2);
+        // const h = camera.height * worldScale * (1 + bleed * 2);
 
-        Clock.overlay = scene.add.rectangle(
-        -camera.width * worldScale * (bleed+0.15),
-        -camera.height * worldScale * (bleed+0.15),
-        w,
-        h,
-        0x000000,
-        1
-        )
-            .setOrigin(0, 0)
-            .setDepth(UIDEPTH - 2)
-            .setScrollFactor(0)
-            .setAlpha(0);
+        // Clock.overlay = scene.add.rectangle(
+        // -camera.width * worldScale * (bleed+0.15),
+        // -camera.height * worldScale * (bleed+0.15),
+        // w,
+        // h,
+        // 0x000000,
+        // 1
+        // )
+        //     .setOrigin(0, 0)
+        //     .setDepth(UIDEPTH - 2)
+        //     .setScrollFactor(0)
+        //     .setAlpha(0);
 
         this.externalText = null;
 
-        scene.uiCamera.ignore([Clock.overlay]);   // overlay is only seen by main cam
+        // scene.uiCamera.ignore([Clock.overlay]);   // overlay is only seen by main cam
     }
 
     update() {
@@ -96,8 +96,15 @@ export class Clock {
         return this.hours == NIGHT_END && this.minutes == 0
     }
 
+    isNightStart(){
+        return this.hours == NIGHT_START && this.minutes == 0
+    }
+
     events() {
-        if (this.isNight()) {
+        if (this.isNightStart()){
+            Player.refreshAllFoW();
+        }
+        else if (this.isNight()) {
             // if (this.day > 3 && this.lastSend !== this.hours && this.spawnedThisNight < this.waveAmount) {
             //     spawnAndSend();
             //     this.spawnedThisNight++;
@@ -109,6 +116,7 @@ export class Clock {
             DailyNeedsTracker.consumeResources();
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
+            Player.refreshAllFoW(true);
             this.pause();
         } else {
             this.lastSend = null;
@@ -118,27 +126,30 @@ export class Clock {
     formatTimeWithDay() {
         const hour12 = this.hours % 12 === 0 ? 12 : this.hours % 12;
         const ampm = this.hours < 12 ? 'AM' : 'PM';
-        const minutesStr = String(this.minutes).padStart(2, '0');
+        const minutesStr = String(Math.round(this.minutes)).padStart(2, '0');
         return `Day ${this.day} — ${hour12}:${minutesStr} ${ampm}`;
     }
 
+    // Clock.js
     updateLighting() {
         let alpha = 0;
         const hourFloat = this.hours + this.minutes / 60;
         let nightHour = hourFloat;
-        if (nightHour < NIGHT_END) nightHour += 24;
+        if (nightHour < 6) nightHour += 24;
 
         if (nightHour >= 20 && nightHour <= 28) {
-            alpha = 0.6;
+            alpha = 0.9;                      // this is DARKNESS amount
         } else if (nightHour >= 18 && nightHour < 20) {
-            const t = (nightHour - 18) / 2;
-            alpha = t * 0.6;
+            const t = (nightHour - 18) / 2;   // dusk ramp
+            alpha = t * 0.9;
         } else if (nightHour > 28 && nightHour <= 30) {
-            const t = 1 - (nightHour - 28) / 2;
-            alpha = t * 0.6;
+            const t = 1 - (nightHour - 28) / 2; // dawn ramp
+            alpha = t * 0.9;
         }
 
-        Clock.overlay.setAlpha(alpha);
+        // ✅ VisibilitySystem expects a light floor (BRIGHTNESS), not darkness.
+        const ambientBrightness = 1 - alpha;
+        VisibilitySystem.setAmbient(ambientBrightness);
     }
 
     pause() {

@@ -7,6 +7,7 @@ import { buildingManager } from '../Manager/buildingManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { weapons } from '../weapons.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
+import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 export class Builder {
     constructor(x, y, teamNumber) {
@@ -87,6 +88,11 @@ export class Builder {
         // Clear references
         if (troop.task) {troop.task.assigned--; troop.task = null;}
         if (troop.carrying) troop.carrying = null;
+
+        if (troop.visionId != null) {
+            VisibilitySystem.removeVisionBubble(troop.visionId);
+            troop.visionId = null;
+        }
         
         if (troop.timer) {
             troop.timer.remove(false);

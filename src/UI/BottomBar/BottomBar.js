@@ -84,6 +84,7 @@ export function CreateBottomBar(scene) {
             || bar.pages.tabs?.[pageKey]
             || (pageKey === 'ovens' ? bar.pages.clayTab : null)
             || (pageKey === 'storage' ? bar.pages.storageTab : null)
+            || (pageKey === 'players' ? bar.pages.playerTab : null)
             || null;
         if (callback && tab) callback(tab);
     };
@@ -216,6 +217,7 @@ var CreatePages = function (scene) {
 
     // optional: expose for debugging
     pages.clayTab = clayTab;
+    pages.playerTab = playerTab;
 
     return pages;
 };

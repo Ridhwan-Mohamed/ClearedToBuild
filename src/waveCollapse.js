@@ -52,7 +52,7 @@ export class WaveCollapse {
         }
     }
 
-    static scatterOnGrass(grid, count = 50, itemValue = 37) {
+    static scatterOnGrass(grid, count = 50, itemValue = TILE_TYPES.grassCrop.grid) {
         const grassCode = TILE_TYPES.grass.grid;
         const candidates = [];
 

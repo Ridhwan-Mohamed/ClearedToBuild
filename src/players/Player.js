@@ -1,7 +1,6 @@
 import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert, UIDEPTH, clearTaskPlusTimer } from "../constants";
 import Phaser from "phaser";
 import { Map } from "../map";
-import { steer, avoid, calculateSeparationForce } from '../steering';
 import { tillManager } from "../Manager/tillManager";
 import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
@@ -18,8 +17,8 @@ import { StorageManager } from "../Manager/StorageManager";
 import { Builder } from "./Builder";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
-import { ZoomMixer } from "../UI/ZoomMixer";
 import { StaminaManager } from "../Manager/staminaManager";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class Player {
 
@@ -28,12 +27,6 @@ export class Player {
     static troops = [];
     static characters;
     static selected = [];
-    static detailsContainer = null;
-    static detailsStaminaText = null;
-    static detailsHealthText = null;
-    static detailsWeaponText = null;
-    static curPlayerDetails = null;
-    static detailsPortrait = null; 
 
     static init(scene){
         this.scene = scene;
@@ -111,8 +104,44 @@ export class Player {
         player.destroy();
     }    
 
+    static _updateVisibilityForTroop(troop) {
+        const gx = Math.floor(troop.x / SQUARESIZE);
+        const gy = Math.floor(troop.y / SQUARESIZE);
+
+        if (gx !== troop.gridX || gy !== troop.gridY) {
+            // Move the troop’s vision bubble (VisibilitySystem will decide if it should repaint)
+            if (troop.visionId != null) {
+                VisibilitySystem.moveVisionBubble(troop.visionId, gx, gy, troop.visionRadius);
+            } else {
+                // Fallback if somehow missing id
+                troop.visionId = VisibilitySystem.addVisionBubble({ x: gx, y: gy, r: troop.visionRadius, boost: 0.1 });
+            }
+            troop.gridX = gx;
+            troop.gridY = gy;
+        }
+    }
+
+    static refreshAllFoW(allVisibile=false) {
+       for (const t of this.troops) VisibilitySystem.applyFoWToSprite(t, allVisibile);
+    }
+
     static configureCubeInteractivity(cube){
         cube.selected = false; // Add a custom property to track selection state
+
+        // Track last-known grid tile for visibility updates
+        cube.gridX = Math.floor(cube.x / SQUARESIZE);
+        cube.gridY = Math.floor(cube.y / SQUARESIZE);
+
+        // give the player its own vision bubble (centered on grid)
+        if (cube.body.team === 1) {
+            cube.visionRadius = cube.visionRadius ?? 6;
+            cube.visionId = VisibilitySystem.addVisionBubble({
+                x: cube.gridX, y: cube.gridY, r: cube.visionRadius, boost: 0.1
+            }, /*noRepaint=*/false);
+        }
+
+        // Default per-unit vision radius in tiles (tweak as you like)
+        cube.visionRadius = cube.visionRadius ?? 6;
 
         // Add a pointerdown event listener to toggle selection
         cube.on('pointerdown', (pointer) => {
@@ -121,7 +150,6 @@ export class Player {
                 Player.scene.updateBerry(-1);
                 StorageManager.consumeItemFromStorage(cube.body.team, UI_ITEM_TYPES.seedBerry);
                 cube.health += 30;
-                this.updateDetailsTab(cube);
                 return;
             }
             if(Player.selected.length && !cube.body.team){
@@ -140,7 +168,7 @@ export class Player {
                     this.selected.splice(index, 1);
                 }
             }
-            Player.showDetailsTab(cube);
+            Player.scene.openDetailPage('players', tab => tab.select(cube));
         });
     
         // Add a pointerover event listener to change texture on hover
@@ -280,7 +308,12 @@ export class Player {
         // Scale speed by stamina ratio
         const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina); 
         const currentSpeed = sprite.baseSpeed * staminaFactor;
-        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - 0.02); this.updateDetailsTab(sprite)};  
+        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - 0.02);}
+        
+        if(sprite.body.team == 1){
+            this._updateVisibilityForTroop(sprite);
+            VisibilitySystem.applyFoWToSprite(sprite);
+        }
 
         const desired = new Phaser.Math.Vector2(nextPoint.x - sprite.x, nextPoint.y - sprite.y)
             .setLength(currentSpeed);
@@ -638,7 +671,7 @@ export class Player {
             if (
                 gx >= 0 && gx < WORLD_DIMENSIONX &&
                 gy >= 0 && gy < WORLD_DIMENSIONY &&
-                (((Map.grid[gy][gx] == 35 || Map.grid[gy][gx] == TILE_TYPES.crops.grid) && troop.body.team) || !troop.body.team) &&
+                (((Map._hasTypeAt(gx, gy, 'road') || Map.grid[gy][gx] == TILE_TYPES.crops.grid) && troop.body.team) || !troop.body.team) &&
                 Map.navGrid[gy][gx] === 1
             ) {
                 validPositions.push(pos);
@@ -670,8 +703,6 @@ export class Player {
     }
 
     static updateTracking(troop){
-        const inView = Map.cameraBounds?.contains(troop.x, troop.y);
-        troop.setVisible(inView); // Will not draw if false
         let neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, 100);
         let reTrack = this.mostClosestEnemy(troop, neighbours);
         if(reTrack){
@@ -723,229 +754,6 @@ export class Player {
         return false;
     }
 
-    static showDetailsTab(player) {
-        if (player == this.curPlayerDetails) return;
-        const scene = Player.scene;
-        const cam = scene.cameras.main;
-        const width = cam.width;
-        const height = cam.height;
-        this.curPlayerDetails = player;
-
-        if (Player.detailsContainer) {
-            Player.hideDetailsTab();
-        }
-
-        const PANEL_W = 250;
-        const PANEL_H = 180;
-        const PAD = 20;
-        const IMG_W = 60, IMG_H = 50;
-
-        const container = scene.add
-            .container(width - PANEL_W - PAD, height + PANEL_H)
-            .setDepth(UIDEPTH)
-            .setScrollFactor(0);
-
-        const bg = scene.add.graphics().setDepth(UIDEPTH);
-        bg.fillStyle(0x000000, 0.8);
-        bg.fillRoundedRect(0, 0, PANEL_W, PANEL_H, 12);
-
-        const outlineColor = player.unitTint;
-        const outline = scene.add.graphics().setDepth(UIDEPTH).setScrollFactor(0);
-        outline.lineStyle(4, outlineColor, 1);
-        outline.strokeRoundedRect(0, 0, PANEL_W, PANEL_H, 12);
-
-        // Portrait
-        const portraitKey = player.health > 50 ? 'char' : 'charHurt';
-        const portrait = scene.add.sprite(
-            PAD + IMG_W / 2,
-            PAD + IMG_H / 2,
-            portraitKey
-        )
-            .setOrigin(0.5)
-            .setDepth(UIDEPTH)
-            .setScrollFactor(0);
-
-        portrait.play(portraitKey);
-
-        // ✅ New: Player Name
-        const textStartY = PAD + IMG_H + 20;
-        let textY = textStartY - 20;  // ✅ reserve a row above level for name
-
-        const nameText = scene.add.text(
-            PAD,
-            textY,
-            `Name: ${player.name || 'Unnamed'}`,
-            { fontSize: '16px', fill: '#ffffff' }
-        ).setOrigin(0, 0).setDepth(UIDEPTH);
-
-
-        const staminaText = scene.add.text(PAD, textY + 20, `Stamina: ${player.stamina}`, {
-            fontSize: '16px', fill: '#ffffff'
-        }).setOrigin(0, 0).setDepth(UIDEPTH);
-
-        const healthText = scene.add.text(PAD, textStartY + 20, `Health: ${player.health}`, {
-            fontSize: '16px', fill: '#ffffff'
-        }).setOrigin(0, 0).setDepth(UIDEPTH);
-
-        const weaponText = scene.add.text(PAD, textStartY + 40, `Weapon: ${player.weapon?.name || 'None'}`, {
-            fontSize: '16px', fill: '#ffffff'
-        }).setOrigin(0, 0).setDepth(UIDEPTH);
-
-        const teamText = scene.add.text(PAD, textStartY + 60, `Team: ${player.body.team}`, {
-            fontSize: '16px', fill: '#ffffff'
-        }).setOrigin(0, 0).setDepth(UIDEPTH);
-
-        const closeBtn = scene.add.text(PANEL_W - PAD, PAD, 'x', {
-            fontSize: '18px', fill: '#ffffff'
-        }).setOrigin(1, 0).setDepth(UIDEPTH).setInteractive().setScrollFactor(0);
-
-        closeBtn.on('pointerover', () => {
-            closeBtn.setStyle({ fill: '#ff3333' });
-        }).on('pointerout', () => {
-            closeBtn.setStyle({ fill: '#ffffff' });
-        });
-
-        closeBtn.on('pointerdown', () => {
-            scene.tweens.add({
-                targets: container,
-                y: height + PANEL_H + PAD,
-                duration: 300,
-                ease: 'Cubic.easeIn',
-                onComplete: () => {
-                    container.destroy();
-                    if (Player.detailsContainer === container) {
-                        Player.detailsContainer = null;
-                    }
-                }
-            });
-        });
-
-        container.add([
-            bg, outline,
-            portrait,
-            nameText,  // ✅ Add name text here
-            staminaText, healthText, weaponText, teamText,
-            closeBtn
-        ]);
-        scene.cameras.main.ignore(container);
-
-        Player.detailsContainer = container;
-
-        scene.tweens.add({
-            targets: container,
-            y: height - PANEL_H - PAD - 100,
-            duration: 300,
-            ease: 'Cubic.easeOut'
-        });
-
-        Player.detailsStaminaText = staminaText;
-        Player.detailsHealthText = healthText;
-        Player.detailsWeaponText = weaponText;
-        Player.detailsPortrait = portrait;
-    }
-
-    static hideDetailsTab() {
-        if (!Player.detailsContainer) return;
-        const scene = Player.scene;
-        const container = Player.detailsContainer;
-      
-        scene.tweens.add({
-          targets: container,
-          y: scene.cameras.main.height,
-          duration: 300,
-          ease: 'Cubic.easeIn',
-          onComplete: () => {
-            if(this.detailsContainer == container) Player.detailsContainer = null;
-            container.destroy();
-          }
-        });
-    }
-
-    static updateDetailsTab(player) {
-        if (!Player.detailsContainer || player !== Player.curPlayerDetails) return;
-        if (player.health <= 0) {
-            Player.hideDetailsTab();
-            return;
-        }
-        const container = Player.detailsContainer;
-
-        //portrait update
-        const portraitKey = player.health > 50 ? 'char' : 'charHurt';
-        if (Player.detailsPortrait.texture.key !== portraitKey) {
-        Player.detailsPortrait.setTexture(portraitKey);
-        Player.detailsPortrait.play(portraitKey);
-        }
-        // Health delta
-        const prevHealth = parseInt(Player.detailsHealthText.text.split(':')[1].trim(), 10);
-        const deltaHealth = player.health - prevHealth;
-        if (deltaHealth !== 0) {
-            const msg = deltaHealth > 0 ? `+${deltaHealth}` : `${deltaHealth}`;
-            const col = deltaHealth > 0 ? '#00ff00' : '#ff3333';
-            const worldX = container.x + Player.detailsHealthText.x + 75;
-            const worldY = container.y + Player.detailsHealthText.y;
-            const ghost = Player.scene.add.text(worldX, worldY, msg, {
-                fontSize: '16px', fill: col, stroke: '#000000', strokeThickness: 2
-            }).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
-            Player.scene.tweens.add({
-                targets: ghost,
-                y: ghost.y - 20,
-                alpha: 0,
-                duration: 800,
-                ease: 'Cubic.easeOut',
-                onComplete: () => ghost.destroy()
-            });
-        }
-        Player.detailsHealthText.setText(`Health:  ${player.health}`);
-    
-        // Stamina delta
-        const prevStamina = parseInt(Player.detailsStaminaText.text.split(':')[1].split('/')[0].trim(), 10);
-        const currentStamina = Math.floor(player.stamina);
-        const deltaStamina = currentStamina - prevStamina;
-        if (deltaStamina !== 0) {
-        const msg = deltaStamina > 0 ? `+${deltaStamina}` : `${deltaStamina}`;
-        const col = deltaStamina > 0 ? '#00ff00' : '#ff3333';
-        const worldX = container.x + Player.detailsStaminaText.x + 75;
-        const worldY = container.y + Player.detailsStaminaText.y;
-        const ghost = Player.scene.add.text(worldX, worldY, msg, {
-            fontSize: '16px', fill: col, stroke: '#000000', strokeThickness: 2
-        }).setOrigin(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
-        Player.scene.tweens.add({
-            targets: ghost,
-            y: ghost.y - 20,
-            alpha: 0,
-            duration: 800,
-            ease: 'Cubic.easeOut',
-            onComplete: () => ghost.destroy()
-        });
-        }
-        Player.detailsStaminaText.setText(`Stamina: ${currentStamina}/${player.maxStamina}`);
-    
-        // Weapon (no ghost)
-        Player.detailsWeaponText.setText(`Weapon:  ${player.weapon?.name || 'None'}`);
-    }
-    
-    static showDetailGhost(textObj, message, color) {
-        const scene = Player.scene;
-        const ghost = scene.add.text(
-          textObj.x + textObj.width + 5,  // just to the right of the detail text
-          textObj.y,
-          message,
-          { fontSize: '16px', fill: color, stroke: '#000000', strokeThickness: 2 }
-        )
-        .setOrigin(0, 0)
-        .setDepth(UIDEPTH)
-        .setScrollFactor(0);
-      
-        scene.tweens.add({
-          targets: ghost,
-          y: ghost.y - 20,
-          alpha: 0,
-          duration: 800,
-          ease: 'Cubic.easeOut',
-          onComplete: () => ghost.destroy()
-        });
-    }
-      
     static applyDefaultTint(cube) {
         let tint;
 

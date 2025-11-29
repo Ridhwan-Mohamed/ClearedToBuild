@@ -1,6 +1,6 @@
 // === ClayOven.js ===
 
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
@@ -11,6 +11,7 @@ import { VisibilitySystem } from "../UI/VisibilitySystem";
 export class ClayOven {
 
     static scene;
+    static cookDuration = 500;
 
     constructor(x, y, teamNumber) {
         this.teamNumber = teamNumber;
@@ -25,9 +26,8 @@ export class ClayOven {
             const cy = y + Math.floor(item.lenY/2);
             // Vision bubble: small boost over ambient
             this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.15 });
-
             // Warm light around oven
-            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 0.9 });
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 2 });
         }
 
         this.sprite.anims.play('oven_idle');
@@ -36,6 +36,7 @@ export class ClayOven {
         this.cooking = false;
 
         Teams.teamLists[teamNumber].ovenList.push(this);
+        Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.clayOven, this.sprite])
 
         this.cookingSlots = [null, null, null];     // { item: UI_ITEM_TYPES.*, amount: number }
         this.outputSlots = [null, null, null];      // same structure
@@ -138,7 +139,7 @@ export class ClayOven {
                 const toAdd = Math.min(count, maxPerSlot);
                 this.cookingSlots[i] = { item: itemType, amount: toAdd };
                 this.cookTimers[i] = 0;
-                this.cookDurations[i] = 100; // configurable later
+                this.cookDurations[i] = ClayOven.cookDuration; // configurable later
                 inserted += toAdd;
                 count -= toAdd;
             }
@@ -152,6 +153,61 @@ export class ClayOven {
                 count -= toAdd;
             }
         }
+
+        const icon = GHOST_ITEM_ICONS[itemType.name] || itemType.name;
+        const text = `+${inserted} ${icon}`;
+        showGhostText(
+            ClayOven.scene,
+            this.sprite.x,
+            this.sprite.y - 8,
+            text,
+            0,0,0,'#00ff00'
+        );
+
+        if (inserted > 0) {
+            ClayOven.scene.events.emit('oven:updated', this);
+        }
+        return inserted > 0 ? inserted : false;
+    }
+
+    addItemToCookAtSlot(itemType, count, slotIndex) {
+        const cooksTo = itemType.cooksTo;
+        if (!cooksTo || count <= 0) return false;
+        if (slotIndex < 0 || slotIndex >= this.cookingSlots.length) return false;
+
+        const maxPerSlot = itemType.stacks || 1;
+        let inserted = 0;
+        const slot = this.cookingSlots[slotIndex];
+
+        // Empty slot
+        if (!slot) {
+            const toAdd = Math.min(count, maxPerSlot);
+            this.cookingSlots[slotIndex] = { item: itemType, amount: toAdd };
+            this.cookTimers[slotIndex] = 0;
+            this.cookDurations[slotIndex] = ClayOven.cookDuration; // same default as addItemToCook
+            inserted += toAdd;
+        }
+        // Matching item slot with room
+        else if (slot.item.name === itemType.name && slot.amount < maxPerSlot) {
+            const space = maxPerSlot - slot.amount;
+            const toAdd = Math.min(space, count);
+            slot.amount += toAdd;
+            inserted += toAdd;
+        }
+        // Different item or full slot → cannot honor this job’s slot
+        else {
+            return false;
+        }
+
+        const icon = GHOST_ITEM_ICONS[itemType.name] || itemType.name;
+        const text = `+${inserted} ${icon}`;
+        showGhostText(
+            ClayOven.scene,
+            this.sprite.x,
+            this.sprite.y - 8,
+            text,
+            0,0,0,'#00ff00'
+        );
 
         if (inserted > 0) {
             ClayOven.scene.events.emit('oven:updated', this);
@@ -172,6 +228,16 @@ export class ClayOven {
         if (slot.amount === 0) {
             slots[index] = null;
         }
+
+        const icon = GHOST_ITEM_ICONS[slot.item.name];
+        const text = `-1 ${icon}`;
+        showGhostText(
+            ClayOven.scene,
+            this.sprite.x,
+            this.sprite.y - 8,
+            text,
+            0,0,0,'#ff0000'
+        );
 
         ClayOven.scene.events.emit('oven:updated', this);
         return slot.item;
@@ -311,7 +377,7 @@ export class ClayOven {
 
                 slot.amount -= 1;
                 this.cookTimers[i] = 0;
-                this.cookDurations[i] = 500;
+                this.cookDurations[i] = ClayOven.cookDuration;
 
                 if (slot.amount <= 0) {
                     this.cookingSlots[i] = null;
@@ -320,7 +386,7 @@ export class ClayOven {
                 }
                 const slotOut = this.outputSlots[i];
                 if (slotOut?.amount >= 5 || slotOut?.forceStore) {
-                    const teamList = Teams.teamLists['1'].ovenPickupItems;
+                    const teamList = Teams.teamLists['1'].ovenPickupJobs;
                     
                     // Check if a task already exists for this oven/output slot
                     let task = teamList.find(t => t.oven === this && t.outputidx === i);
@@ -359,6 +425,15 @@ export class ClayOven {
     addFuel(amount = 1) {
         this.fuel = Math.min(this.maxFuel || 100, this.fuel + amount);
         ClayOven.scene.events.emit('oven:updated', this);
+        const icon = GHOST_ITEM_ICONS['wood'];
+        const text = `+${1} ${icon}`;
+        showGhostText(
+            ClayOven.scene,
+            this.sprite.x,
+            this.sprite.y - 8,
+            text,
+            0,0,0,'#00ff00'
+        );
         return true;
     }
 

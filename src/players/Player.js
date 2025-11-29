@@ -19,6 +19,7 @@ import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { StaminaManager } from "../Manager/staminaManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { Raider } from "./Raider";
 
 export class Player {
 
@@ -194,12 +195,13 @@ export class Player {
                 troop.task = null;
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             }
-            return;
+            return false;
         }
         troop.currentPath = path
         troop.finalPos = path[path.length - 1]
         // Remove the starting point as it's the current position of the cube
         troop.currentPath.shift();
+        return true;
     }
 
     static findBestStartPos(sprite, sx, sy) {
@@ -307,8 +309,8 @@ export class Player {
 
         // Scale speed by stamina ratio
         const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina); 
-        const currentSpeed = sprite.baseSpeed * staminaFactor;
-        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - 0.02);}
+        const currentSpeed = sprite.type.speed * staminaFactor;
+        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
         
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);
@@ -726,19 +728,45 @@ export class Player {
 
     static update(){
         this.troops.forEach( troop => {
-            if(Player.scene.clock.paused){
+            if (Player.scene.clock.paused) {
                 troop.body.setVelocity(0, 0);
-                return;        
+                return;
             }
-            if(troop.isGunslinger) { Gunslinger.update(troop) }
-            else if(troop.isFarmer) { Farmer.update(troop) }
-            else if(troop.isForager) { Forager.update(troop) }
-            else if (troop.isFireman) { Fireman.update(troop) }
-            else if (troop.isBuilder) { Builder.update(troop) }
-            else{ this.updateTracking(troop) } // for enemies
+
+            let skipTail = false;
+
+            // Raiders get their own AI
+            if (troop.isRaider) {
+                skipTail = Raider.update(troop) === true;
+            }
+            else if (troop.isGunslinger) {
+                Gunslinger.update(troop);
+            }
+            else if (troop.isFarmer) {
+                Farmer.update(troop);
+            }
+            else if (troop.isForager) {
+                Forager.update(troop);
+            }
+            else if (troop.isFireman) {
+                Fireman.update(troop);
+            }
+            else if (troop.isBuilder) {
+                Builder.update(troop);
+            }
+            else {
+                // generic enemy / non-class AI
+                this.updateTracking(troop);
+            }
+
+            // Swimming raiders drive their own velocity, so skip stamina+path
+            if (skipTail) return;
+
             StaminaManager.updateTroop(troop);
-            if (troop.state != CONTROL_STATES.SLEEP_MODE) this.followPath(troop);
-        })
+            if (troop.state != CONTROL_STATES.SLEEP_MODE) {
+                this.followPath(troop);
+            }
+        });
     }
 
     static playerAvailible(troop){

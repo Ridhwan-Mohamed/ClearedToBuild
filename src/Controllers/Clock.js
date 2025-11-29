@@ -1,9 +1,8 @@
-import { UIDEPTH } from "../constants";
 import { openPowerupScreen } from "../UI/Powerups";
 import { Teams } from "../Teams";
-import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Player } from "../players/Player";
+import { recalculateDestroyTasksFromPoint, spawnSeaRaider } from "../Manager/spawnManager";
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
@@ -16,8 +15,8 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 16;
-        this.minutes = 1;
+        this.hours = 5;
+        this.minutes = 0;
         this.day = 1;
 
         this.waveAmount = 1;
@@ -102,7 +101,12 @@ export class Clock {
 
     events() {
         if (this.isNightStart()){
-            Player.refreshAllFoW();
+            // Player.refreshAllFoW();
+            // Prepare enemy destroy tasks around base (team 0)
+            // Spawn one sea-raider from the ocean
+            spawnSeaRaider(this.scene);
+            this.spawnedThisNight = 1;
+            this.lastSend = this.hours;
         }
         else if (this.isNight()) {
             // if (this.day > 3 && this.lastSend !== this.hours && this.spawnedThisNight < this.waveAmount) {
@@ -113,10 +117,9 @@ export class Clock {
         } else if (this.isDayStart() && !this.powerupScreenShown){
             this.powerupScreenShown = true;   // ✅ prevent re-trigger
             openPowerupScreen(this.scene);
-            DailyNeedsTracker.consumeResources();
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
-            Player.refreshAllFoW(true);
+            // Player.refreshAllFoW(true);
             this.pause();
         } else {
             this.lastSend = null;

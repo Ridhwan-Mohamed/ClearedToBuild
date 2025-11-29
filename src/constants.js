@@ -37,8 +37,8 @@ export const CONTROL_STATES = {
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
-export var WORLD_DIMENSIONX = 500;
-export var WORLD_DIMENSIONY = 500;
+export var WORLD_DIMENSIONX = 250;
+export var WORLD_DIMENSIONY = 250;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
@@ -330,7 +330,7 @@ export const TILE_TYPES = {
 };
 
 export const teamSetupArray = {
-    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.clayOven, TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
+    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 
@@ -504,7 +504,7 @@ export function clearTaskPlusTimer(sprite){
 }
 
 export const gridColors = {
-    water:  0x00a8f3,
+    water:  0x3cb8f1,
     dirt:   0x4c2b18,
     grass:  0x33cc33,
     house1: 0x8b0000,
@@ -522,7 +522,132 @@ export const gridColors = {
     crops: 0xFCF55F,
 };
 
+export const GHOST_ITEM_ICONS = {
+  food: '🍖',
+  clean_water: '💧',
+  unclean_water: '💧',
+  wood: '🌲',
+  stone: '🗿',
+  crop: '🌾',
+  seedCrop: '🌱',
+  seedBerry: '🍒',
+};
+
+
 export const colorFor = (cell) => {
     const type = Array.isArray(cell) ? TILE_MAP(cell[1]) : TILE_MAP(cell);
     return gridColors[type] || 0xffffff;
 };
+
+export function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isMiss = false, colorGiven = false) {
+    let color;
+
+    if(colorGiven){
+      color = colorGiven
+    } else if (isMiss) {
+        color = '#888888'; // Gray for MISS
+    } else if (teamNumber === 1) {
+        color = '#44ff44'; // Green for player/team 0 hit
+    } else {
+        color = isCrit ? '#ff4444' : '#ffffff'; // Red or white for enemies
+    }
+
+    const ghost = scene.add.text(x, y, text, {
+        fontSize: '16px',
+        fill: color,
+        fontFamily: 'monospace',
+        stroke: '#000000',
+        strokeThickness: 2
+    }).setDepth(1000).setOrigin(0.5);
+
+    scene.tweens.add({
+        targets: ghost,
+        y: y - 20,
+        alpha: 0,
+        duration: 600,
+        onComplete: () => ghost.destroy()
+    });
+} 
+
+export function createBubbleText({
+    scene,
+    target,
+    text,
+    textColor = '#ffffff',
+    bgColor = 'rgba(0,0,0,0.6)',
+    fontSize = 10,
+    duration = 1200,
+    floatOffset = 18,
+    fadeDuration = 350
+}) {
+    if (!scene || !target) return;
+
+    // Base text (world-space)
+    const label = scene.add.text(target.x, target.y - 20, text, {
+        fontSize: `${fontSize}px`,
+        fontFamily: 'monospace',
+        color: textColor,
+        stroke: '#000000',
+        strokeThickness: 2
+    })
+    .setDepth(10000)
+    .setOrigin(0.5)
+    .setScrollFactor(1, 1);   // 🔹 world, not UI
+
+    // Background auto-sized to text
+    const padding = 4;
+    const bg = scene.add.rectangle(
+        label.x, label.y,
+        label.width + padding * 2,
+        label.height + padding * 2,
+        Phaser.Display.Color.HexStringToColor(bgColor).color,
+        1
+    )
+    .setOrigin(0.5)
+    .setDepth(9999)
+    .setScrollFactor(1, 1);   // 🔹 world, not UI
+
+    // Make sure uiCamera does NOT render these
+    if (scene.uiCamera) {
+        scene.uiCamera.ignore([label, bg]);
+    }
+
+    const container = { label, bg, target };
+
+    // Follow target
+    container.update = () => {
+        if (!container.target || !container.label.active || !container.bg.active) return;
+
+        const newX = container.target.x;
+        const newY = container.target.y - floatOffset;
+
+        container.label.x = newX;
+        container.label.y = newY;
+        container.bg.x    = newX;
+        container.bg.y    = newY;
+    };
+
+    scene.events.on('update', container.update);
+
+    // Float then fade
+    scene.tweens.add({
+        targets: [label, bg],
+        y: label.y - 15,
+        duration,
+        ease: 'Linear',
+        onComplete: () => {
+            scene.tweens.add({
+                targets: [label, bg],
+                alpha: 0,
+                duration: fadeDuration,
+                onComplete: () => {
+                    label.destroy();
+                    bg.destroy();
+                    scene.events.off('update', container.update);
+                }
+            });
+        }
+    });
+
+    return container;
+}

@@ -2,7 +2,7 @@ import { CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DI
 import { townBounds, townRoads } from "./town";
 import { Map } from "./map";
 import { Player } from "./players/Player";
-
+import { POWERUP_CARDS } from "./Cards/PowerupCards";
 
 export class Teams {
     static teamLists = {};
@@ -18,7 +18,6 @@ export class Teams {
         houseList: [],
         TeamFarmSpots: [],
         tileList: [],
-        // seedStates: {},
         foragerQueue: [],
         cropList: [],
         crops: [],
@@ -31,13 +30,13 @@ export class Teams {
         ovenList: [],
         ovenJobs: [],
         storageList: [],
-        ovenPickupItems: [],
+        ovenPickupJobs: [],
         ovenFuelJobs: [],
         ovenFuelDeliveryItems: [],
-        ovenDeliveryItems: [],
-        storagePickupItems: [],
         storageDeliveryItems: [],
-        stateLists: {}
+        stateLists: {},
+        cardHand: [],
+        buildings: [],
       };
   
       // initialize a Set for each control state
@@ -89,11 +88,11 @@ export class Teams {
       if (stateIsEmpty && teamNumber) {
         // Map state to task array key
         const taskMapping = {
-          [CONTROL_STATES.DESTROY_MODE]: 'destroyStates',
-          [CONTROL_STATES.BUILD_MODE_B]: 'blockBuildingStates',
-          [CONTROL_STATES.BUILD_MODE_T]: 'buildingTileStates',
-          [CONTROL_STATES.FARM_MODE]: 'tileList',
-          [CONTROL_STATES.HARVEST_MODE]: 'cropList',
+          // [CONTROL_STATES.DESTROY_MODE]: 'destroyStates',
+          // [CONTROL_STATES.BUILD_MODE_B]: 'blockBuildingStates',
+          // [CONTROL_STATES.BUILD_MODE_T]: 'buildingTileStates',
+          // [CONTROL_STATES.FARM_MODE]: 'tileList',
+          // [CONTROL_STATES.HARVEST_MODE]: 'cropList',
           // [CONTROL_STATES.SEED_MODE]: 'seedList',
           // Add more mappings if needed
         };
@@ -101,6 +100,7 @@ export class Teams {
         const taskKey = taskMapping[state];
         if (taskKey && Array.isArray(team[taskKey])) {
           team[taskKey] = [];
+          console.error("Nuked array "+taskKey)
         }
       }
     }
@@ -294,7 +294,6 @@ export class Teams {
                 });
             }
         }
-
         Teams.teamLists[teamNumber].wateringList = wateringList;
     }
 

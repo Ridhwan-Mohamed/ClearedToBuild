@@ -1,4 +1,5 @@
 import { House } from "../buildings/House";
+import { POWERUP_CARDS } from "../Cards/PowerupCards.js";
 import { showAlert, UIDEPTH } from "../constants";
 import { buildingManager } from "../Manager/buildingManager";
 import { Builder } from "../players/Builder";
@@ -8,6 +9,7 @@ import { Forager } from "../players/Forager";
 import { Gunslinger } from "../players/Gunslinger";
 import { Teams } from "../Teams";
 import { townRoads } from "../town";
+import { DailyNeedsTracker } from "./DailyNeedsTracker";
 import { UI_ITEM_TYPES } from "./UIConstants";
 
 // === Character Spawns ===
@@ -21,11 +23,33 @@ const playerClasses = {
 
 var pendingStoreItem = null;
 
+let selectedStoreCard = null;
+let lastStoreClickTime = 0;
+
+function clearStoreSelectionHighlight() {
+    if (!selectedStoreCard) return;
+    // Reset to default visuals for store card
+    selectedStoreCard
+        .setStrokeStyle(2, 0xffffff)
+        .setFillStyle(0x8B4513, 0.4);
+    selectedStoreCard = null;
+}
+
+function setStoreSelectionHighlight(cardBg) {
+    // Clear previous
+    clearStoreSelectionHighlight();
+
+    // New selection visuals
+    selectedStoreCard = cardBg;
+    selectedStoreCard
+        .setStrokeStyle(3, 0xffff00)   // thicker yellow outline
+        .setFillStyle(0x8B4513, 0.8);  // stronger fill
+}
+
 export function openPowerupScreen(scene) {
     const cam = scene.cameras.main;
     const centerX = cam.centerX;
     const yOffset = 100;
-
     const uiContainer = scene.add.container(0, 0).setDepth(2000);
 
     scene.cameras.main.ignore(uiContainer);  // hide from world camera
@@ -57,19 +81,42 @@ export function openPowerupScreen(scene) {
             .setInteractive({ useHandCursor: true });
 
         bg.on('pointerdown', () => {
-            if (!item.money) {
-                if(buildingManager.hasRequiredMaterials(item.cost, 1)){
-                    item.function(scene);
-                }else{
-                    showAlert(scene, "Not enough materials", "#ff0000")
-                }
-            }
-            else if (scene.checkSufficientFunds(item.cost)) {
-                scene.updateMoney(-item.cost);
-                item.function(scene);
-            }
-        });
+            const now = scene.time.now;
 
+            // --- Double-click on already-selected building card → cancel selection ---
+            if (selectedStoreCard === bg && pendingStoreItem && (now - lastStoreClickTime) < 300) {
+                // Cancel placement
+                pendingStoreItem = null;
+                clearStoreSelectionHighlight();
+                showAlert(scene, "Cancelled building placement", "#ffaaaa");
+                lastStoreClickTime = 0;
+                return;
+            }
+
+            // Update last click time for double-click detection
+            lastStoreClickTime = now;
+
+            // --- Normal click logic ---
+            if (!item.money) {
+                // 🔨 Check: do we have at least one builder?
+                const builderCount = Teams.teamLists["1"].builderList.length;
+                if (builderCount === 0) {
+                    showAlert(scene, "You need a Builder first!", "#ff5555");
+                    return;
+                }
+                // Then check materials
+                if (buildingManager.hasRequiredMaterials(item.cost, 1)) {
+                    item.function(scene);  // sets pendingStoreItem
+                    setStoreSelectionHighlight(bg);
+                } else {
+                    showAlert(scene, "Not enough materials", "#ff0000");
+                }
+            } else if (scene.checkSufficientFunds(item.cost)) {
+                    // Money-based store (Berry) – no selection highlight
+                    scene.updateMoney(-item.cost);
+                    item.function(scene);
+                }
+            });
 
         const icon = item.spritesheet
             ? scene.add.sprite(0, -20, item.image, 0).setScale(1.2)  // frame 0 only
@@ -123,20 +170,20 @@ export function openPowerupScreen(scene) {
     // === Powerups ===
     const powerups = getRandomPowerups();
     const cardYOffset = yOffset + 250;
-    const cardSpacing = 160;
+    const cardSpacing = 185;
     let cardStartX = centerX - (powerups.length - 1) * cardSpacing / 2;
 
     powerups.forEach((pu, i) => {
         const cardX = cardStartX + i * cardSpacing;
 
-        const card = scene.add.rectangle(cardX, cardYOffset, 130, 180, 0x222222)
+        const card = scene.add.rectangle(cardX, cardYOffset, 170, 180, 0x222222)
             .setStrokeStyle(3, Phaser.Display.Color.HexStringToColor(pu.OUTLINE).color)
             .setDepth(UIDEPTH)
             .setInteractive({ useHandCursor: true });
 
-        const icon = scene.add.image(cardX, cardYOffset - 40, pu.image).setScale(1.2).setDepth(1);
-        const name = scene.add.text(cardX, cardYOffset + 20, pu.name, {
-            fontSize: '14px',
+        const icon = scene.add.image(cardX, cardYOffset - 40, pu.image).setScale(1).setDepth(1);
+        const name = scene.add.text(cardX, cardYOffset, pu.name, {
+            fontSize: '12px',
             fill: '#ffffff',
             fontFamily: 'monospace'
         }).setOrigin(0.5).setDepth(1);
@@ -148,14 +195,25 @@ export function openPowerupScreen(scene) {
 
         [card, icon, name, desc].forEach(el => el.setScrollFactor(0));
 
-        card.on('pointerdown', () => {
+        card.on("pointerdown", () => {
+            const teamId = "1";
+            const hand = getCardHand(teamId);
+
+            // If full, show swap UI, do NOT apply yet
+            if (hand.length >= 5) {
+                openSwapOverlay(scene, uiContainer, pu, teamId, () => {
+                    closePowerupScreen(scene, uiContainer);
+                });
+                return;
+            }
+
+            addCardToHand(pu, teamId);
+            scene.events.emit("cards:updated");
             closePowerupScreen(scene, uiContainer);
         });
 
         uiContainer.add([card, icon, name, desc]);
     });
-    
-
 
     const spawnCardYOffset = storeYOffset + 360;
     const playerTypes = Object.keys(playerClasses);
@@ -250,8 +308,11 @@ export function openPowerupScreen(scene) {
 
 function closePowerupScreen(scene, container) {
     if (container) container.destroy();
+    clearStoreSelectionHighlight();
+    lastStoreClickTime = 0;
     scene.clock.resume();
     scene.clock.powerupScreenShown = false;
+    DailyNeedsTracker.consumeResources();
 
     if (pendingStoreItem) {
         const item = pendingStoreItem;
@@ -268,15 +329,190 @@ function closePowerupScreen(scene, container) {
 }
 
 function getRandomPowerups(count = 3) {
+    const teamId = "1";
+
+    // Cards already in hand – we don't want to offer these again
+    const hand = getCardHand(teamId);
+    const ownedIds = new Set(hand.map(c => c.id));
+
+    // Only consider powerups we don't already have
+    const candidates = POWERUPS.filter(p => !ownedIds.has(p.id));
+
+    if (candidates.length === 0) return [];
+    if (candidates.length <= count) {
+        // Not enough to fill all slots – just shuffle and return what we have
+        const copy = candidates.slice();
+        Phaser.Utils.Array.Shuffle(copy);
+        return copy;
+    }
+
+    // Build a weighted pool from remaining candidates
     const pool = [];
-    for (let p of POWERUPS) {
-        for (let i = 0; i < p.probability; i++) {
+    for (let p of candidates) {
+        const weight = Math.max(1, p.probability || 1);
+        for (let i = 0; i < weight; i++) {
             pool.push(p);
         }
     }
+
     Phaser.Utils.Array.Shuffle(pool);
-    return pool.slice(0, count);
+
+    // Take unique cards by id from the weighted pool
+    const result = [];
+    const used = new Set();
+
+    for (const card of pool) {
+        if (used.has(card.id)) continue;
+        used.add(card.id);
+        result.push(card);
+        if (result.length >= count) break;
+    }
+
+    // Fallback in case weighting somehow didn't give us enough unique cards
+    if (result.length < count) {
+        const remaining = candidates.filter(c => !used.has(c.id));
+        Phaser.Utils.Array.Shuffle(remaining);
+        for (const c of remaining) {
+            result.push(c);
+            if (result.length >= count) break;
+        }
+    }
+
+    return result;
 }
+
+function openSwapOverlay(scene, uiContainer, incomingCard, teamNumber = "1", onDone = null) {
+    const cam = scene.cameras.main;
+    const hand = getCardHand(teamNumber);
+
+    const overlay = scene.add.container(0, 0).setDepth(UIDEPTH + 500);
+    overlay.setScrollFactor(0);
+
+    // darken + swallow clicks
+    const shade = scene.add.rectangle(0, 0, cam.width, cam.height, 0x000000, 0.75)
+        .setOrigin(0)
+        .setInteractive({ useHandCursor: true });
+    shade.setScrollFactor(0);
+
+    const title = scene.add.text(cam.centerX, 70, "Hand Full — Choose a Card to Replace", {
+        fontSize: "18px",
+        fill: "#ffffff",
+        fontFamily: "monospace"
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    const subtitle = scene.add.text(cam.centerX, 95, `New: ${incomingCard.name}`, {
+        fontSize: "12px",
+        fill: "#cccccc",
+        fontFamily: "monospace"
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    overlay.add([shade, title, subtitle]);
+
+    // layout 5 cards
+    const y = 200;
+    const slotW = 160;
+    const slotH = 190;
+    const spacing = 175;
+    const startX = cam.centerX - 2 * spacing;
+
+    for (let i = 0; i < 5; i++) {
+        const x = startX + i * spacing;
+        const existing = hand[i];
+
+        const bg = scene.add.rectangle(x, y, slotW, slotH, 0x222222, 0.9)
+            .setStrokeStyle(2, 0xffffff)
+            .setInteractive({ useHandCursor: true })
+            .setScrollFactor(0);
+
+        const iconBg = scene.add.rectangle(x, y - 35, 50, 50, 0x111111, 1)
+            .setStrokeStyle(1, 0xffffff, 0.4)
+            .setScrollFactor(0);
+
+        const name = scene.add.text(x, y - 70, existing?.name || "(empty?)", {
+            fontSize: "12px",
+            fill: "#ffffff",
+            fontFamily: "monospace"
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const desc = scene.add.text(x, y + 25, existing?.text || "", {
+            fontSize: "12px",
+            fill: "#cccccc",
+            wordWrap: { width: slotW - 20 }
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const icon = existing?.image
+            ? scene.add.image(x, y - 35, existing.image).setScale(1).setScrollFactor(0)
+            : scene.add.text(x, y - 35, "?", { fontSize: "18px", fill: "#ffffff" }).setOrigin(0.5).setScrollFactor(0);
+
+        bg.on("pointerdown", () => {
+            const old = hand[i];
+
+            // 1) remove old effect
+            if (old && typeof old.remove === "function") old.remove(scene);
+
+            // 2) replace in-hand
+            hand[i] = incomingCard;
+
+            // 3) apply new effect
+            if (incomingCard && typeof incomingCard.apply === "function") incomingCard.apply(scene);
+
+            scene.events.emit("cards:updated");
+
+            overlay.destroy(true);
+            if (typeof onDone === "function") onDone();
+        });
+
+        overlay.add([bg, iconBg, icon, name, desc]);
+    }
+
+    // Cancel button
+    const cancelBg = scene.add.rectangle(cam.centerX, cam.height - 80, 220, 44, 0x550000, 0.85)
+        .setStrokeStyle(2, 0xffffff)
+        .setInteractive({ useHandCursor: true })
+        .setScrollFactor(0);
+
+    const cancelTx = scene.add.text(cam.centerX, cam.height - 80, "Cancel", {
+        fontSize: "16px",
+        fill: "#ffffff",
+        fontFamily: "monospace"
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    cancelBg.on("pointerdown", () => overlay.destroy(true));
+
+    overlay.add([cancelBg, cancelTx]);
+
+    uiContainer.add(overlay);
+}
+
+// Team-based card hand, defaulting to team "1" for now
+export function getCardHand(teamNumber = "1") {
+    const team = Teams.teamLists[teamNumber];
+    if (!team) return [];
+
+    if (!team.cardHand) {
+        team.cardHand = [];
+    }
+    return team.cardHand;
+}
+
+export function addCardToHand(card, teamNumber = "1") {
+    const team = Teams.teamLists[teamNumber];
+    if (!team) return false;
+
+    if (!team.cardHand) team.cardHand = [];
+    const hand = team.cardHand;
+
+    // Normal pickup: apply immediately + add to hand
+    if (card.apply) card.apply();
+
+    // refuse when full (swap UI handles replacement)
+    if (hand.length >= 5) return false;
+
+    hand.push(card);
+    return true;
+}
+
+
 
 export const TYPES = {
     PLAYERTYPE: 'player',
@@ -292,25 +528,7 @@ const PLAYER_COSTS = {
     gunslinger: 500
 };
 
-export const POWERUPS = [
-    {
-        image: 'powerup_attack',
-        name: 'Sharpened Senses',
-        text: 'Increase crit chance by 10%.',
-        type: TYPES.PLAYERTYPE,
-        OUTLINE: '#ff4444',
-        probability: 20
-    },
-    {
-        image: 'powerup_speed',
-        name: 'Quick Feet',
-        text: 'Increase movement speed by 15%.',
-        type: TYPES.BUFF,
-        OUTLINE: '#44ff44',
-        probability: 25
-    },
-    // add more with varying probabilities
-];
+const POWERUPS = POWERUP_CARDS;
 
 const STORE = [
     {

@@ -1,5 +1,5 @@
 import { House } from "../../buildings/House.js";
-import { showAlert } from "../../constants";
+import { showAlert, CONTROL_STATES } from "../../constants";
 import { StaminaManager } from "../../Manager/staminaManager.js";
 import { Player } from "../../players/Player";
 import { Teams } from "../../Teams.js";
@@ -239,24 +239,42 @@ export default class PlayerTab {
             setHP(pct) { hpBar.setPercent(pct); },
             setST(pct) { stBar.setPercent(pct); },
             setUnit(u) {
-            detailsText.setText(
-                `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
-            );
+                detailsText.setText(
+                    `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
+                );
 
-            if (u.portraitKey) {
-                portrait.setVisible(true);
-                portrait.setTexture(u.portraitKey);
-                portrait.play(u.portraitKey); // 🔥 play anim based on key
-            } else {
-                portrait.setVisible(false);
-            }
+                if (u.portraitKey) {
+                    portrait.setVisible(true);
+                    portrait.setTexture(u.portraitKey);
+                    portrait.play(u.portraitKey);
+                } else {
+                    portrait.setVisible(false);
+                }
             },
-            setHP(pct) { hpBar.setPercent(pct); },
-            setST(pct) { stBar.setPercent(pct); },
             setPrices({ seed = seedPrice, sleep = sleepPrice } = {}) {
-            // Rebuild labels if needed; or just replace text on the first child (price label)
-            const sleepPriceLabel = sleepBtn.getChildren?.()[0] || sleepBtn.getElement?.('text');
-            if (sleep !== null && sleepPriceLabel?.setText) sleepPriceLabel.setText(`(${sleep})`);
+                const sleepPriceLabel = sleepBtn.getChildren?.()[0] || sleepBtn.getElement?.('text');
+                if (sleep !== null && sleepPriceLabel?.setText) {
+                    sleepPriceLabel.setText(`(${sleep})`);
+                }
+            },
+            // 🔥 new: let PlayerTab change label + handler at runtime
+            setSleepButton(labelText, onClick) {
+                const children = sleepBtn.getChildren ? sleepBtn.getChildren() : [];
+                if (!children.length) return;
+
+                // Last child is the actual button label (rexUI Label)
+                const btnLabel = children[children.length - 1];
+                const textObj = btnLabel.getElement ? btnLabel.getElement('text') : null;
+
+                if (textObj?.setText) {
+                    textObj.setText(labelText);
+                }
+
+                // Rebind pointerup
+                btnLabel.removeAllListeners?.('pointerup');
+                btnLabel.setInteractive({ useHandCursor: true }).on('pointerup', () => {
+                    onClick?.();
+                });
             }
         };
     }
@@ -276,31 +294,72 @@ export default class PlayerTab {
         }
     }
 
+    wakeOrCancelSelected() {
+        const s = this.selected;
+        if (!s || !s.active) return;
 
+        const state = s.state;
 
-  // --------- TEAM LIST (right) ----------
-  rebuildList() {
-    const scene = this.scene;
-    this.listBody.clear(true);
-    this.rows.clear();
+        // If already sleeping in a house → wake up early
+        if (state === CONTROL_STATES.SLEEP_MODE) {
+            StaminaManager.wakeUp(s);
+            showAlert?.(this.scene, `${s.name} woke up.`, '#33ff77', 1800);
+        }
+        // If walking home to sleep → cancel that trip
+        else if (state === CONTROL_STATES.GO_HOME_MODE) {
+            s.task = null;
+            if (s.currentPath) s.currentPath.length = 0;
+            if (s.body?.setVelocity) s.body.setVelocity(0, 0);
+            Teams.movePlayerState(s, CONTROL_STATES.TRACK_MODE);
+            showAlert?.(this.scene, `${s.name} will stay awake.`, '#33ff77', 1800);
+        }
 
-    // "your team" is team 1 in your codebase
-    // Instead of Player.troops...
-    const team1 = Teams.teamLists['1'].playerList
+        // Refresh detail panel to update button text/state
+        this.paintDetails(s);
+    }
 
-    // sort by type then name for stability
-    team1.sort((a, b) => (this.typeOf(a).localeCompare(this.typeOf(b))) || (a.name || '').localeCompare(b.name || ''));
+    // --------- TEAM LIST (right) ----------
+    rebuildList() {
+        const scene = this.scene;
+        this.listBody.clear(true);
+        this.rows.clear();
 
-    team1.forEach(sprite => {
-      const row = this.createRow(sprite);
-      this.listBody.add(row, { expand: true });
-      this.rows.set(sprite.id, row.userData);
-    });
+        // "your team" is team 1 in your codebase
+        // Instead of Player.troops...
+        const team1 = Teams.teamLists['1'].playerList
 
-    this.listBody.layout();
-    this.scroll.setMinSize(this.RIGHT_W, 180);
-    this.scroll.layout();
-  }
+        // sort by type then name for stability
+        team1.sort((a, b) => (this.typeOf(a).localeCompare(this.typeOf(b))) || (a.name || '').localeCompare(b.name || ''));
+
+        team1.forEach(sprite => {
+        const row = this.createRow(sprite);
+        this.listBody.add(row, { expand: true });
+        this.rows.set(sprite.id, row.userData);
+        });
+
+        this.listBody.layout();
+        this.scroll.setMinSize(this.RIGHT_W, 180);
+        this.scroll.layout();
+    }
+
+    //refresh logic
+    onShow() {
+        const team1 = Teams.teamLists['1']?.playerList || [];
+
+        // If nothing selected (or old selection is gone), pick the first player
+        if (!this.selected || !team1.includes(this.selected)) {
+            if (team1[0]) {
+            this.select(team1[0]);
+            } else {
+            this.selected = null;
+            this.clearDetails();
+            return;
+            }
+        } else {
+            // Ensure detail card is up to date for the existing selection
+            this.paintDetails(this.selected);
+        }
+    }
 
     createRow(sprite) {
     const scene = this.scene;
@@ -358,7 +417,8 @@ export default class PlayerTab {
         hpBar: hp.fill,
         stBar: st.fill,
         nameText: name,
-        bg
+        bg,
+        row,
     };
 
     // initial bar widths
@@ -400,7 +460,20 @@ export default class PlayerTab {
         this.detailCard.setHP((s.health ?? 0) / 100);
         this.detailCard.setST((s.stamina ?? 0) / (s.maxStamina || 100));
         this.detailCard.setPrices({ seed: price, sleep: null });
-        
+        const state = s.state;
+        const isSleepingLike =
+            state === CONTROL_STATES.SLEEP_MODE ||
+            state === CONTROL_STATES.GO_HOME_MODE;
+        // Toggle button text + behavior
+        if (this.detailCard.setSleepButton) {
+            if (isSleepingLike) {
+                // Show Wake / Cancel Sleep
+                this.detailCard.setSleepButton('Wake', () => this.wakeOrCancelSelected());
+            } else {
+                // Normal behavior: send to sleep
+                this.detailCard.setSleepButton('Sleep', () => this.sendSelectedToSleep());
+            }
+        }
         // todo: set portraitKey into detailCard if you extend setUnit
     }
 
@@ -433,9 +506,8 @@ export default class PlayerTab {
 
     // --------- tick / refresh ---------
     tick() {
-        // skip if Players page not open
-        const isActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('players');
-        if (!isActive) return;
+        const current = this.scene.uiBottomBar?.currentPage;
+        if (current !== 'players') return;
 
         // if any troop was removed/added, rebuild
         const team1Count = Teams.teamLists['1'].playerList.length;
@@ -455,6 +527,35 @@ export default class PlayerTab {
         }
     }
 
+
+    onPlayerDestroyed(player) {
+        if (!player) return;
+
+        const data = this.rows.get(player.id);
+        if (data) {
+            // destroy the row UI
+            if (data.row && !data.row.isDestroyed) {
+                data.row.destroy();
+            }
+            this.rows.delete(player.id);
+        }
+
+        // if that player was selected, clear the detail panel
+        if (this.selected === player) {
+            this.selected = null;
+            this.clearDetails();
+        }
+
+        // re-layout scroll panel so there isn't a gap
+        this.listBody?.layout?.();
+        this.scroll?.layout?.();
+
+        // fallback: if counts are now out of sync for any reason, hard refresh
+        const team1Count = Teams.teamLists['1'].playerList.length;
+        if (team1Count !== this.rows.size) {
+            this.rebuildList();
+        }
+    }
 
   updateRowBars({ sprite: s, hpBar, stBar }) {
     hpBar.width = 90 * Math.max(0, Math.min(1, (s.health ?? 0) / 100));

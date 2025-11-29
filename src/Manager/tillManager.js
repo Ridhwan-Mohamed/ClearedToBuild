@@ -53,7 +53,7 @@ export class tillManager {
             const existingCrop = Teams.getCropAt(x, y, sprite.body.team);
 
             if (existingCrop) {
-            // reseed existing crop
+                // reseed existing crop
                 existingCrop.hasSeed = true;
                 existingCrop.growthStage = 0;
                 existingCrop.dailyWatered = false;
@@ -63,21 +63,24 @@ export class tillManager {
                 // plant new crop
                 Map.grid[y][x] = TILE_TYPES.crops.grid;
                 Map.drawGridValue(x,y);
+
+                // Update overview image in real time
+                if (this.scene?.zoomMixer) {
+                    this.scene.zoomMixer.updateOverviewCell(
+                        x,
+                        y,
+                        Map.grid
+                    );
+                }
                 // add to Teams.teamLists[team].crops as usual, with sprite frame 1
             }
 
-
-            this.scene.updateSeeds(-1);
-            StorageManager.consumeItemFromStorage(sprite.body.team, UI_ITEM_TYPES.seedCrop);
-
+            StorageManager.removeCarriedItem(sprite);
             Teams.removeFromStateArray(1, "tileList", sprite.task);
             sprite.task = null;
             sprite.timer = null;
-
-            Manager.assignOneTroopToAction(sprite, Teams.teamLists[`${sprite.body.team}`].tileList, CONTROL_STATES.FARM_MODE);
         });
     }
-
 
     static beginWatering(sprite){
         const x = sprite.task.x;

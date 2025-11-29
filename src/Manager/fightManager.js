@@ -166,35 +166,4 @@ export class fightManager{
             damage
         };
     }
-
-
-    static showGhostText(scene, x, y, text, teamNumber, isCrit = false, isMiss = false) {
-        let color;
-
-        if (isMiss) {
-            color = '#888888'; // Gray for MISS
-        } else if (teamNumber === 0) {
-            color = '#44ff44'; // Green for player/team 0 hit
-        } else {
-            color = isCrit ? '#ff4444' : '#ffffff'; // Red or white for enemies
-        }
-
-        const ghost = scene.add.text(x, y, text, {
-            fontSize: '16px',
-            fill: color,
-            fontFamily: 'monospace',
-            stroke: '#000000',
-            strokeThickness: 2
-        }).setDepth(1000).setOrigin(0.5);
-
-        scene.tweens.add({
-            targets: ghost,
-            y: y - 20,
-            alpha: 0,
-            duration: 600,
-            onComplete: () => ghost.destroy()
-        });
-    }   
-
-
 }

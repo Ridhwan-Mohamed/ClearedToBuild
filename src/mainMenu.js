@@ -20,6 +20,8 @@ import start from 'url:../assets/start.png'
 import playButton from 'url:../assets/playButton.png'
 import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
+import { POWERUP_CARDS } from './Cards/PowerupCards.js';
+
 export var waterSourcesQuadTree;
 
 export class MainMenu {
@@ -46,7 +48,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.4.0', {
+        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.5.0', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
@@ -171,7 +173,7 @@ export class MainMenu {
         });
 
         // === Build Map.grid from already-loaded map image ===
-        const img = scene.textures.get('worldMap').getSourceImage(); // 500x500
+        const img = scene.textures.get('worldMap').getSourceImage(); // 250x250
         const srcW = img.naturalWidth || img.width;
         const srcH = img.naturalHeight || img.height;
         const canvas = document.createElement('canvas');
@@ -206,6 +208,7 @@ export class MainMenu {
                 ctx.fillRect(x, y, 1, 1);
             }
         }
+
         WaveCollapse.scatterOnGrass(scene.gridData, 200);
         WaveCollapse.scatterOnGrass(scene.gridData, 200, TILE_TYPES.grassBerry.grid);
         tex.refresh();
@@ -218,11 +221,116 @@ export class MainMenu {
         scene._srcW      = srcW;
         scene._srcH      = srcH;
         scene.mapTexKey  = texKey;            // ✅ remember the texture key
+
+        // Create water mask canvas
+        const waterTexKey = "waterMask";
+        if (scene.textures.exists(waterTexKey)) scene.textures.remove(waterTexKey);
+
+        const wTex = scene.textures.createCanvas(waterTexKey, srcW, srcH);
+        const wCtx = wTex.getContext();
+
+        // === Build a water mask with a fading waterline from shore ===
+        // Grab the full image data once (faster than per-pixel getImageData)
+        const imgData = ctx.getImageData(0, 0, srcW, srcH).data;
+
+        // 1) Classify pixels as water vs land
+        const isWaterMap = new Array(srcH);
+        for (let y = 0; y < srcH; y++) {
+            const row = new Array(srcW);
+            for (let x = 0; x < srcW; x++) {
+                const idx = (y * srcW + x) * 4;
+                const r = imgData[idx];
+                const g = imgData[idx + 1];
+                const b = imgData[idx + 2];
+
+                // your water colour test (tweak if needed)
+                const isWater = b > 184 && r <= 60;
+
+                row[x] = isWater;
+            }
+            isWaterMap[y] = row;
+        }
+
+        // 2) For each water pixel, find distance to nearest land, fade by distance
+        const maxRadius = 8;   // how far out the waterline extends
+        const maxAlpha  = 0.5; // opacity at the shoreline
+
+        for (let y = 0; y < srcH; y++) {
+            for (let x = 0; x < srcW; x++) {
+                if (!isWaterMap[y][x]) continue; // only care about water pixels
+
+                let minDist = maxRadius + 1;
+
+                // search a neighbourhood around this water pixel for land
+                for (let dy = -maxRadius; dy <= maxRadius && minDist > 1; dy++) {
+                    const ny = y + dy;
+                    if (ny < 0 || ny >= srcH) continue;
+
+                    for (let dx = -maxRadius; dx <= maxRadius; dx++) {
+                        const nx = x + dx;
+                        if (nx < 0 || nx >= srcW) continue;
+
+                        // any non-water pixel counts as land
+                        if (!isWaterMap[ny][nx]) {
+                            const d = Math.sqrt(dx * dx + dy * dy);
+                            if (d < minDist) minDist = d;
+                        }
+                    }
+                }
+
+                // If we didn't find land nearby, skip (deep ocean, no line)
+                if (minDist > maxRadius) continue;
+
+                // Closer to land → higher alpha; farther → fade out
+                const t = 1 - (minDist / maxRadius);      // 1 at shore, 0 at maxRadius
+                const alpha = maxAlpha * t;               // scale by max alpha
+
+                if (alpha <= 0) continue;
+
+                wCtx.fillStyle = `rgba(200,200,255,${alpha.toFixed(3)})`;
+                wCtx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        wTex.refresh();
+        wTex.setFilter(Phaser.Textures.FilterMode.NEAREST);
+
         // Show preview centered in screen space
         const maxW = scene.scale.width * 0.9;
         const maxH = scene.scale.height * 0.7;
         const scale = Math.min(maxW / srcW, maxH / srcH);
         const worldW = srcW * SQUARESIZE, worldH = srcH * SQUARESIZE;
+
+        // === Water overlay aligned with the world map ===
+        const waterOverlay = scene.add.image(worldW / 2, worldH / 2, "waterMask")
+            .setOrigin(0.5)
+            .setScale(SQUARESIZE)        // match the map grid size
+            .setDepth(UIDEPTH - 1)       // ABOVE the mapPreview (UIDEPTH - 2)
+            .setAlpha(0.8)
+            .setScrollFactor(1);
+
+        scene.waterOverlay = waterOverlay;
+        scene.uiCamera.ignore(waterOverlay);
+
+        // gentle alpha pulse
+        scene.tweens.add({
+            targets: waterOverlay,
+            alpha: { from: 0.1, to: 0.9 },
+            duration: 1600,
+            repeat: -1,
+            yoyo: true,
+            ease: "Sine.easeInOut"
+        });
+
+        // // subtle hue wobble
+        // scene.events.on("update", () => {
+        //     const t = scene.time.now * 0.0001;
+        //     waterOverlay.setTint(
+        //         Phaser.Display.Color.HSLToColor(
+        //         0.55 + Math.sin(t) * 0.02, 0.7, 0.6
+        //         ).color
+        //     );
+        // });
 
         scene.menuPreview = scene.add.image(worldW/2, worldH/2, texKey)
             .setOrigin(0.5)
@@ -237,13 +345,17 @@ export class MainMenu {
         cam.roundPixels = true;
         // cam.setBounds(0,0, worldW, worldH);
         cam.centerOn(worldW/2, worldH/2);
-        cam.setZoom(0.09);
+        cam.setZoom(0.2);
 
         scene.uiCamera.ignore(scene.menuPreview); // don’t show on UI cam
 
         scene.zoomMixer = new ZoomMixer();
+        // hand off the existing preview image
         scene.zoomMixer.overviewImage = scene.menuPreview;
-        scene.zoomMixer.mode = 'overview'
+        // tell ZoomMixer which canvas texture to write into
+        scene.zoomMixer.texKey = scene.mapTexKey;   // <- IMPORTANT
+        scene.zoomMixer.mode = 'overview';
+
 
         scene.tweens.add({ targets: scene.menuPreview, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
 
@@ -294,10 +406,9 @@ export class MainMenu {
 
     static buildTeamSelectUI_OnMenuPreview(srcW, srcH, scale) {
         const scene = MainMenu.scene;
-        // --- helpers bound to the current preview image ---
+
         const preview = scene.menuPreview;
         const y0 = preview.y - preview.displayHeight / 2;
-
 
         // repaint a bbox (inclusive)
         const repaintBounds = (b) => {
@@ -305,9 +416,11 @@ export class MainMenu {
             const colorForCell = scene._colorCell;
             for (let y = b.miny; y <= b.maxy; y++) {
                 for (let x = b.minx; x <= b.maxx; x++) {
-                    const val = Array.isArray(scene.gridData[y][x]) ? scene.gridData[y][x][1] : scene.gridData[y][x] 
+                    const val = Array.isArray(scene.gridData[y][x])
+                        ? scene.gridData[y][x][1]
+                        : scene.gridData[y][x];
                     const c = colorForCell(val);
-                    ctx.fillStyle = `#${c.toString(16).padStart(6,'0')}`;
+                    ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
                     ctx.fillRect(x, y, 1, 1);
                 }
             }
@@ -315,7 +428,7 @@ export class MainMenu {
             scene._menuTex.setFilter(Phaser.Textures.FilterMode.NEAREST);
         };
 
-        // simple white circle icon if 'townIcon' isn't loaded
+        // ensure icon texture exists
         const iconKey = 'townIcon';
         if (!scene.textures.exists(iconKey)) {
             const g = scene.add.graphics();
@@ -325,24 +438,19 @@ export class MainMenu {
             g.destroy();
         }
 
-        // === seeds & teams (Team 1 is player by default)
+        // === Town seeds (positions)
         const seeds = [
-            [92, 331], // team 1
-            [293, 383], // team 2
-            [273, 119], // team 3
-            [104, 197]  // team 4
+            [129, 97]
         ];
         const teams = [1, 2, 3, 4];
 
-        // ensure team objects exist
         Teams.newTeam(1); Teams.newTeam(2); Teams.newTeam(3); Teams.newTeam(4);
 
-        // place towns and stamp building ownership (index 3)
+        // place towns
         seeds.forEach(([sx, sy], idx) => {
             const team = teams[idx];
             scene.gridData = generateTown(
                 scene.gridData,
-                // choose your setup here (smallTeam / bigTeam):
                 teamSetupArray.smallTeam,
                 team,
                 sx, sy,
@@ -351,7 +459,6 @@ export class MainMenu {
             const b = townBounds[team];
             if (!b) return;
 
-            // ensure buildingArray[3] = team inside this bbox
             for (let i = 0; i < buildingArray.length; i++) {
                 const e = buildingArray[i];
                 if (!e || e.length < 4) continue;
@@ -363,113 +470,222 @@ export class MainMenu {
             repaintBounds(b);
         });
 
-        // status label near top of preview
-        const label = scene.add.text(
-            preview.x, y0 + 20, '',
-            { fontSize: '16px', fill: '#ffffff', stroke: '#000', strokeThickness: 3 }
-        ).setOrigin(0.5).setAlpha(0.9);
+        // === Starting Kits: resources + goofy names + 3 cards
+        const randInt = (min, max) =>
+            Math.floor(Math.random() * (max - min + 1)) + min;
 
-        // create clickable icons for teams
-        const townIcons = {};
-        const makeIconForTeam = (team) => {
-            const b = townBounds[team];
-            if (!b) return null;
+        const goofyNamesPool = [
+            'Muddy Turnip Militia',
+            'Berry Bureaucrats',
+            'Log Goblin League',
+            'Soggy Sock Syndicate',
+            'Radish Radicals',
+            'Soup Overlords',
+            'Pebble Parliament',
+            'Thirsty Turnip Union'
+        ];
 
-            const cx = Math.round((b.minx + b.maxx) / 2);
-            const cy = Math.round((b.miny + b.maxy) / 2);
-            const ix = cx * SQUARESIZE;
-            const iy = cy * SQUARESIZE;
+        // shuffle names
+        const names = goofyNamesPool.slice();
+        for (let i = names.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [names[i], names[j]] = [names[j], names[i]];
+        }
 
-            const icon = ZoomMixer.createZoomInvariantIcon(
-                'townIcon',
-                `Team ${team}`,
-                ix, iy,
-                { baseScale: 0.9 }
-            );
+        const teamInfo = {};
 
-            // default: dark grey tint; team 1 (player) clears tint
-            icon.setTint(0x141414);
-            townIcons[team] = icon;
+        teams.forEach((team, idx) => {
+            const resources = {
+                seeds:   randInt(2, 10),
+                berries: randInt(2, 10),
+                wood:    randInt(0, 6),
+                stone:   randInt(0, 6),
+                food:    randInt(12, 20),
+                water:   randInt(12, 20)
+            };
 
-            icon.on('pointerover', () => icon.setScale(1.05));
-            icon.on('pointerout',  () => icon.setScale(0.9));
+            const available = POWERUP_CARDS.slice();
+            const cards = [];
+            for (let i = 0; i < 3 && available.length > 0; i++) {
+                const pick = Math.floor(Math.random() * available.length);
+                cards.push(available[pick]);
+                available.splice(pick, 1);
+            }
 
-            icon.on('pointerdown', () => {
-            if (team === 1) return; // already player
+            const kit = {
+                name: names[idx] || `Team ${team}`,
+                resources,
+                cards
+            };
 
-            const bSel = townBounds[team];
-            const bPly = townBounds[1];
-            if (!bSel || !bPly) return;
+            teamInfo[team] = kit;
 
-            // 1) Mark clicked team's buildings to temp
-            for (let i = 0; i < buildingArray.length; i++) {
-                const e = buildingArray[i];
-                if (!e || e.length < 4) continue;
-                const [bx, by, , curTeam] = e;
-                if (curTeam === team &&
-                    bx >= bSel.minx && bx <= bSel.maxx &&
-                    by >= bSel.miny && by <= bSel.maxy) {
-                buildingArray[i][3] = -999; // temp marker
+            const key = String(team);
+            if (!Teams.teamLists[key]) Teams.newTeam(team);
+            Teams.teamLists[key].displayName = kit.name;
+            Teams.teamLists[key].startKit    = kit;
+        });
+
+        // After teams.forEach(...) that fills teamInfo
+        MainMenu.selectedStartKit  = teamInfo[1];
+        MainMenu.selectedStartTeam = 1;
+
+        // === Start Kit Selection Row (no location swap, just kits) ===
+        const centerX = scene.scale.width / 2;
+
+        const kitRow = scene.add.container(centerX, scene.scale.height - 180)
+            .setScrollFactor(0)
+            .setDepth(9999);
+
+        scene.menu.add(kitRow);
+
+        const kitUIs = {};
+        const kitTeams = teams; // [1,2,3,4]
+
+        const cardWidth  = 220;
+        const cardHeight = 150;
+        const spacing    = 12;
+        const totalWidth = kitTeams.length * cardWidth + (kitTeams.length - 1) * spacing;
+        const startX     = -totalWidth / 2 + cardWidth / 2;
+
+        kitTeams.forEach((team, idx) => {
+            const kit = teamInfo[team];
+            if (!kit) return;
+
+            const group = scene.add.container(startX + idx * (cardWidth + spacing), 0);
+            kitRow.add(group);
+
+            const bg = scene.add.rectangle(0, 0, cardWidth, cardHeight, 0x000000, 0.65)
+                .setOrigin(0.5)
+                .setStrokeStyle(2, 0x666666)
+                .setInteractive({ cursor: 'pointer' });
+
+            const nameText = scene.add.text(0, -cardHeight / 2 + 8, kit.name, {
+                fontSize: '14px',
+                fill: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 3,
+                align: 'center',
+                wordWrap: { width: cardWidth - 20 }
+            }).setOrigin(0.5, 0);
+
+            const r = kit.resources;
+            const resText = scene.add.text(0, -15,
+                `Seeds ${r.seeds}  Berries ${r.berries}\n` +
+                `Wood  ${r.wood}   Stone   ${r.stone}\n` +
+                `Food  ${r.food}   Water   ${r.water}`,
+                {
+                    fontSize: '12px',
+                    fill: '#dddddd',
+                    align: 'center',
+                    stroke: '#000000',
+                    strokeThickness: 2
                 }
-            }
-            // 2) Player -> clicked team
-            for (let i = 0; i < buildingArray.length; i++) {
-                const e = buildingArray[i];
-                if (!e || e.length < 4) continue;
-                const [bx, by, , curTeam] = e;
-                if (curTeam === 1 &&
-                    bx >= bPly.minx && bx <= bPly.maxx &&
-                    by >= bPly.miny && by <= bPly.maxy) {
-                buildingArray[i][3] = team;
-                }
-            }
-            // 3) Temp -> player
-            for (let i = 0; i < buildingArray.length; i++) {
-                if (buildingArray[i] && buildingArray[i][3] === -999) buildingArray[i][3] = 1;
-            }
+            ).setOrigin(0.5);
 
-            // 4) Swap bounds
-            const tmpB = townBounds[1];
-            townBounds[1]   = bSel;
-            townBounds[team] = tmpB;
+            group.add([bg, nameText, resText]);
 
-            // 5) Swap roads by reference (so spawns/pathing move too)
-            const t1 = '1', tSel = String(team);
-            const tmpR = townRoads[t1];
-            townRoads[t1]    = townRoads[tSel];
-            townRoads[tSel]  = tmpR;
-
-            // (Optional) swap centers if tracked in Teams
-            if (Teams?.teamLists?.[t1] && Teams?.teamLists?.[tSel]) {
-                const c1 = Teams.teamLists[t1].center;
-                Teams.teamLists[t1].center  = Teams.teamLists[tSel].center;
-                Teams.teamLists[tSel].center= c1;
-            }
-
-            // repaint both towns’ areas
-            repaintBounds(townBounds[1]);
-            repaintBounds(townBounds[team]);
-
-            // tints: make all dark grey, then clear the (now player) icon
-            Object.values(townIcons).forEach(ic => ic.setTint(0x141414));
-            icon.clearTint();
-
-            // feedback label
-            label.setText(`Selected Team ${team} as Player`).setAlpha(1);
-            scene.time.delayedCall(1200, () => label.setAlpha(0));
+            // Card names (3 cards)
+            kit.cards.forEach((card, i) => {
+                const t = scene.add.text(0, 18 + i * 20, card.name, {
+                    fontSize: '12px',
+                    fill: card.OUTLINE || '#ffffff',
+                    stroke: '#ffffff',
+                    strokeThickness: 3,
+                    align: 'center'
+                }).setOrigin(0.5);
+                group.add(t);
             });
 
-            return icon;
-        };
+            kitUIs[team] = { group, bg };
 
-        [1,2,3,4].forEach(makeIconForTeam);
-        if (townIcons[1]) townIcons[1].clearTint(); // auto-highlight player town
+            // interactions
+            bg.on('pointerover', () => {
+                scene.tweens.add({
+                    targets: group,
+                    scale: 1.05,
+                    duration: 120,
+                    ease: 'Quad.easeOut'
+                });
+            });
+
+            bg.on('pointerout', () => {
+                scene.tweens.add({
+                    targets: group,
+                    scale: 1.0,
+                    duration: 120,
+                    ease: 'Quad.easeIn'
+                });
+            });
+
+            bg.on('pointerdown', () => {
+                // update selection data
+                MainMenu.selectedStartKit  = kit;
+                MainMenu.selectedStartTeam = team;
+
+                // visual highlight for selected card
+                kitTeams.forEach(tid => {
+                    const ui = kitUIs[tid];
+                    if (!ui) return;
+                    const selected = (tid === team);
+                    ui.bg.setStrokeStyle(
+                        selected ? 3 : 2,
+                        selected ? 0x00ff66 : 0x666666
+                    );
+                });
+            });
+        });
+
+        // initial highlight on kit 1 (default)
+        if (kitUIs[1]) {
+            kitUIs[1].bg.setStrokeStyle(3, 0x00ff66);
+        }
+
+        // === Starting town house icon (visual marker on the map) ===
+        const b1 = townBounds[1];
+        if (b1) {
+            const cx = ((b1.minx + b1.maxx) / 2) * SQUARESIZE;
+            const cy = ((b1.miny + b1.maxy) / 2) * SQUARESIZE;
+
+            // This uses ZoomMixer's helper so the icon stays a good size when zooming
+            ZoomMixer.createZoomInvariantIcon(
+                'townIcon',
+                'Starting Town',
+                cx,
+                cy,
+                { baseScale: 1.1 }
+            );
+        }
+
     }
 
     static beginLoadingAndHandOff() {
         const scene = MainMenu.scene;
         const centerX = scene.scale.width / 2;
         const centerY = scene.scale.height - 40; // same Y as Play button
+
+        // Apply the chosen starting kit (resources + starting cards) to Team 1
+        const fallbackTeam = Teams.teamLists && Teams.teamLists['1'];
+        const kit = MainMenu.selectedStartKit ||
+                    (fallbackTeam && fallbackTeam.startKit);
+
+        if (kit && kit.resources) {
+            const r = kit.resources;
+
+            scene.seeds          = r.seeds;
+            scene.berries        = r.berries;
+            scene.woodAmnt       = r.wood;
+            scene.stoneAmnt      = r.stone;
+            scene.foodAmnt       = r.food;
+            scene.cleanWaterAmnt = r.water;
+
+            if (Array.isArray(kit.cards) && fallbackTeam) {
+                fallbackTeam.cardHand = kit.cards.slice(0, 3);
+                fallbackTeam.cardHand.forEach(element => {
+                    element.apply();
+                });
+            }
+        }
 
         // Overlay container for bg + spinner
         const loading = scene.add.container(0, 0).setDepth(9999).setScrollFactor(0);
@@ -541,6 +757,7 @@ export class MainMenu {
             scene.sceneButtons();
             VisibilitySystem.init(scene);           // build blockers + occlusion from the map
 
+            Teams.newTeam(0);
             // Fade out everything in menu + loading UI
             const fadeTargets = [scene.menu, scene.logoMini, loading];
             scene.tweens.add({

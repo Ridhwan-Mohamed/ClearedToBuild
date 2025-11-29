@@ -1,5 +1,4 @@
 // === Fireman.js ===
-
 import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
@@ -17,6 +16,10 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 const MAX_CARRY = 1;
 
 export class Fireman {
+
+    static speed = 80;
+    static stamina = 0.02;
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
         sprite.setInteractive();
@@ -27,12 +30,11 @@ export class Fireman {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
-        sprite.baseSpeed = sprite.speed;
         sprite.setTint(0xff9933); // orange tint
         sprite.unitTint = 0xff9933;
+        sprite.type = Fireman;
         sprite.body.pushable = false;
         sprite.animState = 'idle';
         sprite.walk = 'walk';
@@ -58,12 +60,12 @@ export class Fireman {
     }
 
     static update(troop) {
-        if (troop.task || troop.pendingOvenJob || troop.pendingFuelJob) return;
+        if (troop.task) return;
 
         // check for nearby enemies and flee in case.
         Player.updateTracking(troop);
 
-        const outputList = Teams.teamLists[troop.body.team].ovenPickupItems;
+        const outputList = Teams.teamLists[troop.body.team].ovenPickupJobs;
         if (outputList) {
             const unassignedTask = outputList.find(val => val.assigned < val.amount);
             if(unassignedTask) {
@@ -111,16 +113,30 @@ export class Fireman {
             if (nearest) {
                 troop.pendingOvenJob = job;             // remember which job this trip is for
                 troop.skip = true;
+                troop.task = true;
                 Teams.movePlayerState(troop, CONTROL_STATES.GET_WATER_MODE);
-                Player.moveTo(troop, Player.pathTo(troop, nearest.x, nearest.y));
-                return true;
+                const canTravel = Player.moveTo(troop, Player.pathTo(troop, nearest.x, nearest.y));
+                if(canTravel){
+                    troop.pendingOvenJob.assigned += 1;
+                    return true;
+                }
+                console.error("Failed to path to nearest water, WATER PATH ISSUE")
+                troop.task = null;
+                return false;
             }
             return false; // no lake found -> wait
         }
 
         // otherwise: try to pick from storage for THIS job’s item
         troop.pendingOvenJob = job;
-        return StorageManager.tryCreateStoragePickupTask(troop, job.item);
+        const jobPossible = StorageManager.tryCreateStoragePickupTask(troop, job.item);
+        if (!jobPossible) {
+            troop.pendingOvenJob = null;
+            return false;
+        }
+        // we’ve now committed one worker to this job
+        job.assigned += 1;
+        return true;
     }
 
     static assignFromOvenFuelJobs(troop) {
@@ -132,7 +148,13 @@ export class Fireman {
         if (!job) return false;
 
         troop.pendingFuelJob = job;
-        return StorageManager.tryCreateStoragePickupTask(troop, UI_ITEM_TYPES.wood);
+        const jobPossible = StorageManager.tryCreateStoragePickupTask(troop, UI_ITEM_TYPES.wood);
+        if(!jobPossible){
+            troop.pendingFuelJob = null;
+            return false;
+        }
+        troop.pendingFuelJob.assigned += 1;
+        return true;
     }
 
     static maybeAssignOvenFuelDelivery(troop, job, item) {
@@ -171,7 +193,11 @@ export class Fireman {
 
         if (oven.addFuel(amount)) {
             job.remaining -= amount;
-            if (job.remaining <= 0) job.canceled = true;
+            job.assigned -= 1;
+            if (job.remaining <= 0) Teams.removeFromStateArray(troop.body.team, 'ovenFuelJobs', job);
+        }else{
+            console.error("Failed to add fuel to oven")
+            job.assigned -= 1;
         }
 
         StorageManager.removeCarriedItem(troop);
@@ -182,8 +208,10 @@ export class Fireman {
     }
 
     static goRefuelOven(troop, job) {
-        if (!job?.oven) return false;
-
+        if (!job?.oven) {
+            console.error("Failed to refuel oven after wood pickup, OVEN GONE ISSUE")
+            return false; //fine for now, but in the future should have better handling if oven doesnt exist on return
+        }
         // Prepare to move back to oven
         troop.roam = false;
         Teams.movePlayerState(troop, CONTROL_STATES.SEND_TO_OVEN);
@@ -197,6 +225,9 @@ export class Fireman {
         if (approachTile) {
             Player.moveTo(troop, approachTile.path);
             return true;
+        }
+        else{
+            console.error("Failed to refuel oven after wood pickup, PATH ISSUE")
         }
         return false;
     }
@@ -240,52 +271,72 @@ export class Fireman {
     }
 
     static maybeAssignOvenJobDelivery(troop, job, item) {
-        const team = Teams.teamLists[troop.body.team];
-        if (!team || !job || job.canceled) return false;
+        if (!job || job.canceled || !job.oven?.sprite?.active) return false;
 
-        const list = team.ovenDeliveryItems;
-        // see if a delivery task for this oven/slot/item already exists
-        let task = list.find(t =>
-            t.oven === job.oven &&
-            t.inputidx === job.inputidx &&
-            t.item.name === (item?.name || job.item.name)
-        );
+        // Create a one-shot delivery task bound to this job
+        const task = {
+            type: TILE_TYPES.clayOven,
+            x: job.oven.x,
+            y: job.oven.y,
+            oven: job.oven,
+            item: item || job.item,
+            count: 1,
+            inputidx: job.inputidx,
+            assigned: 0,
+            remaining: job.remaining,
+            taskType: 'ovenDelivery',
+            job,   // used by deliverToOven for bookkeeping
+        };
 
-        if (task) {
-            // if that slot already has all units assigned, bail
-            if (task.assigned >= job.remaining) return false;
-        } else {
-            // otherwise create a new delivery task object
-            task = {
-                type: TILE_TYPES.clayOven,
-                x: job.oven.x,
-                y: job.oven.y,
-                oven: job.oven,
-                item: item || job.item,
-                count: 1,
-                inputidx: job.inputidx,
-                assigned: 0,
-                remaining: job.remaining,
-                taskType: 'ovenDelivery',
-                job,                      // 🔗 keep link to job for bookkeeping
-            };
-            list.push(task);
-        }
-
-        // send this troop to the oven
-        return Manager.assignOneTroopToAction(
+        // Directly assign this single task to the troop
+        return Manager.assignTaskToTroop(
             troop,
-            list,
+            task,
             CONTROL_STATES.SEND_TO_OVEN
         );
     }
 
-
     static deliverToOven(troop) {
         const task = troop.task;
+        if (!task || !task.oven) {
+            troop.pendingOvenJob = null;
+            troop.task = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            return;
+        }
+
         const oven = task.oven;
 
-        const success = oven.addItemToCook(task.item, task.count);
+        // Prefer the explicit input index from the job / task
+        const slotIndex =
+            typeof task.inputidx === 'number'
+                ? task.inputidx
+                : (task.job && typeof task.job.inputidx === 'number'
+                    ? task.job.inputidx
+                    : null);
+
+        let success;
+
+        if (slotIndex !== null) {
+            // Try to place exactly into the requested slot
+            success = oven.addItemToCookAtSlot(task.item, task.count, slotIndex);
+
+            // Optional: if the slot was invalid/full or changed type, fall back
+            if (!success) {
+                console.warn(
+                    'deliverToOven: failed to add to requested slot',
+                    slotIndex,
+                    'for item',
+                    task.item?.name,
+                    '– falling back to first available slot.'
+                );
+                success = oven.addItemToCook(task.item, task.count);
+            }
+        } else {
+            // Legacy path: no slot specified, use first-available behavior
+            success = oven.addItemToCook(task.item, task.count);
+        }
+
         if (success) {
             // job bookkeeping
             const job = task.job || troop.pendingOvenJob;
@@ -294,19 +345,12 @@ export class Fireman {
                 job.delivered += 1;
                 job.remaining = Math.max(0, job.target - job.delivered);
                 if (job.remaining <= 0 || job.canceled) {
-                    // remove job from queue
                     const jobs = Teams.teamLists[troop.body.team].ovenJobs;
                     const i = jobs.indexOf(job);
-                    if (i !== -1) jobs.splice(i,1);
+                    if (i !== -1) jobs.splice(i, 1);
                 }
             }
 
-            // task bookkeeping
-            task.assigned--;
-            task.remaining = Math.max(0, task.remaining - 1);
-            if (task.remaining <= 0) {
-                Teams.removeFromStateArray(troop.body.team, 'ovenDeliveryItems', task);
-            }
             StorageManager.removeCarriedItem(troop);
         }
 
@@ -314,7 +358,6 @@ export class Fireman {
         troop.task = null;
         Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
     }
-
 
     static handleOvenPickupComplete(troop) {
         const task = troop.task;
@@ -341,7 +384,7 @@ export class Fireman {
         task.assigned -= 1;
 
         if (task.amount <= 0) {
-            Teams.removeFromStateArray(troop.body.team, 'ovenPickupItems', task);
+            Teams.removeFromStateArray(troop.body.team, 'ovenPickupJobs', task);
         }
 
         const assigned = StorageManager.tryCreateStorageDeliveryTask(troop);
@@ -353,19 +396,17 @@ export class Fireman {
 
     static firemanCompleteWaterPickup(troop){
         const job = troop.pendingOvenJob;
-        const approachTile = buildingManager.findBuildApproachBlock(job?.x ?? 0, job?.y ?? 0, TILE_TYPES.clayOven, troop);
-        if (approachTile){
-            StorageManager.addCarriedItem(troop, UI_ITEM_TYPES.unclean_water);
-            troop.roam = false;
-            Teams.movePlayerState(troop, CONTROL_STATES.SEND_TO_OVEN);
-            // 🚚 assign delivery to the specific oven job
-            Fireman.maybeAssignOvenJobDelivery(troop, job, UI_ITEM_TYPES.unclean_water);
-            Player.moveTo(troop, approachTile.path);
-            return;
+        StorageManager.addCarriedItem(troop, UI_ITEM_TYPES.unclean_water)
+        const canTravel = Fireman.maybeAssignOvenJobDelivery(troop, job, UI_ITEM_TYPES.unclean_water);
+        if(!canTravel){
+            console.error("Failed to path back to oven after water pickup, WATER TO OVEN ERROR")
+            job.assigned -= 1;
+            troop.task = null;
+            troop.pendingOvenJob = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            return false;
         }
-        if (troop.task) troop.task.assigned--;
-        troop.task = null;
-        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        return true;
     }
 
     static destroy(troop) {
@@ -376,6 +417,15 @@ export class Fireman {
         const index = team.firemanList.indexOf(troop);
         if (index !== -1) {
             team.firemanList.splice(index, 1);
+        }
+
+        let plIndex = team.playerList.indexOf(troop)
+        if (plIndex !== -1) {
+            team.playerList.splice(plIndex, 1);
+        }
+        const scene = troop.scene;
+        if (scene?.playerTab?.onPlayerDestroyed) {
+            scene.playerTab.onPlayerDestroyed(troop);
         }
 
         if (troop.timer) {
@@ -391,5 +441,20 @@ export class Fireman {
         // Clear references
         if (troop.task) {troop.task.assigned--; troop.task = null;}
         if (troop.carrying) troop.carrying = null;
+
+        // ❗ Remove from Player.characters group
+        Player.characters.remove(troop);
+
+        // 💥 CRITICAL FIX: remove from physics world
+        if (troop.body) {
+            troop.scene.physics.world.remove(troop.body);
+            troop.body.destroy();
+        }
+
+        const ind = Player.troops.indexOf(troop);
+        if (ind !== -1) Player.troops.splice(ind, 1);
+
+        // Now safe to destroy the sprite
+        troop.destroy();
     }
 }

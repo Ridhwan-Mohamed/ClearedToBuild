@@ -16,7 +16,7 @@ import { VisibilitySystem } from "./UI/VisibilitySystem";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
-    blue: { r: 0, g: 168, b: 243 },
+    blue: { r: 60, g: 184, b: 241 },
     gray : {r: 88, g: 88, b: 88},
     brown: {r: 76, g: 43, b: 24},
     lightGray : {r: 195, g: 195, b: 195},
@@ -813,10 +813,15 @@ export class Map{
                 sprite: block
             });
             // track this crop separately
-            if(!Array.isArray(this.blocks[y*WORLD_DIMENSIONX+x])){
-                this.blocks[y*WORLD_DIMENSIONX+x].destroy()
+            const idx = y * WORLD_DIMENSIONX + x;
+            const slot = this.blocks[idx];
+
+            if (slot && !Array.isArray(slot)) {
+                // In normal (non-overview) mode this will be the old ground sprite
+                if (slot.destroy) slot.destroy();
             }
-            this.blocks[y*WORLD_DIMENSIONX+x] = null;
+            // Safe even if blocks is [] or empty at this index (overview mode)
+            this.blocks[idx] = null;
             return;  // don’t fall through into the normal blocks[] logic
         }
         else if(type.depth == BLOCKDEPTH){

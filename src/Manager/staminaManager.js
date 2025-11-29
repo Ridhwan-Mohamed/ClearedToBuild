@@ -5,6 +5,7 @@ import { buildingManager } from "./buildingManager";
 
 export class StaminaManager {
     static scene;
+    static staminaIncreaseAmnt = 0.02
 
     static updateTroop(troop) {
         // If stamina is empty → go home
@@ -13,7 +14,7 @@ export class StaminaManager {
         }
         // If sleeping → regen stamina
         if (troop.state === CONTROL_STATES.SLEEP_MODE) {
-            troop.stamina = Math.min(troop.maxStamina, troop.stamina + 0.02); // regen rate
+            troop.stamina = Math.min(troop.maxStamina, troop.stamina + this.staminaIncreaseAmnt); // regen rate
             if (troop.stamina >= troop.maxStamina) {
                 this.wakeUp(troop);
             }

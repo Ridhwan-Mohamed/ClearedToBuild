@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES } from '../constants.js';
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS } from '../constants.js';
 import { Map } from '../map.js';
 import { Teams } from '../Teams.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
@@ -24,24 +24,27 @@ export class StorageBuilding {
             // Vision bubble: keep storage area slightly visible
             this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.10 });
             // Utility light: a bit dimmer than oven
-            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 0.7 });
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 2 });
         }
 
         this.x = x;
         this.y = y;
 
+        // 🔹 NEW: per-item pickup reservations (itemName -> reserved count)
+        this.reservedPickup = {};
+
         // Store item counts (max 10 total)
         this.capacity = 16;
         this.storageItems = Array(16).fill(null);
-        // this.addItem(UI_ITEM_TYPES.unclean_water, 15);
-        this.addItem(UI_ITEM_TYPES.clean_water, 15)
+        this.addItem(UI_ITEM_TYPES.clean_water, 15);
         this.addItem(UI_ITEM_TYPES.food, 15);
-        this.addItem(UI_ITEM_TYPES.wood, 10);
+        this.addItem(UI_ITEM_TYPES.wood, 4);
         this.addItem(UI_ITEM_TYPES.stone, 10);
         this.addItem(UI_ITEM_TYPES.seedCrop, 10);
 
         // Register into the team
         Teams.teamLists[teamNumber].storageList.push(this);
+        Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.storage, this.sprite])
         //setup UI listeners
         this.sprite.setInteractive({ useHandCursor: true });
         this.sprite.on('pointerover', () => StorageUI.showMinor(this));
@@ -87,9 +90,18 @@ export class StorageBuilding {
 
         // 3. Refresh UI if needed
         if (changed) {
-            StorageUI.refreshMinor?.(this);
-            DailyNeedsTracker.AddResources(itemDef, OGAmnt - amount);
             const scene = StorageBuilding.scene;
+            StorageUI.refreshMinor?.(this);
+
+            const added = OGAmnt - amount;
+            if (added > 0) {
+                const icon = GHOST_ITEM_ICONS[itemType.name];
+                const text = `+${added} ${icon}`;
+                // teamNumber 0 ⇒ green in showGhostText
+                showGhostText(scene, this.sprite.x, this.sprite.y - 12, text, 0, 0, 0, '#00ff00');
+            }
+
+            DailyNeedsTracker.AddResources(itemDef, added);
             scene.events.emit("storage:updated", this);
         }
 
@@ -98,7 +110,6 @@ export class StorageBuilding {
 
     removeItem(itemName, amount) {
         if (!itemName || amount <= 0) return false;
-
         let remaining = amount;
         let changed = false;
 
@@ -106,7 +117,6 @@ export class StorageBuilding {
         for (let i = 0; i < this.storageItems.length; i++) {
             const slot = this.storageItems[i];
             if (!slot || slot.item.name !== itemName) continue;
-
             if (slot.amount > remaining) {
                 slot.amount -= remaining;
                 remaining = 0;
@@ -117,17 +127,19 @@ export class StorageBuilding {
                 this.storageItems[i] = null;
                 changed = true;
             }
-
             if (remaining <= 0) break;
         }
 
         // 2. Refresh UI if any slot changed
         if (changed) {
+            const icon = GHOST_ITEM_ICONS[itemName];
+            const text = `-${Math.abs(amount-remaining)} ${icon}`;
+            // teamNumber 0 ⇒ green in showGhostText
+            showGhostText(StorageBuilding.scene, this.sprite.x, this.sprite.y - 12, text, 0, 1, 0, '#ff0000');
             StorageUI.refreshMinor?.(this);
             const scene = StorageBuilding.scene;
             scene.events.emit("storage:updated", this);
         }
-
         return remaining <= 0; // true if full amount was removed
     }
 
@@ -206,6 +218,43 @@ export class StorageBuilding {
         return null; // ❌ No space found
     }
 
+    getReservedPickup(itemOrName) {
+        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
+        return this.reservedPickup[name] || 0;
+    }
+
+    reservePickup(itemOrName, amount = 1) {
+        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
+
+        // 🔒 Only reserve if there is enough unreserved stock
+        if (this.getAvailableForPickup(name) < amount) {
+            return false;
+        }
+
+        this.reservedPickup[name] = (this.reservedPickup[name] || 0) + amount;
+        return true;
+    }
+
+    releasePickup(itemOrName, amount = 1) {
+        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
+        const cur = this.reservedPickup[name] || 0;
+        const next = Math.max(0, cur - amount);
+        if (next === 0) {
+            delete this.reservedPickup[name];
+        } else {
+            this.reservedPickup[name] = next;
+        }
+    }
+
+    getAvailableForPickup(itemOrName) {
+        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
+        const itemType = UI_ITEM_TYPES[name];
+        if (!itemType) return 0;
+
+        const total = this.getItemCount(itemType);
+        const reserved = this.getReservedPickup(name);
+        return Math.max(0, total - reserved);
+    }
 
     static hasTeamMaterials(itemName, amount, teamNumber) {
         const itemDef = UI_ITEM_TYPES[itemName];

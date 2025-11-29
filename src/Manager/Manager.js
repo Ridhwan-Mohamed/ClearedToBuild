@@ -138,6 +138,70 @@ export class Manager {
         return false;
     }
 
+    static assignTaskToTroop(troop, task, state){
+        if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
+        else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
+        if(this.buildType(state)){
+            if(this.tooManyAssigned(task, state)) return;
+            if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) return; 
+            let approachTile;
+            if(state == CONTROL_STATES.BUILD_MODE_T){
+                approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
+            }else if(this.blockType(state)){
+                approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+            }
+            if(approachTile){
+                troop.roam = false;
+                Teams.movePlayerState(troop, state)
+                if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
+                troop.task = task;
+                troop.task.assigned += 1;
+                Player.moveTo(troop, approachTile.path)
+                return true;
+            }
+        }else if (state == CONTROL_STATES.TRACK_TARGET){
+            //add the logic for tracking the dipshit
+            const path = Player.pathTo(troop, task.x, task.y, false);
+            if(path){
+                troop.roam = false;
+                troop.track = [null,null];
+                troop.track[0] = task.body;
+                troop.track[1] = {x: task.x, y: task.y};
+                Player.moveTo(troop, path);
+                Teams.movePlayerState(troop, state);
+                return true;
+            }
+        }else{
+            if(this.tooManyAssigned(task, state)) return;
+            Teams.movePlayerState(troop, state)
+            troop.roam = false;
+            task.assigned += 1;
+            troop.task = task
+            let troopX = Math.floor(troop.body.x/SQUARESIZE);
+            let troopY = Math.floor(troop.body.y/SQUARESIZE);
+            if(!Map.navGrid[troopX][troopY]){
+                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                if (newX === -1) {
+                    console.log("No valid start tile nearby");
+                    return false;
+                } else {
+                    troopX = newX*SQUARESIZE+SQUARESIZE/2;
+                    troopY = newY*SQUARESIZE+SQUARESIZE/2;
+                    console.log("New valid tile:", newX, newY);
+                }
+            }else{
+                troopX = troop.x;
+                troopY = troop.y
+            }
+            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+            return true;
+        }
+        if(!Player.playerAvailible(troop)) Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        troop.play('idle');
+        troop.task = null;
+        return false;
+    }
+
     static handleDurationCheck(troop){
         if(troop.task && troop.task.hasOwnProperty('duration') && troop.task.duration <= 0){
             switch (troop.state) {

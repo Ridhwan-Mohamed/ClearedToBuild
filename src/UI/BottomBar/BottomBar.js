@@ -2,12 +2,15 @@ import ClayOvenTab from "./clayOvenTab";
 import FunctionTab from "./FunctionTab";
 import PlayerTab from "./PlayerTab";
 import StorageTab from "./storageTab";
+import CardsTab from "./CardsTab";   
 
 const COLOR_DARK = 0x260e04;
 const COLOR_FUNCTIONS = 0x800080;  // Purple
 const COLOR_PLAYERS  = 0x008000;  // Green
 const COLOR_OVENS    = 0xff0000;  // Red
 const COLOR_STORAGE  = 0x8B4513;  // Brown
+const COLOR_CARDS    = 0xFFD700;     // gold for cards
+
 // after EXPANDED/COLLAPSED:
 const COLLAPSED = 32;     // how much of the bar stays visible when hidden
 const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
@@ -22,19 +25,26 @@ export function CreateBottomBar(scene) {
 
     const tabs  = ui.getElement('tabs');
     const pages = ui.getElement('pages');
-    scene.uiBottomBar = { ui, pages: ui.getElement('pages') };~
+    scene.uiBottomBar = { ui, pages: ui.getElement('pages') };
+    scene.uiBottomBar.currentPage = 'functions';    // 🔹 track current page key
 
     // click a tab -> swap page
     tabs.on('button.click', (btn) => {
         const key = btn?.name;
         if (key) {
             pages.swapPage(key);
+            scene.uiBottomBar.currentPage = key;
 
             if (key !== 'players' && scene.playerTab?.detailCard?.portrait) {
                 scene.playerTab.detailCard.portrait.setVisible(false);
             }
             if (key !== 'ovens' && scene.clayTab) scene.clayTab.hide();
             if (key !== 'storage' && scene.storageTab) scene.storageTab.hide();
+
+            // ⭐ when specific tabs are opened, force a refresh + auto-select
+            if (key === 'ovens'   && scene.clayTab?.onShow)    scene.clayTab.onShow();
+            if (key === 'storage' && scene.storageTab?.onShow) scene.storageTab.onShow();
+            if (key === 'players' && scene.playerTab?.onShow)  scene.playerTab.onShow();
         }
     });
 
@@ -76,19 +86,26 @@ export function CreateBottomBar(scene) {
     scene.openDetailPage = function(pageKey, callback) {
         const bar = scene.uiBottomBar;
         if (!bar) return;
-        // Always swap to the requested page
+
         bar.pages.swapPage(pageKey);
+        bar.currentPage = pageKey;
+
         if (!bar.expanded) scene.setBottomBar(true);
-        // Handle mismatched tab names
+
+        // 🔹 Ensure relevant tab gets its onShow() hook
+        if (pageKey === 'ovens'   && scene.clayTab?.onShow)    scene.clayTab.onShow();
+        if (pageKey === 'storage' && scene.storageTab?.onShow) scene.storageTab.onShow();
+        if (pageKey === 'players' && scene.playerTab?.onShow)  scene.playerTab.onShow();
+
         let tab = bar.pages[pageKey + 'Tab'] 
             || bar.pages.tabs?.[pageKey]
-            || (pageKey === 'ovens' ? bar.pages.clayTab : null)
-            || (pageKey === 'storage' ? bar.pages.storageTab : null)
+            || (pageKey === 'ovens'   ? bar.pages.clayTab    : null)
+            || (pageKey === 'storage' ? bar.pages.storageTab: null)
             || (pageKey === 'players' ? bar.pages.playerTab : null)
             || null;
+
         if (callback && tab) callback(tab);
     };
-
 
     // 🔹 space bar toggle
     scene.input.keyboard.on('keydown-SPACE', () => {
@@ -101,9 +118,12 @@ export function CreateBottomBar(scene) {
         const key = btn?.name;
         if (key) {
             pages.swapPage(key);
+            scene.uiBottomBar.currentPage = key;   // 🔹 keep it in sync
             if (!expanded) setBottomBar(true);
 
-            if (key !== 'players') PlayerTab.hidePortrait();
+            if (key !== 'players') {
+                scene.playerTab?.hidePortrait();
+            }
         }
     });
 
@@ -130,7 +150,6 @@ export function CreateBottomBar(scene) {
     // hide from main camera
     scene.cameras.main.ignore(ui);
 }
-
 
 var CreateTabPage = function (scene) {
     const sizer = scene.rexUI.add.sizer({
@@ -165,6 +184,7 @@ var CreateButtons = function (scene) {
       CreateLabel(scene, 'Players',   COLOR_PLAYERS,   TAB_W).setName('players'),
       CreateLabel(scene, 'Clay Ovens',COLOR_OVENS,     TAB_W).setName('ovens'),
       CreateLabel(scene, 'Storage',   COLOR_STORAGE,   TAB_W).setName('storage'),
+      CreateLabel(scene, 'Cards',      COLOR_CARDS,     TAB_W).setName('cards'),   
     ],
     buttonsType: 'radio'
   });
@@ -185,15 +205,13 @@ var CreateLabel = function (scene, text, color, width) {
       fontSize: 16,
       color: Phaser.Display.Color.IntegerToColor(color).rgba, // colored text
       fontStyle: 'bold',
-      stroke: '#ffffff',         // white outline for contrast
+      stroke: '#000000',         // white outline for contrast
       strokeThickness: 3,
     }),
 
     space: { left: 12, right: 8, top: 4, bottom: 4 }
   });
 };
-
-
 
 var CreatePages = function (scene) {
     const pages = scene.rexUI.add.pages({ fadeDuration: 500 })
@@ -204,19 +222,21 @@ var CreatePages = function (scene) {
     pages.add(playerTab.view, { key: 'players', expand: true });
     scene.playerTab = playerTab;
 
-    // 🔥 New Clay Ovens tab
     const clayTab = new ClayOvenTab(scene);
     pages.add(clayTab.view, { key: 'ovens', expand: true });
+    scene.clayTab = clayTab;
 
-    // keep your other pages (e.g., storage)
     const storageTab = new StorageTab(scene);
     pages.add(storageTab.view, { key: 'storage', expand: true });
     pages.storageTab = storageTab;
-    // 🔥 call refresh once (for your current team 0)
+    scene.storageTab = storageTab;
     storageTab.refresh(1);
 
-    // optional: expose for debugging
-    pages.clayTab = clayTab;
+    const cardsTab = new CardsTab(scene);                        
+    pages.add(cardsTab.view, { key: 'cards', expand: true });    
+    scene.cardsTab = cardsTab;                                   
+
+    pages.clayTab   = clayTab;
     pages.playerTab = playerTab;
 
     return pages;

@@ -11,6 +11,9 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
  
 export class Forager {
 
+    static speed = 80;
+    static stamina = 0.02;
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
         sprite.setInteractive();
@@ -21,14 +24,13 @@ export class Forager {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
-        sprite.baseSpeed = sprite.speed;
         sprite.setTint(0x228B22); // greenish tint for foragers
         sprite.unitTint = 0x228B22;
         sprite.body.pushable = false;
         sprite.animState = 'idle';
+        sprite.type = Forager;
         sprite.walk = 'walk';
         sprite.idle = 'idle';
         sprite.action = 'action';
@@ -69,25 +71,50 @@ export class Forager {
         const team = Teams.teamLists[teamNumber];
         if (!team?.foragerList) return;
 
+        let plIndex = team.playerList.indexOf(troop)
+        if (plIndex !== -1) {
+            team.playerList.splice(plIndex, 1);
+        }
+        const scene = troop.scene;
+        if (scene?.playerTab?.onPlayerDestroyed) {
+            scene.playerTab.onPlayerDestroyed(troop);
+        }
+
         const index = team.foragerList.indexOf(troop);
         if (index !== -1) {
             team.foragerList.splice(index, 1);
         }
 
-        // Clear any active timers or tasks
+        // Kill timers
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
         }
 
+        // Remove FoW bubble
         if (troop.visionId != null) {
             VisibilitySystem.removeVisionBubble(troop.visionId);
             troop.visionId = null;
         }
 
-        // Clear references
-        if (troop.task) {troop.task.assigned--; troop.task = null;}
-        if (troop.carrying) troop.carrying = null;
+        // Clear tasks
+        if (troop.task) { troop.task.assigned--; troop.task = null; }
+        troop.carrying = null;
+
+        // ❗ Remove from Player.characters group
+        Player.characters.remove(troop);
+
+        // 💥 CRITICAL FIX: remove from physics world
+        if (troop.body) {
+            troop.scene.physics.world.remove(troop.body);
+            troop.body.destroy();
+        }
+
+        const ind = Player.troops.indexOf(troop);
+        if (ind !== -1) Player.troops.splice(ind, 1);
+
+        // Now safe to destroy the sprite
+        troop.destroy();
     }
 
 }

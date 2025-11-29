@@ -2,7 +2,6 @@
 // Smooth pointer-centric zoom with crossfade between detailed and overview layers.
 
 import { colorFor, UIDEPTH } from "../constants";
-import { Clock } from "../Controllers/Clock";
 import { Map } from "../map";
 import { Player } from "../players/Player";
 
@@ -99,6 +98,38 @@ export class ZoomMixer {
 
     // Make sure UI camera doesn't render the overlay
     scene.uiCamera?.ignore(this.overviewImage);
+  }
+
+  updateOverviewCell(gridX, gridY, grid, lenx=1, leny=1) {
+      const scene = ZoomMixer.scene;
+      if (!scene) return;
+
+      // Prefer explicit texKey, fall back to overviewImage’s texture key
+      const texKey =
+          this.texKey ||
+          (this.overviewImage && this.overviewImage.texture && this.overviewImage.texture.key);
+
+      if (!texKey || !scene.textures.exists(texKey) || !this.overviewImage) {
+          // nothing to update yet – don’t try to rebuild here, just bail
+          return;
+      }
+
+      const tex = scene.textures.get(texKey);
+      const canvas = tex.getSourceImage();
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // If you need the cell value, use the passed grid (or Map.grid)
+      const val = grid
+          ? (Array.isArray(grid[gridY][gridX]) ? grid[gridY][gridX][1] : grid[gridY][gridX])
+          : null;
+
+      const color = colorFor(val);
+      ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
+      ctx.fillRect(gridX, gridY, lenx, leny);
+      
+      tex.refresh();
+      tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 
   // Zoom to targetZoom around the camera center (no pointer reference)

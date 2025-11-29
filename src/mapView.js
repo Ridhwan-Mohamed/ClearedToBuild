@@ -70,11 +70,13 @@ import mediumMiddlePine from 'url:../assets/trees/mediumMiddlePine.png';
 import mediumTopPine from 'url:../assets/trees/mediumTopPine.png';
 import { PineTree } from './buildings/pineTree.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
+import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
 
 export class mapView extends Phaser.Scene {
+
     constructor() {
         super('mapView');
         mapView.scene = this;
@@ -166,6 +168,7 @@ export class mapView extends Phaser.Scene {
         HouseUI.init(this);
         MainMenu.attach(this);
         PineTree.init(this);
+        loadCardData(this);
     }
 
     create() {
@@ -195,10 +198,10 @@ export class mapView extends Phaser.Scene {
         this.scale.on('resize', ({ width, height }) => this.uiCamera.setSize(width, height));
 
         // Bind menu to this scene and build menu UI (grid, towns, icons, Play)
+
         MainMenu.startMenuPhase();
         setupTownBoundsToggle(this);
         this.cursors = this.input.keyboard.createCursorKeys();
-        recalculateDestroyTasksFromPoint();
         // Add collision between the cube and the barriers
         // this.physics.add.collider(characters, Map.barrier);
         // this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
@@ -576,7 +579,6 @@ export class mapView extends Phaser.Scene {
                     }
                 }
             }
-            tillManager.assignTilesToTroops(1)
         }
         else if(mode == 2){
             let cropList = Teams.teamLists['1'].cropList;
@@ -980,7 +982,7 @@ const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#00a8f3',
+    backgroundColor: '#3cb8f1',
     scene: [mapView, itemTab],
     scale: {
         mode: Phaser.Scale.RESIZE,

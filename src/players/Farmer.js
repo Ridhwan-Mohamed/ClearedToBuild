@@ -10,8 +10,14 @@ import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 
 export class Farmer {
+
+    static speed = 80;
+    static stamina = 0.02;
+    static maxWaterPailCarry = 3;
+
     constructor(x, y, teamNumber) {
         const farmer = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, 'player');
         farmer.setInteractive();
@@ -23,10 +29,9 @@ export class Farmer {
         farmer.currentPath = []
         farmer.body.team = teamNumber;
         farmer.health = 100;
-        farmer.speed = 100
         farmer.stamina = 100;
         farmer.maxStamina = 100;
-        farmer.baseSpeed = farmer.speed;
+        farmer.type = Farmer;
         farmer.setTint(0x8B5A2B)
         farmer.unitTint = 0x8B5A2B;
         farmer.body.pushable = false;
@@ -38,6 +43,7 @@ export class Farmer {
         farmer.carrying = null;
         farmer.waterBucket = {count: 0};
         farmer.oldState = null;
+        farmer.pendingFarmSpot = null;
         ZoomMixer.createPlayerMoniker(farmer);
         Teams.movePlayerState(farmer, CONTROL_STATES.TRACK_MODE);
         farmer.weapon = weapons.hands;
@@ -58,23 +64,115 @@ export class Farmer {
         // 1.5. check for nearby enemies and flee in case.
         Player.updateTracking(troop);
         const teamData = Teams.teamLists[troop.body.team];
-        // 2. if carrying, go and store
-        if(StorageManager.isCarrying(troop)){
+
+        // ---- Carry state / seed detection ----
+        const isCarryingAnything = StorageManager.isCarrying(troop);
+        const carrying = troop.carrying;
+        const seedItemType = UI_ITEM_TYPES.seedCrop;     // <-- seed item used for planting
+        const carryingSeeds = (carrying && carrying === seedItemType);
+
+        // 2. If carrying something that is NOT seeds, send it to storage as before
+        if (isCarryingAnything && !carryingSeeds) {
             const assigned = StorageManager.tryCreateStorageDeliveryTask(troop);
-            if(assigned) return;
+            if (assigned) return;
         }
-        // 3. Harvest ready crops
+
+        // 3. Harvest ready crops (same logic as before, but we keep it before tilling)
         const readyCrop = teamData.TeamFarmSpots?.[0];
-        if (readyCrop && !StorageManager.isCarrying(troop)) {
-            const isHarvesting = Manager.assignOneTroopToAction(troop, Teams.teamLists[troop.body.team].TeamFarmSpots, CONTROL_STATES.R_FARM_MODE);
-            if(isHarvesting) return;
+        if (readyCrop && !isCarryingAnything) {
+            const isHarvesting = Manager.assignOneTroopToAction(
+                troop,
+                Teams.teamLists[troop.body.team].TeamFarmSpots,
+                CONTROL_STATES.R_FARM_MODE
+            );
+            if (isHarvesting) return;
         }
-        // 3.5. Check if plotting is needed
-        const tillSpots = teamData.tileList
-        if(tillSpots.length){
-            const isFarming = Manager.assignOneTroopToAction(troop, tillSpots, CONTROL_STATES.FARM_MODE);
-            if(isFarming) return
+
+        // 3.5. Tilling / planting flow:
+        //  - Find an unreserved till spot
+        //  - Mark it reserved by this farmer (so only 1 farmer per tile)
+        //  - Create a storage pickup job for seeds
+        //  - After seeds are picked up, come back and FARM that exact tile
+
+        const tillSpots = teamData.tileList || [];
+
+        // --- Case A: we already have a reserved till spot ---
+        if (troop.pendingFarmSpot) {
+            const plot = troop.pendingFarmSpot;
+
+            // If we already fetched seeds, go plant this specific spot
+            if (carryingSeeds) {
+                if (plot.reservedBy === troop) delete plot.reservedBy;
+                troop.pendingFarmSpot = null;
+
+                Manager.assignTaskToTroop(
+                    troop,
+                    plot,
+                    CONTROL_STATES.FARM_MODE
+                );
+                return;
+            }
+
+            // No seeds yet: try to create a pickup job for seeds
+            const gotPickup = StorageManager.tryCreateStoragePickupTask(
+                troop,
+                seedItemType
+            );
+            if (gotPickup) return;
+
+            // If no seeds available at all, release the reservation so the tile
+            // can be used later when seeds exist.
+            if (plot.reservedBy === troop) delete plot.reservedBy;
+            troop.pendingFarmSpot = null;
+            // fall through to watering / roaming
+        } else {
+            // --- Case B: no reserved till spot yet: try to claim one ---
+            if (tillSpots.length) {
+                // "unassigned" here = not reserved & not already at max workers
+                const spot = tillSpots.find(
+                    (s) => !s.reservedBy && !Manager.tooManyAssigned(s, 1)
+                );
+
+                if (spot) {
+                    // Reserve this tile for this farmer only
+                    spot.reservedBy = troop;
+                    troop.pendingFarmSpot = spot;
+
+                    // If we already have seeds on us (e.g. leftover from previous run),
+                    // just go plant immediately.
+                    if (carryingSeeds) {
+                        if (spot.reservedBy === troop) delete spot.reservedBy;
+                        troop.pendingFarmSpot = null;
+
+                        Manager.assignTaskToTroop(
+                            troop,
+                            spot,
+                            CONTROL_STATES.FARM_MODE
+                        );
+                        return;
+                    }
+
+                    // Otherwise: go fetch seeds from storage
+                    const gotPickup = StorageManager.tryCreateStoragePickupTask(
+                        troop,
+                        seedItemType
+                    );
+                    if (gotPickup) {
+                        return;
+                    }else{
+                        spot.reservedBy = null;
+                        troop.pendingFarmSpot = null;
+                    }
+
+                    // If no seeds can be picked up right now, we keep the reservation
+                    // for a bit so this farmer will keep trying once storage has seeds.
+                    // If you want to immediately release it on failure, uncomment:
+                    // if (spot.reservedBy === troop) delete spot.reservedBy;
+                    // troop.pendingFarmSpot = null;
+                }
+            }
         }
+
         // 4. Water crops
         const cropNeedingWater = Teams.getCropsNeedingWater(troop.body.team);
         if (cropNeedingWater.length) {
@@ -134,7 +232,7 @@ export class Farmer {
     }
     
     static giveTroopWater(sprite){
-        sprite.waterBucket = { count: 3 };
+        sprite.waterBucket = { count: this.maxWaterPailCarry };
         sprite.task = null;
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
     }
@@ -145,6 +243,15 @@ export class Farmer {
         // Remove from farmerList
         const index = teamList.farmerList.indexOf(farmer);
         if (index !== -1) teamList.farmerList.splice(index, 1);
+
+        let plIndex = teamList.playerList.indexOf(farmer)
+        if (plIndex !== -1) {
+            teamList.playerList.splice(plIndex, 1);
+        }
+        const scene = farmer.scene;
+        if (scene?.playerTab?.onPlayerDestroyed) {
+            scene.playerTab.onPlayerDestroyed(farmer);
+        }
 
         // Clear references
         if (farmer.task) {farmer.task.assigned--; farmer.task = null;}
@@ -159,5 +266,20 @@ export class Farmer {
             farmer.timer.remove(false);
             farmer.timer = null;
         }
+
+        // ❗ Remove from Player.characters group
+        Player.characters.remove(farmer);
+
+        // 💥 CRITICAL FIX: remove from physics world
+        if (farmer.body) {
+            farmer.scene.physics.world.remove(farmer.body);
+            farmer.body.destroy();
+        }
+
+        const ind = Player.troops.indexOf(farmer);
+        if (ind !== -1) Player.troops.splice(ind, 1);
+
+        // Now safe to destroy the sprite
+        farmer.destroy();
     }
 }

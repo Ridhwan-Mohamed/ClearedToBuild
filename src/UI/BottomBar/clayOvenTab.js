@@ -1,5 +1,5 @@
 // ClayOvenTab.js
-import { showAlert, UIDEPTH } from "../../constants";
+import { showAlert, TILE_TYPES, UIDEPTH } from "../../constants";
 import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
 
@@ -12,7 +12,6 @@ export default class ClayOvenTab {
 
     // 🔥 map ovens to their UI rows
     this.cardByOven = new Map();
-
     this.root = this.build();
 
     // live detail refresh still ok
@@ -21,12 +20,20 @@ export default class ClayOvenTab {
 
     // 🔊 listen for oven lifecycle
     this._onOvenUpdated = (oven) => {
-      const isActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('ovens');
-      if (!isActive) return; // 🛑 skip if tab hidden
       if (!oven || oven.teamNumber !== this.team) return;
 
+      const current = this.scene.uiBottomBar?.currentPage;
+
+      // 🔒 Only touch UI if the ovens tab is actually open
+      if (current !== 'ovens') return;
+
+      // Keep the row UI in sync with the oven state (only when tab is open)
       this.updateCard(oven);
-      if (this.selected === oven) this.detail.setOven(oven);
+
+      // And only touch detail panel if this oven is selected
+      if (this.selected === oven && this.detail?.setOven) {
+        this.detail.setOven(oven);
+      }
     };
     this._onOvenAdded = (oven) => {
       if (!oven || oven.teamNumber !== this.team) return;
@@ -63,16 +70,13 @@ export default class ClayOvenTab {
     scene.events.on('oven:removed', this._onOvenRemoved);
   }
 
-
   get view() { return this.root; }
 
   hide() {
     this.selected = null;
-
     // Hide or clear detail panel
     if (this.detail?.setOven) this.detail.setOven(null);
     if (this.detail?.setStorage) this.detail.setStorage(null);
-
     // Hide any visible count texts / icons
     if (this.detail?.cells) {
       this.detail.cells.forEach(c => {
@@ -85,8 +89,24 @@ export default class ClayOvenTab {
         if (child.setVisible) child.setVisible(false);
       });
     }
+    // Hide icons & counters inside each oven card
+    for (const [oven, row] of this.cardByOven.entries()) {
+      if (!row?.userData) continue;
+      // hide cook slot counters/icons
+      row.userData.cookIcons?.forEach(ic => {
+        ic?.setVisible(false);
+        ic?.children?.map?.forEach?.(ch => ch.setVisible(false)); // icon + text
+      });
+      // hide output slot counters/icons
+      row.userData.outIcons?.forEach(ic => {
+        ic?.setVisible(false);
+        ic?.children?.map?.forEach?.(ch => ch.setVisible(false));
+      });
+      // hide fuel text/icon
+      row.userData.fuelValueText?.setVisible(false);
+      row.userData.fuelBadge?.setVisible?.(false);
+    }
   }
-
 
   destroy() {
     this.scene.events.off('update', this._update);
@@ -217,6 +237,9 @@ export default class ClayOvenTab {
       rows.push({ cook, prog, out });
       cook.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
         this.openJobEditor(this.selected, i);
+      });
+      out.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+        this.queueOvenOutputPickup(this.selected, i);
       });
     }
 
@@ -378,6 +401,76 @@ export default class ClayOvenTab {
     return row;
   }
 
+  queueOvenOutputPickup(oven, idx) {
+    if (!oven) return;
+
+    const team = Teams.teamLists[this.team];
+    if (!team) return;
+
+    const slot = oven.outputSlots?.[idx];
+    if (!slot || !slot.item || slot.amount <= 0) {
+        showAlert(this.scene, 'Nothing to pick up in that slot.');
+        return;
+    }
+
+    const jobs = team.ovenPickupJobs || (team.ovenPickupJobs = []);
+
+    // Don't double-queue a live job for this oven/output slot
+    const existing = jobs.find(j =>
+        j.oven === oven &&
+        j.outputidx === idx &&
+        j.taskType === 'ovenPickup' &&
+        j.amount > j.assigned
+    );
+
+    if (existing) {
+        showAlert(this.scene, 'Pickup is already queued for this slot.');
+        return;
+    }
+
+    // Create a job for the current amount in that slot
+    jobs.push({
+        oven,
+        outputidx: idx,
+        x: oven.x,
+        y: oven.y,
+        type: TILE_TYPES.clayOven, // same shape as auto-created tasks
+        assigned: 0,
+        amount: slot.amount,
+        taskType: 'ovenPickup'
+    });
+
+    // Let UI/others know oven state changed
+    this.scene.events.emit('oven:updated', oven);
+  }
+
+  onShow() {
+    // Called when the Clay Ovens tab becomes visible
+    const team = Teams.teamLists[this.team];
+    if (!team) return;
+
+    const ovens = team.ovenList || [];
+
+    // If nothing selected (or old selection is gone), pick the first oven
+    if (!this.selected || !ovens.includes(this.selected)) {
+      if (ovens[0]) {
+        this.selectOven(ovens[0]);
+      } else {
+        this.selected = null;
+        if (this.detail?.setOven) this.detail.setOven(null);
+        return;
+      }
+    } else if (this.detail?.setOven) {
+      // Ensure detail panel is synced with existing selection
+      this.detail.setOven(this.selected);
+    }
+
+    // Refresh every row from current oven state
+    ovens.forEach((oven) => {
+      this.updateCard(oven);
+    });
+  }
+
   // ---------- BEHAVIOR ----------
   selectOven(oven) {
     this.selected = oven;
@@ -455,6 +548,13 @@ export default class ClayOvenTab {
 
     let amount = 1;
 
+    // 🔹 CREATE BACKGROUND FIRST so it’s behind everything
+    const tbBg = scene.rexUI.add.roundRectangle(
+      0, 0, 0, 0, 6, 0x333333, 1
+    );
+    // optional: force it behind by depth, if you want
+    tbBg.setDepth(-1);
+
     // make sure toolbar/text aren’t inheriting any opacity
     const white = { fontSize: 13, color: '#ffffff' };
     const itemText = scene.add.text(0,0,itemKey, white).setAlpha(1);
@@ -483,7 +583,7 @@ export default class ClayOvenTab {
     const mkBtn = (txt, bg) => this.scene.rexUI.add.label({
       text: this.scene.add.text(0,0,txt,{ fontSize: 12, color:'#ffffff' }),
       space:{ left:10,right:10,top:6,bottom:6 },
-      background: scene.rexUI.add.roundRectangle(0,0,0,0,6,0x000000)
+      background: scene.rexUI.add.roundRectangle(0,0,0,0,6,0x000000, 0.2)
     }).setMinSize(84, 28);// label factory
 
     const lbl = (t)=> this.scene.add.text(0,0,t,{ fontSize:12, color:'#ffffff' });
@@ -529,8 +629,7 @@ export default class ClayOvenTab {
             })
         : null;
 
-    // --- toolbar background (behind buttons only)
-    const tbBg = this.scene.rexUI.add.roundRectangle(0,0,0,0,6,0x333333,0.5);
+    // main toolbar with buttons
     const toolbar = this.scene.rexUI.add.sizer({
       orientation: 'x',
       space: { left: 8, right: 8, top: 8, bottom: 8, item: 10 },
@@ -546,16 +645,21 @@ export default class ClayOvenTab {
     if (endBtn) toolbar.add(endBtn, 0, 'center', 0, false);
     toolbar.add(cancelBtn, 0, 'center', 0, false);
 
-    // --- popup background (modal dim layer)
-    const popup = this.scene.rexUI.add.overlapSizer();
-    this.jobPopup = popup;
-    popup.addBackground(tbBg).add(toolbar, { align: 'center' });
+    // 🔧 use a simple sizer instead of overlapSizer for the popup
+    const popup = this.scene.rexUI.add.sizer({
+      orientation: 'x',
+      space: { left: 8, right: 8, top: 8, bottom: 8 }
+    })
+      .addBackground(tbBg)
+      .add(toolbar, { proportion: 1, expand: true });
 
-    scene.cameras.main.ignore([popup, toolbar])
+    this.jobPopup = popup;
+
+    scene.cameras.main.ignore([popup, toolbar]);
 
     // float & layout
     this.scene.add.existing(popup);
-    popup.setDepth(UIDEPTH+100).layout();
+    popup.setDepth(UIDEPTH + 100).layout();
     this.positionJobPopup(popup);
 
     // click-away blocker (kept below popup)
@@ -654,6 +758,11 @@ export default class ClayOvenTab {
     const rr = (w,h,r,c)=>scene.rexUI.add.roundRectangle(0,0,w,h,r,c);
     let amount = 5;
 
+    // --- popup container with background panel ---
+    const bgPanel = scene.rexUI.add.roundRectangle(
+      0, 0, 300, 110, 10, 0x333333, 1 // 🟩 semi-transparent black
+    ).setStrokeStyle(2, 0xffffff, 0.2);   // thin white border
+
     const amtText = scene.add.text(0,0,String(amount),{fontSize:14,color:'#fff'});
     const dec = scene.rexUI.add.label({ text: scene.add.text(0,0,'−',{fontSize:16,color:'#fff'}) })
       .setInteractive().on('pointerup',()=>{amount=Math.max(1,amount-1);amtText.setText(amount);});
@@ -675,15 +784,10 @@ export default class ClayOvenTab {
       space:{left:10,right:10,top:6,bottom:6}
     }).setInteractive().on('pointerup',()=>this.closeJobEditor());
 
-    const toolbar = scene.rexUI.add.sizer({orientation:'x',space:{item:8}})
+    const toolbar = scene.rexUI.add.sizer({orientation:'x',space:{left:10,right:10,item:8}})
       .add(scene.add.text(0,0,'Fuel:',{fontSize:12,color:'#fff'}))
       .add(dec).add(amtText).add(inc)
       .add(startBtn).add(cancelBtn);
-
-    // --- popup container with background panel ---
-    const bgPanel = scene.rexUI.add.roundRectangle(
-      0, 0, 280, 110, 10, 0x000000, 0.85 // 🟩 semi-transparent black
-    ).setStrokeStyle(2, 0xffffff, 0.2);   // thin white border
 
     const popup = scene.rexUI.add.overlapSizer({
       width: 280,
@@ -733,8 +837,6 @@ export default class ClayOvenTab {
     this.scene.events.emit('oven:updated', oven);
   }
 
-
-
   // ---------- Behavior ----------
   selectOven(oven) {
     this.selected = oven;
@@ -748,10 +850,9 @@ export default class ClayOvenTab {
   }
 
   update() {
-    const isActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('ovens');
-    if (!isActive || !this.selected) return;
+    const current = this.scene.uiBottomBar?.currentPage;
+    if (current !== 'ovens' || !this.selected) return;
 
     this.detail.setOven(this.selected);
   }
-
 }

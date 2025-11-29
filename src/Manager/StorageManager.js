@@ -45,34 +45,47 @@ export class StorageManager {
     }
 
     static tryCreateStoragePickupTask(troop, itemType) {
-        const storages = Teams.teamLists[troop.body.team].storageList;
-        for (const storage of storages) {
-            const amount = storage.getItemCount(itemType);
-            if (amount <= 0) continue;
+        const team = Teams.teamLists[troop.body.team];
+        if (!team) return false;
 
-            const existingTask = Teams.teamLists[troop.body.team].storagePickupItems.find(task =>
-                task.storage === storage && task.item.name === itemType.name
+        const storages = team.storageList;
+        if (!storages || storages.length === 0) return false;
+
+        for (const storage of storages) {
+            // how many of this item are actually free to be picked up?
+            const available = storage.getAvailableForPickup(itemType);
+            if (available <= 0) continue;
+
+            // one-shot task just for this troop
+            const task = {
+                type: TILE_TYPES.storage,
+                x: storage.x,
+                y: storage.y,
+                storage,
+                item: itemType,
+                assigned: 0,   // Manager will bump this to 1
+                amount: 1,     // for Manager.tooManyAssigned(GET_FROM_STORAGE)
+                taskType: 'storagePickup'
+            };
+
+            // 🔒 Try to reserve 1 unit; if someone else grabbed it between
+            // available-check and now, this will fail and we move on.
+            const reserved = storage.reservePickup(itemType, 1);
+            if (!reserved) continue;
+
+            // try to send the troop there; if pathing fails, undo reservation and try another storage
+            const ok = Manager.assignTaskToTroop(
+                troop,
+                task,
+                CONTROL_STATES.GET_FROM_STORAGE
             );
 
-            if (existingTask) {
-                if (existingTask.assigned >= amount) continue;
-                troop.task = existingTask;
-            } else {
-                const newTask = {
-                    type: TILE_TYPES.storage,
-                    x: storage.x,
-                    y: storage.y,
-                    storage,
-                    item: itemType,
-                    assigned: 0,
-                    remaining: amount,
-                    taskType: 'storagePickup'
-                };
-                Teams.teamLists[troop.body.team].storagePickupItems.push(newTask);
-                troop.task = newTask;
+            if (!ok) {
+                storage.releasePickup(itemType, 1);
+                continue;
             }
-            
-            return Manager.assignOneTroopToAction(troop, Teams.teamLists[troop.body.team].storagePickupItems, CONTROL_STATES.GET_FROM_STORAGE);
+
+            return true;
         }
 
         return false;
@@ -116,47 +129,59 @@ export class StorageManager {
             return;
         }
 
-        const taken = task.storage.removeItem(task.item.name, 1);
+        const storage = task.storage;
+
+        // Actually try to take 1 item
+        const taken = storage.removeItem(task.item.name, 1);
+
+        // Whatever happens, release the reservation
+        storage.releasePickup(task.item, 1);
+
         if (!taken) {
-            // Item was stolen by another troop, cancel
-            task.assigned--;
-            task.remaining--;
-            if (task.remaining <= 0 || task.assigned <= 0) {
-                Teams.removeFromStateArray(troop.body.team, 'storagePickupItems', task);
-            }
+            // Item was already used or removed by something else
+                console.error("Failed to take form storage, STORAGE ALLOC ERROR")
             troop.task = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             return;
         }
-        
+
+        // We successfully got one unit
         DailyNeedsTracker.updateUIItems(task.item, 1, true);
         this.addCarriedItem(troop, task.item);
 
-        task.assigned--;
-        task.remaining--;
-
-        if (task.remaining <= 0) {
-            Teams.removeFromStateArray(troop.body.team, 'storagePickupItems', task);
-        }
-
-        if (troop.isFireman){
-            //Hack fix for fuel
-            let assigned;
+        if (troop.isFireman) {
+            // 🔥 fuel run: wood for an oven fuel job
             if (troop.pendingFuelJob && troop.carrying === UI_ITEM_TYPES.wood) {
-                    Fireman.goRefuelOven(troop, troop.pendingFuelJob);
-                    return;
+                Fireman.goRefuelOven(troop, troop.pendingFuelJob);
+                return;
             }
-            else{
-                assigned = troop.pendingOvenJob
-                    ? Fireman.maybeAssignOvenJobDelivery(troop, troop.pendingOvenJob, task.item)
-                    : false;
-            }
-            if (!assigned) {
-                troop.task = null;
-                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+
+            // regular oven ingredient delivery
+            Fireman.maybeAssignOvenJobDelivery(troop, troop.pendingOvenJob, task.item);
+        } 
+        else if (troop.isFarmer) {
+            //if pending job go check if you can do it
+            if (troop.pendingFarmSpot) {
+                const plot = troop.pendingFarmSpot;
+                // If we already fetched seeds, go plant this specific spot
+                if (plot.reservedBy === troop) delete plot.reservedBy;
+                troop.pendingFarmSpot = null;
+                const canFarm = Manager.assignTaskToTroop(
+                    troop,
+                    plot,
+                    CONTROL_STATES.FARM_MODE
+                );
+                if(!canFarm){
+                    console.error("Failed to farm after seed pickup, FARM PATH ERROR")
+                    StorageManager.tryCreateStorageDeliveryTask(troop);
+                    troop.pendingFarmSpot.assigned = 0;
+                    troop.pendingFarmSpot = null;
+                    troop.task = null;
+                }
+                return;
             }
         }
-        else{
+        else {
             troop.task = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         }

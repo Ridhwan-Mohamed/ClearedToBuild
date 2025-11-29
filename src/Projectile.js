@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { CONTROL_STATES, SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
+import { CONTROL_STATES, showGhostText, SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
 import { Map } from "./map";
 import { fightManager } from "./Manager/fightManager";
 import { Player } from "./players/Player";
@@ -85,7 +85,7 @@ export class Projectile {
                 projectile.player.timer = null;
                 Player.setAnimState(projectile.player, projectile.player.idle);
             }
-            fightManager.showGhostText(
+            showGhostText(
                 Projectile.scene,
                 target.x,
                 target.y - 10,
@@ -94,7 +94,7 @@ export class Projectile {
                 result.isCrit           // ✅ crit flag
             );
         } else {
-            fightManager.showGhostText(
+            showGhostText(
                 Projectile.scene,
                 target.x,
                 target.y - 10,

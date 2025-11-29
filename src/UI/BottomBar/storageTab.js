@@ -2,7 +2,6 @@
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
 
-
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
     this.scene = scene;
@@ -41,11 +40,20 @@ export default class StorageTab {
     };
 
     this._onUpdated = (storage) => {
-      const isActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('storage');
-      if (!isActive) return; // 🛑 skip if tab hidden
       if (!storage || storage.teamNumber !== this.team) return;
+
+      const current = this.scene.uiBottomBar?.currentPage;
+
+      // 🔒 Only touch UI if the Storage tab is actually open
+      if (current !== 'storage') return;
+
+      // Keep the row UI in sync with the storage state (only when tab is open)
       this.updateCard(storage);
-      if (this.selected === storage) this.detail.setStorage(storage);
+
+      // And only touch the detail panel if this storage is selected
+      if (this.selected === storage && this.detail?.setStorage) {
+        this.detail.setStorage(storage);
+      }
     };
 
     this._onResize = () => this.scroll.layout();
@@ -183,6 +191,30 @@ export default class StorageTab {
     return { panel, setStorage };
   }
 
+  //refresh logic
+  onShow() {
+    const team = Teams.teamLists[this.team];
+    const storages = team?.storageList || [];
+
+    // If nothing selected (or old selection is gone), pick the first storage
+    if (!this.selected || !storages.includes(this.selected)) {
+      if (storages[0] && typeof this.selectFromCard === 'function') {
+        // Use existing selection logic so rows highlight correctly
+        this.selectFromCard(storages[0]);
+      } else {
+        this.selected = null;
+        if (this.detail?.setStorage) this.detail.setStorage(null);
+        return;
+      }
+    } else if (this.detail?.setStorage) {
+      // Ensure detail panel is synced with existing selection
+      this.detail.setStorage(this.selected);
+    }
+
+    // Refresh every row from current storage state
+    storages.forEach((s) => this.updateCard(s));
+  }
+
   // ---------- CARD LIST ----------
   rebuildList() {
     const storages = Teams.teamLists['1']?.storageList || [];
@@ -309,12 +341,10 @@ export default class StorageTab {
   }
 
   update() {
-    // Only refresh detail panel if storage tab is visible
-    const isStorageTabActive = this.scene.uiBottomBar?.pages?.isCurrentPage?.('storage');
-    if (!isStorageTabActive) return;
+    const current = this.scene.uiBottomBar?.currentPage;
+    if (current !== 'storage' || !this.selected) return;
 
-    if (this.selected) {
-      this.detail.setStorage(this.selected);
-    }
+    this.detail.setStorage(this.selected);
   }
+
 }

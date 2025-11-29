@@ -1,7 +1,7 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, showAlert, SQUARESIZE, TILE_TYPES } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
@@ -9,11 +9,12 @@ import { StorageBuilding } from "../buildings/Storage"
 import { House } from "../buildings/House"
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 import { UI_ITEM_TYPES } from "../UI/UIConstants"
-import { ZoomMixer } from "../UI/ZoomMixer"
+
 export class buildingManager{
 
     static NavMeshUpdater;
     static scene;
+    static blockBuildingDuration = 250;
 
     static createBuildTileStateArray(tiles, teamNumber) {
         const team = Teams.teamLists[teamNumber];
@@ -48,8 +49,8 @@ export class buildingManager{
             [-1, -2], [1, -2], [-1, 2], [1, 2],
         ];
 
-        let troopX = Math.floor(troop.body.x/SQUARESIZE)
-        let troopY = Math.floor(troop.body.y/SQUARESIZE)
+        let troopX = Math.floor(troop.x/SQUARESIZE)
+        let troopY = Math.floor(troop.y/SQUARESIZE)
         if(!Map.navGrid[troopX][troopY]){
             let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
             if (newX === -1) {
@@ -61,7 +62,6 @@ export class buildingManager{
             }
         }
     
-        const troopPos = new Phaser.Math.Vector2(troop.x, troop.y);
     
         // 1. Build list of candidate tiles with distances
         let candidates = [];
@@ -145,7 +145,7 @@ export class buildingManager{
     }
 
 
-    static findBuildApproachBlock(x, y, type, troop) {
+    static findBuildApproachBlock(x, y, type, troop, tStartX=null, tStartY=null) {
         const candidates = [];
     
         // Compute top-left corner of the block
@@ -166,12 +166,33 @@ export class buildingManager{
 
                 const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
                 const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
-                const dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
-
+                let dist;
+                if(troop) {dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY)}
+                else {dist = Phaser.Math.Distance.Between(tStartX * SQUARESIZE + SQUARESIZE / 2, tStartY * SQUARESIZE + SQUARESIZE / 2, worldX, worldY)}
                 candidates.push({ tx, ty, dist });
             }
         }
 
+        if(tStartX == null || tStartY == null){
+            let troopX = Math.floor(troop.body.x/SQUARESIZE);
+            let troopY = Math.floor(troop.body.y/SQUARESIZE);
+            tStartX = troop.body.x;
+            tStartY = troop.body.y;
+            if(!Map.navGrid[troopX][troopY]){
+                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                if (newX === -1) {
+                    console.log("No valid start tile nearby");
+                    return null;
+                } else {
+                    tStartX = newX * SQUARESIZE + SQUARESIZE/2;
+                    tStartY = newY * SQUARESIZE + SQUARESIZE/2;
+                    console.log("New valid tile:", newX, newY);
+                }
+            }
+        }else {
+            tStartX = tStartX * SQUARESIZE + SQUARESIZE / 2;
+            tStartY = tStartY * SQUARESIZE + SQUARESIZE / 2;
+        }
     
         // Sort candidates by distance
         candidates.sort((a, b) => a.dist - b.dist);
@@ -179,7 +200,7 @@ export class buildingManager{
         // Try each candidate
         for (const candidate of candidates) {
             const path = Map.navMesh.findPath(
-                { x: troop.x, y: troop.y },
+                { x: tStartX, y: tStartY },
                 { x: candidate.tx * SQUARESIZE + SQUARESIZE / 2, y: candidate.ty * SQUARESIZE + SQUARESIZE / 2 }
             );
     
@@ -218,11 +239,56 @@ export class buildingManager{
                 task.type.lenX * SQUARESIZE,
                 task.type.lenY * SQUARESIZE
             );
+
+            // Snapshot starting duration so we can compute %
+            task.totalDuration = task.duration;
+            task._hovering = false;
+
+            const scene = this.scene;
+
+            // Create shared hover UI once (bg + text)
+            if (!scene.constructionHoverText) {
+                scene.constructionHoverText = scene.add
+                    .text(0, 0, "", {
+                        fontSize: "12px",
+                        fill: "#ffffff",
+                        stroke: "#000000",
+                        strokeThickness: 3,
+                        align: "center",
+                    })
+                    .setOrigin(0.5, 1)
+                    .setDepth(UIDEPTH + 6)
+                    .setScrollFactor(1)
+                    .setVisible(false);
+
+                scene.constructionHoverBg = scene.add
+                    .rectangle(0, 0, 10, 10, 0x000000, 0.6)  // similar to house hover
+                    .setStrokeStyle(1, 0xffffff, 0.4)
+                    .setOrigin(0.5, 1)
+                    .setDepth(UIDEPTH + 5)
+                    .setScrollFactor(1)
+                    .setVisible(false);
+            }
+
+            task.constructionSprite.setInteractive({ useHandCursor: true });
+
+            task.constructionSprite.on("pointerover", () => {
+                task._hovering = true;
+                scene.constructionHoverBg.setVisible(true);
+                scene.constructionHoverText.setVisible(true);
+                buildingManager.updateConstructionHoverText(task);
+            });
+
+            task.constructionSprite.on("pointerout", () => {
+                task._hovering = false;
+                scene.constructionHoverBg.setVisible(false);
+                scene.constructionHoverText.setVisible(false);
+            });
         }
 
 
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(250, () => {
+            sprite.timer = this.scene.time.delayedCall(this.blockBuildingDuration, () => {
                 console.log(`sprite: ${sprite.id} starting timer, duration: ${task.duration}`)
                 if(!sprite.active || sprite.state != CONTROL_STATES.BUILD_MODE_B) return;
                 let teamNumber = sprite.body.team;
@@ -248,6 +314,9 @@ export class buildingManager{
                 sprite.play(sprite.action);
                 task.duration -= 2;
                 sprite.stamina = Math.max(0, sprite.stamina - 0.2);
+                if (task._hovering) {
+                    buildingManager.updateConstructionHoverText(task);
+                }
     
                 if (task.duration <= 0) {
                     // if(!buildingManager.scene.checkSufficientFunds(task.type.price)) return;
@@ -269,6 +338,16 @@ export class buildingManager{
                         task.constructionSprite.destroy();
                         task.constructionSprite = null;
                     }
+                    const scene = buildingManager.scene;
+                    if (scene) {
+                        if (scene.constructionHoverText) {
+                            scene.constructionHoverText.setVisible(false);
+                        }
+                        if (scene.constructionHoverBg) {
+                            scene.constructionHoverBg.setVisible(false);
+                        }
+                    }
+                    task._hovering = false;
                     this.handlePlacement(task);
                     let blockTiles = []
                     let startY = task.y
@@ -407,4 +486,43 @@ export class buildingManager{
             DailyNeedsTracker.updateUIItems(UI_ITEM_TYPES[res], count, true);
         }
     }
+
+    static updateConstructionHoverText(task) {
+        const scene = buildingManager.scene;
+        if (!scene || !task || !task.constructionSprite) return;
+
+        const label = scene.constructionHoverText;
+        const bg    = scene.constructionHoverBg;
+        if (!label || !bg) return;
+
+        const total = task.totalDuration || task.duration || 1;
+        const done  = total - task.duration;
+        const pct   = Math.max(
+            0,
+            Math.min(100, Math.round((done / total) * 100))
+        );
+
+        const name =
+            (task.type && (task.type.displayName || task.type.name)) ||
+            "Building";
+
+        label.setText(`${name}\n${pct}%`);
+
+        // Position above the construction sprite
+        const x = task.constructionSprite.x;
+        const y =
+            task.constructionSprite.y -
+            task.constructionSprite.displayHeight / 2 -
+            4;
+
+        label.setPosition(x, y);
+
+        // Size bg to text, with padding
+        const pad = 4;
+        const w = label.width + pad * 2;
+        const h = label.height + pad * 2;
+        bg.setSize(w, h);
+        bg.setPosition(x, y);
+    }
+
 }

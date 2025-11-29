@@ -385,7 +385,7 @@ export class VisibilitySystem {
     }
 
     for (const V of visCandidates) {
-      const { x, y, r, boost = 0.2 } = V;
+      const { x, y, r, boost = 0.4 } = V;
       const minx = Math.max(vx0, Math.floor(x - r));
       const maxx = Math.min(vx1, Math.ceil (x + r));
       const miny = Math.max(vy0, Math.floor(y - r));

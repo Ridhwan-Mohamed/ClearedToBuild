@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, UIDEPTH } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { HouseUI } from "../UI/HouseUI";
@@ -32,7 +32,7 @@ export class House {
             // Vision bubble so nearby tiles are slightly brighter
             this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 6, boost: 0.10 });
             // Optional: small porch light (trim or remove if you don’t want light)
-            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 0.6 });
+            this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 2 });
         }
 
         this.sprite.on('pointerover', () => this.updateIcons());
@@ -40,6 +40,7 @@ export class House {
 
         this.uiIcons = [null, null];
         Teams.teamLists[team].houseList.push(this);
+        Teams.teamLists[team].buildings.push([x, y, TILE_TYPES.house1, this.sprite])
     }
 
     canAcceptPlayer() {

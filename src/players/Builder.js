@@ -1,5 +1,4 @@
 // === Builder.js ===
-
 import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
@@ -10,6 +9,10 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
 export class Builder {
+
+    static speed = 80;
+    static stamina = 0.02;
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
@@ -29,11 +32,10 @@ export class Builder {
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
         sprite.health = 100;
-        sprite.speed = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
-        sprite.baseSpeed = sprite.speed;
         sprite.body.pushable = false;
+        sprite.type = Builder
 
         sprite.animState = 'idle';
         sprite.walk = 'walk';
@@ -85,6 +87,15 @@ export class Builder {
             }
         }
 
+        let plIndex = team.playerList.indexOf(troop)
+        if (plIndex !== -1) {
+            team.playerList.splice(plIndex, 1);
+        }
+        const scene = troop.scene;
+        if (scene?.playerTab?.onPlayerDestroyed) {
+            scene.playerTab.onPlayerDestroyed(troop);
+        }
+
         // Clear references
         if (troop.task) {troop.task.assigned--; troop.task = null;}
         if (troop.carrying) troop.carrying = null;
@@ -98,5 +109,20 @@ export class Builder {
             troop.timer.remove(false);
             troop.timer = null;
         }
+
+        // ❗ Remove from Player.characters group
+        Player.characters.remove(troop);
+
+        // 💥 CRITICAL FIX: remove from physics world
+        if (troop.body) {
+            troop.scene.physics.world.remove(troop.body);
+            troop.body.destroy();
+        }
+
+        const ind = Player.troops.indexOf(troop);
+        if (ind !== -1) Player.troops.splice(ind, 1);
+
+        // Now safe to destroy the sprite
+        troop.destroy();
     }
 }

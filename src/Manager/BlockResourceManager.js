@@ -1,15 +1,18 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES } from "../constants"
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, colorFor } from "../constants"
 import { Manager } from "./Manager"
 import { buildingManager } from "./buildingManager"
 import { StorageManager } from "./StorageManager"
 import { VisibilitySystem } from "../UI/VisibilitySystem"
+import { Map } from "../map"
 
 export class blockResourceManager{
 
     static NavMeshUpdater;
     static scene;
+    static woodBreakDuration = 1500;
+    static rockBreakDuration = 2500
 
     static assingTroopsToGetBlockResources(teamNumber){
         let blockList = Teams.teamLists[`${teamNumber}`].blockResourceList
@@ -35,7 +38,8 @@ export class blockResourceManager{
         }
 
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(1000, () => {
+            const duration = sprite.task.type == TILE_TYPES.pine ? this.woodBreakDuration : this.rockBreakDuration;
+            sprite.timer = this.scene.time.delayedCall(duration, () => {
                 if(!sprite.active || sprite.state != CONTROL_STATES.GET_BLOCK_RESOURCE) return;
                 const dx = sprite.x - sprite.task.x*SQUARESIZE;
                 const dy = sprite.y - sprite.task.y*SQUARESIZE;
@@ -76,6 +80,20 @@ export class blockResourceManager{
                             blockTiles.push({x: j, y: i});
                         }
                     }
+
+                    // 🔵 overview: reflect cleared resource tiles
+                    if (this.scene?.zoomMixer) {
+                        for (const t of blockTiles) {
+                            this.scene.zoomMixer.updateOverviewCell(
+                                t.x,
+                                t.y,
+                                Map.grid,
+                                task.type.lenX,
+                                task.type.lenY
+                            );
+                        }
+                    }
+                    
                     this.NavMeshUpdater.blockTiles(blockTiles, true);
                     buildingManager.removeBuildingFromArray(task.x, task.y);
                     VisibilitySystem.onOccluderChangedRect(task.x, task.y, task.type.lenX, task.type.lenY, /*isBlock=*/false);

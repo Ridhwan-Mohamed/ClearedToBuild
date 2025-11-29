@@ -1,10 +1,11 @@
-import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH, WORLD_DIMENSIONX } from "../constants";
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH, colorFor } from "../constants";
 import { Manager } from "./Manager";
 import { StorageManager } from "./StorageManager";
 import { Map } from "../map";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+
 
 export class seedManager {
     static scene;
@@ -53,9 +54,12 @@ export class seedManager {
             sprite.task.block.queuedOutline = null;
         }
         Map.grid[y][x] = 1;
-        if(Map.cameraBounds.contains(sprite.task.x*SQUARESIZE,sprite.task.y*SQUARESIZE)){
-            Map.drawGridValue(x,y);
+
+        // Update detailed view if tile is on-screen
+        if (Map.cameraBounds.contains(sprite.task.x * SQUARESIZE, sprite.task.y * SQUARESIZE)) {
+            Map.drawGridValue(x, y);
         }
+
         sprite.task = null;
     }
 

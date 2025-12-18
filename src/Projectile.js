@@ -60,38 +60,63 @@ export class Projectile {
         const x1 = Math.floor(target.x / SQUARESIZE);
         const y1 = Math.floor(target.y / SQUARESIZE);
 
-        const points = Phaser.Geom.Line.BresenhamPoints(new Phaser.Geom.Line(x0, y0, x1, y1));
+        const points = Phaser.Geom.Line.BresenhamPoints(
+            new Phaser.Geom.Line(x0, y0, x1, y1)
+        );
 
         for (const point of points) {
             const cell = Map.grid[point.y]?.[point.x];
-            if (Array.isArray(cell) && TILE_TYPES[TILE_MAP(cell[1])].block) return false; // It's blocked by building or structure
+
+            if (Array.isArray(cell)) {
+                const key  = TILE_MAP(cell[1]);
+                const type = TILE_TYPES[key];
+
+                // ❌ still block on walls, houses, storage, etc.
+                // ✅ but DO NOT block on water – it's not visually occluding.
+                if (type && type.block && key !== "water") {
+                    return false;
+                }
+            }
         }
 
         return true; // clear shot
     }
 
-
     static handleCollision(target, projectile) {
         const result = fightManager.calculateHitResultFromWeapon(projectile.weapon);
         if (result.hit) {
+
+            // 🔴 Apply on-hit effects to the victim (flash, timer cancel, knockback team 0)
+            const attacker = projectile.player || null;
+            fightManager.applyHitReaction(target, attacker);
+
             target.health = Math.max(0, target.health - result.damage);
-            if(target.health <= 0){
+
+            if (target.health <= 0) {
                 fightManager.checkForKillReward(projectile.team, target);
-                Player.destroyPlayer(target);
-                Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE)
-                Teams.removeFromStateArray(1, "fightingList", target);
-                projectile.player.track = null;
-                projectile.player.timer.remove(false);
-                projectile.player.timer = null;
-                Player.setAnimState(projectile.player, projectile.player.idle);
+                target.destroySelf();
+
+                if (projectile.player) {
+                    Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE);
+                    projectile.player.track = null;
+                    if (projectile.player.timer) {
+                        projectile.player.timer.remove(false);
+                        projectile.player.timer = null;
+                    }
+                    Player.setAnimState(projectile.player, projectile.player.idle);
+                }
+
+                // If you still need this removeFromStateArray, keep it:
+                // Teams.removeFromStateArray(1, "fightingList", target);
             }
+
             showGhostText(
                 Projectile.scene,
                 target.x,
                 target.y - 10,
                 `${result.isCrit ? 'CRIT ' : ''}${result.damage}`,
-                projectile.team, // ✅ shooter team
-                result.isCrit           // ✅ crit flag
+                projectile.team,
+                result.isCrit
             );
         } else {
             showGhostText(
@@ -99,9 +124,9 @@ export class Projectile {
                 target.x,
                 target.y - 10,
                 'MISS',
-                projectile.team, // ✅ still shooter
+                projectile.team,
                 false,
-                true                  // ✅ miss flag
+                true
             );
         }
 

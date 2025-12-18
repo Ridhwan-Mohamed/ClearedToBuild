@@ -30,8 +30,17 @@ export class StorageBuilding {
         this.x = x;
         this.y = y;
 
-        // 🔹 NEW: per-item pickup reservations (itemName -> reserved count)
+        // 🔹 Building health
+        this.maxHealth = 280;
+        this.health = this.maxHealth;
+        this.healthBarBg = null;
+        this.healthBar   = null;
+        this._damageBarUntil = 0;
+
+        // per-item pickup reservations (itemName -> reserved count)
         this.reservedPickup = {};
+
+        this.sprite.buildingRef = this;
 
         // Store item counts (max 10 total)
         this.capacity = 16;
@@ -47,8 +56,16 @@ export class StorageBuilding {
         Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.storage, this.sprite])
         //setup UI listeners
         this.sprite.setInteractive({ useHandCursor: true });
-        this.sprite.on('pointerover', () => StorageUI.showMinor(this));
-        this.sprite.on('pointerout', () => StorageUI.hideMinor(this));
+        this.sprite.on('pointerover', () => {
+            this.isHovered = true;
+            this.updateHealthBar?.();
+            StorageUI.showMinor(this)
+        });
+        this.sprite.on('pointerout', () => {
+            this.isHovered = false;
+            this.updateHealthBar?.();
+            StorageUI.hideMinor(this)
+        });
         this.sprite.on('pointerdown', () => {
             StorageBuilding.scene.openDetailPage('storage', tab => tab.selectFromWorld(this));
         });
@@ -282,8 +299,98 @@ export class StorageBuilding {
         return remaining <= 0; // ✅ True if all removed
     }
 
+    ensureHealthBar() {
+        if (!this.sprite) return;
+        const scene = StorageBuilding.scene;
+        if (!scene) return;
+
+        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.storage.lenX * SQUARESIZE);
+        const y = this.sprite.y - this.sprite.displayHeight / 2 - 24;
+
+        if (!this.healthBarBg) {
+            this.healthBarBg = scene.add
+                .rectangle(this.sprite.x, y, fullWidth, 4, 0x000000, 0.6)
+                .setDepth(BLOCKDEPTH + 1);
+        }
+        if (!this.healthBar) {
+            this.healthBar = scene.add
+                .rectangle(this.sprite.x, y, fullWidth, 2, 0x00ff00, 1)
+                .setDepth(BLOCKDEPTH + 2);
+        }
+    }
+
+    updateHealthBar() {
+        if (!this.sprite) return;
+        this.ensureHealthBar();
+
+        if (!this.healthBar || !this.healthBarBg) return;
+        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.storage.lenX * SQUARESIZE);
+        const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
+
+        this.healthBarBg.setDisplaySize(fullWidth, 4);
+        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+
+        const now = StorageBuilding.scene?.time?.now ?? 0;
+        const visible = this.isHovered || now < this._damageBarUntil;
+        this.healthBarBg.setVisible(visible);
+        this.healthBar.setVisible(visible);
+    }
+
+    shakeAndFlash() {
+        if (!this.sprite) return;
+        const scene = StorageBuilding.scene;
+        const targets = [this.sprite];
+        if (this.healthBarBg) targets.push(this.healthBarBg);
+        if (this.healthBar)   targets.push(this.healthBar);
+
+        scene.tweens.add({
+            targets,
+            x: "+=3",
+            yoyo: true,
+            duration: 40,
+            repeat: 2
+        });
+
+        this.sprite.setTint(0xff6666);
+        scene.time.delayedCall(120, () => {
+            if (this.sprite) this.sprite.clearTint();
+        });
+    }
+
+    // Called by buildingManager.beginDestroyingBlock
+    onDamaged(damage, currentHealth, maxHealth) {
+        this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
+        this.health = Math.max(0, currentHealth);
+
+        this.shakeAndFlash();
+        const now = StorageBuilding.scene?.time?.now ?? 0;
+        this._damageBarUntil = now + 2000;
+        this.updateHealthBar();
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = StorageBuilding.scene.time.delayedCall(2000, () => {
+            this.updateHealthBar?.();
+        });
+
+
+        const textY = this.sprite.y - this.sprite.displayHeight / 2 - 8;
+        showGhostText(
+            StorageBuilding.scene,
+            this.sprite.x,
+            textY,
+            `-${damage}`,
+            this.teamNumber,
+            0, 0,
+            '#ff5555'
+        );
+    }
+
     destroy() {
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = null;
+
         this.sprite?.destroy();
+        if (this.healthBarBg) this.healthBarBg.destroy();
+        if (this.healthBar)   this.healthBar.destroy();
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         Teams.removeFromStateArray(this.teamNumber, 'storageList', this);

@@ -4,8 +4,6 @@ import { Teams } from '../Teams.js';
 import { Manager } from '../Manager/Manager.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
-import { weapons } from '../weapons.js';
-import { blockResourceManager } from '../Manager/BlockResourceManager.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
  
@@ -24,6 +22,7 @@ export class Forager {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
+        sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.setTint(0x228B22); // greenish tint for foragers
@@ -35,7 +34,6 @@ export class Forager {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.name = NameGenerator.generate();
-        sprite.weapon = weapons.hands;
         sprite.carrying = null;
         ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
@@ -50,18 +48,32 @@ export class Forager {
     }
 
     static update(forager){
-        if(forager.task) return
+        // If currently fleeing, only maintain flee behaviour.
+        if (forager.state === CONTROL_STATES.FLEE_MODE) {
+            Player.updateTracking(forager);   // may keep fleeing or drop back to TRACK_MODE when safe
+            return;
+        }
 
-        // 1.5. check for nearby enemies and flee in case.
+        // Always check for nearby enemies first (can flip into FLEE_MODE and drop tasks).
         Player.updateTracking(forager);
-        if(StorageManager.isCarrying(forager)){
+        if (forager.state === CONTROL_STATES.FLEE_MODE) {
+            // Just started fleeing this tick; do not do forager logic.
+            return;
+        }
+
+        // If we still have a task after tracking (i.e., not dropped by flee), just work it.
+        if (forager.task) return;
+
+        if (StorageManager.isCarrying(forager)) {
             return StorageManager.tryCreateStorageDeliveryTask(forager);
         }
+
         const queue = Teams.teamLists[forager.body.team].foragerQueue;
         if (queue.length) {
             Manager.assignOneTroopToAction(forager, queue, CONTROL_STATES.TRACK_MODE);
         }
-        if(!forager.task && forager.state == CONTROL_STATES.TRACK_MODE && !forager.roam){
+
+        if (!forager.task && forager.state === CONTROL_STATES.TRACK_MODE && !forager.roam) {
             Player.roam(forager);
         }
     }
@@ -70,6 +82,8 @@ export class Forager {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
         if (!team?.foragerList) return;
+
+        Player._destroyMiniBars(troop)
 
         let plIndex = team.playerList.indexOf(troop)
         if (plIndex !== -1) {

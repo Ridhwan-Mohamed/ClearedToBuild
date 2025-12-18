@@ -1,11 +1,8 @@
-import { StorageBuilding } from "../buildings/Storage";
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
+import { BLOCKDEPTH, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES } from "../constants";
 import { Manager } from "./Manager";
 import { StorageManager } from "./StorageManager";
 import { Map } from "../map";
-import { mapView } from "../mapView";
 import { Player } from "../players/Player";
-import { Farmer } from "../players/Farmer";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 
@@ -45,7 +42,6 @@ export class tillManager {
 
     static beginTilling(sprite) {
         const {x, y} = sprite.task;
-        if (!this.scene.checkSufficientSeeds(1)) return;
 
         sprite.timer = this.scene.time.delayedCall(1000, () => {
             if (!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) return;
@@ -74,7 +70,7 @@ export class tillManager {
                 }
                 // add to Teams.teamLists[team].crops as usual, with sprite frame 1
             }
-
+            this.scene.removeTillPreviewSprite(x, y);
             StorageManager.removeCarriedItem(sprite);
             Teams.removeFromStateArray(1, "tileList", sprite.task);
             sprite.task = null;

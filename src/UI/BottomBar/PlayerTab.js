@@ -89,12 +89,10 @@ export default class PlayerTab {
         return root;
     }
 
-
-
     // Build the unit info panel inside your bottom bar.
     // Call: const card = buildUnitInfoPanel(scene, ui, assets);
     // Then ui.add(card.panel, 0, 'top-left', { left: 12, top: 8 }, true).layout();
-    buildUnitInfoPanel(scene, ui, {
+    buildUnitInfoPanel(scene, ui = this, {
         portraitKey = null,              // texture key for the portrait (optional)
         name = '—',
         type = '—',
@@ -104,30 +102,36 @@ export default class PlayerTab {
         stPct = 1.0,                     // 0..1
         seedPrice = 70,
         sleepPrice = null                // set a number to show, or null to hide
-        } = {}) {
+    } = {}) {
 
         const BAR_W = 260;
         const BAR_H = 14;
 
         // ---------- helpers ----------
-        const rr = (w, h, r, color) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, color);
+        const rr = (w, h, r, color) =>
+            scene.rexUI.add.roundRectangle(0, 0, w, h, r, color);
 
         function makeBar(width, height, fillColor) {
-            // Use OverlapSizer so fill sits ABOVE the background (no side-by-side issue)
+            // OverlapSizer so fill sits above background
             const s = scene.rexUI.add.overlapSizer({ width, height });
 
             const bg   = rr(width, height, 4, 0x353535);
             const fill = rr(Math.max(1, width - 6), height - 6, 4, fillColor)
-                        .setOrigin(0, 0.5);
+                .setOrigin(0, 0.5);
 
             s.addBackground(bg);
-            s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 3, right: 3 } });
+            s.add(fill, {
+                key: 'fill',
+                align: 'left',
+                expand: false,
+                padding: { left: 3, right: 3 }
+            });
             s.layout();
 
             s.setPercent = (pct) => {
-            const p = Phaser.Math.Clamp(pct, 0, 1);
-            fill.width = Math.max(1, (width - 6) * p);
-            s.layout();
+                const p = Phaser.Math.Clamp(pct, 0, 1);
+                fill.width = Math.max(1, (width - 6) * p);
+                s.layout();
             };
 
             return s;
@@ -135,40 +139,65 @@ export default class PlayerTab {
 
         function makeButton(labelText, onClick) {
             const label = scene.rexUI.add.label({
-            background: rr(0, 36, 10, 0x2a5bd8),
-            text: scene.add.text(0, 0, labelText, { fontFamily: 'sans-serif', fontSize: 14, color: '#ffffff' }),
-            space: { left: 14, right: 14, top: 8, bottom: 8 }
+                background: rr(0, 36, 10, 0x2a5bd8),
+                text: scene.add.text(0, 0, labelText, {
+                    fontFamily: 'sans-serif',
+                    fontSize: 14,
+                    color: '#ffffff'
+                }),
+                space: { left: 14, right: 14, top: 8, bottom: 8 }
             });
-            label.setMinSize(120, 36); // consistent size so text never hides under the bg
-            label.setInteractive({ useHandCursor: true }).on('pointerup', () => onClick?.());
-            return label;
-        }
+            label.setMinSize(80, 36);
 
-        function makePricedButton(title, price, onClick) {
-            // price above button, both centered; wrap in a vertical sizer so they stay together
-            const v = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } });
-            if (price !== null && price !== undefined) {
-            v.add(
-                scene.add.text(0, 0, `(${price})`, { fontFamily: 'sans-serif', fontSize: 12, color: '#CCCCCC' }),
-                0, 'center', 0, false
-            );
-            }
-            v.add(makeButton(title, onClick), 0, 'center', 0, false);
-            v.setMinSize(140, 56); // gives both buttons the same overall footprint
-            return v;
+            label
+                .setInteractive({ useHandCursor: true })
+                .on('pointerup', () => onClick?.())
+                .on('pointerover', () => {
+                    // Don’t clobber guard placement cursor
+                    if (!scene.guardPlacement?.active) {
+                    scene.input.setDefaultCursor('pointer');
+                    }
+                })
+                .on('pointerout', () => {
+                    // Don’t clobber guard placement cursor
+                    if (!scene.guardPlacement?.active) {
+                    scene.input.setDefaultCursor('default');
+                    }
+                });
+
+            return label;
         }
 
         function makeSellButton(onClick) {
             const label = scene.rexUI.add.label({
                 background: rr(0, 36, 10, 0x9c27b0),
-                text: scene.add.text(0, 0, 'Sell', { fontFamily: 'sans-serif', fontSize: 14, color: '#ffffff' }),
+                text: scene.add.text(0, 0, 'Sell', {
+                    fontFamily: 'sans-serif',
+                    fontSize: 14,
+                    color: '#ffffff'
+                }),
                 space: { left: 14, right: 14, top: 8, bottom: 8 }
             });
-            label.setMinSize(120, 36);
-            label.setInteractive({ useHandCursor: true }).on('pointerup', () => onClick?.());
+            label.setMinSize(80, 36);
+
+            label
+                .setInteractive({ useHandCursor: true })
+                .on('pointerup', () => onClick?.())
+                .on('pointerover', () => {
+                    // Don’t clobber guard placement cursor
+                    if (!scene.guardPlacement?.active) {
+                    scene.input.setDefaultCursor('pointer');
+                    }
+                })
+                .on('pointerout', () => {
+                    // Don’t clobber guard placement cursor
+                    if (!scene.guardPlacement?.active) {
+                    scene.input.setDefaultCursor('default');
+                    }
+                });
+
             return label;
         }
-
 
         // ---------- header row: portrait + details ----------
         const header = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 12 } });
@@ -176,10 +205,7 @@ export default class PlayerTab {
         const portrait = scene.add.sprite(0, 0, 'char')
             .setDisplaySize(48, 48)
             .setOrigin(0.5, 0.5);
-        header.add(portrait, 0, 'center', 0, false);
-
         portrait.setVisible(false); // start hidden
-
         this.portrait = portrait;
 
         const detailsText = scene.add.text(
@@ -188,20 +214,26 @@ export default class PlayerTab {
             { fontFamily: 'sans-serif', fontSize: 16, color: '#EDEDED' }
         );
 
-        header.add(portrait,     0, 'center', 0, false);
-        header.add(detailsText,  0, 'left',   0, true);
+        header.add(portrait,    0, 'center', 0, false);
+        header.add(detailsText, 0, 'left',   0, true);
 
-        // ---------- bars column: labels + overlapped bars ----------
+        // ---------- bars column ----------
         const barsCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
 
         const hpRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
-        hpRow.add(scene.add.text(0, 0, 'HP', { fontSize: 12, color: '#B0B0B0' }), 0, 'center', { right: 4 }, false);
+        hpRow.add(
+            scene.add.text(0, 0, 'HP', { fontSize: 12, color: '#B0B0B0' }),
+            0, 'center', { right: 4 }, false
+        );
         const hpBar = makeBar(BAR_W, BAR_H, 0xFF5A70);
         hpBar.setPercent(hpPct);
         hpRow.add(hpBar, 0, 'center', 0, false);
 
         const stRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
-        stRow.add(scene.add.text(0, 0, 'ST', { fontSize: 12, color: '#B0B0B0' }), 0, 'center', { right: 4 }, false);
+        stRow.add(
+            scene.add.text(0, 0, 'ST', { fontSize: 12, color: '#B0B0B0' }),
+            0, 'center', { right: 4 }, false
+        );
         const stBar = makeBar(BAR_W, BAR_H, 0x69D6FF);
         stBar.setPercent(stPct);
         stRow.add(stBar, 0, 'center', 0, false);
@@ -209,18 +241,54 @@ export default class PlayerTab {
         barsCol.add(hpRow, 0, 'left', 0, false);
         barsCol.add(stRow, 0, 'left', 0, false);
 
-        // ---------- buttons row: inline, same size, price above ----------
-        const buttonsRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 16 } });
+        // ---------- buttons row ----------
+        const buttonsRow = scene.rexUI.add.sizer({
+            orientation: 'x',
+            space: { item: 16 }
+        });
 
-        const sellBtn = makeSellButton(() => this.sellSelected());
-        const sleepBtn = makePricedButton(
-            'Sleep',
-            sleepPrice,
-            () => this.sendSelectedToSleep()
-        );
+        // make the row as wide as the HP/ST bars so alignment is predictable
+        buttonsRow.setMinSize(BAR_W, 40);
 
-        buttonsRow.add(sellBtn,  0, 'top', 0, false);
-        buttonsRow.add(sleepBtn, 0, 'top', 0, false);
+        const sellBtn   = makeSellButton(() => ui.sellSelected());
+        const sleepBtn  = makeButton('Sleep', () => ui.sendSelectedToSleep())
+        const guardBtn  = makeButton('Guard',  () => ui.startGuardPlacementForSelected?.());
+        const attackBtn = makeButton('Attack', () => ui.attackSelectedTarget?.());
+
+        // layout helper: rebuild row so things always pack from the left
+        function updateButtonsLayout({ isFriendly, isCombatant, isEnemy }) {
+            // remove all children from the row, but keep them alive
+            buttonsRow.clear(false);
+
+            // hard reset visibility so dropped buttons don't float on screen
+            sellBtn.setVisible(false);
+            sleepBtn.setVisible(false);
+            guardBtn.setVisible(false);
+            attackBtn.setVisible(false);
+
+            if (isFriendly) {
+                sellBtn.setVisible(true);
+                buttonsRow.add(sellBtn,  0, 'top', 0, false);
+
+                sleepBtn.setVisible(true);
+                buttonsRow.add(sleepBtn, 0, 'top', 0, false);
+
+                if (isCombatant) {
+                    guardBtn.setVisible(true);
+                    buttonsRow.add(guardBtn, 0, 'top', 0, false);
+                }
+            }
+
+            if (isEnemy) {
+                attackBtn.setVisible(true);
+                buttonsRow.add(attackBtn, 0, 'top', 0, false);
+            }
+
+            buttonsRow.layout();
+        }
+
+        // start with nothing shown (no unit selected yet)
+        updateButtonsLayout({ isFriendly: false, isCombatant: false, isEnemy: false });
 
         // ---------- root panel stack ----------
         const panel = scene.rexUI.add.sizer({
@@ -230,9 +298,10 @@ export default class PlayerTab {
 
         panel.add(header,     0, 'left', 0, true);
         panel.add(barsCol,    0, 'left', 0, true);
-        panel.add(buttonsRow, 0, 'left', 0, true);
+        // push buttons clearly below the bars, don't let them expand
+        panel.add(buttonsRow, 0, 'center', { top: 16 }, false);
 
-        // return with some setters for live updates
+        // ---------- return with setters ----------
         return {
             panel,
             portrait, // expose portrait
@@ -242,7 +311,6 @@ export default class PlayerTab {
                 detailsText.setText(
                     `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
                 );
-
                 if (u.portraitKey) {
                     portrait.setVisible(true);
                     portrait.setTexture(u.portraitKey);
@@ -252,29 +320,33 @@ export default class PlayerTab {
                 }
             },
             setPrices({ seed = seedPrice, sleep = sleepPrice } = {}) {
-                const sleepPriceLabel = sleepBtn.getChildren?.()[0] || sleepBtn.getElement?.('text');
+                const sleepPriceLabel =
+                    sleepBtn.getChildren?.()[0] || sleepBtn.getElement?.('text');
                 if (sleep !== null && sleepPriceLabel?.setText) {
                     sleepPriceLabel.setText(`(${sleep})`);
                 }
             },
-            // 🔥 new: let PlayerTab change label + handler at runtime
             setSleepButton(labelText, onClick) {
                 const children = sleepBtn.getChildren ? sleepBtn.getChildren() : [];
                 if (!children.length) return;
 
-                // Last child is the actual button label (rexUI Label)
+                // last child is the actual button label (rexUI Label)
                 const btnLabel = children[children.length - 1];
-                const textObj = btnLabel.getElement ? btnLabel.getElement('text') : null;
+                const textObj = btnLabel.getElement
+                    ? btnLabel.getElement('text')
+                    : null;
 
                 if (textObj?.setText) {
                     textObj.setText(labelText);
                 }
 
-                // Rebind pointerup
                 btnLabel.removeAllListeners?.('pointerup');
-                btnLabel.setInteractive({ useHandCursor: true }).on('pointerup', () => {
-                    onClick?.();
-                });
+                btnLabel.setInteractive({ useHandCursor: true })
+                    .on('pointerup', () => onClick?.());
+            },
+            // 🔥 called from paintDetails/clearDetails
+            setButtonsLayout(flags) {
+                updateButtonsLayout(flags);
             }
         };
     }
@@ -292,6 +364,27 @@ export default class PlayerTab {
         } else {
             showAlert?.(this.scene, `No available house for ${s.name}.`, '#ff4444', 1800);
         }
+    }
+
+    startGuardPlacementForSelected() {
+        const s = this.selected;
+        if (!s || !s.active) return;
+
+        // Put the scene into "guard placement" mode
+        this.scene.guardPlacement = {
+            active: true,
+            troop: s
+        };
+
+        // Change mouse cursor to a "hand" / grab style to indicate mode
+        this.scene.input.setDefaultCursor('grab');
+
+        showAlert?.(
+            this.scene,
+            `Guard mode: click on the map to station ${s.name}.`,
+            '#33aaff',
+            2000
+        );
     }
 
     wakeOrCancelSelected() {
@@ -316,6 +409,43 @@ export default class PlayerTab {
 
         // Refresh detail panel to update button text/state
         this.paintDetails(s);
+    }
+
+    attackSelectedTarget() {
+        const target = this.selected;
+        if (!target || !target.active) return;
+
+        if (!target.body || target.body.team !== 0) {
+            showAlert?.(
+                this.scene,
+                'Attack is only for enemy units.',
+                '#ffcc00',
+                1500
+            );
+            return;
+        }
+
+        Player.assignFighterToTarget(target);
+        showAlert?.(
+            this.scene,
+            `Sending a fighter to attack ${target.name || 'enemy'}.`,
+            '#ff9933',
+            1800
+        );
+    }
+
+    attackSelectedTarget() {
+        const target = this.selected;
+        if (!target || !target.active) return;
+
+        // Only attack enemies (team 0)
+        if (!target.body || target.body.team !== 0) {
+            showAlert?.(this.scene, 'Attack is only for enemy units.', '#ffcc00', 1500);
+            return;
+        }
+
+        Player.assignFighterToTarget(target);
+        showAlert?.(this.scene, `Sending a fighter to attack ${target.name || 'enemy'}.`, '#ff9933', 1800);
     }
 
     // --------- TEAM LIST (right) ----------
@@ -362,80 +492,82 @@ export default class PlayerTab {
     }
 
     createRow(sprite) {
-    const scene = this.scene;
+        const scene = this.scene;
 
-    const bg = scene.rexUI.add.roundRectangle(
-        0, 0, 0, 0, 6,
-        sprite.unitTint ?? 0x666666,
-        0.15
-    ).setStrokeStyle(2, sprite.unitTint ?? 0x888888);
+        const bg = scene.rexUI.add.roundRectangle(
+            0, 0, 0, 0, 6,
+            sprite.unitTint ?? 0x666666,
+            0.15
+        ).setStrokeStyle(2, sprite.unitTint ?? 0x888888);
 
+        const name = scene.add.text(
+            0, 0,
+            sprite.name || 'Unnamed',
+            { fontSize: '13px', color: '#ffffff' }
+        );
 
+        // helper for mini bars
+        function makeMiniBar(width, height, fillColor) {
+            const s = scene.rexUI.add.overlapSizer({ width, height });
+            const bg   = scene.add.rectangle(0, 0, width, height, 0x222222).setOrigin(0, 0.5);
+            const fill = scene.add.rectangle(0, 0, width, height, fillColor).setOrigin(0, 0.5);
+            s.addBackground(bg);
+            s.add(fill, { key: 'fill', align: 'left', expand: true });
+            return { sizer: s, fill };
+        }
 
+        const hp = makeMiniBar(90, 6, 0xff4d4d);
+        const st = makeMiniBar(90, 6, 0x4dd2ff);
 
-    const name = scene.add.text(
-        0, 0,
-        sprite.name || 'Unnamed',
-        { fontSize: '13px', color: '#ffffff' }
-    );
+        const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
+            .add(hp.sizer, 0, 'left', 0, false)
+            .add(st.sizer, 0, 'left', 0, false);
 
-    // helper for mini bars
-    function makeMiniBar(width, height, fillColor) {
-        const s = scene.rexUI.add.overlapSizer({ width, height });
-        const bg   = scene.add.rectangle(0, 0, width, height, 0x222222).setOrigin(0, 0.5);
-        const fill = scene.add.rectangle(0, 0, width, height, fillColor).setOrigin(0, 0.5);
-        s.addBackground(bg);
-        s.add(fill, { key: 'fill', align: 'left', expand: true });
-        return { sizer: s, fill };
+        const row = scene.rexUI.add.sizer({
+            orientation: 'x',
+            space: { left: 8, right: 8, top: 6, bottom: 6, item: 10 },
+        })
+            .addBackground(bg)
+            .add(name, { proportion: 1, expand: false })
+            .add(bars, { proportion: 0, expand: false });
+        
+        // 🔥 stretch full width
+        const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
+        row.setMinSize(fullWidth, 6);
+
+        // row.setMinSize(this.RIGHT_W - 20, this.ROW_H);
+        row.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.select(sprite));
+
+        // store refs on row
+        row.userData = {
+            sprite,
+            hpBar: hp.fill,
+            stBar: st.fill,
+            nameText: name,
+            bg,
+            row,
+        };
+
+        // initial bar widths
+        this.updateRowBars(row.userData);
+
+        return row;
     }
-
-    const hp = makeMiniBar(90, 6, 0xff4d4d);
-    const st = makeMiniBar(90, 6, 0x4dd2ff);
-
-    const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
-        .add(hp.sizer, 0, 'left', 0, false)
-        .add(st.sizer, 0, 'left', 0, false);
-
-    const row = scene.rexUI.add.sizer({
-        orientation: 'x',
-        space: { left: 8, right: 8, top: 6, bottom: 6, item: 10 },
-    })
-        .addBackground(bg)
-        .add(name, { proportion: 1, expand: false })
-        .add(bars, { proportion: 0, expand: false });
-    
-    // 🔥 stretch full width
-    const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
-    row.setMinSize(fullWidth, 6);
-
-    // row.setMinSize(this.RIGHT_W - 20, this.ROW_H);
-    row.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.select(sprite));
-
-    // store refs on row
-    row.userData = {
-        sprite,
-        hpBar: hp.fill,
-        stBar: st.fill,
-        nameText: name,
-        bg,
-        row,
-    };
-
-    // initial bar widths
-    this.updateRowBars(row.userData);
-
-    return row;
-    }
-
 
     // --------- selection & details ----------
     select(sprite) {
         this.selected = sprite;
         // highlight selected row
         for (const { bg, sprite: s } of this.rows.values()) {
-        bg.setAlpha(s === sprite ? 1 : 0.6);
-        bg.setStrokeStyle(2, s === sprite ? 0xffffff : (s.unitTint ?? 0x888888), 1);
+            bg.setAlpha(s === sprite ? 1 : 0.6);
+            bg.setStrokeStyle(2, s === sprite ? 0xffffff : (s.unitTint ?? 0x888888), 1);
         }
+
+        // 🔥 keep world mini bars open for selected unit
+        if (Player.setMiniBarSelectedFromTab) {
+            Player.setMiniBarSelectedFromTab(sprite);
+        }
+
         this.paintDetails(sprite);
     }
 
@@ -448,41 +580,66 @@ export default class PlayerTab {
         const type = this.typeOf(s);
         const price = this.SELL_PRICE[type] ?? this.SELL_PRICE.Default;
 
-        // You can still change the portrait dynamically if needed:
+        // same close-up logic as before
         const portraitKey = s.health > 50 ? 'char' : 'charHurt';
         this.detailCard.setUnit({
-            name: s.name || 'Unnamed',
+            name:   s.name || 'Unnamed',
             type,
-            team: s.body?.team ?? '?',
+            team:   s.body?.team ?? '?',
             weapon: s.weapon?.name ?? 'None',
             portraitKey
         });
+
         this.detailCard.setHP((s.health ?? 0) / 100);
         this.detailCard.setST((s.stamina ?? 0) / (s.maxStamina || 100));
         this.detailCard.setPrices({ seed: price, sleep: null });
+
         const state = s.state;
         const isSleepingLike =
             state === CONTROL_STATES.SLEEP_MODE ||
             state === CONTROL_STATES.GO_HOME_MODE;
-        // Toggle button text + behavior
+
         if (this.detailCard.setSleepButton) {
             if (isSleepingLike) {
-                // Show Wake / Cancel Sleep
                 this.detailCard.setSleepButton('Wake', () => this.wakeOrCancelSelected());
             } else {
-                // Normal behavior: send to sleep
                 this.detailCard.setSleepButton('Sleep', () => this.sendSelectedToSleep());
             }
         }
-        // todo: set portraitKey into detailCard if you extend setUnit
+
+        // ---- NEW: control which buttons you see ----
+        const team = s.body?.team;
+        const isFriendly = team === 1;
+        const isEnemy    = team === 0;
+
+        const isCombatant =
+            type === 'Gunslinger' ||
+            type === 'Blademaster' ||
+            type === 'Brawler';
+
+        this.detailCard.setButtonsLayout?.({
+            isFriendly,
+            isCombatant,
+            isEnemy
+        });
     }
 
-
     clearDetails() {
-        this.detailCard.setUnit({ name: '—', type: '—', team: '—', weapon: '—', portraitKey: null });
+        this.detailCard.setUnit({
+            name: '—',
+            type: '—',
+            team: '—',
+            weapon: '—',
+            portraitKey: null
+        });
         this.detailCard.setHP(0);
         this.detailCard.setST(0);
         this.detailCard.setPrices({ seed: 0, sleep: null });
+        this.detailCard.setButtonsLayout?.({
+            isFriendly: false,
+            isCombatant: false,
+            isEnemy: false
+        });
     }
 
     sellSelected() {
@@ -557,24 +714,26 @@ export default class PlayerTab {
         }
     }
 
-  updateRowBars({ sprite: s, hpBar, stBar }) {
-    hpBar.width = 90 * Math.max(0, Math.min(1, (s.health ?? 0) / 100));
-    stBar.width = 90 * Math.max(0, Math.min(1, (s.stamina ?? 0) / (s.maxStamina || 100)));
-  }
+    updateRowBars({ sprite: s, hpBar, stBar }) {
+        hpBar.width = 90 * Math.max(0, Math.min(1, (s.health ?? 0) / 100));
+        stBar.width = 90 * Math.max(0, Math.min(1, (s.stamina ?? 0) / (s.maxStamina || 100)));
+    }
 
-  typeOf(s) {
-    if (s.isFarmer) return 'Farmer';
-    if (s.isForager) return 'Forager';
-    if (s.isFireman) return 'Fireman';
-    if (s.isBuilder) return 'Builder';
-    if (s.isGunslinger) return 'Gunslinger';
-    return 'Unit';
-  }
+    typeOf(s) {
+        if (s.isFarmer)      return 'Farmer';
+        if (s.isForager)     return 'Forager';
+        if (s.isFireman)     return 'Fireman';
+        if (s.isBuilder)     return 'Builder';
+        if (s.isGunslinger)  return 'Gunslinger';
+        if (s.isBlademaster) return 'Blademaster';
+        if (s.isBrawler)     return 'Brawler';
+        return 'Unit';
+    }
 
-  hidePortrait() {
-    this.portrait?.setVisible(false);
-  }
+    hidePortrait() {
+        this.portrait?.setVisible(false);
+    }
 
-  // Expose the root for rexUI pages.addPage(...)
-  get view() { return this.root; }
+    // Expose the root for rexUI pages.addPage(...)
+    get view() { return this.root; }
 }

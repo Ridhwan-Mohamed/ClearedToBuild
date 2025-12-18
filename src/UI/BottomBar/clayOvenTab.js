@@ -5,6 +5,17 @@ import { UI_ITEM_TYPES } from "../UIConstants";
 
 
 export default class ClayOvenTab {
+
+  static ensureBlankTexture(scene) {
+    if (scene.textures.exists("blank")) return;
+
+    const g = scene.add.graphics();
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(0, 0, 1, 1);
+    g.generateTexture("blank", 1, 1);
+    g.destroy();
+  }
+
   constructor(scene, teamNumber = 1) {
     this.scene = scene;
     this.team = teamNumber;
@@ -78,34 +89,34 @@ export default class ClayOvenTab {
     if (this.detail?.setOven) this.detail.setOven(null);
     if (this.detail?.setStorage) this.detail.setStorage(null);
     // Hide any visible count texts / icons
-    if (this.detail?.cells) {
-      this.detail.cells.forEach(c => {
-        if (c.icon) c.icon.setVisible(false);
-        if (c.text) c.text.setVisible(false);
-      });
-    }
-    if (this.cards?.childrenMap?.grid) {
-      this.cards.childrenMap.grid.getAllVisibleChildren?.().forEach(child => {
-        if (child.setVisible) child.setVisible(false);
-      });
-    }
-    // Hide icons & counters inside each oven card
-    for (const [oven, row] of this.cardByOven.entries()) {
-      if (!row?.userData) continue;
-      // hide cook slot counters/icons
-      row.userData.cookIcons?.forEach(ic => {
-        ic?.setVisible(false);
-        ic?.children?.map?.forEach?.(ch => ch.setVisible(false)); // icon + text
-      });
-      // hide output slot counters/icons
-      row.userData.outIcons?.forEach(ic => {
-        ic?.setVisible(false);
-        ic?.children?.map?.forEach?.(ch => ch.setVisible(false));
-      });
-      // hide fuel text/icon
-      row.userData.fuelValueText?.setVisible(false);
-      row.userData.fuelBadge?.setVisible?.(false);
-    }
+    // if (this.detail?.cells) {
+    //   this.detail.cells.forEach(c => {
+    //     if (c.icon) c.icon.setVisible(false);
+    //     if (c.text) c.text.setVisible(false);
+    //   });
+    // }
+    // if (this.cards?.childrenMap?.grid) {
+    //   this.cards.childrenMap.grid.getAllVisibleChildren?.().forEach(child => {
+    //     if (child.setVisible) child.setVisible(false);
+    //   });
+    // }
+    // // Hide icons & counters inside each oven card
+    // for (const [oven, row] of this.cardByOven.entries()) {
+    //   if (!row?.userData) continue;
+    //   // hide cook slot counters/icons
+    //   row.userData.cookIcons?.forEach(ic => {
+    //     ic?.setVisible(false);
+    //     ic?.children?.map?.forEach?.(ch => ch.setVisible(false)); // icon + text
+    //   });
+    //   // hide output slot counters/icons
+    //   row.userData.outIcons?.forEach(ic => {
+    //     ic?.setVisible(false);
+    //     ic?.children?.map?.forEach?.(ch => ch.setVisible(false));
+    //   });
+    //   // hide fuel text/icon
+    //   row.userData.fuelValueText?.setVisible(false);
+    //   row.userData.fuelBadge?.setVisible?.(false);
+    // }
   }
 
   destroy() {
@@ -161,8 +172,59 @@ export default class ClayOvenTab {
     const scene = this.scene;
     const rr = (w,h,r,c,a=1) => scene.rexUI.add.roundRectangle(0,0,w,h,r,c,a);
 
-    // header: title
-    const title = scene.add.text(0,0,"Oven Details", { fontSize: 16, color: "#ffffff", fontFamily: "sans-serif" });
+    // helper: generic percent bar (used for HP)
+    const makeBar = (width, height, fillColor) => {
+      const s = scene.rexUI.add.overlapSizer({ width, height });
+      const bg = rr(width, height, 4, 0x222222, 1);
+      const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 4, fillColor, 1).setOrigin(0, 0.5);
+
+      s.addBackground(bg);
+      s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
+      s.layout();
+
+      s.setPercent = (pct) => {
+        const p = Phaser.Math.Clamp(pct ?? 0, 0, 1);
+        fill.width = Math.max(1, (width - 2) * p);
+        s.layout();
+      };
+
+      return s;
+    };
+
+    // helper: HP bar with centered text (HP cur/max)
+    const makeHpBarWithText = (width, height) => {
+      const s = scene.rexUI.add.overlapSizer({ width, height });
+
+      const bg = rr(width, height, 5, 0x222222, 1);
+      const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 5, 0x4caf50, 1).setOrigin(0, 0.5);
+
+      const txt = scene.add.text(0, 0, 'HP —/—', {
+        fontFamily: 'sans-serif',
+        fontSize: 12,
+        color: '#ffffff',
+      }).setOrigin(0.5, 0.5);
+
+      s.addBackground(bg);
+      s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
+      s.add(txt,  { key: 'txt',  align: 'center', expand: false });
+      s.layout();
+
+      s.setValue = (cur, max) => {
+        const m = Math.max(1, (max ?? 0));
+        const c = Math.max(0, (cur ?? 0));
+        const p = Phaser.Math.Clamp(c / m, 0, 1);
+        fill.width = Math.max(1, (width - 2) * p);
+        txt.setText(`HP ${Math.floor(c)}/${Math.floor(m)}`);
+        s.layout();
+      };
+
+      return s;
+    };
+
+    // header: title + coords + HP
+    const title = scene.add.text(0,0,"Oven", { fontSize: 16, color: "#ffffff", fontFamily: "sans-serif" });
+    const sub = scene.add.text(0,0,"—", { fontSize: 12, color: "#b0b0b0", fontFamily: "sans-serif" });
+    const ovenHpBar = makeHpBarWithText(240, 14);
 
     // after 'title' create a fuel row
     const woodIconKey = (UI_ITEM_TYPES['wood']?.icon) || 'wood' || 'blank';
@@ -183,22 +245,88 @@ export default class ClayOvenTab {
       if (this.selected) this.openRefuelEditor(this.selected);
     });
 
+    const fixBtn = scene.rexUI.add.label({
+      background: scene.rexUI.add.roundRectangle(0,0,0,0,10,0x2f7d32),
+      text: scene.add.text(0,0,'🛠 Fix', { fontSize: 14, color: '#ffffff', fontFamily: 'sans-serif' }),
+      space: { left: 12, right: 12, top: 7, bottom: 7 }
+    })
+      .setMinSize(110, 34)
+      .setInteractive({ useHandCursor: true });
+
+    fixBtn.on('pointerup', () => {
+      const b = this.selected; // oven
+      if (!b) return;
+
+      const maxHp = (b.maxHealth ?? 100);
+      const hp    = (b.health ?? b.hp ?? 0);
+      if (hp >= maxHp) {showAlert(scene, "Building is Already in condition", '#00ff00'); return}
+
+      const team = Teams.teamLists[this.team];
+      if (!team.buildingFixTasks) team.buildingFixTasks = [];
+
+      Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
+        x: b.gridX ?? b.x,
+        y: b.gridY ?? b.y,
+        type: b.buildType ?? TILE_TYPES.clayOven,
+        value: b,
+        assigned: 0,
+      });
+    });
+
+    // Make them share row width (prevents stacking in narrow panels)
+    refuelBtn.setMinSize(0, 34);
+    fixBtn.setMinSize(0, 34);
+
+    const actionRow = scene.rexUI.add.sizer({
+      orientation: 'x',
+      space: { item: 10 }
+    })
+      .add(refuelBtn, { proportion: 1, align: 'center', expand: true })
+      .add(fixBtn,    { proportion: 1, align: 'center', expand: true });
 
 
     // helper: icon with count (overlay bottom-right)
     const iconWithCount = () => {
       const c = scene.rexUI.add.overlapSizer({ width: 28, height: 28 });
-      const icon = scene.add.image(0,0,"blank").setDisplaySize(24,24).setOrigin(0.5);
-      const count = scene.add.text(0,0,"", {
-        fontSize: 12, color: "#ffffff", stroke: "#000", strokeThickness: 2, fontFamily: "monospace"
-      }).setOrigin(1,1);
+
+      // 🔲 background box for the slot (neutral gray like the tabs)
+      const bg = rr(28, 28, 4, 0x333333, 0.9);
+      c.addBackground(bg);
+
+      const icon = scene.add.image(0, 0, "blank")
+        .setDisplaySize(24, 24)
+        .setOrigin(0.5);
+
+      const count = scene.add.text(0, 0, "", {
+        fontSize: 12,
+        color: "#ffffff",
+        stroke: "#000",
+        strokeThickness: 2,
+        fontFamily: "monospace"
+      }).setOrigin(1, 1);
+
       c.add(icon, { key: "icon", align: "center" });
       c.add(count, { key: "count", align: "right-bottom" });
+
       c.setIcon = (key, amt) => {
-        if (key) icon.setTexture(key);
-        if (amt && amt > 1) { count.setVisible(true).setText("x"+amt); }
-        else { count.setVisible(false); }
+        const hasIcon =
+          key && key !== "empty" && scene.textures.exists(key);
+
+        if (hasIcon) {
+          icon.setTexture(key);
+          icon.setVisible(true);
+        } else {
+          // 🔕 no icon → just show the gray box
+          icon.setVisible(false);
+        }
+
+        if (amt && amt > 1) {
+          count.setVisible(true).setText("x" + amt);
+        } else {
+          count.setVisible(false);
+        }
       };
+
       return c;
     };
 
@@ -247,30 +375,40 @@ export default class ClayOvenTab {
       orientation: "y",
       space: { left: 10, right: 10, top: 6, bottom: 6, item: 10 }
     })
-      .add(title, 0, "left", 0, false)
-      .add(fuelRow, 0, "left", 0, false)
-      .add(refuelBtn, 0, "left", 0, false)
-      .add(col,   0, "left", 0, true);
+      .add(title,     0, "left", 0, false)
+      .add(sub,       0, "left", 0, false)
+      .add(ovenHpBar, 0, "left", 0, false)
+      .add(fuelRow,   0, "left", 0, false)
+      .add(actionRow, 0, "left", 0, false)
+      .add(col,       0, "left", 0, true);
 
     // methods to update details
     const setOven = (oven) => {
       if (!oven) {
+        title.setText('Oven');
+        sub.setText('—');
+        ovenHpBar.setValue(0, 1);
         rows.forEach(r => {
-          r.cook.setIcon("blank", 0);
+          r.cook.setIcon(null, 0);  // 🔸 no texture → just gray box
           r.prog.setPct(0);
-          r.out.setIcon("blank", 0);
+          r.out.setIcon(null, 0);
         });
         fuelText.setText('Fuel: 0');
         return;
       }
+
+      title.setText('Oven');
+      sub.setText(`(${oven.x ?? 0}, ${oven.y ?? 0})`);
+      ovenHpBar.setValue(oven.health ?? 0, oven.maxHealth ?? 1);
+
       fuelText.setText(`Fuel: ${oven.fuel|0}`);
       for (let i=0;i<3;i++) {
         const cookSlot = oven.cookingSlots[i];
         const outSlot  = oven.outputSlots[i];
-        const cookKey = UI_ITEM_TYPES[cookSlot?.item?.name || "empty"]?.icon || "blank";
-        const outKey  = UI_ITEM_TYPES[outSlot?.item?.name  || "empty"]?.icon || "blank";
+        const cookKey = UI_ITEM_TYPES[cookSlot?.item?.name || "empty"]?.icon || null;
+        const outKey  = UI_ITEM_TYPES[outSlot?.item?.name  || "empty"]?.icon || null;
         rows[i].cook.setIcon(cookKey, cookSlot?.amount || 0);
-        rows[i].out.setIcon(outKey, outSlot?.amount || 0);
+        rows[i].out.setIcon(outKey,  outSlot?.amount  || 0);
 
         const dur = oven.cookDurations[i] || 0;
         const t   = oven.cookTimers[i] || 0;
@@ -300,6 +438,7 @@ export default class ClayOvenTab {
 
   createCard(oven, idx) {
     const scene = this.scene;
+    const arrow = scene.add.text(0,0,"→", { fontSize: 16, color: "#bbbbbb" });
     const name = scene.add.text(0, 0, `Oven ${idx + 1} (${oven.x},${oven.y})`, {
       fontSize: 13,
       color: "#ffffff",
@@ -320,27 +459,37 @@ export default class ClayOvenTab {
 
     // helper: icon overlay
     const icon = (key, amt) => {
-      const c = scene.rexUI.add.overlapSizer({ width: 26, height: 26 });
-      const im = scene.add
-        .image(0, 0, key || "blank")
-        .setDisplaySize(22, 22)
-        .setOrigin(0.5);
-      const tx = scene.add
-        .text(0, 0, "", {
-          fontSize: 11,
-          color: "#ffffff",
-          stroke: "#000",
-          strokeThickness: 2,
-          fontFamily: "monospace",
-        })
-        .setOrigin(1, 1);
-      c.add(im, { key: "im", align: "center" });
-      c.add(tx, { key: "tx", align: "right-bottom" });
+      const c = scene.rexUI.add.overlapSizer({ width: 30, height: 30 });
+
+      // background gray box
+      const bg = scene.rexUI.add.roundRectangle(0,0,26,26,4,0x333333,0.9);
+      c.addBackground(bg);
+
+      // the ACTUAL item icon (still Phaser Image)
+      const im = scene.add.image(0,0,"blank")
+        .setDisplaySize(22,22)
+        .setOrigin(0.5)
+        .setVisible(false);       // start hidden
+
+      const tx = scene.add.text(0,0,"",{
+        fontSize:11, color:"#fff", stroke:"#000", strokeThickness:2
+      }).setOrigin(1,1);
+
+      c.add(im, { key:"im", align:"center" });
+      c.add(tx, { key:"tx", align:"right-bottom" });
+
       c.setIcon = (k, a) => {
-        if (k) im.setTexture(k);
-        if (a && a > 1) tx.setText("x" + a).setVisible(true);
+        if (k && scene.textures.exists(k)) {
+          im.setTexture(k).setVisible(true);
+        } else {
+          im.setVisible(false);
+        }
+
+        if (a && a > 1) tx.setText("x"+a).setVisible(true);
         else tx.setVisible(false);
       };
+
+      c.setIcon(key, amt || 0);
       return c;
     };
 
@@ -349,46 +498,87 @@ export default class ClayOvenTab {
     const cookIcons = [];
     for (let i = 0; i < 3; i++) {
       const slot = oven.cookingSlots[i];
-      const key = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || "blank";
-      const ic = icon(key, slot?.amount || 0);
+      let key = null;
+      let amount = 0;
+
+      if (slot && slot.item) {
+        const uiItem = UI_ITEM_TYPES[slot.item.name];
+        if (uiItem && uiItem.icon && scene.textures.exists(uiItem.icon)) {
+          key = uiItem.icon;
+        }
+        amount = slot.amount || 0;
+      }
+
+      const ic = icon(key, amount);
       cookRow.add(ic);
       cookIcons.push(ic);
     }
-
-    const arrow = scene.add.text(0, 0, "→", { fontSize: 14, color: "#bbbbbb" });
 
     // output row icons
     const outRow = scene.rexUI.add.sizer({ orientation: "x", space: { item: 6 } });
     const outIcons = [];
     for (let i = 0; i < 3; i++) {
       const slot = oven.outputSlots[i];
-      const key = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || "blank";
-      const ic = icon(key, slot?.amount || 0);
+      let key = null;
+      let amount = 0;
+
+      if (slot && slot.item) {
+        const uiItem = UI_ITEM_TYPES[slot.item.name];
+        if (uiItem && uiItem.icon && scene.textures.exists(uiItem.icon)) {
+          key = uiItem.icon;
+        }
+        amount = slot.amount || 0;
+      }
+
+      const ic = icon(key, amount);
       outRow.add(ic);
       outIcons.push(ic);
     }
 
-    // background + layout
+    // background
     const bg = scene.rexUI
       .add.roundRectangle(0, 0, 0, 0, 6, 0xffffff, 0.08)
       .setStrokeStyle(1, 0xffffff, 0.15);
 
-    const row = scene.rexUI.add.sizer({
+    // helper: HP bar (no text) that can be updated without changing row height
+    const makeHpBar = (width, height) => {
+      const s = scene.rexUI.add.overlapSizer({ width, height });
+      const b = scene.rexUI.add.roundRectangle(0, 0, width, height, 4, 0x222222, 1);
+      const f = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), Math.max(1, height - 2), 4, 0x4caf50, 1)
+        .setOrigin(0, 0.5);
+      s.addBackground(b);
+      s.add(f, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
+      s.layout();
+      s.setPercent = (pct) => {
+        const p = Phaser.Math.Clamp(pct ?? 0, 0, 1);
+        f.width = Math.max(1, (width - 2) * p);
+        s.layout();
+      };
+      return s;
+    };
+
+    // inner content row (top)
+    const content = scene.rexUI.add.sizer({
       orientation: "x",
-      space: { left: 12, right: 12, top: 6, bottom: 6, item: 12 },
+      space: { left: 12, right: 12, top: 6, bottom: 14, item: 12 }, // bottom padding leaves room for HP bar
     })
-      .addBackground(bg)
       .add(name, { proportion: 1, expand: false })
       .add(fuelBadge, { proportion: 0, expand: false })
       .add(cookRow, { proportion: 0, expand: false })
       .add(arrow, { proportion: 0, expand: false })
       .add(outRow, { proportion: 0, expand: false });
 
-    // 🔥 stretch full width
+    // 🔥 stretch full width (keep existing height)
     const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
-    row.setMinSize(fullWidth, 48);
+    const hpBar = makeHpBar(Math.max(80, fullWidth - 24), 6);
+    hpBar.setPercent((oven.health ?? 0) / (oven.maxHealth || 1));
 
-    row.userData = { oven, name, cookIcons, outIcons, fuelBadge, fuelValueText };
+    const row = scene.rexUI.add.overlapSizer({ width: fullWidth, height: 48 })
+      .addBackground(bg)
+      .add(content, { key: 'content', align: 'top', expand: false })
+      .add(hpBar, { key: 'hp', align: 'bottom', expand: false, padding: { left: 12, right: 12, bottom: 6 } });
+
+    row.userData = { oven, name, cookIcons, outIcons, fuelBadge, fuelValueText, hpBar };
 
     row.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
       this.selectOven(oven);
@@ -496,16 +686,16 @@ export default class ClayOvenTab {
     if (!row || !row.userData) return;
 
     // cooking slots
-    for (let i=0;i<3;i++) {
+    for (let i = 0; i < 3; i++) {
       const slot = oven.cookingSlots[i];
-      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || "blank";
+      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
       row.userData.cookIcons[i].setIcon(key, slot?.amount || 0);
     }
 
     // output slots
-    for (let i=0;i<3;i++) {
+    for (let i = 0; i < 3; i++) {
       const slot = oven.outputSlots[i];
-      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || "blank";
+      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
       row.userData.outIcons[i].setIcon(key, slot?.amount || 0);
     }
 
@@ -514,8 +704,11 @@ export default class ClayOvenTab {
       fuelText.setText(String(oven.fuel | 0));
     }
 
+    // HP bar
+    if (row.userData.hpBar?.setPercent) {
+      row.userData.hpBar.setPercent((oven.health ?? 0) / (oven.maxHealth || 1));
+    }
   }
-
 
   // ------------ JOBS ------------
 

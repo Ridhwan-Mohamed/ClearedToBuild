@@ -71,7 +71,7 @@ export class ClayOvenUI {
     static showMinor(oven) {
         if (oven.minorUI) return;
 
-        const bg = this.scene.add.rectangle(0, 0, 80, 40, 0x000000, 0.7)
+        const bg = this.scene.add.rectangle(0, 0, 80, 26, 0x000000, 0.7)
             .setOrigin(0.5)
             .setDepth(UIDEPTH)
             .setScrollFactor(0); // <- Not 1. Set to 0 for fixed UI

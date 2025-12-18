@@ -18,7 +18,7 @@ import iWater from 'url:../assets/water/iwater.png'
 // import BLCWater from 'url:../assets/water/BLCWater.png'
 import waterParticle from 'url:../assets/waterParticle.png'
 import crops from 'url:../assets/crops.png'
-import { Map } from './map.js';
+import { Map as GameMap } from './map.js';
 import { Turret } from './Turret.js';
 import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
@@ -45,6 +45,7 @@ import { Clock } from './Controllers/Clock.js';
 import clayOven from 'url:../assets/clayOven.png'
 import { ClayOven } from './buildings/ClayOven.js';
 import { DailyNeedsTracker } from './UI/DailyNeedsTracker.js';
+import tillOverlay from 'url:../assets/tillOverlay.png'
 import foodIcon from 'url:../assets/foodIcon.png'
 import waterIcon from 'url:../assets/waterIcon.png'
 import woodIcon from 'url:../assets/woodIcon.png'
@@ -80,7 +81,7 @@ export class mapView extends Phaser.Scene {
     constructor() {
         super('mapView');
         mapView.scene = this;
-        Map.scene = this;
+        GameMap.scene = this;
         Turret.scene = this;
         tillManager.scene = this;
         buildingManager.scene = this;
@@ -111,6 +112,9 @@ export class mapView extends Phaser.Scene {
         this.selectingEnemies = false;
         this.enemySelectStart = null;
         this.enemySelectionRect = null;
+        this.tillPreviewSprites = new Map(); // key = "x,y" → sprite
+        this.tillPulseTween = null;
+        this.guardPlacement = { active: false, troop: null };
     }
 
     preload() {
@@ -136,6 +140,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('playerIcon', playerIcon);
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
         this.load.image('sparkle', waterParticle);
+        this.load.image('tillOverlay', tillOverlay);
         this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
         // this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
         this.load.spritesheet('shore_edge', TWater, { frameWidth: 16, frameHeight: 16 });
@@ -203,7 +208,7 @@ export class mapView extends Phaser.Scene {
         setupTownBoundsToggle(this);
         this.cursors = this.input.keyboard.createCursorKeys();
         // Add collision between the cube and the barriers
-        // this.physics.add.collider(characters, Map.barrier);
+        // this.physics.add.collider(characters, GameMap.barrier);
         // this.physics.add.overlap(Player.characters, Player.characters, Player.handlePlayerCollision, null, this);
         this.physics.add.collider(
             Player.characters,
@@ -234,7 +239,7 @@ export class mapView extends Phaser.Scene {
                 ClayOven.beginPlacing(this, 1)
             }
             else{
-                Map.beginPlacing(item)
+                GameMap.beginPlacing(item)
             }
         });
 
@@ -252,7 +257,7 @@ export class mapView extends Phaser.Scene {
 
         this.input.keyboard.on('keydown-ESC', () => {
             this.selectMode = true
-            //Map.navMesh = new NavMesh(buildPolysFromGridMap(Map.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
+            //GameMap.navMesh = new NavMesh(buildPolysFromGridMap(GameMap.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
             if(this.gridPlace){
                 this.gridPlace = false
             }
@@ -262,9 +267,9 @@ export class mapView extends Phaser.Scene {
                 Turret.baseItem.destroy();
             }
             else{
-                Map.isPlacing = false; // Exit placing mode
-                Map.placingItem.destroy(); // Clear placing item
-                Map.placingItem = null;
+                GameMap.isPlacing = false; // Exit placing mode
+                GameMap.placingItem.destroy(); // Clear placing item
+                GameMap.placingItem = null;
             }
         });
         this.clock = {paused: true};
@@ -288,11 +293,26 @@ export class mapView extends Phaser.Scene {
                 console.log("hit player");
                 return;
             }
-            if(Map.placingItem && !Map.placingItem.blocked){
+            // 🔵 GUARD / SURVEY MODE: if PlayerTab put us into guardPlacement, consume this click
+            if (this.guardPlacement && this.guardPlacement.active && pointer.button === 0) {
+                const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+                const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+                const worldX = gridX * SQUARESIZE + SQUARESIZE / 2;
+                const worldY = gridY * SQUARESIZE + SQUARESIZE / 2;
+
+                Player.setGuardPost(this.guardPlacement.troop, worldX, worldY);
+
+                this.guardPlacement.active = false;
+                this.guardPlacement.troop = null;
+                this.input.setDefaultCursor('default');
+
+                return;
+            }
+            else if(GameMap.placingItem && !GameMap.placingItem.blocked){
                 const items = TILE_TYPES[this.registry.get('image')]
                 let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
-                if(items == TILE_TYPES.player){Map.handleMapClick(x,y,items)}
+                if(items == TILE_TYPES.player){GameMap.handleMapClick(x,y,items)}
                 else{
                     Teams.teamLists['1'].blockBuildingStates.push({
                         type: items,
@@ -360,7 +380,7 @@ export class mapView extends Phaser.Scene {
                 selectionCountText = this.add.text(
                     this.cameras.main.width - 150, // Relative to camera
                     65,                            // Slight padding below the position text
-                    `Selected: ${Player.selected.length}\nnavGird: ${Map.navGrid[posY][posX]}\ngrid: ${Map.grid[posY][posX]}`, 
+                    `Selected: ${Player.selected.length}\nnavGird: ${GameMap.navGrid[posY][posX]}\ngrid: ${GameMap.grid[posY][posX]}`, 
                     { fontSize: '14px', fill: '#ffffff' }
                 )
                     .setScrollFactor(0)                // Stick to camera
@@ -379,7 +399,7 @@ export class mapView extends Phaser.Scene {
                     const variance = 4;
                     targetX += Phaser.Math.RND.between(-variance, variance);
                     targetY += Phaser.Math.RND.between(-variance, variance);
-                    if(Map.navGrid[troopY][troopX] == 0){
+                    if(GameMap.navGrid[troopY][troopX] == 0){
                         let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                         if (newX === -1) {
                             console.log("No valid start tile nearby");
@@ -390,12 +410,12 @@ export class mapView extends Phaser.Scene {
                             troopY = newY
                         }
                     }
-                    else if(Map.navGrid[posY][posX] == 0){
+                    else if(GameMap.navGrid[posY][posX] == 0){
                         console.log("end pos is at blocked grid");
                         return;
                     }
                     troop.roam = false;
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX+SQUARESIZE/2, y: targetY+SQUARESIZE/2 }));
+                    Player.moveTo(troop, GameMap.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX+SQUARESIZE/2, y: targetY+SQUARESIZE/2 }));
                 });
             }
         });
@@ -441,7 +461,7 @@ export class mapView extends Phaser.Scene {
     
         if (deviationX > EDGE_RATIO || deviationY > EDGE_RATIO) {
             this.oldMapCenter = [centerChunkX, centerChunkY]; // Update old center
-            if(this.zoomMixer.mode == 'detailed') Map.reDraw(); // Trigger a redraw
+            if(this.zoomMixer.mode == 'detailed') GameMap.reDraw(); // Trigger a redraw
         }
 
     }
@@ -471,7 +491,7 @@ export class mapView extends Phaser.Scene {
     
             // Update the end cell for selection
             this.endCell = { x: gridX, y: gridY };
-            if(Map.checkSpreadPosition(this.startCell.x,this.startCell.y,this.endCell.x, this.endCell.y)){
+            if(GameMap.checkSpreadPosition(this.startCell.x,this.startCell.y,this.endCell.x, this.endCell.y)){
                 this.drawSelectionOutline("0xff0000");
             } else{
                 // Visualize the current selection
@@ -559,13 +579,14 @@ export class mapView extends Phaser.Scene {
                 for (let x = minX; x <= maxX; x++) {
                     this.farmMode = false;
                     this.functionTab.updateVisuals();
-                    let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
+                    let type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))]
                     if(type.spread && type.name != "water" && type.name != 'road'){
                         tillList.push( {
                             x,
                             y,
                             assigned: 0
                         });
+                        this.addTillPreviewSprite(x, y);
                     }
                     else if(type.name == 'crops'){
                         const crop = Teams.getCropAt(x,y,1);
@@ -575,6 +596,7 @@ export class mapView extends Phaser.Scene {
                                 y,
                                 assigned: 0
                             });
+                            this.addTillPreviewSprite(x, y);
                         }
                     }
                 }
@@ -584,13 +606,13 @@ export class mapView extends Phaser.Scene {
             let cropList = Teams.teamLists['1'].cropList;
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
-                    let type = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))]
+                    let type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))]
                     if(type.name == 'crops'){
                         let cropTile;
                         const key = `${x},${y}`
-                        if(Array.isArray(Map.cropDict[key])){
-                            cropTile = Map.cropDict[key][0]
-                        }else{cropTile = Map.cropDict[key]}
+                        if(Array.isArray(GameMap.cropDict[key])){
+                            cropTile = GameMap.cropDict[key][0]
+                        }else{cropTile = GameMap.cropDict[key]}
                         if(cropTile.anims.currentFrame.index == 3){
                             cropList.push({
                                 x,
@@ -608,16 +630,16 @@ export class mapView extends Phaser.Scene {
                 for (let x = minX; x <= maxX; x++) {
                     this.seedGridMode = false;
                     this.functionTab.updateVisuals();
-                    let tileType = TILE_TYPES[TILE_MAP(Map.grabDepth(Map.grid[y][x], FLOORDEPTH))];
+                    let tileType = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))];
                     if (tileType.interactable) {
-                        const block = Map.blocks[y * WORLD_DIMENSIONX + x];
+                        const block = GameMap.blocks[y * WORLD_DIMENSIONX + x];
                         // register the seed task AND bind the block to it
                         const task = { x, y, block, forageType: 'seed', assigned: 0 };
                         Teams.teamLists["1"].foragerQueue.push(task);
                         // 🟡 draw persistent yellow outline
                         if (block && !block.queuedOutline) {
                             const size = SQUARESIZE;
-                            const outline = Map.scene.add.graphics();
+                            const outline = GameMap.scene.add.graphics();
                             outline.setDepth(UIDEPTH);
                             outline.lineStyle(2, 0xffff00, 1);
                             outline.strokeRect(x * size, y * size, size, size);
@@ -631,7 +653,7 @@ export class mapView extends Phaser.Scene {
         else{
             const item = itemTab.itemValues(this.registry.get('image'));
             item.lenX = maxX-minX; item.lenY = maxY-minY;
-            Map.addSpreadItem(minX,minY,item);
+            GameMap.addSpreadItem(minX,minY,item);
         }
     }
 
@@ -971,6 +993,75 @@ export class mapView extends Phaser.Scene {
         fightManager.sendToAttack()
     }
 
+    addTillPreviewSprite(x, y) {
+        const key = `${x},${y}`;
+
+        // already exists?
+        if (this.tillPreviewSprites.has(key)) return;
+
+        const spr = this.add.image(
+            x * SQUARESIZE + SQUARESIZE / 2,
+            y * SQUARESIZE + SQUARESIZE / 2,
+            "tillOverlay"
+        )
+        .setDisplaySize(SQUARESIZE, SQUARESIZE)
+        .setDepth(FLOORDEPTH)
+        .setAlpha(0.6);
+        this.uiCamera.ignore(spr)
+
+        this.tillPreviewSprites.set(key, spr);
+    }
+
+    syncTillPulseTween() {
+
+        if (!this.tillPulseTween) {
+            this.tillPulseTween = this.tweens.add({
+                targets: Array.from(this.tillPreviewSprites.values()),
+                alpha: { from: 0.4, to: 0.9 },
+                duration: 700,
+                ease: 'Sine.inOut',
+                yoyo: true,
+                repeat: -1
+            });
+        } else {
+            this.tillPulseTween.targets = Array.from(this.tillPreviewSprites.values());
+        }
+    }
+
+    enableTillFlash(x, y) {
+        const key = `${x},${y}`;
+        const spr = this.tillPreviewSprites.get(key);
+        if (!spr) return;
+
+        // already flashing? don't double-attach
+        if (spr._flashTween) {
+            return;
+        }
+
+        spr._flashTween = this.tweens.add({
+            targets: spr,
+            alpha: { from: 0.4, to: 0.9 },
+            duration: 650,
+            ease: 'Sine.inOut',
+            yoyo: true,
+            repeat: -1
+        });
+    }
+
+    removeTillPreviewSprite(x, y) {
+        const key = `${x},${y}`;
+        const spr = this.tillPreviewSprites.get(key);
+        if (!spr) return;
+
+        this.tillPreviewSprites.delete(key);
+
+        if (spr._flashTween) {
+            spr._flashTween.remove();
+            spr._flashTween = null;
+        }
+
+        spr.destroy();
+    }
 
 }
 

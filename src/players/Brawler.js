@@ -1,5 +1,4 @@
-// === Gunslinger.js ===
-
+// === Brawler.js ===
 import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
@@ -8,47 +7,44 @@ import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
-export class Gunslinger {
+export class Brawler {
 
-    static speed = 100;
-    static stamina = 0.02;
+    static speed = 130; // fastest melee unit
+    static stamina = 0.025;
 
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
             SQUARESIZE * y + SQUARESIZE / 2,
-            'gun1'
+            'player'
         );
 
         sprite.setInteractive();
-        sprite.setOrigin(0.5, 0.5);
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);
         sprite.setCollideWorldBounds(true);
-        sprite.setTint(0x9999ff); // bluish tint
-        sprite.unitTint = 0x9999ff;
+        sprite.setTint(0xFFD712); // unique golden tint
+        sprite.unitTint = 0xFFD712;
 
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
-        sprite.health = 200;
-        sprite.maxHealth = 200;
+        sprite.health = 160; // cheap + fragile
+        sprite.maxHealth = 160;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.body.pushable = false;
         sprite.name = NameGenerator.generate();
-        sprite.type = Gunslinger;
+        sprite.type = Brawler;
 
-        sprite.animState = 'gun1Idle';
-        sprite.walk = 'gun1Walk';
-        sprite.idle = 'gun1Idle';
+        sprite.animState = 'idle';
+        sprite.walk = 'walk';
+        sprite.idle = 'idle';
         sprite.action = 'action';
 
-        sprite.isGunslinger = true;
+        sprite.isBrawler = true;
 
-        // === Equip pistol ===
-        sprite.weapon = weapons.pistol;
+        sprite.weapon = weapons.boxingGloves;
 
-        // === Register with systems ===
         ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
@@ -56,41 +52,31 @@ export class Gunslinger {
         Player.configureCubeInteractivity(sprite);
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
-        sprite.destroySelf = () => Gunslinger.destroy(sprite);
+        sprite.destroySelf = () => Brawler.destroy(sprite);
 
         return sprite;
     }
 
     static update(troop) {
         Player.updateTracking(troop);
-
-        if(troop.task || troop.track) {return;}
-        else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
+        if (troop.task || troop.track) return;
+        if (!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam)
             Player.roam(troop);
-        }
     }
 
     static destroy(troop) {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
 
-        if (team?.fighterList) {
-            const index = team.fighterList.indexOf(troop);
-            if (index !== -1) {
-                team.fighterList.splice(index, 1);
-            }
-        }
-
         Player._destroyMiniBars(troop)
 
-        let plIndex = team.playerList.indexOf(troop)
-        if (plIndex !== -1) {
-            team.playerList.splice(plIndex, 1);
+        if (team?.fighterList) {
+            const index = team.fighterList.indexOf(troop);
+            if (index !== -1) team.fighterList.splice(index, 1);
         }
-        const scene = troop.scene;
-        if (scene?.playerTab?.onPlayerDestroyed) {
-            scene.playerTab.onPlayerDestroyed(troop);
-        }
+
+        const plIndex = team.playerList.indexOf(troop);
+        if (plIndex !== -1) team.playerList.splice(plIndex, 1);
 
         if (troop.timer) {
             troop.timer.remove(false);
@@ -102,14 +88,11 @@ export class Gunslinger {
             troop.visionId = null;
         }
 
-        // Clear references
-        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        if (troop.task) { troop.task.assigned--; troop.task = null; }
         if (troop.carrying) troop.carrying = null;
 
-        // ❗ Remove from Player.characters group
         Player.characters.remove(troop);
 
-        // 💥 CRITICAL FIX: remove from physics world
         if (troop.body) {
             troop.scene.physics.world.remove(troop.body);
             troop.body.destroy();
@@ -118,7 +101,6 @@ export class Gunslinger {
         const ind = Player.troops.indexOf(troop);
         if (ind !== -1) Player.troops.splice(ind, 1);
 
-        // Now safe to destroy the sprite
         troop.destroy();
     }
 }

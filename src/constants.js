@@ -34,6 +34,9 @@ export const CONTROL_STATES = {
     GET_BLOCK_RESOURCE: 22,
     SLEEP_MODE: 23,
     GO_HOME_MODE: 24,
+    FLEE_MODE: 25,
+    HEADING_TO_GUARD: 26,
+    FIX_BUILDING: 27,
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames

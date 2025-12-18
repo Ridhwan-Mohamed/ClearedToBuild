@@ -9,7 +9,6 @@ import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ClayOven } from '../buildings/ClayOven.js';
 import { buildingManager } from '../Manager/buildingManager.js';
-import { weapons } from '../weapons.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 
@@ -30,6 +29,7 @@ export class Fireman {
         sprite.currentPath = [];
         sprite.body.team = teamNumber;
         sprite.health = 100;
+        sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.setTint(0xff9933); // orange tint
@@ -42,8 +42,7 @@ export class Fireman {
         sprite.action = 'action';
         sprite.name = NameGenerator.generate();
         sprite.skip = false; //flag for manager task allocation
-        sprite.weapon = weapons.hands;
- 
+
         sprite.carrying = null; // [{ item, count }]
         sprite.isFireman = true;
 
@@ -60,15 +59,26 @@ export class Fireman {
     }
 
     static update(troop) {
-        if (troop.task) return;
+        // If currently fleeing, only maintain flee behaviour.
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            Player.updateTracking(troop);   // may keep fleeing or drop back to TRACK_MODE when safe
+            return;
+        }
 
-        // check for nearby enemies and flee in case.
+        // Always check for nearby enemies first (can flip into FLEE_MODE and drop tasks).
         Player.updateTracking(troop);
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            // Just started fleeing this tick; do not do fireman/oven logic.
+            return;
+        }
+
+        // If we still have a task after tracking (i.e., not dropped by flee), just work it.
+        if (troop.task) return;
 
         const outputList = Teams.teamLists[troop.body.team].ovenPickupJobs;
         if (outputList) {
             const unassignedTask = outputList.find(val => val.assigned < val.amount);
-            if(unassignedTask) {
+            if (unassignedTask) {
                 Manager.assignOneTroopToAction(troop, outputList, CONTROL_STATES.GET_FROM_OVEN);
                 return;
             }
@@ -94,7 +104,7 @@ export class Fireman {
             if (assigned) return;
         }
 
-        if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
+        if (!troop.task && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
         }
     }
@@ -413,6 +423,8 @@ export class Fireman {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
         if (!team?.firemanList) return;
+
+        Player._destroyMiniBars(troop)
 
         const index = team.firemanList.indexOf(troop);
         if (index !== -1) {

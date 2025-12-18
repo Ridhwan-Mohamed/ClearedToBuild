@@ -178,6 +178,7 @@ export class StorageManager {
                     troop.pendingFarmSpot = null;
                     troop.task = null;
                 }
+                this.scene.enableTillFlash(plot.x, plot.y);
                 return;
             }
         }

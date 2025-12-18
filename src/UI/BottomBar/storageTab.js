@@ -1,6 +1,7 @@
 // === StorageTab.js ===
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
+import { showAlert } from '../../constants'
 
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
@@ -135,17 +136,74 @@ export default class StorageTab {
     const scene = this.scene;
     const rr = (w, h, r, c, a = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, c, a);
 
-    const title = scene.add.text(0, 0, "Storage Details", { fontSize: 16, color: "#ffffff" });
+    const ensureBlankTexture = () => {
+      if (scene.textures.exists("blank")) return;
+
+      const g = scene.add.graphics();
+      g.fillStyle(0xffffff, 1);
+      g.fillRect(0, 0, 1, 1);
+      g.generateTexture("blank", 1, 1);
+      g.destroy();
+    };
+    ensureBlankTexture();
+
+    // header: title + coords + HP
+    const title = scene.add.text(0, 0, "Storage", { fontSize: 16, color: "#ffffff", fontFamily: "sans-serif" });
+    const sub = scene.add.text(0, 0, "—", { fontSize: 12, color: "#b0b0b0", fontFamily: "sans-serif" });
+
+    const makeHpBarWithText = (width, height) => {
+      const s = scene.rexUI.add.overlapSizer({ width, height });
+
+      const bg = rr(width, height, 5, 0x222222, 1);
+      const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 5, 0x4caf50, 1)
+        .setOrigin(0, 0.5);
+
+      const txt = scene.add.text(0, 0, 'HP —/—', {
+        fontFamily: 'sans-serif',
+        fontSize: 12,
+        color: '#ffffff',
+      }).setOrigin(0.5, 0.5);
+
+      s.addBackground(bg);
+      s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
+      s.add(txt,  { key: 'txt',  align: 'center', expand: false });
+      s.layout();
+
+      s.setValue = (cur, max) => {
+        const m = Math.max(1, (max ?? 0));
+        const c = Math.max(0, (cur ?? 0));
+        const p = Phaser.Math.Clamp(c / m, 0, 1);
+        fill.width = Math.max(1, (width - 2) * p);
+        txt.setText(`HP ${Math.floor(c)}/${Math.floor(m)}`);
+        s.layout();
+      };
+
+      return s;
+    };
+
+    const storageHpBar = makeHpBarWithText(240, 14);
     const gridSizer = scene.rexUI.add.gridSizer({
       column: 4, row: 4,
       columnProportions: 1, rowProportions: 1,
       space: { column: 8, row: 8, left: 6, right: 6, top: 6, bottom: 6 },
     });
 
-    // helper: icon+count cell
     const makeCell = () => {
       const s = scene.rexUI.add.overlapSizer({ width: 32, height: 32 });
-      const icon = scene.add.image(0, 0, "blank").setDisplaySize(24, 24).setOrigin(0.5);
+
+      // 🔲 background gray box like ClayOvenTab
+      const bg = scene.rexUI.add.roundRectangle(
+        0, 0,
+        28, 28,
+        4,
+        0x333333,
+        0.9
+      );
+      s.addBackground(bg);
+
+      // placeholder icon; we size it only when real texture is set
+      const icon = scene.add.image(0, 0, "blank").setOrigin(0.5);
+
       const count = scene.add.text(0, 0, "", {
         fontSize: 11,
         color: "#ffffff",
@@ -153,13 +211,29 @@ export default class StorageTab {
         strokeThickness: 2,
         fontFamily: "monospace",
       }).setOrigin(1, 1);
-      s.add(icon, { key: "icon", align: "center" });
+
+      s.add(icon,  { key: "icon",  align: "center" });
       s.add(count, { key: "count", align: "right-bottom" });
+
       s.setIcon = (key, amt) => {
-        if (key) icon.setTexture(key);
-        if (amt && amt > 1) count.setVisible(true).setText("x" + amt);
-        else count.setVisible(false);
+        const hasIcon = key && scene.textures.exists(key);
+
+        if (hasIcon) {
+          icon.setTexture(key);
+          icon.setDisplaySize(24, 24);   // size AFTER real texture
+          icon.setVisible(true);
+        } else {
+          // no item → hide the icon, keep gray box visible
+          icon.setVisible(false);
+        }
+
+        if (amt && amt > 1) {
+          count.setVisible(true).setText("x" + amt);
+        } else {
+          count.setVisible(false);
+        }
       };
+
       return s;
     };
 
@@ -170,20 +244,68 @@ export default class StorageTab {
       cells.push(c);
     }
 
-    const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 10 } })
-      .add(title, 0, "left", 0, false)
+    const fixBtn = scene.rexUI.add.label({
+      background: scene.rexUI.add.roundRectangle(0, 0, 0, 34, 10, 0x2f7d32),
+      text: scene.add.text(0, 0, "🛠 Fix", { fontFamily: "sans-serif", fontSize: 14, color: "#ffffff" }),
+      space: { left: 12, right: 12, top: 7, bottom: 7 },
+    })
+      .setMinSize(110, 34)
+      .setInteractive({ useHandCursor: true });
+
+    fixBtn.on('pointerup', () => {
+      const b = this.selected; // storage
+      if (!b) return;
+
+      const maxHp = (b.maxHealth ?? 100);
+      const hp    = (b.health ?? b.hp ?? 0);
+      if (hp >= maxHp) {showAlert(scene, "Building is Already in condition", '#00ff00'); return}
+
+      const team = Teams.teamLists[this.team];
+      if (!team.buildingFixTasks) team.buildingFixTasks = [];
+
+      Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
+        x: b.gridX ?? b.x,
+        y: b.gridY ?? b.y,
+        type: b.buildType, // storage should already carry this
+        value: b,
+        assigned: 0,
+      });
+    });
+
+    // header row: [Storage ............][Fix]
+    fixBtn.setMinSize(90, 34);
+
+    const headerRow = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { item: 10 }
+    })
+      .add(title, { proportion: 1, align: "left", expand: true })
+      .add(fixBtn, { proportion: 0, align: "right", expand: false });
+
+    const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 8 } })
+      .add(headerRow, 0, "left", 0, true)
+      .add(sub, 0, "left", 0, false)
+      .add(storageHpBar, 0, "left", 0, false)
       .add(rr(0, 2, 0, 0xffffff, 0.15), 0, "left", 0, false)
       .add(gridSizer, 0, "left", 0, false);
 
     const setStorage = (storage) => {
       if (!storage) {
-        cells.forEach(c => c.setIcon("blank", 0));
+        title.setText("Storage");
+        sub.setText("—");
+        storageHpBar.setValue(0, 1);
+        cells.forEach(c => c.setIcon(null, 0));   // 🔸 no texture for empty
         return;
       }
+
+      title.setText("Storage");
+      sub.setText(`(${storage.x ?? 0}, ${storage.y ?? 0})`);
+      storageHpBar.setValue(storage.health ?? 0, storage.maxHealth ?? 1);
+
       const items = storage.storageItems;
       for (let i = 0; i < 16; i++) {
         const slot = items[i];
-        const key = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || "blank";
+        const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
         cells[i].setIcon(key, slot?.amount || 0);
       }
     };
@@ -232,57 +354,80 @@ export default class StorageTab {
 
   createCard(storage, idx) {
     const scene = this.scene;
-    const nameText = scene.add.text(0, 0, `Storage ${idx + 1}`, {
-        fontSize: 13,
-        color: "#ffffff",
+
+    const nameText = scene.add.text(0, 0, `Storage ${idx + 1} (${storage.x ?? 0},${storage.y ?? 0})`, {
+      fontSize: 13,
+      color: "#ffffff",
     });
 
     const iconsRow = scene.rexUI.add.sizer({
-        orientation: "x",
-        space: { item: 6 },
+      orientation: "x",
+      space: { item: 6 },
     });
 
     const items = storage.storageItems
-        .filter((s) => s && s.item && s.item.name !== "empty");
+      .filter((s) => s && s.item && s.item.name !== "empty");
 
     items.forEach((slot) => {
-        const key = UI_ITEM_TYPES[slot.item.name]?.icon || "blank";
-        const s = scene.rexUI.add.overlapSizer({ width: 26, height: 26 });
-        const im = scene.add.image(0, 0, key).setDisplaySize(22, 22).setOrigin(0.5);
-        const tx = scene.add.text(0, 0, "", {
+      const key = UI_ITEM_TYPES[slot.item.name]?.icon || "blank";
+      const s = scene.rexUI.add.overlapSizer({ width: 26, height: 26 });
+      const im = scene.add.image(0, 0, key).setDisplaySize(22, 22).setOrigin(0.5);
+      const tx = scene.add.text(0, 0, "", {
         fontSize: 10,
         color: "#ffffff",
         stroke: "#000",
         strokeThickness: 2,
         fontFamily: "monospace",
-        }).setOrigin(1, 1);
-        if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
-        s.add(im, { key: "im", align: "center" });
-        s.add(tx, { key: "tx", align: "right-bottom" });
-        iconsRow.add(s);
+      }).setOrigin(1, 1);
+      if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
+      s.add(im, { key: "im", align: "center" });
+      s.add(tx, { key: "tx", align: "right-bottom" });
+      iconsRow.add(s);
     });
 
     // Full-width row style
     const bg = scene.rexUI
-        .add.roundRectangle(0, 0, 0, 0, 6, 0xffffff, 0.08)
-        .setStrokeStyle(1, 0xffffff, 0.15);
+      .add.roundRectangle(0, 0, 0, 0, 6, 0xffffff, 0.08)
+      .setStrokeStyle(1, 0xffffff, 0.15);
 
-    const card = scene.rexUI.add.sizer({
-        orientation: "x",
-        space: { left: 12, right: 12, top: 6, bottom: 6, item: 10 },
-    })
-        .addBackground(bg)
-        .add(nameText, { proportion: 1, expand: false, align: "left" })
-        .add(iconsRow, { proportion: 1, expand: false, align: "left" });
-
-    // 🔥 stretch across 2/3 panel
     const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
-    card.setMinSize(fullWidth, 48);
 
-    card.userData = { storage, iconsRow };
+    // helper: HP bar (no text)
+    const makeHpBar = (width, height) => {
+      const s = scene.rexUI.add.overlapSizer({ width, height });
+      const b = scene.rexUI.add.roundRectangle(0, 0, width, height, 4, 0x222222, 1);
+      const f = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), Math.max(1, height - 2), 4, 0x4caf50, 1)
+        .setOrigin(0, 0.5);
+      s.addBackground(b);
+      s.add(f, { key: "fill", align: "left", expand: false, padding: { left: 1, right: 1 } });
+      s.layout();
+      s.setPercent = (pct) => {
+        const p = Phaser.Math.Clamp(pct ?? 0, 0, 1);
+        f.width = Math.max(1, (width - 2) * p);
+        s.layout();
+      };
+      return s;
+    };
+
+    const hpBar = makeHpBar(Math.max(80, fullWidth - 24), 6);
+    hpBar.setPercent((storage.health ?? 0) / (storage.maxHealth || 1));
+
+    const content = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { left: 12, right: 12, top: 6, bottom: 14, item: 10 }, // leave room for HP bar
+    })
+      .add(nameText, { proportion: 1, expand: false, align: "left" })
+      .add(iconsRow, { proportion: 1, expand: false, align: "left" });
+
+    const card = scene.rexUI.add.overlapSizer({ width: fullWidth, height: 48 })
+      .addBackground(bg)
+      .add(content, { key: "content", align: "top", expand: false })
+      .add(hpBar, { key: "hp", align: "bottom", expand: false, padding: { left: 12, right: 12, bottom: 6 } });
+
+    card.userData = { storage, iconsRow, hpBar, nameText };
     card.setInteractive({ useHandCursor: true })
-        .on("pointerdown", () => this.selectFromCard(storage));
-    
+      .on("pointerdown", () => this.selectFromCard(storage));
+
     card.on("pointerover", () => bg.setFillStyle(0xffffff, 0.15));
     card.on("pointerout",  () => bg.setFillStyle(0xffffff, 0.08));
 
@@ -292,7 +437,7 @@ export default class StorageTab {
   updateCard(storage) {
     const card = this.cardByStorage.get(storage);
     if (!card || !card.userData) return;
-    const { iconsRow } = card.userData;
+    const { iconsRow, hpBar, nameText } = card.userData;
     iconsRow.removeAll(true);
 
     const items = storage.storageItems
@@ -311,6 +456,15 @@ export default class StorageTab {
     });
 
     iconsRow.layout();
+
+    if (nameText?.setText) {
+      const base = (nameText.text || 'Storage').split('(')[0].trimEnd();
+      nameText.setText(`${base}(${storage.x ?? 0},${storage.y ?? 0})`);
+    }
+
+    if (hpBar?.setPercent) {
+      hpBar.setPercent((storage.health ?? 0) / (storage.maxHealth || 1));
+    }
   }
 
   // ---------- BEHAVIOR ----------

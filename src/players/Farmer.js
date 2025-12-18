@@ -3,7 +3,6 @@ import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES } from '../constants
 import { Manager } from '../Manager/Manager.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
-import { weapons } from '../weapons.js';
 import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
@@ -28,7 +27,8 @@ export class Farmer {
         farmer.roam = false;
         farmer.currentPath = []
         farmer.body.team = teamNumber;
-        farmer.health = 100;
+        farmer.health = 60;
+        farmer.maxHealth = 60;
         farmer.stamina = 100;
         farmer.maxStamina = 100;
         farmer.type = Farmer;
@@ -46,7 +46,6 @@ export class Farmer {
         farmer.pendingFarmSpot = null;
         ZoomMixer.createPlayerMoniker(farmer);
         Teams.movePlayerState(farmer, CONTROL_STATES.TRACK_MODE);
-        farmer.weapon = weapons.hands;
         Player.characters.add(farmer);
         Player.troops.push(farmer);
         Player.configureCubeInteractivity(farmer);
@@ -58,11 +57,20 @@ export class Farmer {
     }
  
     static update(troop){
+        // If currently fleeing, only maintain flee behaviour
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            Player.updateTracking(troop);   // can drop back to TRACK_MODE when safe
+            return;
+        }
+
+        // Always check for nearby enemies first – may flip into FLEE_MODE
+        Player.updateTracking(troop);
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            return; // we just started fleeing, don't do farm logic this tick
+        }
+
         // 1. If manually assigned via tilling or harvesting
         if (troop.task) return;
-
-        // 1.5. check for nearby enemies and flee in case.
-        Player.updateTracking(troop);
         const teamData = Teams.teamLists[troop.body.team];
 
         // ---- Carry state / seed detection ----
@@ -239,6 +247,8 @@ export class Farmer {
 
     static destroy(farmer) {
         const teamList = Teams.teamLists[farmer.body.team];
+
+        Player._destroyMiniBars(farmer)
         
         // Remove from farmerList
         const index = teamList.farmerList.indexOf(farmer);

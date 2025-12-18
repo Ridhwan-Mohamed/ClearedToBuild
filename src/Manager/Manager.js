@@ -21,7 +21,15 @@ export class Manager {
                     if(state == CONTROL_STATES.BUILD_MODE_T){
                         approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                     }else if(this.blockType(state)){
-                        approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                        // DESTROY should path to ANY perimeter tile
+                        if (state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) {
+                            approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop);
+                            if (!approachTile) continue;
+                            troop.path = approachTile.path;
+                            troop.destX = approachTile.tx;
+                            troop.destY = approachTile.ty;
+                        }
+                        else approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                     }
                     if(approachTile){
                         troop.roam = false;
@@ -83,7 +91,14 @@ export class Manager {
                 if(state == CONTROL_STATES.BUILD_MODE_T){
                     approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                 }else if(this.blockType(state)){
-                    approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                    if (state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) {
+                        approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop);
+                        if (!approachTile) return;
+                        troop.path = approachTile.path;
+                        troop.destX = approachTile.tx;
+                        troop.destY = approachTile.ty;
+                    }
+                    else approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                 }
                 if(approachTile){
                     troop.roam = false;
@@ -225,7 +240,8 @@ export class Manager {
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
             state == CONTROL_STATES.SEND_TO_STORAGE ||
-            state == CONTROL_STATES.GET_BLOCK_RESOURCE;
+            state == CONTROL_STATES.GET_BLOCK_RESOURCE ||
+            state == CONTROL_STATES.FIX_BUILDING;
     }
 
     static blockType(state){
@@ -235,7 +251,8 @@ export class Manager {
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
             state == CONTROL_STATES.SEND_TO_STORAGE ||
-            state == CONTROL_STATES.GET_BLOCK_RESOURCE;
+            state == CONTROL_STATES.GET_BLOCK_RESOURCE ||
+            state == CONTROL_STATES.FIX_BUILDING;
     }
 
     static tooManyAssigned(task, state) {

@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { HouseUI } from "../UI/HouseUI";
@@ -16,11 +16,29 @@ export class House {
         this.occupants = [];
         this.uiContainer = House.scene.add.container(0, 0).setDepth(UIDEPTH);
 
+        // 🔹 Building health
+        this.maxHealth = 300;
+        this.health = this.maxHealth;
+        this.healthBarBg = null;
+        this.healthBar   = null;
+        this._damageBarUntil = 0;
+
         this.sprite = House.scene.add.image(x * SQUARESIZE, y * SQUARESIZE, houseType.name)
             .setOrigin(0)
             .setDepth(BLOCKDEPTH)
             .setInteractive()
             .on('pointerdown', () => {
+                const scene = this.scene;
+
+                // Prefer BottomBar tab flow (like ovens/storage)
+                if (scene?.openDetailPage) {
+                    scene.openDetailPage('houses', (tab) => {
+                        tab?.selectFromWorld?.(this);  // select + center handled by tab
+                    });
+                    return;
+                }
+
+                // Fallback (old UI)
                 HouseUI.toggleMajor(this);
             });
         Map.drawRoadAround(x,y,houseType,team);
@@ -35,8 +53,18 @@ export class House {
             this.lightId  = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 5, brightness: 2 });
         }
 
-        this.sprite.on('pointerover', () => this.updateIcons());
-        this.sprite.on('pointerout', () => this.clearIcons());
+        this.sprite.buildingRef = this;
+
+        this.sprite.on('pointerover', () => {
+            this.isHovered = true;
+            this.updateHealthBar?.();
+            this.updateIcons()
+        });
+        this.sprite.on('pointerout', () => {
+            this.isHovered = false;
+            this.updateHealthBar?.();
+            this.clearIcons()
+        });
 
         this.uiIcons = [null, null];
         Teams.teamLists[team].houseList.push(this);
@@ -110,12 +138,123 @@ export class House {
         this.uiIcons = [];
     }
 
+    selectFromWorld(house) {
+        if (!house) return;
+        this.select(house);
+        this.centerOnHouse(house);
+    }
+
+    centerOnHouse(house) {
+        const cam = this.scene.cameras.main;
+        if (!cam || !house?.sprite) return;
+
+        const b = house.sprite.getBounds();
+        cam.centerOn(b.centerX, b.centerY);
+    }
+
+    ensureHealthBar() {
+        if (!this.sprite) return;
+        const scene = this.scene;
+        if (!scene) return;
+
+        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE);
+        const y = this.sprite.y - this.sprite.displayHeight / 2 - 4;
+
+        if (!this.healthBarBg) {
+            this.healthBarBg = scene.add
+                .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 4, 0x000000, 0.6)
+                .setDepth(BLOCKDEPTH + 1);
+        }
+        if (!this.healthBar) {
+            this.healthBar = scene.add
+                .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 2, 0x00ff00, 1)
+                .setDepth(BLOCKDEPTH + 2);
+        }
+    }
+
+    updateHealthBar() {
+        if (!this.sprite) return;
+        this.ensureHealthBar();
+
+        if (!this.healthBar || !this.healthBarBg) return;
+        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE);
+        const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
+
+        this.healthBarBg.setDisplaySize(fullWidth, 4);
+        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+
+        const now = this.scene?.time?.now ?? 0;
+        const visible = this.isHovered || now < this._damageBarUntil;
+        this.healthBarBg.setVisible(visible);
+        this.healthBar.setVisible(visible);
+    }
+
+    shakeAndFlash() {
+        if (!this.sprite) return;
+        const targets = [this.sprite];
+        if (this.healthBarBg) targets.push(this.healthBarBg);
+        if (this.healthBar)   targets.push(this.healthBar);
+
+        this.scene.tweens.add({
+            targets,
+            x: "+=3",
+            yoyo: true,
+            duration: 40,
+            repeat: 2
+        });
+
+        this.sprite.setTint(0xff6666);
+        this.scene.time.delayedCall(120, () => {
+            if (this.sprite) this.sprite.clearTint();
+        });
+    }
+
+    // Called by buildingManager.beginDestroyingBlock
+    onDamaged(damage, currentHealth, maxHealth) {
+        this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
+        this.health = Math.max(0, currentHealth);
+
+        this.shakeAndFlash();
+        const now = House.scene?.time?.now ?? 0;
+        this._damageBarUntil = now + 2000;
+        this.updateHealthBar();
+        // 🔑 force a visibility re-check after expiry (so it hides without hover)
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = House.scene.time.delayedCall(2000, () => {
+            this.updateHealthBar?.();
+        });
+
+
+        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE);
+        const textX = this.sprite.x + fullWidth / 2;
+        const textY = this.sprite.y - this.sprite.displayHeight / 2 - 8;
+
+        showGhostText(
+            this.scene,
+            textX,
+            textY,
+            `-${damage}`,
+            this.team, 0, 0,
+            '#ff5555'
+        );
+    }
+
     destroy() {
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = null;
+        
+        // remove from team house list so UI rows vanish
+        const list = Teams.teamLists?.[this.team]?.houseList;
+        if (Array.isArray(list)) {
+            const i = list.indexOf(this);
+            if (i !== -1) list.splice(i, 1);
+        }
+
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
+        if (this.healthBarBg) this.healthBarBg.destroy();
+        if (this.healthBar)   this.healthBar.destroy();
         this.sprite?.destroy();
         this.clearIcons?.();
     }
-
-
 }

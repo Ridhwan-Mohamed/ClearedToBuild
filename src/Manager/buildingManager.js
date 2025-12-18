@@ -1,7 +1,7 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, showGhostText, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
@@ -135,24 +135,23 @@ export class buildingManager{
             if (inside) continue;
 
             if (ty < 0 || tx < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
-            if (Map.navGrid[ty][tx]) {
-                // found at least one walkable tile adjacent to the block
-                return true;
-            }
+                if (Map.navGrid[ty][tx]) {
+                    // found at least one walkable tile adjacent to the block
+                    return true;
+                }
             }
         }
         return false;
     }
 
-
-    static findBuildApproachBlock(x, y, type, troop, tStartX=null, tStartY=null) {
+    static findBuildApproachBlock(x, y, type, troop, tStartX = null, tStartY = null) {
         const candidates = [];
-    
-        // Compute top-left corner of the block
+
+        // Top-left of block footprint
         const startX = x;
         const startY = y;
 
-        // Search one tile around the perimeter of the block
+        // 1) Collect all walkable perimeter tiles (as before)
         for (let dy = -1; dy <= type.lenY; dy++) {
             for (let dx = -1; dx <= type.lenX; dx++) {
                 const tx = startX + dx;
@@ -167,49 +166,155 @@ export class buildingManager{
                 const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
                 const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
                 let dist;
-                if(troop) {dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY)}
-                else {dist = Phaser.Math.Distance.Between(tStartX * SQUARESIZE + SQUARESIZE / 2, tStartY * SQUARESIZE + SQUARESIZE / 2, worldX, worldY)}
+                if (troop) {
+                    dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
+                } else {
+                    dist = Phaser.Math.Distance.Between(
+                        tStartX * SQUARESIZE + SQUARESIZE / 2,
+                        tStartY * SQUARESIZE + SQUARESIZE / 2,
+                        worldX,
+                        worldY
+                    );
+                }
                 candidates.push({ tx, ty, dist });
             }
         }
 
-        if(tStartX == null || tStartY == null){
-            let troopX = Math.floor(troop.body.x/SQUARESIZE);
-            let troopY = Math.floor(troop.body.y/SQUARESIZE);
+        // 2) Resolve starting world position (troop or explicit)
+        if (tStartX == null || tStartY == null) {
+            let troopX = Math.floor(troop.body.x / SQUARESIZE);
+            let troopY = Math.floor(troop.body.y / SQUARESIZE);
             tStartX = troop.body.x;
             tStartY = troop.body.y;
-            if(!Map.navGrid[troopX][troopY]){
-                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+
+            if (!Map.navGrid[troopY]?.[troopX]) {
+                const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                 if (newX === -1) {
                     console.log("No valid start tile nearby");
                     return null;
                 } else {
-                    tStartX = newX * SQUARESIZE + SQUARESIZE/2;
-                    tStartY = newY * SQUARESIZE + SQUARESIZE/2;
+                    tStartX = newX * SQUARESIZE + SQUARESIZE / 2;
+                    tStartY = newY * SQUARESIZE + SQUARESIZE / 2;
                     console.log("New valid tile:", newX, newY);
                 }
             }
-        }else {
+        } else {
             tStartX = tStartX * SQUARESIZE + SQUARESIZE / 2;
             tStartY = tStartY * SQUARESIZE + SQUARESIZE / 2;
         }
-    
-        // Sort candidates by distance
+
+        // 🔥 3) Prefer "door" tile: bottom-center of the block
+        //    Imagine door on bottom edge in y, centered in x.
+        const doorDx = Math.floor(type.lenX / 2);          // center in X
+        const doorTx = startX + doorDx;
+        const doorTy = startY + type.lenY;                 // just below bottom edge
+
+        if (
+            doorTx >= 0 && doorTy >= 0 &&
+            doorTy < Map.navGrid.length &&
+            doorTx < Map.navGrid[0].length &&
+            Map.navGrid[doorTy][doorTx]            // must be walkable
+        ) {
+            const doorWorldX = doorTx * SQUARESIZE + SQUARESIZE / 2;
+            const doorWorldY = doorTy * SQUARESIZE + SQUARESIZE / 2;
+
+            const doorPath = Map.navMesh.findPath(
+                { x: tStartX, y: tStartY },
+                { x: doorWorldX, y: doorWorldY }
+            );
+
+            if (doorPath && doorPath.length > 0) {
+                // ✅ Path straight to the "door"
+                return { tx: doorTx, ty: doorTy, path: doorPath };
+            }
+        }
+
+        // 4) Fallback: previous behaviour, closest perimeter candidate
         candidates.sort((a, b) => a.dist - b.dist);
-    
-        // Try each candidate
+
         for (const candidate of candidates) {
             const path = Map.navMesh.findPath(
                 { x: tStartX, y: tStartY },
-                { x: candidate.tx * SQUARESIZE + SQUARESIZE / 2, y: candidate.ty * SQUARESIZE + SQUARESIZE / 2 }
+                {
+                    x: candidate.tx * SQUARESIZE + SQUARESIZE / 2,
+                    y: candidate.ty * SQUARESIZE + SQUARESIZE / 2
+                }
             );
-    
+
             if (path && path.length > 0) {
                 return { tx: candidate.tx, ty: candidate.ty, path };
             }
         }
-        
+
         return null; // ❌ No valid path found
+    }
+
+    static findApproachAnyPerimeter(x, y, type, troop, tStartX = null, tStartY = null) {
+        const candidates = [];
+        const startX = x;
+        const startY = y;
+
+        // 1) Collect all walkable perimeter tiles around footprint
+        for (let dy = -1; dy <= type.lenY; dy++) {
+            for (let dx = -1; dx <= type.lenX; dx++) {
+            const tx = startX + dx;
+            const ty = startY + dy;
+
+            const inside = dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY;
+            if (inside) continue;
+
+            if (tx < 0 || ty < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
+            if (!Map.navGrid[ty][tx]) continue;
+
+            const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
+            const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
+
+            let dist;
+            if (troop) {
+                dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
+            } else {
+                dist = Phaser.Math.Distance.Between(
+                tStartX * SQUARESIZE + SQUARESIZE / 2,
+                tStartY * SQUARESIZE + SQUARESIZE / 2,
+                worldX,
+                worldY
+                );
+            }
+
+            candidates.push({ tx, ty, dist });
+            }
+        }
+
+        // 2) Resolve start world pos
+        if (tStartX == null || tStartY == null) {
+            let troopX = Math.floor(troop.body.x / SQUARESIZE);
+            let troopY = Math.floor(troop.body.y / SQUARESIZE);
+            tStartX = troop.body.x;
+            tStartY = troop.body.y;
+
+            if (!Map.navGrid[troopY]?.[troopX]) {
+            const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+            if (newX === -1) return null;
+            tStartX = newX * SQUARESIZE + SQUARESIZE / 2;
+            tStartY = newY * SQUARESIZE + SQUARESIZE / 2;
+            }
+        } else {
+            tStartX = tStartX * SQUARESIZE + SQUARESIZE / 2;
+            tStartY = tStartY * SQUARESIZE + SQUARESIZE / 2;
+        }
+
+        // 3) Closest perimeter tile that actually has a path
+        candidates.sort((a, b) => a.dist - b.dist);
+
+        for (const c of candidates) {
+            const path = Map.navMesh.findPath(
+            { x: tStartX, y: tStartY },
+            { x: c.tx * SQUARESIZE + SQUARESIZE / 2, y: c.ty * SQUARESIZE + SQUARESIZE / 2 }
+            );
+            if (path && path.length > 0) return { tx: c.tx, ty: c.ty, path };
+        }
+
+        return null;
     }
 
     static beginBuildingBlock(sprite) {
@@ -423,15 +528,45 @@ export class buildingManager{
                     return;
                 }
 
-                task.duration -= 50;
+                // Initialize max health snapshot for this destroy job
+                if (!task.totalDuration) {
+                    task.totalDuration = task.duration;
+                }
+
+                // Compute damage for this tick
+                let damage;
+                if (!sprite.body.team) {
+                    // Raiders / enemies: use their weapon to damage buildings
+                    damage = sprite.weapon?.baseDmg || 5;
+                } else {
+                    // Player-side "demolition" – slow chip damage
+                    damage = 2;
+                }
+
+                // Apply damage to the task duration
+                task.duration = Math.max(0, task.duration - damage);
+
+                // Resolve building instance: prefer value.buildingRef, fall back to value
+                const targetObj = task.value?.buildingRef || task.value;
+
+                if (targetObj && typeof targetObj.onDamaged === "function") {
+                    targetObj.onDamaged(damage, task.duration, task.totalDuration);
+                }
+
+
                 sprite.play(sprite.action);
                 
                 if (task.duration <= 0) {
                     sprite.timer.remove(false);
                     sprite.timer = null;
                     console.log("Done Destroying.");
-                    sprite.play(sprite.idle)
-                    task.value.destroy()
+                    sprite.play(sprite.idle);
+                    const targetObj = task.value?.buildingRef || task.value;
+                    if (targetObj && typeof targetObj.destroy === "function") {
+                        targetObj.destroy();       // calls ClayOven/House/StorageBuilding.destroy
+                    } else if (task.value && typeof task.value.destroy === "function") {
+                        task.value.destroy();      // fallback: just sprite
+                    }
                     let blockTiles = []
                     for(let i =  task.y; i < task.type.lenY + task.y; i++){
                         for(let j = task.x; j < task.type.lenX + task.x; j++){
@@ -452,23 +587,130 @@ export class buildingManager{
                     console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
                     sprite.timer.remove(false);
                     sprite.timer = null;
-                    // 🔥 Restart another delayed call if still building
+                    // 🔥 Restart another delayed call if still destroying
                     this.beginDestroyingBlock(sprite);
                 }
+
             });
         }
     }
 
-    static removeBuildingFromArray(x, y) {
+    static removeBuildingFromArray(x, y) { //problematic, hard looping as we dont know who destroying and why
+        // 1) Remove from global town.buildingArray
         for (let i = 0; i < buildingArray.length; i++) {
             const [bx, by] = buildingArray[i];
             if (bx === x && by === y) {
-                console.log(`REMOVED BUILDING at ${bx},${by}`)
+                console.log(`REMOVED BUILDING (global) at ${bx},${by}`);
                 buildingArray.splice(i, 1);
-                return true;
+                break;
             }
         }
-        return false;
+
+        // 2) Remove from each team’s buildings list and clean matching destroy tasks
+        for (const teamKey in Teams.teamLists) {
+            const team = Teams.teamLists[teamKey];
+            if (!team) continue;
+
+            if (Array.isArray(team.buildings)) {
+                const before = team.buildings.length;
+
+                team.buildings = team.buildings.filter(([bx, by, type, building]) => {
+                    return !(bx === x && by === y);
+                });
+
+                // If we actually removed something from this team, also clear destroy tasks at that tile
+                if (team.buildings.length !== before && Array.isArray(team.destroyStates)) {
+                    team.destroyStates = team.destroyStates.filter(t => t.x !== x || t.y !== y);
+                }
+            }
+        }
+
+        return true;
+    }
+
+    static beginFixingBuilding(sprite) {
+        const task = sprite.task;
+
+        if (!task || !task.value) {
+            sprite.task = null;
+            sprite.timer = null;
+            sprite.play(sprite.idle);
+            return;
+        }
+
+        const b = task.value; // the building instance you stored
+        const maxHp = (b.maxHealth ?? 100);
+        const hpKey = ("health" in b) ? "health" : (("hp" in b) ? "hp" : "health");
+
+        if ((b[hpKey] ?? 0) >= maxHp) {
+            // already fixed
+            Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", task);
+            sprite.task = null;
+            sprite.timer = null;
+            sprite.play(sprite.idle);
+            Manager.assignOneTroopToAction(sprite, Teams.teamLists[sprite.body.team].buildingFixTasks, CONTROL_STATES.FIX_BUILDING);
+            return;
+        }
+
+        if (!sprite.timer) {
+            sprite.timer = this.scene.time.delayedCall(1000, () => {
+            if (!sprite.active || sprite.state !== CONTROL_STATES.FIX_BUILDING) return;
+
+            // building might have been destroyed mid-task
+            if (!sprite.task || !sprite.task.value) {
+                sprite.task = null;
+                sprite.timer = null;
+                sprite.play(sprite.idle);
+                return;
+            }
+
+            const building = sprite.task.value;
+            const maxHealth = (building.maxHealth ?? 100);
+            const key = ("health" in building) ? "health" : (("hp" in building) ? "hp" : "health");
+
+            const before = (building[key] ?? 0);
+            const healed = Math.min(5, maxHealth - before);
+            building[key] = Math.min(maxHealth, before + healed);
+
+            // green flash + shake
+            if (building.sprite) {
+                building.sprite.setTint(0x44ff44);
+                this.scene.tweens.add({
+                targets: building.sprite,
+                x: building.sprite.x + 2,
+                yoyo: true,
+                repeat: 2,
+                duration: 60,
+                onComplete: () => building.sprite.clearTint()
+                });
+            }
+
+
+            showGhostText(this.scene, building.x, building.y - 20, `+${healed} 💚`, 0x44ff44);
+            
+
+            sprite.play(sprite.action);
+
+            // finished?
+            if (building[key] >= maxHealth) {
+                Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", sprite.task);
+                sprite.task = null;
+
+                if (sprite.timer) {
+                sprite.timer.remove(false);
+                sprite.timer = null;
+                }
+
+                sprite.play(sprite.idle);
+                return;
+            }
+
+            // continue ticking
+            sprite.timer.remove(false);
+            sprite.timer = null;
+            this.beginFixingBuilding(sprite);
+            });
+        }
     }
 
     static hasRequiredMaterials(costObj, teamNumber) {

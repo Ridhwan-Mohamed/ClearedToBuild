@@ -15,7 +15,7 @@ export class StorageUI {
     static showMinor(storage) {
         if (storage.minorUI) return;
 
-        const bg = this.scene.add.rectangle(0, 0, 60, 30, 0x000000, 0.75)
+        const bg = this.scene.add.rectangle(0, 0, 60, 14, 0x000000, 0.75)
             .setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH);
 
         const text = this.scene.add.text(0, 0, `${storage.totalStored}/16`, {

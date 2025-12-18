@@ -7,6 +7,8 @@ import { Farmer } from "../players/Farmer";
 import { Fireman } from "../players/Fireman";
 import { Forager } from "../players/Forager";
 import { Gunslinger } from "../players/Gunslinger";
+import { Blademaster } from "../players/Blademaster";
+import { Brawler } from "../players/Brawler";
 import { Teams } from "../Teams";
 import { townRoads } from "../town";
 import { DailyNeedsTracker } from "./DailyNeedsTracker";
@@ -18,7 +20,9 @@ const playerClasses = {
     fireman: Fireman,
     forager: Forager,
     builder: Builder,
-    gunslinger: Gunslinger
+    gunslinger: Gunslinger,
+    blademaster: Blademaster,
+    brawler: Brawler
 };
 
 var pendingStoreItem = null;
@@ -51,6 +55,7 @@ export function openPowerupScreen(scene) {
     const centerX = cam.centerX;
     const yOffset = 100;
     const uiContainer = scene.add.container(0, 0).setDepth(2000);
+    scene.time.timeScale = 0;
 
     scene.cameras.main.ignore(uiContainer);  // hide from world camera
     scene.uiCamera.ignore([]);               // UI cam will see it by default
@@ -250,7 +255,6 @@ export function openPowerupScreen(scene) {
             }
         });
 
-
         // Create a temp sprite using the class' default texture
         const preview = scene.add.sprite(0, -20, 'player')
             .setScale(1.2)
@@ -264,7 +268,9 @@ export function openPowerupScreen(scene) {
             case 'fireman':    tint = 0xff9933; break;
             case 'gunslinger': tint = 0x9999ff; break;
             case 'builder':    tint = 0x4433ff; break;
-            default:           tint = 0x64ff32; break; // fallback team color
+            case 'blademaster': tint = 0xAA33EE; break;
+            case 'brawler':     tint = 0xFFD712; break;
+            default:           tint = 0x64ff32; break;
         }
         preview.setTint(tint);
 
@@ -312,6 +318,7 @@ function closePowerupScreen(scene, container) {
     lastStoreClickTime = 0;
     scene.clock.resume();
     scene.clock.powerupScreenShown = false;
+    scene.time.timeScale = 1;
     DailyNeedsTracker.consumeResources();
 
     if (pendingStoreItem) {
@@ -525,7 +532,9 @@ const PLAYER_COSTS = {
     fireman: 100,
     forager: 100,
     builder: 100,
-    gunslinger: 500
+    gunslinger: 500,
+    blademaster: 250, 
+    brawler: 75
 };
 
 const POWERUPS = POWERUP_CARDS;

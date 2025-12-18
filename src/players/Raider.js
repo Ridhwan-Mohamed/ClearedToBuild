@@ -9,7 +9,7 @@ import { recalculateDestroyTasksFromPoint } from "../Manager/spawnManager";
 
 export class Raider {
     // Used by Player.followPath via sprite.type.speed / sprite.type.stamina
-    static speed   = 80;  // a bit quick
+    static speed   = 200;  // a bit quick
     static stamina = 0;   // no stamina drain
 
     constructor(x, y, teamNumber = 0) {
@@ -29,14 +29,16 @@ export class Raider {
         raider.isRaider   = true;
         raider.isSeaRaider = false;   // sea mode is set in spawnSeaRaider
         raider.roam       = false;
+        raider.maxHealth  = 100;
 
         // Make sure stamina math is well-defined (even if we never drain it)
         raider.maxStamina = raider.maxStamina ?? 100;
         raider.stamina    = raider.stamina ?? raider.maxStamina;
+        raider.weapon     = weapons.hands;
+        raider.destroySelf = () => Raider.destroy(raider); 
 
         // Enemies (team 0) already default to red tint in Player.applyDefaultTint,
         // so we don't have to override tint here.
-
         return raider;
     }
 
@@ -88,7 +90,7 @@ export class Raider {
                 }
             } else {
                 // Still in water: keep swimming toward the center
-                const speed = 40;
+                const speed = 100;
                 const dx = troop.swimDirX || 0;
                 const dy = troop.swimDirY || 0;
                 troop.body.setVelocity(dx * speed, dy * speed);
@@ -99,7 +101,17 @@ export class Raider {
         }
 
         // 2) Land-raider behaviour:
-        // if they have no task, try to grab a destroy task
+
+        // First: scan for nearby TEAM 1 units. If any are in threat radius,
+        // treat them as primary targets (fight like a normal combatant).
+        Player.updateTracking(troop);
+
+        if (troop.track && troop.track[0] && troop.track[0].team === 1) {
+            // Now the shared movement + fightManager.attack will handle the chase
+            return false;
+        }
+
+        // 🔁 No valid player target (or we just cleared it) → go back to destroying buildings/crops
         const teamZero = Teams.teamLists["0"];
         if (!troop.task && teamZero && teamZero.destroyStates && teamZero.destroyStates.length) {
             Manager.assignOneTroopToAction(
@@ -109,7 +121,53 @@ export class Raider {
             );
         }
 
-        // Let the shared stamina + followPath stuff run from Player.update
+        // Let generic stamina + followPath run this frame
         return false;
+    }
+
+    static destroy(troop) {
+        if (!troop || !troop.body) return;
+        const scene = troop.scene;
+
+        Player._destroyMiniBars(troop)
+
+        const team = Teams.teamLists["0"];
+        if (team) {
+            if (team.fighterList) {
+                const fidx = team.fighterList.indexOf(troop);
+                if (fidx !== -1) team.fighterList.splice(fidx, 1);
+            }
+            const pidx = team.playerList.indexOf(troop);
+            if (pidx !== -1) team.playerList.splice(pidx, 1);
+        }
+
+        // Cancel active timers
+        if (troop.timer) {
+            troop.timer.remove(false);
+            troop.timer = null;
+        }
+
+        // Drop task cleanly
+        if (troop.task) {
+            if (typeof troop.task.assigned === "number") troop.task.assigned--;
+            troop.task = null;
+        }
+
+        troop.track = null;
+        troop.forcedTarget = null;
+
+        // Remove physics body
+        if (troop.body) {
+            try { scene.physics.world.remove(troop.body); } catch {}
+            try { troop.body.destroy(); } catch {}
+        }
+
+        // Remove from global lists
+        const idx = Player.troops.indexOf(troop);
+        if (idx !== -1) Player.troops.splice(idx, 1);
+
+        Player.characters.remove(troop);
+
+        troop.destroy();
     }
 }

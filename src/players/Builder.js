@@ -4,9 +4,9 @@ import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { NameGenerator } from './NameGenerator.js';
-import { weapons } from '../weapons.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { Manager } from '../Manager/Manager.js';
 
 export class Builder {
 
@@ -32,6 +32,7 @@ export class Builder {
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
         sprite.health = 100;
+        sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.body.pushable = false;
@@ -42,7 +43,6 @@ export class Builder {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.carry = 'carry';
-        sprite.weapon = weapons.hands;
 
         sprite.isBuilder = true;
 
@@ -59,26 +59,47 @@ export class Builder {
     }
  
     static update(troop) {
-        Player.updateTracking(troop);
+        // If currently fleeing, only maintain flee behaviour.
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            Player.updateTracking(troop);   // may keep fleeing or drop back to TRACK_MODE when safe
+            return;
+        }
 
-        if (troop.task || troop.track) return;
+        // Always check for nearby enemies first (can flip into FLEE_MODE and drop tasks).
+        Player.updateTracking(troop);
+        if (troop.state === CONTROL_STATES.FLEE_MODE) {
+            // Just started fleeing this tick; do not do builder logic.
+            return;
+        }
+
+        // If we still have a task after tracking (i.e., not dropped by flee), just work it.
+        if (troop.task) return;
 
         const team = Teams.teamLists[troop.body.team];
 
         if (team.destroyStates?.length) {
-            buildingManager.assingTroopsToDestroy(troop.body.team);
-        } else if (team.blockBuildingStates?.length) {
-            buildingManager.assignTroopToBuildBlock(troop.body.team);
+            const destroyList = team.destroyStates;
+            Manager.assignOneTroopToAction(troop, destroyList, CONTROL_STATES.DESTROY_MODE); 
+        } else if (team.blockBuildingStates?.length) { 
+            const blockBuildList = team.blockBuildingStates;
+            Manager.assignOneTroopToAction(troop, blockBuildList, CONTROL_STATES.BUILD_MODE_B);
         } else if (team.buildingTileStates?.length) {
-            buildingManager.assingTroopsToBuildTile(troop.body.team);
+            const tileList = team.buildingTileStates;
+            Manager.assignOneTroopToAction(troop, tileList, CONTROL_STATES.BUILD_MODE_T);
+        } else if (team.buildingFixTasks.length){
+            const fixList = team.buildingFixTasks;
+            Manager.assignOneTroopToAction(troop, fixList, CONTROL_STATES.FIX_BUILDING);
         } else if (!troop.task && !troop.track && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
         }
     }
 
+
     static destroy(troop) {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
+
+        Player._destroyMiniBars(troop)
 
         if (team?.builderList) {
             const index = team.builderList.indexOf(troop);

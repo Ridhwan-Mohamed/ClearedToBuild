@@ -6,6 +6,7 @@ import icon_strength from 'url:../../assets/cardIcons/icon_strength.png'
 import icon_explosion from 'url:../../assets/cardIcons/icon_explosion.png'
 import icon_water_jar from 'url:../../assets/cardIcons/icon_water_jar.png'
 import icon_house from 'url:../../assets/cardIcons/icon_house.png'
+import icon_accuracy from 'url:../../assets/cardIcons/icon_accuracy.png'
 import { blockResourceManager } from '../Manager/BlockResourceManager'
 import { Farmer } from '../players/Farmer'
 import { Fireman } from '../players/Fireman'
@@ -14,6 +15,7 @@ import { Forager } from '../players/Forager'
 import { ClayOven } from '../buildings/ClayOven'
 import { buildingManager } from '../Manager/buildingManager'
 import { StaminaManager } from '../Manager/staminaManager'
+import { weapons } from '../weapons'
 
 export function loadCardData(scene){
     scene.load.image('icon_speed_boots', icon_speed_boots);
@@ -24,6 +26,7 @@ export function loadCardData(scene){
     scene.load.image('icon_explosion', icon_explosion);
     scene.load.image('icon_water_jar', icon_water_jar);
     scene.load.image('icon_house', icon_house);
+    scene.load.image('icon_accuracy', icon_accuracy);
 }
 
 export const POWERUP_CARDS = [
@@ -237,19 +240,18 @@ export const POWERUP_CARDS = [
         }
     },
 
-    // ===== GUNSLINGER DAMAGE – +50% damage per shot =====
+    // ===== GUNSLINGER ACCURACY – +50% accuracy per shot =====
     {
-        id: "gunslinger_damage_50",
-        image: "icon_explosion",
+        id: "gunslinger_accuracy_50",
+        image: "icon_accuracy",
         name: "Deadly Aim",
-        text: "Gunslingers deal +50% damage per shot.",
+        text: "Gunslingers gain double hit accuracy.",
         type: "player",
         target: "gunslinger",
         OUTLINE: "#9999ff",
         probability: 15,
         apply: () => {
-            console.log("Apply +50% damage to Gunslingers");
-            
+            weapons.pistol.accuracy *= 2
         }
     },
 

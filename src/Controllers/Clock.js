@@ -15,8 +15,8 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 5;
-        this.minutes = 0;
+        this.hours = 17;
+        this.minutes = 50;
         this.day = 1;
 
         this.waveAmount = 1;

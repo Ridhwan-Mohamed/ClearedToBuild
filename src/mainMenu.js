@@ -440,7 +440,7 @@ export class MainMenu {
 
         // === Town seeds (positions)
         const seeds = [
-            [129, 97]
+            [126, 154]
         ];
         const teams = [1, 2, 3, 4];
 
@@ -533,53 +533,66 @@ export class MainMenu {
         // === Start Kit Selection Row (no location swap, just kits) ===
         const centerX = scene.scale.width / 2;
 
-        const kitRow = scene.add.container(centerX, scene.scale.height - 180)
+        // replace kitRow creation
+        const kitRow = scene.add.container(0, 0)
             .setScrollFactor(0)
             .setDepth(9999);
-
         scene.menu.add(kitRow);
 
-        const kitUIs = {};
-        const kitTeams = teams; // [1,2,3,4]
+        // card sizing – you can bump slightly for readability
+        const cardWidth  = 240;
+        const cardHeight = 160;
 
-        const cardWidth  = 220;
-        const cardHeight = 150;
-        const spacing    = 12;
-        const totalWidth = kitTeams.length * cardWidth + (kitTeams.length - 1) * spacing;
-        const startX     = -totalWidth / 2 + cardWidth / 2;
+        // 4 quadrant anchors (leave map center mostly free)
+        const positions = [
+            { x: scene.scale.width * 0.12, y: scene.scale.height * 0.25 }, // top-left
+            { x: scene.scale.width * 0.88, y: scene.scale.height * 0.25 }, // top-right
+            { x: scene.scale.width * 0.12, y: scene.scale.height * 0.75 }, // bottom-left
+            { x: scene.scale.width * 0.88, y: scene.scale.height * 0.75 }  // bottom-right
+        ];
+
+        const kitUIs = {};
+        const kitTeams = teams;
 
         kitTeams.forEach((team, idx) => {
             const kit = teamInfo[team];
             if (!kit) return;
 
-            const group = scene.add.container(startX + idx * (cardWidth + spacing), 0);
+            const pos = positions[idx] || {
+                x: scene.scale.width / 2,
+                y: scene.scale.height / 2
+            };
+
+            const group = scene.add.container(pos.x, pos.y);
             kitRow.add(group);
 
-            const bg = scene.add.rectangle(0, 0, cardWidth, cardHeight, 0x000000, 0.65)
+            const bg = scene.add.rectangle(0, 0, cardWidth, cardHeight, 0x000000, 0.7)
                 .setOrigin(0.5)
-                .setStrokeStyle(2, 0x666666)
+                .setStrokeStyle(3, 0x444444)
                 .setInteractive({ cursor: 'pointer' });
 
             const nameText = scene.add.text(0, -cardHeight / 2 + 8, kit.name, {
-                fontSize: '14px',
+                fontSize: '16px',
                 fill: '#ffffff',
                 stroke: '#000000',
-                strokeThickness: 3,
+                strokeThickness: 4,
                 align: 'center',
                 wordWrap: { width: cardWidth - 20 }
             }).setOrigin(0.5, 0);
 
             const r = kit.resources;
-            const resText = scene.add.text(0, -15,
-                `Seeds ${r.seeds}  Berries ${r.berries}\n` +
-                `Wood  ${r.wood}   Stone   ${r.stone}\n` +
-                `Food  ${r.food}   Water   ${r.water}`,
+
+            const resText = scene.add.text(
+                0, -10,
+                `Seeds  ${r.seeds}   Berries ${r.berries}\n` +
+                `Wood   ${r.wood}    Stone   ${r.stone}\n` +
+                `Food   ${r.food}    Water   ${r.water}`,
                 {
-                    fontSize: '12px',
-                    fill: '#dddddd',
+                    fontSize: '13px',
+                    fill: '#f0f0f0',
                     align: 'center',
                     stroke: '#000000',
-                    strokeThickness: 2
+                    strokeThickness: 3
                 }
             ).setOrigin(0.5);
 
@@ -587,10 +600,10 @@ export class MainMenu {
 
             // Card names (3 cards)
             kit.cards.forEach((card, i) => {
-                const t = scene.add.text(0, 18 + i * 20, card.name, {
-                    fontSize: '12px',
-                    fill: card.OUTLINE || '#ffffff',
-                    stroke: '#ffffff',
+                const t = scene.add.text(0, 24 + i * 20, card.name, {
+                    fontSize: '13px',
+                    fill: '#ffffff',                          // bright readable text
+                    stroke: card.OUTLINE || '#00ccff',        // use card colour as outline
                     strokeThickness: 3,
                     align: 'center'
                 }).setOrigin(0.5);

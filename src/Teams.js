@@ -37,6 +37,7 @@ export class Teams {
         stateLists: {},
         cardHand: [],
         buildings: [],
+        buildingFixTasks: [],
       };
   
       // initialize a Set for each control state

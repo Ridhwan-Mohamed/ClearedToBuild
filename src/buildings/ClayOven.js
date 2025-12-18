@@ -35,6 +35,18 @@ export class ClayOven {
         this.y = y;
         this.cooking = false;
 
+        // 🔹 Building health (for destroy feedback)
+        this.maxHealth = 250;
+        this.health = this.maxHealth;
+        this.healthBarBg = null;
+        this.healthBar   = null;
+
+        // Show HP bar briefly after taking damage (even if not hovered).
+        // Prevents the bar from staying visible forever when the building is left partially damaged.
+        this._damageBarUntil = 0; // ms timestamp
+
+        this.sprite.buildingRef = this;
+
         Teams.teamLists[teamNumber].ovenList.push(this);
         Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.clayOven, this.sprite])
 
@@ -42,12 +54,21 @@ export class ClayOven {
         this.outputSlots = [null, null, null];      // same structure
         this.cookTimers = [0, 0, 0];                // track elapsed time
         this.cookDurations = [0, 0, 0];             // required time
+        this.isCooking      = [false, false, false]; // 🔹 add this    
         this.fuel = 0;
 
         this.sprite.setInteractive();
 
-        this.sprite.on('pointerover', () => ClayOvenUI.showMinor(this));
-        this.sprite.on('pointerout', () => ClayOvenUI.hideMinor(this));
+        this.sprite.on('pointerover', () => {
+            this.isHovered = true;
+            this.updateHealthBar?.();
+            ClayOvenUI.showMinor(this)
+        });
+        this.sprite.on('pointerout', () => {
+            this.isHovered = false;
+            this.updateHealthBar?.();
+            ClayOvenUI.hideMinor(this)
+        });
         this.sprite.on('pointerdown', () => ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this)));
 
         ClayOven.scene.events.emit('oven:added', this);
@@ -267,13 +288,23 @@ export class ClayOven {
     }
 
     stopAllCooking() {
+        // Ensure arrays exist even if something called this early
+        if (!this.cookTimers) this.cookTimers = [0, 0, 0];
+        if (!this.isCooking)  this.isCooking  = [false, false, false];
+
         for (let i = 0; i < 3; i++) {
-            if (this.cookTimers[i]) {
-                this.cookTimers[i].remove();
-                this.cookTimers[i] = null;
+            const timer = this.cookTimers[i];
+
+            // If we ever stored a Phaser timer here, clean it up
+            if (timer && typeof timer.remove === "function") {
+                timer.remove(false);
             }
-            this.isCooking[i] = false;
+
+            // Reset to "not cooking"
+            this.cookTimers[i] = 0;
+            this.isCooking[i]  = false;
         }
+
         this.updateAnimation();
     }
 
@@ -437,9 +468,104 @@ export class ClayOven {
         return true;
     }
 
+    ensureHealthBar() {
+        if (!this.sprite) return;
+        const scene = ClayOven.scene;
+        if (!scene) return;
+
+        const fullWidth = this.sprite.displayWidth || (4 * SQUARESIZE);
+        const y = this.sprite.y - (this.sprite.displayHeight) / 2 - 30;
+
+        if (!this.healthBarBg) {
+            this.healthBarBg = scene.add
+                .rectangle(this.sprite.x, y, fullWidth, 4, 0x000000, 0.6)
+                .setDepth(BLOCKDEPTH + 1);
+        }
+        if (!this.healthBar) {
+            this.healthBar = scene.add
+                .rectangle(this.sprite.x, y, fullWidth, 2, 0x00ff00, 1)
+                .setDepth(BLOCKDEPTH + 2);
+        }
+    }
+
+    updateHealthBar() {
+        if (!this.sprite) return;
+        this.ensureHealthBar();
+
+        if (!this.healthBar || !this.healthBarBg) return;
+        const fullWidth = this.sprite.displayWidth || (4 * SQUARESIZE);
+        const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
+
+        this.healthBarBg.setDisplaySize(fullWidth, 4);
+        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+
+        const now = ClayOven.scene?.time?.now ?? 0;
+        const visible = this.isHovered || now < this._damageBarUntil;
+        this.healthBarBg.setVisible(visible);
+        this.healthBar.setVisible(visible);
+    }
+
+    shakeAndFlash() {
+        if (!this.sprite) return;
+        const scene = ClayOven.scene;
+        const targets = [this.sprite];
+        if (this.healthBarBg) targets.push(this.healthBarBg);
+        if (this.healthBar)   targets.push(this.healthBar);
+
+        scene.tweens.add({
+            targets,
+            x: "+=3",
+            yoyo: true,
+            duration: 40,
+            repeat: 2
+        });
+
+        this.sprite.setTint(0xff6666);
+        scene.time.delayedCall(120, () => {
+            if (this.sprite) this.sprite.clearTint();
+        });
+    }
+
+    // Called by buildingManager.beginDestroyingBlock
+    onDamaged(damage, currentHealth, maxHealth) {
+        this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
+        this.health = Math.max(0, currentHealth);
+
+        this.shakeAndFlash();
+
+        // Keep the health bar visible for a short period after the most recent hit.
+        // If another hit happens, this extends/restarts the timer.
+        const now = ClayOven.scene?.time?.now ?? 0;
+        this._damageBarUntil = now + 2000;
+        this.updateHealthBar();
+
+        // 🔑 force a visibility re-check after expiry
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = ClayOven.scene.time.delayedCall(2000, () => {
+            this.updateHealthBar?.();
+        });
+
+        // Floating damage text
+        const textY = this.sprite.y - (this.sprite.displayHeight || (4 * SQUARESIZE)) / 2 - 8;
+        showGhostText(
+            ClayOven.scene,
+            this.sprite.x,
+            textY,
+            `-${damage}`,
+            this.teamNumber,
+            0, 0,
+            '#ff5555'
+        );
+    }
+
     destroy() {
+        this._damageBarTimer?.remove(false);
+        this._damageBarTimer = null;
+        
         this.stopAllCooking();
         ClayOven.scene.events.emit('oven:removed', this);
+        if (this.healthBarBg) this.healthBarBg.destroy();
+        if (this.healthBar)   this.healthBar.destroy();
         if (this.sprite) this.sprite.destroy();
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);

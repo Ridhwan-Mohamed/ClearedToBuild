@@ -1,52 +1,50 @@
 📈 Advancing TODOS
 
-Gamify Update-1 (2–4 weeks)
+Gamify Update-2, Fighting (1-2 weeks)
 
-🧑‍🤝‍🧑 Team Tasks:
-    - ❤️‍🩹 Make players lose health at EOD (prioritize lowest-health first) ✔️
-    - 🍎💧 Add visualization for food & water (➕ health/stamina icons for eating, ➖ icons for starvation) ✔️
+👹 ENEMY TASKS
+   🌑👣 Spawn enemy troops in water ✔️
+   💢🌀 Add hit-stun + knockback ✔️
+   ⚡✨ Flash animation when stunned (players flash but no stun) ✔️
+   🔥🏚️ Enemies target various buildings (storage, ovens, etc.) ✔️ 
+   📅⏳ Enemy waves start Day 5 (grace period)
 
-🎴 Cards:
-    - 💡 Brainstorm cards for each domain (fighting, building, farming, cooking, etc.) ✔️
-    - 🎨 Design cards (images, colors by type, names, descriptions) ✔️
-    - 🖱️ Make cards selectable ✔️
-    - 🗂️ Add UI Tab for viewing active cards ✔️
-    - 💥 Make the cards work ✔️
-    - ♻️ Swap card code ✔️
-    - 🎛️ Random powerups per startup location (berries, cards) ✔️
+🔫 GUNSLINGER
+   🔫💥 Make shooting functional ✔️
+   📈🎯 Implement Gunslinger damage upgrade cards ✔️
+   🎯 Aiming issues causing them to come too close ✔️
+   🏃💨 Flee mechanic ✔️
 
-🗺️ Map
-    - 🎨 redesign the map (especially near POI's) ✔️
+⚔️ BLADEMASTER
+   ⚔️🛠️ Create sword-wielding character ✔️
+   💣📍 High damage but requires close range ✔️
+   🐌⏱️ Slow movement speed ✔️
+   💰📉 Medium price unit ✔️
 
-🔥 ClayOven
-    - 📝 fix task addition ui part ✔️
-    - 🖼️ Fix display problems on clayoven tab ✔️
-    - 🍞 add animation to something being taken or placed into ClayOven ✔️
+🥊 BRAWLER
+   🥊🧍 Boxing character unit ✔️
+   🎯⬇️ Lower damage, melee range ✔️
+   🏃💨 Fast movement speed ✔️
+   🙂 Cheap unit cost ✔️
 
-📦 Storage
-    - 🖼️ fix display problems on storage tab ✔️
-    - 📉 Lower storage capacity to encourage more storage buildings
-    - 📤 add animation to something being taken or placed into storage facility ✔️
+⚔️ FIGHTING SYSTEM
+   💥💀 Killing enemies fully implemented 
+   🔁🤜 Improve combat update loop responsiveness
 
-🧍 PlayerTab
-    - 💀 make players on death remove player row in player tab ✔️
-    - 🖼️ Fix display problems ✔️
+🏃💨 Flee
+   💨 Make non combatants flee enemies ✔️
 
-🏗️ Building
-    - 🔍 make build sites on hover display type of building and percent ✔️
+🌑 Functions
+   ✨ Make button to make players go to house at night and stay (hide)
 
-🧹 Remove:
-    - 🚫 Players in other teams (not needed right now) ✔️
+🐛 Bugs:
+   ⏱️ Timers dont stop when powerup screen is up
+   🎯 Enemy detection bug when in track mode
 
-🧭 Main Menu:
-    - ⚖️ Add pros & cons for each starting location (players, types, cards, buildings) ✔️ 
-    - 🎛️ Display differences in a clean, attractive way ✔️
-
-🐞 Bugs:
-    - 📋 Destroy players better ✔️
-    - 🔥 Fireman refuel non existant wood ✔️
-    - 🔥 Fireman refuel concurrent logic check ✔️
-
+Functions:
+   send all non-combatants to bed at night
+   send all combatants to bed at day
+    
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
     - ⚠️ Stop UICamera from rendering map

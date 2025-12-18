@@ -3,13 +3,15 @@ import FunctionTab from "./FunctionTab";
 import PlayerTab from "./PlayerTab";
 import StorageTab from "./storageTab";
 import CardsTab from "./CardsTab";   
+import HousesTab from "./HousesTab"
 
 const COLOR_DARK = 0x260e04;
 const COLOR_FUNCTIONS = 0x800080;  // Purple
-const COLOR_PLAYERS  = 0x008000;  // Green
-const COLOR_OVENS    = 0xff0000;  // Red
-const COLOR_STORAGE  = 0x8B4513;  // Brown
-const COLOR_CARDS    = 0xFFD700;     // gold for cards
+const COLOR_PLAYERS   = 0x008000;  // Green
+const COLOR_OVENS     = 0xff0000;  // Red
+const COLOR_STORAGE   = 0x8B4513;  // Brown
+const COLOR_CARDS     = 0xFFD700;  // gold for cards
+const COLOR_BROWNISH  = 0x2d251e;  // brown for house
 
 // after EXPANDED/COLLAPSED:
 const COLLAPSED = 32;     // how much of the bar stays visible when hidden
@@ -40,11 +42,13 @@ export function CreateBottomBar(scene) {
             }
             if (key !== 'ovens' && scene.clayTab) scene.clayTab.hide();
             if (key !== 'storage' && scene.storageTab) scene.storageTab.hide();
+            if (key !== 'houses' && scene.housesTab) scene.housesTab.hide();
 
             // ⭐ when specific tabs are opened, force a refresh + auto-select
             if (key === 'ovens'   && scene.clayTab?.onShow)    scene.clayTab.onShow();
             if (key === 'storage' && scene.storageTab?.onShow) scene.storageTab.onShow();
             if (key === 'players' && scene.playerTab?.onShow)  scene.playerTab.onShow();
+            if (key === 'houses' && scene.housesTab?.onShow) scene.housesTab.onShow();
         }
     });
 
@@ -184,6 +188,7 @@ var CreateButtons = function (scene) {
       CreateLabel(scene, 'Players',   COLOR_PLAYERS,   TAB_W).setName('players'),
       CreateLabel(scene, 'Clay Ovens',COLOR_OVENS,     TAB_W).setName('ovens'),
       CreateLabel(scene, 'Storage',   COLOR_STORAGE,   TAB_W).setName('storage'),
+      CreateLabel(scene, 'Houses',    COLOR_BROWNISH, TAB_W).setName('houses'),
       CreateLabel(scene, 'Cards',      COLOR_CARDS,     TAB_W).setName('cards'),   
     ],
     buttonsType: 'radio'
@@ -223,6 +228,7 @@ var CreatePages = function (scene) {
     scene.playerTab = playerTab;
 
     const clayTab = new ClayOvenTab(scene);
+    ClayOvenTab.ensureBlankTexture(scene);
     pages.add(clayTab.view, { key: 'ovens', expand: true });
     scene.clayTab = clayTab;
 
@@ -231,6 +237,12 @@ var CreatePages = function (scene) {
     pages.storageTab = storageTab;
     scene.storageTab = storageTab;
     storageTab.refresh(1);
+
+    const housesTab = new HousesTab(scene);
+    pages.add(housesTab.view, { key: 'houses', expand: true });
+    pages.housesTab = housesTab;
+    scene.housesTab = housesTab;
+    housesTab.refresh(1);
 
     const cardsTab = new CardsTab(scene);                        
     pages.add(cardsTab.view, { key: 'cards', expand: true });    

@@ -9,7 +9,7 @@ import { recalculateDestroyTasksFromPoint } from "../Manager/spawnManager";
 
 export class Raider {
     // Used by Player.followPath via sprite.type.speed / sprite.type.stamina
-    static speed   = 200;  // a bit quick
+    static speed   = 100;  // a bit quick
     static stamina = 0;   // no stamina drain
 
     constructor(x, y, teamNumber = 0) {

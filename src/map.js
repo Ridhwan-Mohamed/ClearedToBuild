@@ -13,6 +13,7 @@ import { ClayOven } from "./buildings/ClayOven";
 import { mapView } from "./mapView";
 import { PineTree } from "./buildings/pineTree";
 import { VisibilitySystem } from "./UI/VisibilitySystem";
+import { AudioManager } from "./Manager/AudioManager";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -46,6 +47,9 @@ export class Map{
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         this.graphics = this.scene.add.graphics();
+        Map.worldLayer = Map.scene.add.layer();
+        Map.worldLayer.setName?.("worldLayer");
+        Map.worldStaticLayer = Map.scene.add.layer();   // NEW: buildings/trees/rocks/placing ghosts etc.
     }
 
     static initGrid(){ // precompute oriented frames + minimal base/top pairing
@@ -561,6 +565,9 @@ export class Map{
         this.blocks = [];
         this.waterBlocks.forEach(child => child.destroy());
         this.barrier.clear(true);
+
+        // remove any prior world-layer children created last redraw
+        if (this.worldLayer) this.worldLayer.removeAll(true);
     
         const camera = this.scene.cameras.main;
     
@@ -587,6 +594,7 @@ export class Map{
                 if (y < 0 || x < 0 || y >= height || x >= width) {
                     // Draw water tiles for out-of-bounds
                     let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
+                    this._worldAdd(barrierBlock); 
                     barrierBlock.play('water').setDepth(FLOORDEPTH)
                     this.waterBlocks.push(barrierBlock)
                 }
@@ -603,6 +611,21 @@ export class Map{
                 }
             }
         }
+
+        // After we've rebuilt visible world objects:
+        AudioManager.updateFromRedraw({
+        topLeftX,
+        topLeftY,
+        bottomRightX,
+        bottomRightY,
+        grid: this.grid,
+        width,
+        height,
+        buildingArray
+        });
+        
+        // After we've rebuilt visible world objects:
+        this._uiIgnoreWorldLayer();
     }   
 
     static handleCrops(x,y){
@@ -636,6 +659,7 @@ export class Map{
         const node = spec.sheet
             ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth).play(spec.anim || spec.key)
             : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
+        this._worldAdd(node); 
         if (angle) node.setAngle(angle);
         return node;
     }
@@ -664,6 +688,7 @@ export class Map{
                 const cx  = x * SQUARESIZE + SQUARESIZE / 2;
                 const cy  = y * SQUARESIZE + SQUARESIZE / 2;
                 const block = this.scene.add.sprite(cx, cy, 'crops').setDepth(def.depth);
+                this.addToWorldStatic(block); 
                 block.setFrame(1);
                 block.hasSeed = true;
                 this.handleGridDelete(block, def, x, y);
@@ -691,6 +716,7 @@ export class Map{
                 node = def.spriteSheet
                     ? this.scene.add.sprite(cx, cy, tileKey).setDepth(def.depth).play(tileKey)
                     : this.scene.add.image(cx, cy, tileKey).setDepth(def.depth);
+                this._worldAdd(node); 
             }
 
             // Basic rotation logic preserved
@@ -751,6 +777,7 @@ export class Map{
         const node = spec.sheet
             ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth)
             : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
+        this._worldAdd(node); 
         if (spec.sheet) node.play(spec.anim || spec.key);
         node.setAngle(angle);
         return node;
@@ -1173,6 +1200,43 @@ export class Map{
             });
             this.placingItem = null;
         }
+    }
+
+    static _worldAdd(obj) {
+        if (!obj) return obj;
+        if (this.worldLayer) this.worldLayer.add(obj);
+        return obj;
+    }
+
+    static addToWorldStatic(obj) {
+        if (!obj) return obj;
+
+        // put into static world layer (so it's logically grouped)
+        Map.worldStaticLayer.add(obj);
+
+        // IMPORTANT: UI cam must not render it
+        const uiCam = Map.scene?.uiCamera;
+        if (uiCam) uiCam.ignore(obj);
+
+        return obj;
+    }
+
+    static removeFromWorldStatic(obj, destroy = true) {
+        if (!obj) return;
+        Map.worldStaticLayer?.remove(obj);
+
+        if (destroy && obj.destroy) obj.destroy();
+    }
+
+    static _uiIgnoreWorldLayer() {
+        const cam = this.scene?.uiCamera;
+        if (!cam || !this.worldLayer) return;
+
+        const gridKids   = Map.worldLayer?.getChildren?.() || [];
+        // static layer only needs to be ignored once per object, BUT ignoring again is harmless
+        const staticKids = Map.worldStaticLayer?.getChildren?.() || [];
+
+        cam.ignore([...gridKids, ...staticKids]);
     }
 
     static getPixelRGBA(x, y) {

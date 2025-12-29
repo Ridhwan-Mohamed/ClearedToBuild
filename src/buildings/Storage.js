@@ -13,8 +13,13 @@ export class StorageBuilding {
         this.teamNumber = teamNumber;
 
         const item = TILE_TYPES.storage;
-        this.sprite = StorageBuilding.scene.add.sprite((x+ Math.floor(item.lenX/2))*SQUARESIZE, (y + Math.floor(item.lenY/2))*SQUARESIZE, 'storage')
-            .setDepth(BLOCKDEPTH);
+        this.sprite = Map.addToWorldStatic(
+            StorageBuilding.scene.add.sprite(
+                (x + Math.floor(item.lenX/2)) * SQUARESIZE,
+                (y + Math.floor(item.lenY/2)) * SQUARESIZE,
+                'storage'
+            ).setDepth(BLOCKDEPTH)
+        );
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
 
@@ -311,11 +316,13 @@ export class StorageBuilding {
             this.healthBarBg = scene.add
                 .rectangle(this.sprite.x, y, fullWidth, 4, 0x000000, 0.6)
                 .setDepth(BLOCKDEPTH + 1);
+            Map.addToWorldStatic(this.healthBarBg);
         }
         if (!this.healthBar) {
             this.healthBar = scene.add
                 .rectangle(this.sprite.x, y, fullWidth, 2, 0x00ff00, 1)
                 .setDepth(BLOCKDEPTH + 2);
+            Map.addToWorldStatic(this.healthBar);
         }
     }
 

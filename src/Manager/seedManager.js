@@ -5,6 +5,7 @@ import { Map } from "../map";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { AudioManager } from "./AudioManager";
 
 
 export class seedManager {
@@ -54,6 +55,14 @@ export class seedManager {
             sprite.task.block.queuedOutline = null;
         }
         Map.grid[y][x] = 1;
+
+        const isSeedPickup =
+            itemType === UI_ITEM_TYPES.seedCrop ||
+            itemType === UI_ITEM_TYPES.seedBerry;
+
+        if (isSeedPickup) {
+            AudioManager.playPickup();
+        }
 
         // Update detailed view if tile is on-screen
         if (Map.cameraBounds.contains(sprite.task.x * SQUARESIZE, sprite.task.y * SQUARESIZE)) {

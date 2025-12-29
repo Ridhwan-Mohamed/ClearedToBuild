@@ -13,6 +13,13 @@ export default class HousesTab {
 
     this.root = this.build();
 
+    scene.cameras.main.ignore(this.root);
+
+    // ALSO ignore all children, so sprites like portraits never render in world cam
+    const kids = this.root.getAllChildren?.() || this.root.list || [];
+    scene.cameras.main.ignore(kids);
+
+
     this._tickEvt = scene.time.addEvent({
       delay: 250,
       loop: true,
@@ -49,8 +56,8 @@ export default class HousesTab {
     this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
 
     this.scroll = scene.rexUI.add.scrollablePanel({
-      width: 300,
-      height: 180,
+      width: Math.floor(scene.scale.width * (2 / 3)) - 48,
+      height: 200,
       scrollMode: 0,
       background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.25),
       panel: { child: this.listBody, mask: { padding: 1 } },
@@ -159,21 +166,27 @@ export default class HousesTab {
         value: b,
         assigned: 0,
       });
-    }, 0x2f7d32);
+    }, 0x2f7d32, 28);
 
     const panel = scene.rexUI.add.sizer({
       orientation: 'y',
       space: { left: 10, right: 10, top: 8, bottom: 8, item: 10 },
     });
 
-    const header = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } })
+    const titleCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 2 } })
       .add(title, 0, 'left', 0, false)
-      .add(sub,   0, 'left', 0, false)
+      .add(sub,   0, 'left', 0, false);
+
+    const headerRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } })
+      .add(titleCol, { proportion: 1, expand: true })
+      .add(fixBtn,   { proportion: 0, expand: false, align: 'right' });
+
+    const header = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } })
+      .add(headerRow,  0, 'left', 0, true)
       .add(houseHpBar, 0, 'left', 0, false);
 
     panel.add(header, 0, 'left', 0, true);
     panel.add(occSizer, 0, 'left', 0, true);
-    panel.add(fixBtn, 0, 'left', 0, false);
 
     return {
       panel,
@@ -200,14 +213,14 @@ export default class HousesTab {
     };
   }
 
-  makeButton(scene, labelText, onClick, bgColor = 0x2a5bd8) {
+  makeButton(scene, labelText, onClick, bgColor = 0x2a5bd8, h = 28) {
     const label = scene.rexUI.add.label({
-      background: scene.rexUI.add.roundRectangle(0, 0, 0, 34, 10, bgColor),
-      text: scene.add.text(0, 0, labelText, { fontFamily: 'sans-serif', fontSize: 14, color: '#ffffff' }),
-      space: { left: 12, right: 12, top: 7, bottom: 7 },
+      background: scene.rexUI.add.roundRectangle(0, 0, 0, h, 10, bgColor),
+      text: scene.add.text(0, 0, labelText, { fontFamily: 'sans-serif', fontSize: 13, color: '#ffffff' }),
+      space: { left: 10, right: 10, top: 5, bottom: 5 },
     });
 
-    label.setMinSize(110, 34);
+    label.setMinSize(92, h);
     label.setInteractive({ useHandCursor: true }).on('pointerup', () => onClick?.());
     return label;
   }
@@ -240,7 +253,7 @@ export default class HousesTab {
 
     const panel = scene.rexUI.add.sizer({
       orientation: 'x',
-      space: { left: 8, right: 8, top: 8, bottom: 8, item: 10 },
+      space: { left: 6, right: 6, top: 6, bottom: 6, item: 8 }, // was 8/8/8/8 item 10
     })
       .addBackground(bg)
       .add(portrait, 0, 'center', 0, false)
@@ -278,6 +291,10 @@ export default class HousesTab {
 
     return {
       panel,
+      hidePortrait: () => {
+        portrait.setVisible(false);
+        portrait.setAlpha(0);
+      },
       setTroop: (troop) => {
         if (!troop || !troop.active) {
           name.setText(`Slot ${idx + 1}: —`);
@@ -304,12 +321,11 @@ export default class HousesTab {
         hp.sizer.setPercent(hpPct);
         st.sizer.setPercent(stPct);
 
-        hidePortrait: () => {
-          portrait.setVisible(false);
-          portrait.setAlpha(0);
-        },
-
         updateBtn(troop);
+
+        portrait.setVisible(true);
+        portrait.setAlpha(1);   // <-- add this
+        portrait.setTexture(portraitKey);
       },
     };
   }
@@ -390,6 +406,19 @@ export default class HousesTab {
     }
 
     this.paintDetails();
+  }
+
+  selectFromWorld(house) {
+    if (!house) return;
+    this.select(house);
+
+    // optional: center camera on the clicked house
+    const cam = this.scene.cameras.main;
+    const spr = house.sprite;
+    if (cam && spr?.getBounds) {
+      const b = spr.getBounds();
+      cam.centerOn(b.centerX, b.centerY);
+    }
   }
 
   paintDetails() {

@@ -20,6 +20,8 @@ export class Builder {
             'player'
         );
 
+        Player.scene.uiCamera.ignore(sprite);
+
         sprite.setInteractive();
         sprite.setOrigin(0.5, 0.5);
         sprite.setDepth(BLOCKDEPTH + 1);

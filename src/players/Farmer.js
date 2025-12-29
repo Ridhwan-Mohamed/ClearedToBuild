@@ -10,6 +10,7 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
+import { AudioManager } from '../Manager/AudioManager.js';
 
 export class Farmer {
 
@@ -19,6 +20,7 @@ export class Farmer {
 
     constructor(x, y, teamNumber) {
         const farmer = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, 'player');
+        Player.scene.uiCamera.ignore(farmer);
         farmer.setInteractive();
         farmer.id = this.count;
         Player.count += 1;
@@ -242,6 +244,7 @@ export class Farmer {
     static giveTroopWater(sprite){
         sprite.waterBucket = { count: this.maxWaterPailCarry };
         sprite.task = null;
+        AudioManager.playWaterPickup();
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
     }
 

@@ -11,6 +11,7 @@ import { ClayOven } from '../buildings/ClayOven.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { AudioManager } from '../Manager/AudioManager.js';
 
 const MAX_CARRY = 1;
 
@@ -21,6 +22,7 @@ export class Fireman {
 
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
+        Player.scene.uiCamera.ignore(sprite);        
         sprite.setInteractive();
         sprite.id = Player.count++;
         sprite.setOrigin(0.5, 0.5);
@@ -407,6 +409,7 @@ export class Fireman {
     static firemanCompleteWaterPickup(troop){
         const job = troop.pendingOvenJob;
         StorageManager.addCarriedItem(troop, UI_ITEM_TYPES.unclean_water)
+        AudioManager.playWaterPickup();
         const canTravel = Fireman.maybeAssignOvenJobDelivery(troop, job, UI_ITEM_TYPES.unclean_water);
         if(!canTravel){
             console.error("Failed to path back to oven after water pickup, WATER TO OVEN ERROR")

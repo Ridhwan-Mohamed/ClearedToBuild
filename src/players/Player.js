@@ -22,6 +22,7 @@ import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Raider } from "./Raider";
 import { Blademaster } from "./Blademaster";
 import { Brawler } from "./Brawler";
+import { AudioManager } from "../Manager/AudioManager";
 
 export class Player {
 
@@ -52,6 +53,7 @@ export class Player {
 
     static addPlayer(x,y,team,spriteSheet='player',walk='walk',idle='idle',action='action', weapon=weapons.hands) {
         const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, spriteSheet);
+        Player.scene.uiCamera.ignore(newCube);
         newCube.setInteractive();
         newCube.id = this.count;
         this.count += 1;
@@ -332,20 +334,17 @@ export class Player {
                 Phaser.Math.Distance.Between(sprite.x, sprite.y, targetGO.x, targetGO.y) <
                 sprite.weapon.range;
 
-            const hasLoS =
-                !sprite.weapon.projectile ||
-                Projectile.hasLineOfSight(sprite, targetGO);
+            // Only gunslinger needs LoS gating (projectile weapon behavior)
+            const hasLoS = !sprite.isGunslinger || Projectile.hasLineOfSight(sprite, targetGO);
 
             if (inRange && hasLoS) {
-                // Stop moving and attack
                 sprite.body.setVelocity(0, 0);
-                if (sprite.currentPath && sprite.currentPath.length) {
-                    sprite.currentPath.length = 0;
-                }
+                if (sprite.currentPath && sprite.currentPath.length) sprite.currentPath.length = 0;
                 Teams.movePlayerState(sprite, CONTROL_STATES.ATTACK_MODE);
                 this.doAction(sprite);
                 return;
             }
+
         }
 
         // 2) If we aren't walking anywhere, just idle.
@@ -361,7 +360,7 @@ export class Player {
         const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina); 
         const currentSpeed = sprite.type.speed * staminaFactor;
         if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
-        
+
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);
             VisibilitySystem.applyFoWToSprite(sprite);
@@ -375,6 +374,7 @@ export class Player {
             desired.y
         );
         sprite.body.setVelocity(newVelocity.x, newVelocity.y);
+        AudioManager.tryPlayStep(sprite);
         // Rotate the sprite to face the direction of movement
         if (newVelocity.length() > 0) {
             sprite.rotation = Phaser.Math.Angle.Between(0, 0, newVelocity.x, newVelocity.y); // Calculate angle

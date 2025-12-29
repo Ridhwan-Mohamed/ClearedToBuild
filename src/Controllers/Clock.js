@@ -3,6 +3,7 @@ import { Teams } from "../Teams";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Player } from "../players/Player";
 import { recalculateDestroyTasksFromPoint, spawnSeaRaider } from "../Manager/spawnManager";
+import { AudioManager } from "../Manager/AudioManager";
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
@@ -15,7 +16,7 @@ export class Clock {
         this.paused = false; 
         this.powerupScreenShown = false;
 
-        this.hours = 17;
+        this.hours = 5;
         this.minutes = 50;
         this.day = 1;
 
@@ -100,26 +101,35 @@ export class Clock {
     }
 
     events() {
-        if (this.isNightStart()){
-            // Player.refreshAllFoW();
-            // Prepare enemy destroy tasks around base (team 0)
-            // Spawn one sea-raider from the ocean
-            spawnSeaRaider(this.scene);
-            this.spawnedThisNight = 1;
+        if (this.isNightStart()) {
+            // ✅ No enemies until Day 3
+            AudioManager.setIsNight(true);
+
+            if (this.day < 0) {
+                this.spawnedThisNight = 0;
+                this.lastSend = this.hours;
+                return;
+            }
+
+            // ✅ Day 3–4: 1 spawn, Day 5–6: 2 spawns, Day 7–8: 3 spawns, ...
+            const spawnsTonight = 1 + Math.floor((this.day - 0) / 2);
+
+            for (let i = 0; i < spawnsTonight; i++) {
+                spawnSeaRaider(this.scene);
+            }
+
+            this.spawnedThisNight = spawnsTonight;
             this.lastSend = this.hours;
         }
         else if (this.isNight()) {
-            // if (this.day > 3 && this.lastSend !== this.hours && this.spawnedThisNight < this.waveAmount) {
-            //     spawnAndSend();
-            //     this.spawnedThisNight++;
-            //     this.lastSend = this.hours;
-            // }
-        } else if (this.isDayStart() && !this.powerupScreenShown){
-            this.powerupScreenShown = true;   // ✅ prevent re-trigger
+            // keep your later-per-hour spawning disabled for now (or remove)
+        }
+        else if (this.isDayStart() && !this.powerupScreenShown) {
+            AudioManager.setIsNight(false);
+            this.powerupScreenShown = true;
             openPowerupScreen(this.scene);
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
-            // Player.refreshAllFoW(true);
             this.pause();
         } else {
             this.lastSend = null;

@@ -14,6 +14,7 @@ export class Forager {
 
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
+        Player.scene.uiCamera.ignore(sprite);
         sprite.setInteractive();
         sprite.id = Player.count++;
         sprite.setOrigin(0.5, 0.5);

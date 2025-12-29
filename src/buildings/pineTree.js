@@ -28,6 +28,7 @@ export class PineTree {
     const cx = (gridX + 1.5) * SQUARESIZE;
     const cy = (gridY + 1.5) * SQUARESIZE;
     this.container = scene.add.container(cx, cy).setDepth(TILE_TYPES.pine.depth);
+    GameMap.addToWorldStatic(this.container);
 
     // all layers are 64x64 → exact overlap
     this.base = scene.add.image(0, 0, "fullBasePine").setOrigin(0.5).setDepth(BLOCKDEPTH);

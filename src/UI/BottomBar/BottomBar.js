@@ -19,162 +19,149 @@ const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
 const START_OPEN  = false; // start expanded?
 
 export function CreateBottomBar(scene) {
-    const ui = CreateTabPage(scene)
-        .setOrigin(0.5, 1)
-        .setPosition(scene.scale.width / 2, scene.scale.height + EXPANDED - COLLAPSED + 95)
-        .setMinSize(scene.scale.width, EXPANDED)   // <-- force width
-        .layout();
+  const tabPage = CreateTabPage(scene);
 
-    const tabs  = ui.getElement('tabs');
-    const pages = ui.getElement('pages');
-    scene.uiBottomBar = { ui, pages: ui.getElement('pages') };
-    scene.uiBottomBar.currentPage = 'functions';    // 🔹 track current page key
+  const ui = tabPage.sizer
+    .setOrigin(0.5, 1)
+    // ✅ start in collapsed position (no mystery +95/+155)
+    .setPosition(scene.scale.width / 2, scene.scale.height + (EXPANDED - COLLAPSED + 155))
+    .setMinSize(scene.scale.width, EXPANDED)
+    .layout();
 
-    // click a tab -> swap page
-    tabs.on('button.click', (btn) => {
-        const key = btn?.name;
-        if (key) {
-            pages.swapPage(key);
-            scene.uiBottomBar.currentPage = key;
+  const tabs = tabPage.tabs;
+  const pages = tabPage.pages;
+  const toggleBtn = tabPage.toggleBtn;
 
-            if (key !== 'players' && scene.playerTab?.detailCard?.portrait) {
-                scene.playerTab.detailCard.portrait.setVisible(false);
-            }
-            if (key !== 'ovens' && scene.clayTab) scene.clayTab.hide();
-            if (key !== 'storage' && scene.storageTab) scene.storageTab.hide();
-            if (key !== 'houses' && scene.housesTab) scene.housesTab.hide();
+  let expanded = START_OPEN;
+  let tween = null;
 
-            // ⭐ when specific tabs are opened, force a refresh + auto-select
-            if (key === 'ovens'   && scene.clayTab?.onShow)    scene.clayTab.onShow();
-            if (key === 'storage' && scene.storageTab?.onShow) scene.storageTab.onShow();
-            if (key === 'players' && scene.playerTab?.onShow)  scene.playerTab.onShow();
-            if (key === 'houses' && scene.housesTab?.onShow) scene.housesTab.onShow();
-        }
+  const EXPANDED_Y = scene.scale.height;
+  const COLLAPSED_Y = scene.scale.height + (EXPANDED - COLLAPSED + 155); // ✅ no extra offset
+
+  // after you have `tabs` and `pages`
+  scene.uiBottomBar = {
+    ui,
+    tabs,
+    pages,
+    currentPage: 'functions',
+    expanded: START_OPEN,
+  };
+
+  // ensure setBottomBar updates scene.uiBottomBar.expanded too
+  function setBottomBar(open) {
+    if (tween) tween.stop();
+    tween = scene.tweens.add({
+      targets: ui,
+      y: open ? EXPANDED_Y : COLLAPSED_Y,
+      duration: 200,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        expanded = open;
+        scene.uiBottomBar.expanded = open;   // ✅ keep in sync
+        tween = null;
+
+        const t = toggleBtn.getElement?.('text') || toggleBtn.text;
+        if (t) t.setText(expanded ? '▼' : '▲');
+      }
     });
+  }
 
-    // default: show Functions on boot
-    pages.swapPage('functions');
-    if (typeof tabs.setValue === 'function') {
-        tabs.setValue('functions');
-    } else {
-        const fnBtn = tabs.buttons?.find(b => b.name === 'functions');
-        if (fnBtn) tabs.emit('button.click', fnBtn);
-    }
+  function toggleBottomBar() {
+    setBottomBar(!expanded);
+  }
 
-    // --- COLLAPSE/EXPAND CONTROL ---
-    let expanded = START_OPEN;
-    let tween = null;
-    const EXPANDED_Y = scene.scale.height;
-    const COLLAPSED_Y = scene.scale.height + (EXPANDED - COLLAPSED + 95);
+  scene.setBottomBar = setBottomBar;
 
-    function setBottomBar(open) {
-        if (tween) tween.stop();
-        tween = scene.tweens.add({
-            targets: ui,
-            y: open ? EXPANDED_Y : COLLAPSED_Y,
-            duration: 200,
-            ease: 'Cubic.easeOut',
-            onComplete: () => {
-                expanded = open;
-                tween = null;
-            }
-        });
-    }
+  scene.openDetailPage = function(pageKey, callback) {
+    const bar = scene.uiBottomBar;
+    if (!bar) return;
 
-    function toggleBottomBar() {
-        setBottomBar(!expanded);
-    }
+    // 1) swap page
+    bar.pages.swapPage(pageKey);
+    bar.currentPage = pageKey;
 
-    // expose to scene
-    scene.setBottomBar = setBottomBar;
-    scene.openDetailPage = function(pageKey, callback) {
-        const bar = scene.uiBottomBar;
-        if (!bar) return;
+    // 2) sync the radio tab selection so UI matches
+    bar.tabs?.setValue?.(pageKey);
 
-        bar.pages.swapPage(pageKey);
-        bar.currentPage = pageKey;
+    // 3) expand if needed
+    if (!bar.expanded) scene.setBottomBar(true);
 
-        if (!bar.expanded) scene.setBottomBar(true);
+    // 4) map to the real tab object instances
+    const tab =
+      (pageKey === 'ovens')   ? scene.clayTab :
+      (pageKey === 'storage') ? scene.storageTab :
+      (pageKey === 'players') ? scene.playerTab :
+      (pageKey === 'houses')  ? scene.housesTab :
+      null;
 
-        // 🔹 Ensure relevant tab gets its onShow() hook
-        if (pageKey === 'ovens'   && scene.clayTab?.onShow)    scene.clayTab.onShow();
-        if (pageKey === 'storage' && scene.storageTab?.onShow) scene.storageTab.onShow();
-        if (pageKey === 'players' && scene.playerTab?.onShow)  scene.playerTab.onShow();
+    // 5) show hook
+    tab?.onShow?.();
 
-        let tab = bar.pages[pageKey + 'Tab'] 
-            || bar.pages.tabs?.[pageKey]
-            || (pageKey === 'ovens'   ? bar.pages.clayTab    : null)
-            || (pageKey === 'storage' ? bar.pages.storageTab: null)
-            || (pageKey === 'players' ? bar.pages.playerTab : null)
-            || null;
+    // 6) run selection callback
+    if (callback && tab) callback(tab);
+  };
 
-        if (callback && tab) callback(tab);
-    };
+  // ✅ toggle button
+  toggleBtn
+    .setInteractive({ useHandCursor: true })
+    .on('pointerup', () => toggleBottomBar());
 
-    // 🔹 space bar toggle
-    scene.input.keyboard.on('keydown-SPACE', () => {
-        toggleBottomBar();
-    });
+  // ✅ click tabs
+  tabs.on('button.click', (btn) => {
+    const key = btn?.name;
+    if (!key) return;
 
-    // 🔹 clicking a tab opens bar if collapsed
-    const tabBtns = ui.getElement('tabs');
-        tabBtns.on('button.click', (btn) => {
-        const key = btn?.name;
-        if (key) {
-            pages.swapPage(key);
-            scene.uiBottomBar.currentPage = key;   // 🔹 keep it in sync
-            if (!expanded) setBottomBar(true);
+    pages.swapPage(key);
+    scene.uiBottomBar.currentPage = key;
 
-            if (key !== 'players') {
-                scene.playerTab?.hidePortrait();
-            }
-        }
-    });
+    if (!expanded) setBottomBar(true);
 
-    scene.scale.on('resize', (sz) => {
-        ui.setMinSize(sz.width, EXPANDED);
-        ui.setPosition(sz.width / 2, sz.height);
+    if (key !== 'players') scene.playerTab?.hidePortrait?.();
+    if (key !== 'ovens')   scene.clayTab?.hide?.();
+    if (key !== 'storage') scene.storageTab?.hide?.();
+    if (key !== 'houses')  scene.housesTab?.hide?.();
 
-        // rebuild the tabs so TAB_W recalculates for the new width
-        const tabs = ui.getElement('tabs');
-        const pages = ui.getElement('pages');
-        const value = tabs?.value ?? 'functions';
+    if (key === 'ovens')   scene.clayTab?.onShow?.();
+    if (key === 'storage') scene.storageTab?.onShow?.();
+    if (key === 'players') scene.playerTab?.onShow?.();
+    if (key === 'houses')  scene.housesTab?.onShow?.();
+  });
 
-        // re-create the whole tab strip quickly:
-        const newTabs = CreateButtons(scene);
-        ui
-            .remove(tabs, true)                          // destroy old
-            .insertAt(0, newTabs, { key: 'tabs', align: 'left', expand: false })
-            .layout();
+  // default page
+  pages.swapPage('functions');
+  tabs.setValue?.('functions');
 
-        // restore selected tab
-        newTabs.setValue?.(value);
-    });
+  // (optional) spacebar toggle
+  scene.input.keyboard.on('keydown-SPACE', () => toggleBottomBar());
 
-    // hide from main camera
-    scene.cameras.main.ignore(ui);
+  // hide from main camera
+  scene.cameras.main.ignore(ui);
+  scene.housesTab?.hide?.();
 }
 
+
 var CreateTabPage = function (scene) {
-    const sizer = scene.rexUI.add.sizer({
-        width: scene.scale.width,
-        orientation: 'y',
-        space: { left: 0, right: 0, top: 0, bottom: 0, item: 0 }
-    })
+  const sizer = scene.rexUI.add.sizer({
+    width: scene.scale.width,
+    orientation: 'y',
+    space: { left: 0, right: 0, top: 0, bottom: 0, item: 0 }
+  });
 
-    // tabs on top
-    .add(
-      CreateButtons(scene),
-      { key: 'tabs', align: 'left', expand: false, padding: { left: 0 } }
-    )
+  const topRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 6 } });
 
-    // pages below
-    .add(
-      CreatePages(scene),
-      { key: 'pages', proportion: 1, expand: true }
-    );
+  const tabs = CreateButtons(scene);
+  const toggleBtn = CreateToggleLabel(scene, '▲', 44);
+  const pages = CreatePages(scene);
 
-  return sizer;
+  // ✅ IMPORTANT: give keys so ui.getElement('tabs') works
+  topRow.add(tabs,      { key: 'tabs',      proportion: 1, expand: true,  align: 'left' });
+  topRow.add(toggleBtn, { key: 'toggleBtn', proportion: 0, expand: false, align: 'right' });
+
+  sizer.add(topRow, { expand: true });
+  sizer.add(pages, { key: 'pages', proportion: 1, expand: true });
+
+  // ✅ Return real references so we don't depend on getElement()
+  return { sizer, tabs, pages, toggleBtn };
 };
 
 var CreateButtons = function (scene) {
@@ -215,6 +202,28 @@ var CreateLabel = function (scene, text, color, width) {
     }),
 
     space: { left: 12, right: 8, top: 4, bottom: 4 }
+  });
+};
+
+var CreateToggleLabel = function (scene, text, width = 44) {
+  return scene.rexUI.add.label({
+    width,
+    height: 32,
+    background: scene.rexUI.add.roundRectangle(
+      0, 0, 0, 0,
+      { tl: 6, tr: 6, bl: 0, br: 0 },
+      0x222222
+    ).setStrokeStyle(1, 0x000000),
+
+    text: scene.add.text(0, 0, text, {
+      fontSize: 16,
+      color: '#ffffff',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }),
+
+    space: { left: 16, right: 8, top: 4, bottom: 4 }
   });
 };
 

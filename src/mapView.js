@@ -1,57 +1,57 @@
 import Phaser, { Plugins } from 'phaser';
-import worldMap from 'url:../assets/worldMap.png'
-import black from 'url:../assets/black.png'
-import gray from 'url:../assets/gray.png'
-import green from 'url:../assets/green.png'
-import leader from 'url:../assets/purple.png'
-import hammer from 'url:../assets/hammer.png'
-import grass from 'url:../assets/grass.png'
-import Water from 'url:../assets/water/water.png'
-import TWater from 'url:../assets/water/TWater.png'
-// import BWater from 'url:../assets/water/BWater.png'
-// import RWater from 'url:../assets/water/RWater.png'
-// import LWater from 'url:../assets/water/LWater.png'
-// import TRCWater from 'url:../assets/water/TRCWater.png'
-// import BRCWater from 'url:../assets/water/BRCWater.png'
-import TLCWater from 'url:../assets/water/TLCWater.png'
-import iWater from 'url:../assets/water/iwater.png'
-// import BLCWater from 'url:../assets/water/BLCWater.png'
-import waterParticle from 'url:../assets/waterParticle.png'
-import crops from 'url:../assets/crops.png'
+import worldMap from 'url:./assets/worldMap.png'
+import black from 'url:./assets/black.png'
+import gray from 'url:./assets/gray.png'
+import green from 'url:./assets/green.png'
+import leader from 'url:./assets/purple.png'
+import hammer from 'url:./assets/hammer.png'
+import grass from 'url:./assets/grass.png'
+import Water from 'url:./assets/water/water.png'
+import TWater from 'url:./assets/water/TWater.png'
+// import BWater from 'url:./assets/water/BWater.png'
+// import RWater from 'url:./assets/water/RWater.png'
+// import LWater from 'url:./assets/water/LWater.png'
+// import TRCWater from 'url:./assets/water/TRCWater.png'
+// import BRCWater from 'url:./assets/water/BRCWater.png'
+import TLCWater from 'url:./assets/water/TLCWater.png'
+import iWater from 'url:./assets/water/iwater.png'
+// import BLCWater from 'url:./assets/water/BLCWater.png'
+import waterParticle from 'url:./assets/waterParticle.png'
+import crops from 'url:./assets/crops.png'
 import { Map as GameMap } from './map.js';
 import { Turret } from './Turret.js';
 import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Projectile } from './Projectile.js';
-import player from 'url:../assets/Players/player.png'
-import gun1 from 'url:../assets/Players/gun1.png'
-import playerAction from 'url:../assets/Players/playerAction.png'
-import playerCarry from 'url:../assets/Players/playerCarry.png'
+import player from 'url:./assets/Players/player.png'
+import gun1 from 'url:./assets/Players/gun1.png'
+import playerAction from 'url:./assets/Players/playerAction.png'
+import playerCarry from 'url:./assets/Players/playerCarry.png'
 import { playerDict, setupTownBoundsToggle, townBounds } from './town.js';
 import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './Manager/buildingManager.js';
-import monies from 'url:../assets/monies.png'
-import seeds from 'url:../assets/seeds.png'
+import monies from 'url:./assets/monies.png'
+import seeds from 'url:./assets/seeds.png'
 import { fightManager } from './Manager/fightManager.js';
 import { seedManager } from './Manager/seedManager.js';
-import char from 'url:../assets/char.png'
-import charHurt from 'url:../assets/charHurt.png'
-import berry from 'url:../assets/berry.png'
-import spawn from 'url:../assets/hole.png'
+import char from 'url:./assets/char.png'
+import charHurt from 'url:./assets/charHurt.png'
+import berry from 'url:./assets/berry.png'
+import spawn from 'url:./assets/hole.png'
 import { recalculateDestroyTasksFromPoint } from './Manager/spawnManager.js';
 import { Clock } from './Controllers/Clock.js';
-import clayOven from 'url:../assets/clayOven.png'
+import clayOven from 'url:./assets/clayOven.png'
 import { ClayOven } from './buildings/ClayOven.js';
 import { DailyNeedsTracker } from './UI/DailyNeedsTracker.js';
-import tillOverlay from 'url:../assets/tillOverlay.png'
-import foodIcon from 'url:../assets/foodIcon.png'
-import waterIcon from 'url:../assets/waterIcon.png'
-import woodIcon from 'url:../assets/woodIcon.png'
-import stoneIcon from 'url:../assets/stoneIcon.png'
-import playerIcon from 'url:../assets/playerIcon.png'
-import uncleanWaterIcon from 'url:../assets/uncleanWaterIcon.png'
+import tillOverlay from 'url:./assets/tillOverlay.png'
+import foodIcon from 'url:./assets/foodIcon.png'
+import waterIcon from 'url:./assets/waterIcon.png'
+import woodIcon from 'url:./assets/woodIcon.png'
+import stoneIcon from 'url:./assets/stoneIcon.png'
+import playerIcon from 'url:./assets/playerIcon.png'
+import uncleanWaterIcon from 'url:./assets/uncleanWaterIcon.png'
 import { ClayOvenUI } from './UI/ClayOvenUI.js';
 import { StorageBuilding } from './buildings/Storage.js';
 import { StorageUI } from './UI/StorageUI.js';
@@ -63,15 +63,16 @@ import { MainMenu } from './mainMenu.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { HouseUI } from './UI/HouseUI.js';
 import UIPlugin from 'phaser3-rex-plugins/templates/ui/ui-plugin.js';
-import fullBasePine from 'url:../assets/trees/fullBasePine.png';
-import fullMiddlePine from 'url:../assets/trees/fullMiddlePine.png';
-import fullTopPine from 'url:../assets/trees/fullTopPine.png';
-import mediumBasePine from 'url:../assets/trees/mediumBasePine.png';
-import mediumMiddlePine from 'url:../assets/trees/mediumMiddlePine.png';
-import mediumTopPine from 'url:../assets/trees/mediumTopPine.png';
+import fullBasePine from 'url:./assets/trees/fullBasePine.png';
+import fullMiddlePine from 'url:./assets/trees/fullMiddlePine.png';
+import fullTopPine from 'url:./assets/trees/fullTopPine.png';
+import mediumBasePine from 'url:./assets/trees/mediumBasePine.png';
+import mediumMiddlePine from 'url:./assets/trees/mediumMiddlePine.png';
+import mediumTopPine from 'url:./assets/trees/mediumTopPine.png';
 import { PineTree } from './buildings/pineTree.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
+import { AudioManager } from './Manager/AudioManager.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -166,6 +167,7 @@ export class mapView extends Phaser.Scene {
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
+        AudioManager.init(this);
         DailyNeedsTracker.init(this);
         ClayOvenUI.init(this); // once in your main scene's create()
         StorageBuilding.scene = this;

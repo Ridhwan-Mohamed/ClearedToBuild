@@ -135,6 +135,7 @@ export class fightManager{
 
                 // 🧨 Projectile weapon (gunslinger, etc.)
                 if (weapon.projectile) {
+                    AudioManager.playWeaponAttack(sprite, weapon, { volume: 0.45, cooldownMs: 60 });
                     const leadPos = Projectile.leadAndAngle(sprite, target, weapon.speed);
                     const angle = Phaser.Math.Angle.Between(sprite.x, sprite.y, leadPos.x, leadPos.y);
                     new Projectile(sprite.x, sprite.y, angle, sprite.body.team, weapon, sprite);
@@ -158,6 +159,8 @@ export class fightManager{
                 let color = '#ffffff';
 
                 if (isHit) {
+                    AudioManager.playWeaponAttack(sprite, weapon, { volume: 0.32, cooldownMs: 80 });
+                    
                     damage = isCrit ? weapon.critDmg : weapon.baseDmg;
 
                     // 🔴 Apply on-hit effects: flash, cancel timer, knockback team 0

@@ -7,7 +7,7 @@ Gamify Update-2, Fighting (1-2 weeks)
    💢🌀 Add hit-stun + knockback ✔️
    ⚡✨ Flash animation when stunned (players flash but no stun) ✔️
    🔥🏚️ Enemies target various buildings (storage, ovens, etc.) ✔️ 
-   📅⏳ Enemy waves start Day 5 (grace period)
+   📅⏳ Enemy waves start Day 5 (grace period) ✔️ 
 
 🔫 GUNSLINGER
    🔫💥 Make shooting functional ✔️
@@ -28,23 +28,19 @@ Gamify Update-2, Fighting (1-2 weeks)
    🙂 Cheap unit cost ✔️
 
 ⚔️ FIGHTING SYSTEM
-   💥💀 Killing enemies fully implemented 
-   🔁🤜 Improve combat update loop responsiveness
+   💥💀 Killing enemies fully implemented ✔️ 
+   🔁🤜 Improve combat update loop responsiveness ✔️ 
 
 🏃💨 Flee
    💨 Make non combatants flee enemies ✔️
 
 🌑 Functions
-   ✨ Make button to make players go to house at night and stay (hide)
+   ✨ Make button to make players go to house at night and stay (hide) ✔️
 
 🐛 Bugs:
-   ⏱️ Timers dont stop when powerup screen is up
-   🎯 Enemy detection bug when in track mode
+   ⏱️ Timers dont stop when powerup screen is up ✔️ 
+   🎯 Enemy detection bug when in track mode ✔️ 
 
-Functions:
-   send all non-combatants to bed at night
-   send all combatants to bed at day
-    
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
     - ⚠️ Stop UICamera from rendering map

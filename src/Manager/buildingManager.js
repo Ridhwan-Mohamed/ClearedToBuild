@@ -9,6 +9,7 @@ import { StorageBuilding } from "../buildings/Storage"
 import { House } from "../buildings/House"
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 import { UI_ITEM_TYPES } from "../UI/UIConstants"
+import { AudioManager } from "./AudioManager"
 
 export class buildingManager{
 
@@ -325,6 +326,7 @@ export class buildingManager{
             if (task) {
                 Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
             }
+            AudioManager.setConstructionActive(sprite, false);
             sprite.task = null
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
             let teamNumber = sprite.body.team;
@@ -391,14 +393,21 @@ export class buildingManager{
             });
         }
 
+        // Mark this builder as actively constructing (starts/keeps the construction loop)
+        AudioManager.setConstructionActive(sprite, true);
 
         if (!sprite.timer) {
             sprite.timer = this.scene.time.delayedCall(this.blockBuildingDuration, () => {
                 console.log(`sprite: ${sprite.id} starting timer, duration: ${task.duration}`)
-                if(!sprite.active || sprite.state != CONTROL_STATES.BUILD_MODE_B) return;
+                if (!sprite.active || sprite.state != CONTROL_STATES.BUILD_MODE_B) {
+                    AudioManager.setConstructionActive(sprite, false);
+                    sprite.timer = null; // avoid “stuck timer” pointers
+                    return;
+                }
                 let teamNumber = sprite.body.team;
                 if (!task || task.duration <= 0){
                     console.log(`sprite: ${sprite.id} delete mode within timer `)
+                    AudioManager.setConstructionActive(sprite, false);
                     Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
                     sprite.task = null;
                     sprite.timer = null; 
@@ -431,6 +440,8 @@ export class buildingManager{
                     sprite.timer = null;
                     console.log("Done building.");
                     const cost = task.type.cost;
+                    AudioManager.setConstructionActive(sprite, false);
+                    AudioManager.playSound("sfx_building_complete");
                     if (cost && !this.hasRequiredMaterials(cost, teamNumber)) {
                         console.log("Not enough resources to build!");
                         sprite.play(sprite.idle);
@@ -438,7 +449,6 @@ export class buildingManager{
                         sprite.task = null;
                         return;
                     }
-                    this.consumeRequiredMaterials(cost, teamNumber);
                     if (task.constructionSprite) {
                         task.constructionSprite.destroy();
                         task.constructionSprite = null;
@@ -512,7 +522,7 @@ export class buildingManager{
             sprite.play(sprite.idle);
             return;
         }
-    
+
         if (!sprite.timer) {
             sprite.timer = this.scene.time.delayedCall(1000, () => {
                 if(!sprite.active || sprite.state != CONTROL_STATES.DESTROY_MODE) return;
@@ -538,6 +548,7 @@ export class buildingManager{
                 if (!sprite.body.team) {
                     // Raiders / enemies: use their weapon to damage buildings
                     damage = sprite.weapon?.baseDmg || 5;
+                    AudioManager.playWeaponAttack(sprite, sprite.weapon);
                 } else {
                     // Player-side "demolition" – slow chip damage
                     damage = 2;
@@ -560,6 +571,7 @@ export class buildingManager{
                     sprite.timer.remove(false);
                     sprite.timer = null;
                     console.log("Done Destroying.");
+                    AudioManager.playSound("sfx_building_collapse");
                     sprite.play(sprite.idle);
                     const targetObj = task.value?.buildingRef || task.value;
                     if (targetObj && typeof targetObj.destroy === "function") {
@@ -587,6 +599,7 @@ export class buildingManager{
                     console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
                     sprite.timer.remove(false);
                     sprite.timer = null;
+                    AudioManager.playSound("sfx_building_damage");
                     // 🔥 Restart another delayed call if still destroying
                     this.beginDestroyingBlock(sprite);
                 }

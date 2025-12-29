@@ -6,6 +6,7 @@ import { buildingManager } from "./buildingManager"
 import { StorageManager } from "./StorageManager"
 import { VisibilitySystem } from "../UI/VisibilitySystem"
 import { Map } from "../map"
+import { AudioManager } from "./AudioManager"
 
 export class blockResourceManager{
 
@@ -30,6 +31,8 @@ export class blockResourceManager{
 
         if (!task) {
             sprite.task = null
+            AudioManager.setHarvestActive(sprite, "wood", false);
+            AudioManager.setHarvestActive(sprite, "rock", false);
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
             let teamNumber = sprite.body.team;
             Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockResourceList, CONTROL_STATES.GET_BLOCK_RESOURCE);
@@ -38,9 +41,17 @@ export class blockResourceManager{
         }
 
         if (!sprite.timer) {
+            const isWoodJob = sprite.task.type == TILE_TYPES.pine;
+            AudioManager.setHarvestActive(sprite, isWoodJob ? "wood" : "rock", true);
             const duration = sprite.task.type == TILE_TYPES.pine ? this.woodBreakDuration : this.rockBreakDuration;
             sprite.timer = this.scene.time.delayedCall(duration, () => {
-                if(!sprite.active || sprite.state != CONTROL_STATES.GET_BLOCK_RESOURCE) return;
+                if (!sprite.active || sprite.state != CONTROL_STATES.GET_BLOCK_RESOURCE) {
+                    // job interrupted
+                    const isWoodJob = sprite.task?.type == TILE_TYPES.pine;
+                    AudioManager.setHarvestActive(sprite, isWoodJob ? "wood" : "rock", false);
+                    sprite.timer = null;
+                    return;
+                }
                 const dx = sprite.x - sprite.task.x*SQUARESIZE;
                 const dy = sprite.y - sprite.task.y*SQUARESIZE;
 
@@ -51,6 +62,7 @@ export class blockResourceManager{
                     sprite.direction = dy > 0 ? 'down' : 'up';
                 }
                 sprite.play(sprite.action);
+
                 task.remaining--;
                 task.value.health = task.remaining;  // keep sprite.health updated
                 task.assigned--;
@@ -80,7 +92,6 @@ export class blockResourceManager{
                             blockTiles.push({x: j, y: i});
                         }
                     }
-
                     // 🔵 overview: reflect cleared resource tiles
                     if (this.scene?.zoomMixer) {
                         for (const t of blockTiles) {
@@ -98,6 +109,7 @@ export class blockResourceManager{
                     buildingManager.removeBuildingFromArray(task.x, task.y);
                     VisibilitySystem.onOccluderChangedRect(task.x, task.y, task.type.lenX, task.type.lenY, /*isBlock=*/false);
                 }
+                AudioManager.playBlockBreak(isWoodJob ? "wood" : "rock");
                 StorageManager.addCarriedItem(sprite, task.resource);
                 Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
                 sprite.play(sprite.idle);
@@ -107,6 +119,8 @@ export class blockResourceManager{
                     task.value.queuedOutline.destroy();
                     value.queuedOutline = null;
                 }
+                const finishedWoodJob = sprite.task?.type == TILE_TYPES.pine;
+                AudioManager.setHarvestActive(sprite, finishedWoodJob ? "wood" : "rock", false);
                 sprite.task = null;
             });
         }

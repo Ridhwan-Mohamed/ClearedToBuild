@@ -1,7 +1,6 @@
 import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
-import { HouseUI } from "../UI/HouseUI";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class House {
@@ -23,24 +22,26 @@ export class House {
         this.healthBar   = null;
         this._damageBarUntil = 0;
 
-        this.sprite = House.scene.add.image(x * SQUARESIZE, y * SQUARESIZE, houseType.name)
-            .setOrigin(0)
-            .setDepth(BLOCKDEPTH)
-            .setInteractive()
-            .on('pointerdown', () => {
-                const scene = this.scene;
+        this.sprite = Map.addToWorldStatic(
+            House.scene.add.image(x * SQUARESIZE, y * SQUARESIZE, houseType.name)
+                .setOrigin(0)
+                .setDepth(BLOCKDEPTH)
+                .setInteractive()
+            )
+                .setOrigin(0)
+                .setDepth(BLOCKDEPTH)
+                .setInteractive()
+                .on('pointerdown', () => {
+                    const scene = this.scene;
 
-                // Prefer BottomBar tab flow (like ovens/storage)
-                if (scene?.openDetailPage) {
-                    scene.openDetailPage('houses', (tab) => {
-                        tab?.selectFromWorld?.(this);  // select + center handled by tab
-                    });
-                    return;
-                }
-
-                // Fallback (old UI)
-                HouseUI.toggleMajor(this);
-            });
+                    // Prefer BottomBar tab flow (like ovens/storage)
+                    if (scene?.openDetailPage) {
+                        scene.openDetailPage('houses', (tab) => {
+                            tab?.selectFromWorld?.(this);  // select + center handled by tab
+                        });
+                        return;
+                    }
+                });
         Map.drawRoadAround(x,y,houseType,team);
         Map.addBlockItem(x,y,houseType);
 
@@ -164,11 +165,13 @@ export class House {
             this.healthBarBg = scene.add
                 .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 4, 0x000000, 0.6)
                 .setDepth(BLOCKDEPTH + 1);
+            Map.addToWorldStatic(this.healthBarBg);
         }
         if (!this.healthBar) {
             this.healthBar = scene.add
                 .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 2, 0x00ff00, 1)
                 .setDepth(BLOCKDEPTH + 2);
+            Map.addToWorldStatic(this.healthBar);
         }
     }
 

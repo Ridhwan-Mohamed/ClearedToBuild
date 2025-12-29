@@ -260,6 +260,8 @@ export class ZoomMixer {
 
     icon.setScale(baseScale / cam.zoom);
 
+    // ✅ hide this icon from the UI camera
+    scene.uiCamera?.ignore(icon);
 
     // Hover label
     const label = scene.add.text(x, y - 20, description, {
@@ -288,6 +290,8 @@ export class ZoomMixer {
         onComplete: () => label.setVisible(false)
       });
     });
+
+    scene.uiCamera?.ignore(label);
 
     ZoomMixer.mapIconContainer.add([icon, label]);
     return icon;
@@ -324,4 +328,85 @@ export class ZoomMixer {
     return icon;
   }
 
+}
+
+export function createZoomButtons(scene, opts = {}) {
+  const {
+    xPad = 30,
+    yPad = 80,         // “below top bar” default
+    gap = 8,
+    alpha = 0.65,
+    bgAlpha = 0.25,
+    btnSize = 50,
+  } = opts;
+
+  // container anchored to screen (not world)
+  const ui = scene.add.container(0, 0).setDepth(UIDEPTH + 50);
+  ui.setScrollFactor(0);
+
+  // IMPORTANT: world camera must ignore these
+  scene.cameras.main.ignore(ui);
+
+  const makeBtn = (label) => {
+    const bg = scene.add.rectangle(0, 0, btnSize, btnSize, 0x000000, bgAlpha)
+      .setOrigin(0.5)
+      .setStrokeStyle(1, 0xffffff, 0.25)
+      .setInteractive({ useHandCursor: true }); // ✅ bg is the interactive target
+
+    const txt = scene.add.text(0, 0, label, {
+      fontFamily: 'Arial',
+      fontSize: '18px',
+      color: '#ffffff',
+    }).setOrigin(0.5);
+
+    // Keep as container for layout, but DO NOT set container interactive
+    const c = scene.add.container(0, 0, [bg, txt]);
+    c.setSize(btnSize, btnSize);
+
+    // hover feel on bg, drive alpha on the whole container
+    bg.on('pointerover', () => c.setAlpha(1));
+    bg.on('pointerout',  () => c.setAlpha(alpha));
+    c.setAlpha(alpha);
+
+    // optional: prevent clicks on the text from “missing” the bg hit area
+    // (text is not interactive by default, so this is usually fine)
+
+    // expose bg so caller can attach handlers to bg specifically
+    c.bg = bg;
+
+    return c;
+  };
+
+  const zoomInBtn  = makeBtn('🔎➕');
+  const zoomOutBtn = makeBtn('🔎➖');
+
+  ui.add([zoomInBtn, zoomOutBtn]);
+
+  // layout (vertical stack)
+  zoomInBtn.setPosition(0, 0);
+  zoomOutBtn.setPosition(0, btnSize + gap);
+
+  const positionUI = () => {
+    ui.x = scene.scale.width - xPad;
+    ui.y = yPad;
+  };
+  positionUI();
+
+  scene.scale.on('resize', positionUI);
+
+  zoomInBtn.bg.on('pointerdown', () => {
+    const zm = scene.zoomMixer;
+    if (!zm) return;
+    zm.targetZoom = 1;
+    zm.smoothCenterZoomTo(1);
+  });
+
+  zoomOutBtn.bg.on('pointerdown', () => {
+    const zm = scene.zoomMixer;
+    if (!zm) return;
+    zm.targetZoom = 0.3;
+    zm.smoothCenterZoomTo(0.3);
+  });
+
+  return ui;
 }

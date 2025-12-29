@@ -2,22 +2,22 @@ import logo from 'url:../public/logo.png'
 import logoMini from 'url:../public/logoMini.png'
 import { TILE_MAP, TILE_TYPES, UIDEPTH, colorFor, create2DArray } from './constants';
 import { WaveCollapse } from './waveCollapse';
-import { generateTown, buildingArray, townBounds, townRoads, waterSourcesQuadTree } from './town.js';
+import { generateTown, buildingArray, townBounds, townRoads } from './town.js';
 import { Map } from './map.js';
 import { Teams } from './Teams.js';
-import worldMap from 'url:../assets/worldMap.png'
-import townIcon from 'url:../assets/houseIcon.png'
+import worldMap from 'url:./assets/worldMap.png'
+import townIcon from 'url:./assets/houseIcon.png'
 import { SQUARESIZE } from './constants';
 import { NavMeshUpdater } from './NavMeshUpdater.js';
-import { ZoomMixer } from './UI/ZoomMixer.js';
+import { createZoomButtons, ZoomMixer } from './UI/ZoomMixer.js';
 import { NavMesh } from './lib/navmesh/navmesh.js';
 import { GameStart } from './Controllers/GameStart.js';
 import { buildingManager } from './Manager/buildingManager.js';
 import { blockResourceManager } from './Manager/BlockResourceManager.js';
 import { teamSetupArray } from './constants';
 import { buildWaterQuadtree } from './lib/waterQuadTree.js'
-import start from 'url:../assets/start.png'
-import playButton from 'url:../assets/playButton.png'
+import start from 'url:./assets/start.png'
+import playButton from 'url:./assets/playButton.png'
 import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { POWERUP_CARDS } from './Cards/PowerupCards.js';
@@ -48,7 +48,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.5.0', {
+        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.6.0', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
@@ -770,6 +770,7 @@ export class MainMenu {
             scene.sceneButtons();
             VisibilitySystem.init(scene);           // build blockers + occlusion from the map
 
+            createZoomButtons(scene)
             Teams.newTeam(0);
             // Fade out everything in menu + loading UI
             const fadeTargets = [scene.menu, scene.logoMini, loading];

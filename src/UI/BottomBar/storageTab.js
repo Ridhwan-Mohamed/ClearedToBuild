@@ -272,9 +272,6 @@ export default class StorageTab {
       });
     });
 
-    // header row: [Storage ............][Fix]
-    fixBtn.setMinSize(90, 34);
-
     const headerRow = scene.rexUI.add.sizer({
       orientation: "x",
       space: { item: 10 }

@@ -19,6 +19,8 @@ export class Blademaster {
             'player'
         );
 
+        Player.scene.uiCamera.ignore(sprite);
+
         sprite.setInteractive();
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);

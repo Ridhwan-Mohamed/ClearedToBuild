@@ -324,7 +324,8 @@ function closePowerupScreen(scene, container) {
     if (pendingStoreItem) {
         const item = pendingStoreItem;
         pendingStoreItem = null;
-
+        buildingManager.consumeRequiredMaterials(item.cost, 1);
+        // Start building placement
         // Defer the placement to the *next* pointerup
         const handler = () => {
             scene.registry.set('image', item.type); // Trigger placement logic

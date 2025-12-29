@@ -5,6 +5,7 @@ import { Map } from "../map";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { AudioManager } from "./AudioManager";
 
 export class tillManager {
     static scene;
@@ -35,6 +36,7 @@ export class tillManager {
         Teams.resetCrop(cropData);
         this.scene.updateMoney(10);
         StorageManager.addCarriedItem(sprite,UI_ITEM_TYPES.crop);
+        AudioManager.playCropHarvest();
         Teams.removeFromStateArray(sprite.body.team, "TeamFarmSpots", sprite.task);
         sprite.task = null;
         StorageManager.tryCreateStorageDeliveryTask(sprite);
@@ -72,6 +74,7 @@ export class tillManager {
             }
             this.scene.removeTillPreviewSprite(x, y);
             StorageManager.removeCarriedItem(sprite);
+            AudioManager.playPlant();
             Teams.removeFromStateArray(1, "tileList", sprite.task);
             sprite.task = null;
             sprite.timer = null;
@@ -82,6 +85,7 @@ export class tillManager {
         const x = sprite.task.x;
         const y = sprite.task.y;
         sprite.play('action')
+        AudioManager.playWateringStart();
         // === Show sparkle image with fade-out ===
         const sparkle = this.scene.add.image(
             x * SQUARESIZE + SQUARESIZE / 2,
@@ -105,10 +109,10 @@ export class tillManager {
             sprite.waterBucket.count = Math.max(0, sprite.waterBucket.count - 1);
             Teams.markCropWatered(sprite.body.team, x, y)
                 // === Sparkle effect at crop location ===
+            Teams.removeFromStateArray(sprite.body.team, "wateringList", sprite.task);
             sprite.timer = null;
             sprite.task = null;
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            Teams.removeFromStateArray(sprite.body.team, "wateringList", sprite.task);
         });
     }
 }

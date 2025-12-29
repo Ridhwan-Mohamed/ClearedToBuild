@@ -19,7 +19,8 @@ export class Gunslinger {
             SQUARESIZE * y + SQUARESIZE / 2,
             'gun1'
         );
-
+        Player.scene.uiCamera.ignore(sprite);
+        
         sprite.setInteractive();
         sprite.setOrigin(0.5, 0.5);
         sprite.setDepth(BLOCKDEPTH + 1);

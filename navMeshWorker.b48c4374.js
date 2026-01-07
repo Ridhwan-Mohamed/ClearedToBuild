@@ -1426,11 +1426,29 @@ const TILE_TYPES = {
             bottomRight: 10
         },
         complex: true,
-        price: 5,
+        price: {
+            stone: 1
+        },
         spread: true,
         block: true,
         grid: 2,
-        depth: BLOCKDEPTH
+        depth: BLOCKDEPTH,
+        // OPTIONAL but recommended: new per-piece assets you mentioned
+        // (keeps numeric mapping for grid/TILE_MAP but draw can use assets)
+        assets: {
+            interior: {
+                key: 'wall_interior',
+                sheet: false
+            },
+            edge: {
+                key: 'wall_edge',
+                sheet: false
+            },
+            corner: {
+                key: 'wall_corner',
+                sheet: false
+            }
+        }
     },
     sand: {
         name: "sand",
@@ -1773,6 +1791,75 @@ const TILE_TYPES = {
         lenX: 4,
         lenY: 4,
         depth: BLOCKDEPTH + 2
+    },
+    woodWall: {
+        name: "woodWall",
+        interior: 57,
+        sides: {
+            up: 58,
+            down: 59,
+            left: 60,
+            right: 61
+        },
+        corners: {
+            topLeft: 62,
+            topRight: 63,
+            bottomLeft: 64,
+            bottomRight: 65
+        },
+        complex: true,
+        price: 5,
+        spread: true,
+        block: true,
+        grid: 57,
+        depth: BLOCKDEPTH,
+        cost: {
+            wood: 1
+        },
+        // OPTIONAL recommended per-piece assets (your new naming scheme)
+        assets: {
+            interior: {
+                key: 'woodWall_interior',
+                sheet: false
+            },
+            edge: {
+                key: 'woodWall_edge',
+                sheet: false
+            },
+            corner: {
+                key: 'woodWall_corner',
+                sheet: false
+            }
+        }
+    },
+    // --- DOORS (NOT blocked; spriteSheet w/ 2 frames) ---
+    wall_door: {
+        value: 'wall_door',
+        name: "wall_door",
+        grid: 66,
+        block: false,
+        depth: BLOCKDEPTH,
+        lenX: 1,
+        lenY: 1,
+        spriteSheet: true,
+        complex: false,
+        price: {
+            stone: 1
+        }
+    },
+    woodWall_door: {
+        value: 'woodWall_door',
+        name: "woodWall_door",
+        grid: 67,
+        block: false,
+        depth: BLOCKDEPTH,
+        lenX: 1,
+        lenY: 1,
+        spriteSheet: true,
+        complex: false,
+        price: {
+            wood: 1
+        }
     }
 };
 const teamSetupArray = {
@@ -1864,7 +1951,18 @@ const TILE_ARR = [
     'road_corner',
     'road_corner',
     'road_corner',
-    'road_corner' // 56 (BR)
+    'road_corner',
+    'woodWall',
+    'wood_tWall',
+    'wood_bWall',
+    'wood_lWall',
+    'wood_rWall',
+    'wood_tlcWall',
+    'wood_trcWall',
+    'wood_blcWall',
+    'wood_brcWall',
+    'wall_door',
+    'woodWall_door' // 67 wood wall door
 ];
 function TILE_MAP(val) {
     if (val == 1) return "grass";
@@ -1888,6 +1986,9 @@ function TILE_MAP(val) {
     else if (val == 45) return "grassRock";
     else if (val == 46) return "rock";
     else if (val == 47) return "construction";
+    else if (val >= 57 && val <= 65) return "woodWall";
+    else if (val == 66) return "wall_door";
+    else if (val == 67) return "woodWall_door";
 }
 function gridPos(x, y) {
     return {

@@ -733,7 +733,9 @@ const CONTROL_STATES = {
     GO_HOME_MODE: 24,
     FLEE_MODE: 25,
     HEADING_TO_GUARD: 26,
-    FIX_BUILDING: 27
+    FIX_BUILDING: 27,
+    SIEGE_MODE: 28,
+    DESTROY_MODE_T: 29
 };
 const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
 var WORLD_DIMENSIONX = 250;
@@ -1208,7 +1210,6 @@ const TILE_TYPES = {
 const teamSetupArray = {
     smallTeam: [
         TILE_TYPES.clayOven,
-        TILE_TYPES.house1,
         TILE_TYPES.house2,
         TILE_TYPES.storage
     ],

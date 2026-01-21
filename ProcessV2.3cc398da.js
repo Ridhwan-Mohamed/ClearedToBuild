@@ -778,6 +778,9 @@ const TILE_TYPES = {
         block: true,
         grid: 2,
         depth: BLOCKDEPTH,
+        spriteSheet: true,
+        lenX: 1,
+        lenY: 1,
         // OPTIONAL but recommended: new per-piece assets you mentioned
         // (keeps numeric mapping for grid/TILE_MAP but draw can use assets)
         assets: {
@@ -1161,6 +1164,9 @@ const TILE_TYPES = {
         cost: {
             wood: 1
         },
+        spriteSheet: true,
+        lenX: 1,
+        lenY: 1,
         // OPTIONAL recommended per-piece assets (your new naming scheme)
         assets: {
             interior: {
@@ -1382,6 +1388,10 @@ function clearTaskPlusTimer(sprite) {
 }
 const gridColors = {
     water: 0x3cb8f1,
+    wall: 0x808080,
+    woodWall: 0x808080,
+    wall_door: 0x5a5a5a,
+    wall_door: 0x5a5a5a,
     dirt: 0x4c2b18,
     grass: 0x33cc33,
     house1: 0x8b0000,

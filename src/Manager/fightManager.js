@@ -6,6 +6,7 @@ import { Manager } from "./Manager";
 import { Projectile } from "../Projectile";
 import { weapons } from "../weapons";
 import { Map } from "../map";
+import { AudioManager } from "./AudioManager";
 
 export class fightManager{
 

@@ -25,6 +25,7 @@ export class Teams {
         buildingTileStates: [],
         blockBuildingStates: [],
         destroyStates: [],
+        destroyTileStates: [],
         fightingList: [],
         center: [0, 0],
         ovenList: [],
@@ -38,6 +39,7 @@ export class Teams {
         cardHand: [],
         buildings: [],
         buildingFixTasks: [],
+        siegeTileStates: [],
       };
   
       // initialize a Set for each control state

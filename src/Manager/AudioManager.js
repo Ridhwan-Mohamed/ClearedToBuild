@@ -25,6 +25,8 @@ import rock_break from 'url:../assets/audio/rock-destroy.ogg';
 import building_complete from 'url:../assets/audio/building-complete.ogg';
 import building_damage from 'url:../assets/audio/building-damage.ogg';
 import building_collapse from 'url:../assets/audio/building-collapse.ogg';
+import door_open from 'url:../assets/audio/door-opening.ogg';
+import door_close from 'url:../assets/audio/door-closing.ogg';
 
 export class AudioManager {
   static scene = null;
@@ -86,6 +88,8 @@ export class AudioManager {
     scene.load.audio("sfx_building_complete", building_complete);
     scene.load.audio("sfx_building_damage", building_damage);
     scene.load.audio("sfx_building_collapse", building_collapse);
+    scene.load.audio("sfx_door_open",   door_open);
+    scene.load.audio("sfx_door_close",  door_close);
   }
 
   // Call once per redraw

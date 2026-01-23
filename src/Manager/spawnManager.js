@@ -8,8 +8,9 @@ import Phaser from "phaser";
 import { Map } from "../map";
 import { ZoomMixer } from "../UI/ZoomMixer"; 
 import { Raider } from "../players/Raider";
+import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 
-export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = '0') {
+export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = '0', troop) {
     const targetsAdded = new Set();
     const buildingArray = Teams.teamLists['1'].buildings;
     const pointsToCheck = (x !== null && y !== null) ? [[x, y]] : spawnPoints;
@@ -26,7 +27,7 @@ export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber 
 
             if (alreadyInState || targetsAdded.has(key)) continue;
 
-            const pathData = buildingManager.findBuildApproachBlock(bx, by, type, null, playerMock.x, playerMock.y);
+            const pathData = buildingManager.findBuildApproachBlock(bx, by, type, troop, playerMock.x, playerMock.y);
             if (pathData) {
                 const task = {
                     type,
@@ -41,6 +42,37 @@ export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber 
             }
         }
     }
+}
+
+// helper (inside spawnManager)
+export function pickRaidApproachForPOI(poiX, poiY, type, raiderTroop) {
+    const targets = SiegePlanner.buildPerimeterTargets(
+        poiX, poiY, type.lenX, type.lenY,
+        Map.enemyNavGrid[0].length,
+        Map.enemyNavGrid.length
+    );
+
+    // Try nearest-first by euclid; validate with path
+    targets.sort((a, b) => {
+        const awx = a.x * SQUARESIZE + SQUARESIZE/2, awy = a.y * SQUARESIZE + SQUARESIZE/2;
+        const bwx = b.x * SQUARESIZE + SQUARESIZE/2, bwy = b.y * SQUARESIZE + SQUARESIZE/2;
+        const da = (awx - raiderTroop.x)**2 + (awy - raiderTroop.y)**2;
+        const db = (bwx - raiderTroop.x)**2 + (bwy - raiderTroop.y)**2;
+        return da - db;
+    });
+
+    for (const t of targets) {
+        if (Map.enemyNavGrid[t.y][t.x] !== 1) continue;
+            // use troop-aware approach finder (now mesh-agnostic after patch #1)
+            const res = buildingManager.findApproachAnyPerimeter(
+            poiX, poiY, type, raiderTroop
+        );
+
+        if (res && res.path && res.path.length) {
+            return res; // { tx, ty, path }
+        }
+    }
+    return null;
 }
 
 export function spawnAndSend() {

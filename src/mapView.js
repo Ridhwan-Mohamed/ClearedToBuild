@@ -73,12 +73,13 @@ import { PineTree } from './buildings/pineTree.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
 import { AudioManager } from './Manager/AudioManager.js';
+import { WallPlacementController } from './Controllers/WallPlacementController.js';
+import { WallDestroyController } from './Controllers/WallDestroyController.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
 
 export class mapView extends Phaser.Scene {
-
     constructor() {
         super('mapView');
         mapView.scene = this;
@@ -100,6 +101,17 @@ export class mapView extends Phaser.Scene {
         this.isBrushMode = false; // Track if brush mode is active
         this.isBrushActive = false;
         this.farmMode = false;
+        this.stoneWallMode = false;
+        this.woodWallMode = false;
+        // Farm plot selection state (laptop-friendly, 2-click)
+        this._prevFarmMode = false;
+        this.farmConsumeNextClick = false; // eat the UI click that toggled farm mode
+        this.farmSelectActive = false;     // true while choosing plot corners
+        this.farmSelectPhase = 0;          // 0=inactive, 1=pick start, 2=pick end
+        this.farmHover = null;             // green hover tile for valid start locations
+        this.farmBanner = null;            // top-center instruction banner (container)
+        this.farmBannerParts = null;       // { left, esc, middle, seedCount, seedIcon, right }
+        this.farmInstructionText = null;   // top-center instruction banner
         this.harvestMode = false;
         this.money = 1300; // Starting amount
         this.seeds = 10;
@@ -175,6 +187,7 @@ export class mapView extends Phaser.Scene {
         HouseUI.init(this);
         MainMenu.attach(this);
         PineTree.init(this);
+        WallPlacementController.preload(this);
         loadCardData(this);
     }
 
@@ -183,17 +196,11 @@ export class mapView extends Phaser.Scene {
         this.createAnim('shore_edge')
         this.createAnim('shore_corner')
         this.createAnim('shore_island')
-        // this.createAnim('bwater')
-        // this.createAnim('rwater')
-        // this.createAnim('lwater')
-        // this.createAnim('trcwater')
-        // this.createAnim('brcwater')
-        // this.createAnim('tlcwater')
-        // this.createAnim('blcwater')
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
         ZoomMixer.initMapIconContainer();
+        this.wallDestroyer = new WallDestroyController(this);
 
         Player.init(this);
         Player.createAnim('oven_idle', 'clayOven', 0, 0, -1, 1);
@@ -259,7 +266,30 @@ export class mapView extends Phaser.Scene {
 
         this.input.keyboard.on('keydown-ESC', () => {
             this.selectMode = true
-            //GameMap.navMesh = new NavMesh(buildPolysFromGridMap(GameMap.navGrid, SQUARESIZE, SQUARESIZE, undefined, 0));
+            // Farm mode: ESC cycles (end->start) then (start->exit farm mode)
+            if (!this.farmMode && !this.farmSelectActive) return;
+
+            // If selecting: step back through phases
+            if (this.farmSelectActive) {
+                if (this.farmSelectPhase === 2) {
+                    // back to phase 1
+                    this.farmSelectPhase = 1;
+                    this.startCell = null;
+                    this.endCell = null;
+                    this.graphics.clear();
+                    if (this.farmHover) this.farmHover.setVisible(false);
+                    this.setFarmInstructionPhase1();
+                    return;
+                }
+                if (this.farmSelectPhase === 1) {
+                    // exit farm mode entirely
+                    this.cancelFarmSelection(true);
+                    return;
+                }
+            }
+
+            // if farmMode is on but selection not active, still exit
+            this.cancelFarmSelection(true);
             if(this.gridPlace){
                 this.gridPlace = false
             }
@@ -278,6 +308,32 @@ export class mapView extends Phaser.Scene {
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
+        // Farm mode UX helpers (world hover + UI banner)
+        this.farmHover = this.add.image(0, 0, "selected")
+            .setDisplaySize(SQUARESIZE, SQUARESIZE)
+            .setAlpha(0.5)
+            .setVisible(false)
+            .setDepth(UIDEPTH);
+
+        if (this.uiCamera) this.uiCamera.ignore(this.farmHover);
+
+        this.ensureFarmInstructionUI();
+
+        // inside create() or constructor after scene exists:
+        this.wallPlacer = new WallPlacementController(this);
+
+        // pointer move
+        this.input.on("pointermove", (pointer) => {
+            if (this.wallPlacer?.active) this.wallPlacer.onPointerMove(pointer);
+            if (this.wallDestroyer?.active) this.wallDestroyer.onPointerMove(pointer);
+        });
+
+        // ESC
+        this.input.keyboard.on("keydown-ESC", () => {
+            if (this.wallPlacer?.active) this.wallPlacer.onEsc();
+            if (this.wallDestroyer?.active) this.wallDestroyer.onEsc();
+        });
+
         this.keyboardSpeed = 10;
         this.input.keyboard.on('keydown-K', () => {
             this.selectingEnemies = true;
@@ -291,6 +347,16 @@ export class mapView extends Phaser.Scene {
             let cam = this.cameras.main;
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
             if(this.clock.paused) return;
+            // ✅ WALL MODE CONSUMES INPUT
+            if (this.wallPlacer?.active && pointer.button === 0) {
+                this.wallPlacer.onClick(pointer);
+                return; // IMPORTANT: prevent fall-through into selection/move/build/etc
+            }
+            // ✅ DESTROY MODE CONSUMES INPUT
+            if (this.wallDestroyer?.active && pointer.button === 0) {
+                this.wallDestroyer.onClick(pointer);
+                return;
+            }
             if (clickedOnPlayer.length > 0) {
                 console.log("hit player");
                 return;
@@ -308,6 +374,17 @@ export class mapView extends Phaser.Scene {
                 this.guardPlacement.troop = null;
                 this.input.setDefaultCursor('default');
 
+                return;
+            }
+            // 🌾 FARM MODE: laptop-friendly 2-click plot selection (left click)
+            else if (this.farmMode && pointer.button === 0) {
+                // Consume the UI click that toggled farm mode on
+                if (this.farmConsumeNextClick) {
+                    this.farmConsumeNextClick = false;
+                    this.beginFarmSelectionIfNeeded();
+                    return;
+                }
+                this.handleFarmPointerDown(pointer);
                 return;
             }
             else if(GameMap.placingItem && !GameMap.placingItem.blocked){
@@ -469,7 +546,47 @@ export class mapView extends Phaser.Scene {
     }
     
     onPointerMove(pointer) {
-        if (this.isBrushMode && this.isBrushActive) {
+        // Farm mode hover/preview
+        // === Farm mode hover / live preview ===
+        if (this.farmSelectActive && this.farmSelectPhase === 1) {
+            const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+            const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+
+            const ok = this.isValidFarmTile(gridX, gridY);
+            if (this.farmHover) {
+                this.farmHover.setVisible(ok);
+                if (ok) {
+                    this.farmHover.setPosition(
+                        gridX * SQUARESIZE + SQUARESIZE / 2,
+                        gridY * SQUARESIZE + SQUARESIZE / 2
+                    );
+                }
+            }
+            return;
+        }
+        else if (this.farmSelectActive && this.farmSelectPhase === 2 && this.startCell) {
+            const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+            const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+
+            this.endCell = { x: gridX, y: gridY };
+
+            const minX = Math.min(this.startCell.x, this.endCell.x);
+            const maxX = Math.max(this.startCell.x, this.endCell.x);
+            const minY = Math.min(this.startCell.y, this.endCell.y);
+            const maxY = Math.max(this.startCell.y, this.endCell.y);
+
+            const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
+            const enoughSeeds = (this.seeds >= totalNeeded);
+
+            const cantSpread = GameMap.checkSpreadPosition(minX, minY, maxX, maxY);
+
+            const ok = !cantSpread && enoughSeeds;
+            this.drawSelectionOutline(ok ? "0x00ff00" : "0xff0000");
+
+            this.setFarmInstructionPhase2(totalNeeded);
+            return;
+        }
+        else if (this.isBrushMode && this.isBrushActive) {
             const gridX = Math.floor(pointer.worldX / SQUARESIZE);
             const gridY = Math.floor(pointer.worldY / SQUARESIZE);
 
@@ -504,7 +621,9 @@ export class mapView extends Phaser.Scene {
 
     onPointerUp() {
         this.graphics.clear();
-        if (this.selectingEnemies) {
+        // Farm mode uses click-to-pick; don't let pointerup clear our selection state.
+        if (this.farmSelectActive) return;
+        else if (this.selectingEnemies) {
             const end = this.input.activePointer.positionToCamera(this.cameras.main).clone();
             this.processEnemySelection(this.enemySelectStart, end);
             this.selectingEnemies = false;
@@ -517,10 +636,10 @@ export class mapView extends Phaser.Scene {
 
             this.events.emit('mode:completed', 'Attack');
         }
-        else if(this.farmMode){
-            this.getSelectedCells(1)
-            this.events.emit('mode:completed', 'Farm');
-        }
+        // else if(this.farmMode){
+        //     this.getSelectedCells(1)
+        //     this.events.emit('mode:completed', 'Farm');
+        // }
         else if(this.harvestMode){
             this.getSelectedCells(2)
         }
@@ -548,6 +667,288 @@ export class mapView extends Phaser.Scene {
         this.endCell = null;
     }
 
+    // === Farm mode: laptop-friendly 2-click plot selection ===
+// === Farm instruction UI (segmented, colored parts, seed icon) ===
+ensureFarmInstructionUI() {
+    if (this.farmInstructionUI) return;
+
+    const y = 40; // below top bar
+    const x = this.cameras.main.width / 2;
+
+    this.farmInstructionUI = this.add.container(x, y)
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH + 10)
+        .setVisible(false);
+
+    // children we reuse
+    this.farmInstrLeft = this.add.text(0, 0, "", {
+        fontSize: "16px",
+        fontFamily: "monospace",
+        fill: "#ffffff",
+        stroke: "#000",
+        strokeThickness: 3,
+    }).setOrigin(0, 0);
+
+    this.farmInstrMid = this.add.text(0, 0, "", {
+        fontSize: "16px",
+        fontFamily: "monospace",
+        fill: "#ffffff",
+        stroke: "#000",
+        strokeThickness: 3,
+    }).setOrigin(0, 0);
+
+    this.farmInstrSeedCount = this.add.text(0, 0, "", {
+        fontSize: "16px",
+        fontFamily: "monospace",
+        fill: "#00ff00",
+        stroke: "#000",
+        strokeThickness: 3,
+    }).setOrigin(0, 0);
+
+    this.farmInstrSeedIcon = this.add.image(0, 8, "seeds") // seed icon key MUST be 'seeds'
+        .setOrigin(0, 0.5)
+        .setScale(0.7);
+
+    this.farmInstrRight = this.add.text(0, 0, "", {
+        fontSize: "16px",
+        fontFamily: "monospace",
+        fill: "#ff4444", // red for Esc part
+        stroke: "#000",
+        strokeThickness: 3,
+    }).setOrigin(0, 0);
+
+    this.farmInstructionUI.add([
+        this.farmInstrLeft,
+        this.farmInstrMid,
+        this.farmInstrSeedCount,
+        this.farmInstrSeedIcon,
+        this.farmInstrRight,
+    ]);
+
+    // ignore by camera
+    this.cameras.main.ignore(this.farmInstructionUI);
+
+    // keep centered on resize
+    this.scale.on("resize", ({ width }) => {
+        if (this.farmInstructionUI) this.farmInstructionUI.setX(width / 2);
+    });
+}
+
+layoutFarmInstruction() {
+    // layout left-to-right, then center container contents
+    const pad = 8;
+
+    // hide seed bits unless they have text
+    const seedVisible = !!this.farmInstrSeedCount.text;
+
+    this.farmInstrSeedCount.setVisible(seedVisible);
+    this.farmInstrSeedIcon.setVisible(seedVisible);
+
+    let x = 0;
+    this.farmInstrLeft.setX(x);
+    x += this.farmInstrLeft.width + pad;
+
+    this.farmInstrMid.setX(x);
+    x += this.farmInstrMid.width + pad;
+
+    if (seedVisible) {
+        this.farmInstrSeedCount.setX(x);
+        x += this.farmInstrSeedCount.width + pad;
+
+        this.farmInstrSeedIcon.setX(x);
+        x += this.farmInstrSeedIcon.displayWidth + pad;
+    }
+
+    this.farmInstrRight.setX(x);
+    x += this.farmInstrRight.width;
+
+    // center the whole strip around container origin
+    const totalW = x;
+    for (const child of this.farmInstructionUI.list) {
+        child.x -= totalW / 2;
+    }
+}
+
+showFarmInstruction() {
+    this.ensureFarmInstructionUI();
+    this.farmInstructionUI.setVisible(true);
+}
+
+hideFarmInstruction() {
+    if (this.farmInstructionUI) this.farmInstructionUI.setVisible(false);
+}
+
+setFarmInstructionPhase1() {
+    this.ensureFarmInstructionUI();
+
+    this.farmInstrLeft.setText("Click spot to begin plot");
+    this.farmInstrMid.setText("");               // no middle piece
+    this.farmInstrSeedCount.setText("");         // no seed count in phase 1
+    this.farmInstrRight.setText(" Esc to cancel");
+    this.farmInstrRight.setColor("#ff4444");     // red Esc
+
+    this.showFarmInstruction();
+    this.layoutFarmInstruction();
+}
+
+setFarmInstructionPhase2(totalNeeded) {
+    this.ensureFarmInstructionUI();
+
+    this.farmInstrLeft.setText("Select end spot");
+    this.farmInstrMid.setText(" - x");
+    this.farmInstrSeedCount.setText(String(totalNeeded));
+
+    const enough = (this.seeds >= totalNeeded);
+    this.farmInstrSeedCount.setColor(enough ? "#00ff00" : "#ff4444");
+
+    this.farmInstrRight.setText("  Esc to go back");
+    this.farmInstrRight.setColor("#ff4444");
+
+    this.showFarmInstruction();
+    this.layoutFarmInstruction();
+}
+
+// Valid start tile rules (matches your getSelectedCells(1) behavior)
+isValidFarmTile(x, y) {
+    if (x < 0 || y < 0 || x >= WORLD_DIMENSIONX || y >= WORLD_DIMENSIONY) return false;
+
+    const type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))];
+
+    // Tillable ground (spread tiles) excluding water/road
+    if (type?.spread && type.name !== "water" && type.name !== "road") return true;
+
+    // Existing crop tile that doesn't have a seed yet
+    if (type?.name === "crops") {
+        const crop = Teams.getCropAt(x, y, 1);
+        if (crop && !crop.hasSeed) return true;
+    }
+
+    return false;
+}
+
+// ---- Farm selection seed accounting helpers ----
+getPendingFarmTileKeySet() {
+    const team1 = Teams.teamLists?.["1"];
+    const list = team1?.tileList || [];
+    const set = new Set();
+
+    for (const t of list) {
+        if (!t) continue;
+        if (typeof t.x !== "number" || typeof t.y !== "number") continue;
+        set.add(`${t.x},${t.y}`);
+    }
+    return set;
+}
+
+// Returns how many seeds we need if we confirm THIS rectangle,
+// INCLUDING already-queued (pending) tiles.
+getFarmSelectionSeedCost(minX, maxX, minY, maxY) {
+    const pending = this.getPendingFarmTileKeySet();
+    let newCount = 0;
+
+    for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+            if (!this.isValidFarmTile(x, y)) continue;
+
+            const key = `${x},${y}`;
+            if (pending.has(key)) continue;  // already queued, don't double count
+
+            newCount++;
+        }
+    }
+
+    const pendingCount = pending.size;
+    const totalNeeded = pendingCount + newCount;
+
+    return { pendingCount, newCount, totalNeeded };
+}
+
+beginFarmSelectionIfNeeded() {
+    if (!this.farmMode) return;
+    if (this.farmSelectActive) return;
+
+    this.farmSelectActive = true;
+    this.farmSelectPhase = 1;
+    this.startCell = null;
+    this.endCell = null;
+    this.graphics.clear();
+
+    // IMPORTANT: consume the click that turned farm mode on (prevents fall-through)
+    this.farmConsumeNextClick = true;
+
+    this.setFarmInstructionPhase1();
+}
+
+cancelFarmSelection(exitFarmMode = false) {
+    this.farmSelectActive = false;
+    this.farmSelectPhase = 0;
+    this.startCell = null;
+    this.endCell = null;
+    this.graphics.clear();
+    if (this.farmHover) this.farmHover.setVisible(false);
+    this.hideFarmInstruction();
+
+    if (exitFarmMode) {
+        // this is the key — FunctionTab uses this to un-toggle
+        this.events.emit("mode:completed", "Farm");
+        this.farmMode = false; // keep for safety; UI state comes from the event
+    }
+}
+
+    handleFarmPointerDown(pointer) {
+        this.beginFarmSelectionIfNeeded();
+
+        // consume the activation click (so first "real" click sets the start tile)
+        if (this.farmConsumeNextClick) {
+            this.farmConsumeNextClick = false;
+            return;
+        }
+
+        const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+        const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+
+        // Phase 1: pick a valid start tile
+        if (this.farmSelectPhase === 1) {
+            if (!this.isValidFarmTile(gridX, gridY)) return;
+
+            this.startCell = { x: gridX, y: gridY };
+            this.endCell = { x: gridX, y: gridY };
+            this.farmSelectPhase = 2;
+
+            if (this.farmHover) this.farmHover.setVisible(false);
+            return;
+        }
+
+        // Phase 2: confirm end tile
+        if (this.farmSelectPhase === 2 && this.startCell) {
+            if (!this.isValidFarmTile(gridX, gridY)) return;
+
+            this.endCell = { x: gridX, y: gridY };
+
+            const minX = Math.min(this.startCell.x, this.endCell.x);
+            const maxX = Math.max(this.startCell.x, this.endCell.x);
+            const minY = Math.min(this.startCell.y, this.endCell.y);
+            const maxY = Math.max(this.startCell.y, this.endCell.y);
+
+            const cantSpread = GameMap.checkSpreadPosition(minX, minY, maxX, maxY);
+            if (cantSpread) return;
+
+            const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
+            if (!this.checkSufficientSeeds(totalNeeded)) {
+                // stay in phase 2, user can resize selection or Esc back
+                return;
+            }
+
+            // NOW it's allowed: proceed to existing tilling code
+            this.getSelectedCells(1);
+
+            // IMPORTANT: fully shut off selection + tell UI to toggle the Farm button off
+            this.cancelFarmSelection(false);
+            this.events.emit("mode:completed", "Farm");
+            return;
+        }
+    }
+
     drawSelectionOutline(color) {
         this.graphics.clear(); // Clear previous drawings
         this.graphics.lineStyle(2, color, 1); // black outline with thickness
@@ -567,6 +968,10 @@ export class mapView extends Phaser.Scene {
     }
 
     getSelectedCells(mode = 0) {
+        const team1 = Teams.teamLists?.["1"];
+        if (!team1) return;
+
+        const existing = this.getPendingFarmTileKeySet();
         const minX = Math.min(this.startCell.x, this.endCell.x);
         const maxX = Math.max(this.startCell.x, this.endCell.x);
         const minY = Math.min(this.startCell.y, this.endCell.y);
@@ -574,35 +979,34 @@ export class mapView extends Phaser.Scene {
         // compute total seeds needed in the selected rectangle
         const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
         // if insufficient, show alert and bail out
-        if(mode == 1){
-            if (!this.checkSufficientSeeds(tileCount)) return;
-            let tillList = Teams.teamLists['1'].tileList;
+        if (mode === 1) {
+            // FARM/TILL selection mode
+            const tillList = Teams.teamLists['1'].tileList;
+
             for (let y = minY; y <= maxY; y++) {
                 for (let x = minX; x <= maxX; x++) {
-                    this.farmMode = false;
-                    this.functionTab.updateVisuals();
-                    let type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))]
-                    if(type.spread && type.name != "water" && type.name != 'road'){
-                        tillList.push( {
-                            x,
-                            y,
-                            assigned: 0
-                        });
+                    const type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))];
+                    const key = `${x},${y}`;
+                    if (existing.has(key)) continue; // don't double-add
+                    existing.add(key);
+                    // spreadable ground but not water/road
+                    if (type.spread && type.name !== "water" && type.name !== "road") {
+                        tillList.push({ x, y, assigned: 0 });
                         this.addTillPreviewSprite(x, y);
                     }
-                    else if(type.name == 'crops'){
-                        const crop = Teams.getCropAt(x,y,1);
-                        if(crop && !crop.hasSeed){
-                            tillList.push( {
-                                x,
-                                y,
-                                assigned: 0
-                            });
+                    // crop tiles: only queue if crop exists and has no seed
+                    else if (type.name === "crops") {
+                        const crop = Teams.getCropAt(x, y, 1);
+                        if (crop && !crop.hasSeed) {
+                            tillList.push({ x, y, assigned: 0 });
                             this.addTillPreviewSprite(x, y);
                         }
                     }
                 }
             }
+
+            // IMPORTANT: do NOT turn farmMode off here.
+            // Selection lifecycle should end via your "complete" event path (see section 3).
         }
         else if(mode == 2){
             let cropList = Teams.teamLists['1'].cropList;
@@ -918,6 +1322,14 @@ export class mapView extends Phaser.Scene {
             this.clock.update();
             this.handleKeyboardCameraMovement();
             PineTree.updateAll(this.time.now);
+            if (this.farmMode && !this._prevFarmMode) {
+                this.farmConsumeNextClick = true;
+                this.beginFarmSelectionIfNeeded();
+            }
+            if (!this.farmMode && this._prevFarmMode) {
+                this.cancelFarmSelection(false);
+            }
+            this._prevFarmMode = this.farmMode;
         }
         Player.update();
         ClayOvenUI.updateAllOvens(1);

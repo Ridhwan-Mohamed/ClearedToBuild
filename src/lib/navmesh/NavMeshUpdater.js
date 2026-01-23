@@ -1,30 +1,33 @@
 // navmeshUpdater.js
-import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from './constants.js';
-import { Map } from './map.js';
-import Vector2 from "./lib/navmesh/math/vector-2";
-import { NavMesh } from './lib/navmesh/navmesh.js';
-import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
-import NavPoly from './lib/navmesh/navpoly.js';
-import Polygon from './lib/navmesh/math/polygon.js';
+import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from '../../constants.js';
+import { Map } from '../../map.js';
+import Vector2 from "./math/vector-2.js";
+import { NavMesh } from './navmesh.js';
+import { buildPolysFromGridMap } from './map-parsers/build-polys-from-grid-map.js';
+import NavPoly from './navpoly.js';
+import Polygon from './math/polygon.js';
 
 export class NavMeshUpdater {
-    constructor(navMesh, scene) {
+    constructor(navMesh, scene, opts) {
         this.navMesh = navMesh;
         this.scene = scene;
         this.debugGraphics = [];
         this.debugEnabled = false;
 
+        this._toggleKey = opts.toggleKey ?? "M";
+        this._fillColor = opts.fillColor ?? 0x00ff00;
+        this._fillAlpha = opts.fillAlpha ?? 0.2;
+        this._lineColor = opts.lineColor ?? 0xffffff;
+        this._lineAlpha = opts.lineAlpha ?? 0.4;
+
         this._setupToggleKey();
     }
 
     _setupToggleKey() {
-        this.scene.input.keyboard.on('keydown-M', () => {
+        this.scene.input.keyboard.on(`keydown-${this._toggleKey}`, () => {
             this.debugEnabled = !this.debugEnabled;
-            if (this.debugEnabled) {
-                this.drawDebug();
-            } else {
-                this.clearDebug();
-            }
+            if (this.debugEnabled) this.drawDebug();
+            else this.clearDebug();
         });
     }
 
@@ -104,7 +107,7 @@ export class NavMeshUpdater {
      * Block a single tile.
      */
     blockTile(x, y) {
-        this.blockTiles([{x: x, y: y}]);
+        return this.blockTiles([{ x, y }]);
     }
 
     /**
@@ -121,14 +124,15 @@ export class NavMeshUpdater {
         // Step 1: Find affected polygons
         let affectedPolys;
         if(addTiles){
-            affectedPolys = Map.navMesh.navPolygons.filter(poly =>
+            affectedPolys = this.navMesh.navPolygons.filter(poly =>
                 tileRects.some(tileRect => this._polygonIsAdjacentToRect(poly.polygon.points, tileRect))
             );            
         }else{
-            affectedPolys = Map.navMesh.navPolygons.filter(poly =>
+            affectedPolys = this.navMesh.navPolygons.filter(poly =>
                 tileRects.some(tileRect => this._polygonIntersectsRect(poly.polygon.points, tileRect))
             );
         }
+        const removedPolyIds = affectedPolys.map(p => p.id);
 
         // Step 2: Gather unaffected neighbors
         const neighborPolys = new Set();
@@ -183,25 +187,29 @@ export class NavMeshUpdater {
         // Step 7: Build NavPoly instances
         const newNavPolys = newPolygons.map((polyPoints, i) => {
             const polygon = new Polygon(polyPoints.map(p => new Vector2(p.x, p.y)));
-            const id = Map.navMesh._nextPolyId++;
+            const id = this.navMesh._nextPolyId++;
             return new NavPoly(id, polygon);
         });
+        const addedPolyIds = newNavPolys.map(p => p.id);
+        const neighborPolyIds = Array.from(neighborPolys).map(p => p.id);
+
     
         // Step 9: Remove old polys
         for (const oldPoly of affectedPolys) {
-            Map.navMesh.removePolygon(oldPoly);
+            this.navMesh.removePolygon(oldPoly);
         }
     
         // Step 10: Add new polys
         for (const newPoly of newNavPolys) {
-            Map.navMesh.addPolygon(newPoly);
+            this.navMesh.addPolygon(newPoly);
         }
 
         const allPolys = newNavPolys.concat(Array.from(neighborPolys));
-        Map.navMesh.calculateNewNeighbors(allPolys);
-        Map.navMesh.rebuild()
+        this.navMesh.calculateNewNeighbors(allPolys);
+        this.navMesh.rebuild()
     
         if (this.debugEnabled) this.drawDebug();
+        return { removedPolyIds, addedPolyIds, neighborPolyIds };
     }
 
     _getPolygonsBounds(allPoints) {
@@ -328,13 +336,13 @@ export class NavMeshUpdater {
     }
 
     setupAddAndRemove(){
-        Map.navMesh.addPolygon = function (navPoly) {
+        this.navMesh.addPolygon = function (navPoly) {
             const id = this.navPolygons.length;
             // Add to navPolygons list
             this.navPolygons.push(navPoly);
         };
         
-        Map.navMesh.removePolygon = function(poly) {
+        this.navMesh.removePolygon = function(poly) {
             // Remove shared references from neighbors
             for (const neighbor of poly.neighbors) {
                 // Remove this polygon from the neighbor's neighbor list

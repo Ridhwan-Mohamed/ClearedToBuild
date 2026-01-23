@@ -1,6 +1,5 @@
 import { buildingManager } from "./buildingManager";
 import { CONTROL_STATES, SQUARESIZE } from "../constants";
-import { Map } from "../map";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 
@@ -10,6 +9,7 @@ export class Manager {
     static assignTroopsToAction(troopList, taskList, state, force = false){
         if (taskList.length <= 0) return;
         for(let troop of troopList){
+            const {navMesh, navGrid} = Player._getNavForTroop(troop);
             if(!force && !Player.playerAvailible(troop)) continue;
             for(let task of taskList){
                 if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
@@ -63,7 +63,7 @@ export class Manager {
                     troop.task = task
                     let troopX = Math.floor(troop.body.x/SQUARESIZE);
                     let troopY = Math.floor(troop.body.y/SQUARESIZE);
-                    if(!Map.navGrid[troopX][troopY]){
+                    if(!navGrid[troopX][troopY]){
                         let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                         if (newX === -1) {
                             console.log("No valid start tile nearby");
@@ -73,7 +73,7 @@ export class Manager {
                             console.log("New valid tile:", newX, newY);
                         }
                     }
-                    Player.moveTo(troop, Map.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+                    Player.moveTo(troop, navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
                     break;
                 }
             }
@@ -81,6 +81,7 @@ export class Manager {
     }
 
     static assignOneTroopToAction(troop, taskList, state){
+        const {navMesh, navGrid} = Player._getNavForTroop(troop);
         for(let task of taskList){
             if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
             else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
@@ -129,7 +130,7 @@ export class Manager {
                 troop.task = task
                 let troopX = Math.floor(troop.body.x/SQUARESIZE);
                 let troopY = Math.floor(troop.body.y/SQUARESIZE);
-                if(!Map.navGrid[troopX][troopY]){
+                if(!navGrid[troopX][troopY]){
                     let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                     if (newX === -1) {
                         console.log("No valid start tile nearby");
@@ -143,7 +144,7 @@ export class Manager {
                     troopX = troop.x;
                     troopY = troop.y
                 }
-                Player.moveTo(troop, Map.navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+                Player.moveTo(troop, navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
                 return true;
             }
         }
@@ -154,6 +155,7 @@ export class Manager {
     }
 
     static assignTaskToTroop(troop, task, state){
+        const {navMesh, navGrid} = Player._getNavForTroop(troop);
         if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
         else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
         if(this.buildType(state)){
@@ -194,7 +196,7 @@ export class Manager {
             troop.task = task
             let troopX = Math.floor(troop.body.x/SQUARESIZE);
             let troopY = Math.floor(troop.body.y/SQUARESIZE);
-            if(!Map.navGrid[troopX][troopY]){
+            if(!navGrid[troopX][troopY]){
                 let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                 if (newX === -1) {
                     console.log("No valid start tile nearby");
@@ -208,7 +210,7 @@ export class Manager {
                 troopX = troop.x;
                 troopY = troop.y
             }
-            Player.moveTo(troop, Map.navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+            Player.moveTo(troop, navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
             return true;
         }
         if(!Player.playerAvailible(troop)) Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -236,6 +238,7 @@ export class Manager {
         return state == CONTROL_STATES.BUILD_MODE_B ||
             state == CONTROL_STATES.BUILD_MODE_T || 
             state == CONTROL_STATES.DESTROY_MODE ||
+            state == CONTROL_STATES.DESTROY_MODE_T ||
             state == CONTROL_STATES.GET_FROM_OVEN ||
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
@@ -247,6 +250,7 @@ export class Manager {
     static blockType(state){
         return state == CONTROL_STATES.BUILD_MODE_B ||
             state == CONTROL_STATES.DESTROY_MODE ||
+            state == CONTROL_STATES.DESTROY_MODE_T ||
             state == CONTROL_STATES.GET_FROM_OVEN ||
             state == CONTROL_STATES.SEND_TO_OVEN ||
             state == CONTROL_STATES.GET_FROM_STORAGE ||
@@ -267,6 +271,10 @@ export class Manager {
         // Allow many for build/destroy
         if (state === CONTROL_STATES.BUILD_MODE_B || state === CONTROL_STATES.DESTROY_MODE) {
             return task.assigned > 5;
+        }
+
+        if(state === CONTROL_STATES.DESTROY_MODE_T){
+            return task.assigned > 0;
         }
 
         // All other tasks: only 1 assignment allowed

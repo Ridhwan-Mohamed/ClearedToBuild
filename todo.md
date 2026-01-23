@@ -1,52 +1,38 @@
 📈 Advancing TODOS
 
-Gamify Update-2, Fighting (1-2 weeks)
+Gamify Update-3 - Walls, inventory tab,  (1-2 weeks)
 
-👹 ENEMY TASKS
-   🌑👣 Spawn enemy troops in water ✔️
-   💢🌀 Add hit-stun + knockback ✔️
-   ⚡✨ Flash animation when stunned (players flash but no stun) ✔️
-   🔥🏚️ Enemies target various buildings (storage, ovens, etc.) ✔️ 
-   📅⏳ Enemy waves start Day 5 (grace period) ✔️ 
+📦 Wall UI
+   - 🛠️ walls and building placement similar to farm mode (esc to cancel and whatnot) ✔️
+   - 💥 Function tab - make button for walls creation ✔️
+   - 💥 Function tab - make button for walls destruction  ✔️
 
-🔫 GUNSLINGER
-   🔫💥 Make shooting functional ✔️
-   📈🎯 Implement Gunslinger damage upgrade cards ✔️
-   🎯 Aiming issues causing them to come too close ✔️
-   🏃💨 Flee mechanic ✔️
+🖌 Wall Art
+   - 🖍 Make wall art for 4 types of connections for wood and rock walls ✔️
 
-⚔️ BLADEMASTER
-   ⚔️🛠️ Create sword-wielding character ✔️
-   💣📍 High damage but requires close range ✔️
-   🐌⏱️ Slow movement speed ✔️
-   💰📉 Medium price unit ✔️
+⚔️ Walls – building Logic
+   - 👷 Builders handle dismantling and making ✔️
+   - 🛠️ make builders build the walls ✔️
+   - 🛠️ Player can destroy walls manually ✔️
+   - ♻️ Partial resource refund on destruction ✔️
 
-🥊 BRAWLER
-   🥊🧍 Boxing character unit ✔️
-   🎯⬇️ Lower damage, melee range ✔️
-   🏃💨 Fast movement speed ✔️
-   🙂 Cheap unit cost ✔️
+👹 Enemies + attacking walls
+   - 🧠 Raiders attack walls only if required to reach target ✔️
+   - 💥 Walls animate on hit (shake, impact feedback) 
+   - 🩹 Damage shown via visual states (cracks, wear) ✔️
+   - ❤️ Walls have health, no health bar ✔️
+   - 🧭 Account for walls during pathfinding ✔️
+   - 🚧 Detect when town is fully blocked ✔️ 
+   - 🎯 Target different sites (food, buildings, infrastructure)  
+   - 🎲 Do not always attack first building in array ✔️
 
-⚔️ FIGHTING SYSTEM
-   💥💀 Killing enemies fully implemented ✔️ 
-   🔁🤜 Improve combat update loop responsiveness ✔️ 
-
-🏃💨 Flee
-   💨 Make non combatants flee enemies ✔️
-
-🌑 Functions
-   ✨ Make button to make players go to house at night and stay (hide) ✔️
-
-🐛 Bugs:
-   ⏱️ Timers dont stop when powerup screen is up ✔️ 
-   🎯 Enemy detection bug when in track mode ✔️ 
+Sieging/Region
+   - gather all connector walls on new region creation ✔️
+   - better wall attacking based on task assigned ✔️
 
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
-    - ⚠️ Stop UICamera from rendering map
     - 🔄 Make redraw a webworker and handle edge cases
 ----------------------------------------------------------------------------------------------------------------------------------
 ⏳ Down the Line
-    - 📦 Storage Reconfig
-    - 🧭 Pathing Update
-    - ⚔️ Fighting
+Fighting polish, Map polish, Art polish, Cards+, Sound polish, UI polish (housing and store tab and QoL UI) 

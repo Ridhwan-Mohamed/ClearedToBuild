@@ -112,7 +112,7 @@ export class Clock {
             }
 
             // ✅ Day 3–4: 1 spawn, Day 5–6: 2 spawns, Day 7–8: 3 spawns, ...
-            const spawnsTonight = 1 + Math.floor((this.day - 0) / 2);
+            const spawnsTonight = 1 + Math.floor((this.day + 0) / 2);
 
             for (let i = 0; i < spawnsTonight; i++) {
                 spawnSeaRaider(this.scene);

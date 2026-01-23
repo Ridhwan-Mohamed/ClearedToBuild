@@ -2,11 +2,13 @@
 import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE } from '../constants.js';
 import { Player } from './Player.js';
 import { Teams } from '../Teams.js';
-import { buildingManager } from '../Manager/buildingManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
+import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
+import { StorageBuilding } from '../buildings/Storage.js';
+import { Wall } from '../buildings/Wall.js';
 
 export class Builder {
 
@@ -79,9 +81,10 @@ export class Builder {
 
         const team = Teams.teamLists[troop.body.team];
 
-        if (team.destroyStates?.length) {
-            const destroyList = team.destroyStates;
-            Manager.assignOneTroopToAction(troop, destroyList, CONTROL_STATES.DESTROY_MODE); 
+        if (team.destroyTileStates?.length) {
+            Manager.assignOneTroopToAction(troop, team.destroyTileStates, CONTROL_STATES.DESTROY_MODE_T);
+        } else if (team.destroyStates?.length) {
+            Manager.assignOneTroopToAction(troop, team.destroyStates, CONTROL_STATES.DESTROY_MODE);
         } else if (team.blockBuildingStates?.length) { 
             const blockBuildList = team.blockBuildingStates;
             Manager.assignOneTroopToAction(troop, blockBuildList, CONTROL_STATES.BUILD_MODE_B);
@@ -96,12 +99,77 @@ export class Builder {
         }
     }
 
+    static onWallDestroyed(troop, task) {
+        const teamNumber = troop.body.team;
+        const team = Teams.teamLists[teamNumber];
+        if (!team || !task) return;
+
+        // 1) Remove from team queue (encapsulated here)
+        Teams.removeFromStateArray(teamNumber, "destroyTileStates", task);
+
+        // 2) Refund / auto-consume using originalGridVal from the task
+        const originalGridVal = task.originalGridVal;
+        const kind = Wall.kindFromGridVal(originalGridVal);
+        if (kind) {
+            const refundKey =
+            kind.material === "stone"
+                ? "wood"
+                : "stone";
+
+            const refundItem = UI_ITEM_TYPES[refundKey];
+            if (refundItem) {
+                // prefer paying for an existing wall build in queue
+                const buildQ = team.buildingTileStates;
+                if (Array.isArray(buildQ) && buildQ.length) {
+                    const match = buildQ.find(t => t?.type?.name && this._matchesWallBuildType(t.type.name, kind));
+                    if (match) {
+                        match.prepaid = true;
+                    } else {
+                        this._storeRefund(team, refundItem);
+                    }
+                } else {
+                    this._storeRefund(team, refundItem);
+                }
+            }
+        }
+
+        // 3) Clear troop task + timer, reset state (NO reassignment here)
+        troop.task = null;
+        if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
+        troop.play(troop.idle);
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+    }
+
+    static _matchesWallBuildType(buildTypeName, kind) {
+        // Doors:
+        if (kind.isDoor) {
+            if (kind.material === "stone") return buildTypeName === "wall_door";
+            return buildTypeName === "woodWall_door";
+        }
+        // Non-doors:
+        if (kind.material === "stone") return buildTypeName === "wall";
+        return buildTypeName === "woodWall";
+    }
+
+    static _storeRefund(team, refundItem) {
+        const storages = team.storageList;
+        if (Array.isArray(storages) && storages.length) {
+            // Put into first storage that accepts it
+            for (const s of storages) {
+                if (s?.addItem?.(refundItem, 1)) return;
+            }
+        }
+
+        // No storage or no capacity: buffer on team for later reconciliation
+        if (!Array.isArray(team.pendingRefunds)) team.pendingRefunds = [];
+        team.pendingRefunds.push({ item: refundItem, count: 1 });
+    }
 
     static destroy(troop) {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
 
-        Player._destroyMiniBars(troop)
+        Player._destroyMiniBars(troop);
 
         if (team?.builderList) {
             const index = team.builderList.indexOf(troop);

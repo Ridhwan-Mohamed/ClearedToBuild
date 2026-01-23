@@ -37,6 +37,8 @@ export const CONTROL_STATES = {
     FLEE_MODE: 25,
     HEADING_TO_GUARD: 26,
     FIX_BUILDING: 27,
+    SIEGE_MODE: 28,
+    DESTROY_MODE_T: 29,
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
@@ -59,17 +61,27 @@ export const TILE_TYPES = {
     depth: FLOORDEPTH
   },
 
-  wall : {
+  wall: {
     name: "wall",
     interior: 2,
     sides: { up: 3, down: 4, left: 5, right: 6 },
     corners: { topLeft: 7, topRight: 8, bottomLeft: 9, bottomRight: 10 },
     complex: true,
-    price: 5,
+    price: { stone: 1 },         
     spread: true,
     block: true,
     grid: 2,
-    depth: BLOCKDEPTH
+    depth: BLOCKDEPTH,
+    spriteSheet: true,
+    lenX: 1, lenY: 1,
+
+    // OPTIONAL but recommended: new per-piece assets you mentioned
+    // (keeps numeric mapping for grid/TILE_MAP but draw can use assets)
+    assets: {
+      interior: { key: 'wall_interior', sheet: false },
+      edge:     { key: 'wall_edge',     sheet: false },   // "top edge" source; map.js flips/rotates
+      corner:   { key: 'wall_corner',   sheet: false },   // "top-left corner" source; map.js flips/rotates
+    }
   },
 
   sand: {
@@ -329,11 +341,59 @@ export const TILE_TYPES = {
     grid: 47,
     lenX: 4, lenY: 4,
     depth: BLOCKDEPTH+2,
-  }
+  },
+
+    woodWall: {
+    name: "woodWall",
+    interior: 57,
+    sides: { up: 58, down: 59, left: 60, right: 61 },
+    corners: { topLeft: 62, topRight: 63, bottomLeft: 64, bottomRight: 65 },
+    complex: true,
+    price: 5,                 // or whatever
+    spread: true,
+    block: true,
+    grid: 57,                 // IMPORTANT: used in MapFromImage “blocked” check if you add it
+    depth: BLOCKDEPTH,
+    cost: { wood: 1 },         // for your UI counters
+    spriteSheet: true,
+    lenX: 1, lenY: 1,
+    // OPTIONAL recommended per-piece assets (your new naming scheme)
+    assets: {
+      interior: { key: 'woodWall_interior', sheet: false },
+      edge:     { key: 'woodWall_edge',     sheet: false },
+      corner:   { key: 'woodWall_corner',   sheet: false },
+      // door can be separate later: { key:'woodWall_door', ... }
+    }
+  },
+  // --- DOORS (NOT blocked; spriteSheet w/ 2 frames) ---
+  wall_door: {
+    value: 'wall_door',
+    name: "wall_door",
+    grid: 66,            // new numeric id
+    block: false,        // IMPORTANT: doors do NOT block navmesh
+    depth: BLOCKDEPTH,
+    lenX: 1,
+    lenY: 1,
+    spriteSheet: true,   // IMPORTANT: 2-frame sheet
+    complex: false,
+    price: { stone: 1 }
+  },
+  woodWall_door: {
+    value: 'woodWall_door',
+    name: "woodWall_door",
+    grid: 67,            // new numeric id
+    block: false,
+    depth: BLOCKDEPTH,
+    lenX: 1,
+    lenY: 1,
+    spriteSheet: true,
+    complex: false,
+    price: { wood: 1 }
+  },
 };
 
 export const teamSetupArray = {
-    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house1, TILE_TYPES.house2, TILE_TYPES.storage],
+    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house2, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 
@@ -407,7 +467,19 @@ export const TILE_ARR = [
   'road_corner',  // 53 (TL)
   'road_corner',  // 54 (TR)
   'road_corner',  // 55 (BL)
-  'road_corner'   // 56 (BR)
+  'road_corner',   // 56 (BR)
+
+  'woodWall',   // 57 interior
+  'wood_tWall', // 58
+  'wood_bWall', // 59
+  'wood_lWall', // 60
+  'wood_rWall', // 61
+  'wood_tlcWall', // 62
+  'wood_trcWall', // 63
+  'wood_blcWall', // 64
+  'wood_brcWall', // 65
+  'wall_door',     // 66 wall door
+  'woodWall_door'  // 67 wood wall door
 ];
 
 // --- TILE_MAP (full) ---
@@ -441,6 +513,9 @@ export function TILE_MAP(val){
   else if (val == 45) return "grassRock";
   else if (val == 46) return "rock";
   else if (val == 47) return "construction";
+  else if (val >= 57 && val <= 65) return "woodWall";
+  else if (val == 66) return "wall_door";
+  else if (val == 67) return "woodWall_door";
 }
 
 
@@ -508,6 +583,10 @@ export function clearTaskPlusTimer(sprite){
 
 export const gridColors = {
     water:  0x3cb8f1,
+    wall: 0x808080,
+    woodWall: 0x808080,
+    wall_door: 0x5a5a5a,
+    wall_door: 0x5a5a5a,
     dirt:   0x4c2b18,
     grass:  0x33cc33,
     house1: 0x8b0000,

@@ -14,6 +14,8 @@ import { mapView } from "./mapView";
 import { PineTree } from "./buildings/pineTree";
 import { VisibilitySystem } from "./UI/VisibilitySystem";
 import { AudioManager } from "./Manager/AudioManager";
+import { WallPlacementController } from "./Controllers/WallPlacementController";
+import { Wall } from "./buildings/Wall";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -33,6 +35,12 @@ export class Map{
     static grid;
     static navGrid
     static navMesh;
+    static regionSystem;
+    static regionDrawer;
+    static enemyNavMesh;
+    static enemyNavGrid;
+    static enemyRegionSystem;
+    static enemyRegionDrawer;
     static scene;
     static imageData;
     static placingItem = null; // The current item being placed
@@ -73,6 +81,7 @@ export class Map{
             // Water always sits on base (avoid seams), even if interior
             if (name === 'water') {
                 this.determineTileType(x,y,'water',-1,0);
+                continue;
             }
 
             // Complex floors (dirt): orient; pair only if non-interior (edges/corners/island)
@@ -277,26 +286,33 @@ export class Map{
         }
     }
 
-    // Helper: does a single numeric tile value block?
-    static _tileIsBlocking(val){
+    // Helper: does a tile value block?
+    // Accepts:
+    // - null/undefined
+    // - numeric tile value
+    // - nested arrays like [floor, top] or even [[floorA, floorB], top]
+    static _tileIsBlocking(val) {
         if (val == null) return false;
+        // NEW: recursive array handling
+        if (Array.isArray(val)) {
+            // block if ANY element blocks (covers 2-floor weirdness + nested pairs)
+            for (const v of val) {
+                return this._tileIsBlocking(v);
+            }
+        }
         const name = TILE_MAP(val);
         if (!name) return false;
         const t = TILE_TYPES[name];
         return !!t?.block;
     }
 
-    // Helper: does the cell at (x,y) block? (handles [floor, top] arrays)
-    static _cellIsBlocking(x, y){
+    static _cellIsBlocking(x, y) {
         const row = this.grid[y];
-        if (!row) return true;              // out-of-bounds → treat as blocked
+        if (!row) return true;          // OOB blocked
         const cell = row[x];
-        if (cell == null) return true;      // null/undefined → treat as blocked
+        if (cell == null) return true;  // missing blocked
 
-        if (Array.isArray(cell)) {
-            // Block if either layer is blocking; allow if both are non-blocking
-            return this._tileIsBlocking(cell[0]) || this._tileIsBlocking(cell[1]);
-        }
+        // NEW: let _tileIsBlocking handle scalar OR array OR nested arrays
         return this._tileIsBlocking(cell);
     }
 
@@ -304,11 +320,11 @@ export class Map{
     static checkBlockPosition(posX, posY, lenX, lenY, turret = 0){
         for (let y = posY; y < posY + lenY; y++) {
             for (let x = posX; x < posX + lenX; x++) {
-            if (this._cellIsBlocking(x, y)) {
-                if (turret) Turret.topItem.blocked = true;
-                else this.placingItem.blocked = true;
-                return Phaser.Display.Color.GetColor(200, 49, 19); // red
-            }
+                if (this._cellIsBlocking(x, y)) {
+                    if (turret) Turret.topItem.blocked = true;
+                    else this.placingItem.blocked = true;
+                    return Phaser.Display.Color.GetColor(200, 49, 19); // red
+                }
             }
         }
         if (turret) Turret.topItem.blocked = false;
@@ -331,7 +347,7 @@ export class Map{
         let lenY = endY - posY;
         for (let y = posY; y < posY + lenY + 1; y++) {
             for (let x = posX; x < posX + lenX + 1; x++) {
-                if(TILE_TYPES[TILE_MAP(this.grid[y][x])]?.block){
+                if(this._cellIsBlocking(x,y)){
                     return true;
                 }
             }
@@ -358,6 +374,7 @@ export class Map{
                     barrierBlock.setDisplaySize(SQUARESIZE, SQUARESIZE).setDepth(FLOORDEPTH).setAlpha(0);
                     this.barrier.add(barrierBlock);
                     Map.navGrid[y][x] = 0;
+                    Map.enemyNavGrid[y][x] = 0;
                 }
             }
         }
@@ -415,15 +432,13 @@ export class Map{
         const upd = (gx, gy) => {
             if (!this.grid[gy]) return;
             if (!this._hasTypeAt(gx, gy, tileType)) return;
-
-            // choose the correct layer in the neighbor to rewrite
-            const nIdx = this._layerIndexFor(gx, gy, depth, tileType);
-
-            if (Array.isArray(this.grid[gy][gx])) {
-            // compute the oriented numeric code AND write it into the chosen layer
-            const oriented = this.determineTileType(gx, gy, tileType, nIdx);
-            // ensure the numeric gets stored in the chosen layer, preserving the other
-            this.checkAndPlace(gx, gy, oriented, depth, tileType);
+                // choose the correct layer in the neighbor to rewrite
+                const nIdx = this._layerIndexFor(gx, gy, depth, tileType);
+                if (Array.isArray(this.grid[gy][gx])) {
+                // compute the oriented numeric code AND write it into the chosen layer
+                const oriented = this.determineTileType(gx, gy, tileType, nIdx);
+                // ensure the numeric gets stored in the chosen layer, preserving the other
+                if(oriented) this.checkAndPlace(gx, gy, oriented, depth, tileType);
             } else {
             // scalar cell → just rewrite it
             this.grid[gy][gx] = this.determineTileType(gx, gy, tileType);
@@ -558,7 +573,6 @@ export class Map{
         this.blocks[idx][layerIndex] = sprites;
     }
 
-
     static reDraw(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
         this.graphics.clear();
         this.blocks.forEach(Map._destroyNode);
@@ -602,6 +616,7 @@ export class Map{
                     this.handleCrops(x,y);
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
+                    const name = type.name;
                     this.drawGridValue(x, y, 0);
                     if (type && type.spread) {
                         this.drawGridValue(x, y, 1)
@@ -690,12 +705,24 @@ export class Map{
                 const block = this.scene.add.sprite(cx, cy, 'crops').setDepth(def.depth);
                 this.addToWorldStatic(block); 
                 block.setFrame(1);
+                WallPlacementController.bindStructureLightAndVision(block, cx, cy, {
+                    r: 6,
+                    boost: 0.12,
+                    intensity: 1.1
+                });
                 block.hasSeed = true;
                 this.handleGridDelete(block, def, x, y);
             }
             return;
         }
         // --- /CROPS
+
+        // NEW: walls + doors are STATIC STRUCTURES, not part of redraw blocks
+        if (index != 0 && Wall.isWallOrDoorCell(cell)) {
+            // ensure the static sprite exists (stored in Map.worldStaticLayer)
+            Wall.ensureAt(this.scene, x, y);
+            return null; // IMPORTANT: do not store/draw as normal grid element
+        }
 
         const drawOne = (val) => {
             const name = TILE_MAP(val);
@@ -711,11 +738,48 @@ export class Map{
                 else if (shape === 'island') node = this._spawnSpec(cx, cy, def.depth, a.island);
                 else if (shape === 'edge') node = this._spawnSpec(cx, cy, def.depth, a.edge, angle);
                 else node = this._spawnSpec(cx, cy, def.depth, a.corner, angle);
+                if(def.name == "wall" || def.name == "woodWall") {
+                    WallPlacementController.bindStructureLightAndVision(node, cx, cy, {
+                        r: 6,
+                        boost: 0.12,
+                        intensity: 1.1
+                    });
+                }
             } else {
                 const tileKey = TILE_ARR[val];
-                node = def.spriteSheet
-                    ? this.scene.add.sprite(cx, cy, tileKey).setDepth(def.depth).play(tileKey)
-                    : this.scene.add.image(cx, cy, tileKey).setDepth(def.depth);
+
+                const isDoor =
+                    tileKey === "wall_door" || tileKey === "woodWall_door" ||
+                    name === "wallDoor" || name === "woodWallDoor";
+
+                if (def.spriteSheet) {
+                    node = this.scene.add.sprite(cx, cy, tileKey).setDepth(def.depth);
+
+                    // map.js (inside drawGridValue -> after creating `node` as a sprite)
+
+                    if (isDoor) {
+                        node.setFrame(0); // closed
+
+                        // Rotate 90° if vertical wall (above/below neighbors), else 0°
+                        // IMPORTANT: pass the DOOR type name (wall_door / woodWall_door)
+                        const doorTypeName = (tileKey === "woodWall_door") ? "woodWall_door" : "wall_door";
+                        node.setAngle(WallPlacementController.doorAngleForCell(this.grid, x, y, doorTypeName));
+
+                        // ✅ put this door into the door physics group so overlap works
+                        WallPlacementController.bindDoorSprite(this.scene, node);
+                        WallPlacementController.bindStructureLightAndVision(node, cx, cy, {
+                            r: 6,
+                            boost: 0.12,
+                            intensity: 1.1
+                        });
+                    }
+                    else {
+                        node.play(tileKey);
+                    }
+                } else {
+                    node = this.scene.add.image(cx, cy, tileKey).setDepth(def.depth);
+                }
+
                 this._worldAdd(node); 
             }
 
@@ -822,6 +886,19 @@ export class Map{
     }
 
     static handleGridDelete(block, type, x, y){
+        if(type.name == "wall" || type.name == "woodWall" || type.name == "wall_door" || type.name == "woodWall_door"){
+            const idx = y * WORLD_DIMENSIONX + x;
+            const slot = this.blocks[idx];
+            if (slot && Array.isArray(slot)) {
+                // In normal (non-overview) mode this will be the old ground sprite
+                if (slot && slot[1] && slot[1].destroy) slot.destroy();
+                this.blocks[idx] = slot[0]
+            }
+            if(Array.isArray(this.grid[y][x])){
+                this.grid[y][x] = this.grid[y][x][0];
+            }
+            return;
+        }
         if (type.name === "crops") {
             const key = `${x},${y}`;
             Map.cropDict[key] = block;
@@ -874,6 +951,7 @@ export class Map{
                 this.blocks[y*WORLD_DIMENSIONX+x][0] = block;
                 if(this.blocks[y*WORLD_DIMENSIONX+x][1].body){
                     Map.navGrid[y][x] = 0;
+                    Map.enemyNavGrid[y][x] = 0;
                 }
             }
         }
@@ -885,23 +963,48 @@ export class Map{
     static _hasTypeAt(gx, gy, typeName) {
         const c = this.grid[gy]?.[gx];
         if (c == null) return false;
-        if (Array.isArray(c)) {
-            // check top and base; either can be this type
-            return TILE_MAP(c[0]) === typeName || TILE_MAP(c[1]) === typeName;
-        }
-        return TILE_MAP(c) === typeName;
-    }
 
+        // Wall-family equivalence:
+        // - "wall" should treat "wall_door" as same family
+        // - "woodWall" should treat "woodWall_door" as same family
+        // (but if you ask specifically for a door type, keep it exact)
+        const matches = (mapped) => {
+            if (!mapped) return false;
+
+            // family match for adjacency logic
+            if (typeName === "wall")      return mapped === "wall" || mapped === "wall_door";
+            if (typeName === "woodWall")  return mapped === "woodWall" || mapped === "woodWall_door";
+
+            // optional convenience if you ever want it:
+            if (typeName === "door") return mapped === "wall_door" || mapped === "woodWall_door";
+
+            // otherwise exact match
+            return mapped === typeName;
+        };
+
+        if (Array.isArray(c)) {
+            // check top and base; either can be this type family
+            return matches(TILE_MAP(c[0])) || matches(TILE_MAP(c[1]));
+        }
+
+        return matches(TILE_MAP(c));
+    }
 
     static determineTileType(x, y, tileType, index = -1, draw = 1) {
         const def = TILE_TYPES[tileType];
+
+        //dont handle doors
+        if(index && (TILE_MAP(this.grid[y][x][1]) == "woodWall_door" || TILE_MAP(this.grid[y][x][1]) == "wall_door")){
+            return;
+        }
+
         // inside determineTileType(...)
-        const write = (val, pairUnderForced) => {
-            if (index > -1) {
-                this.grid[y][x][index] = val;
-                if (draw) this.drawGridValue(x,y,index);
-                return val;
-            }
+        const   write = (val, pairUnderForced) => {
+            // if (index > -1) {
+            //     this.grid[y][x][index] = val;
+            //     if (draw) this.drawGridValue(x,y,index);
+            //     return val;
+            // }
 
             // Auto-pair only when needed (non-interior complex tiles)
             let pairUnder = pairUnderForced;
@@ -945,14 +1048,24 @@ export class Map{
                 ? (neighDef.interior ?? neighDef.grid)
                 : TILE_TYPES.grass.grid;
             }
-
+            if(this.grid[y][x] && pairUnder && !Array.isArray(this.grid[y][x]) && def.block){
+                this.grid[y][x] = [this.grid[y][x], val];
+                if (draw) this.drawGridValue(x,y,1);
+                return val;
+            }
+            if(this.grid[y][x] && pairUnder && Array.isArray(this.grid[y][x]) && def.block){
+                this.handleGridDelete(null, def, x, y);
+                this.grid[y][x] = [this.grid[y][x], val];
+                if (draw) this.drawGridValue(x,y,1);
+                return val;
+            }
             this.grid[y][x] = (pairUnder != null) ? [pairUnder, val] : val;
             if (draw) this.drawGridValue(x,y);
             return val;
         };
 
         // bounds guard for water
-        if (def.name === "water" && (x === 0 || y === 0 || x === this.grid[0].length-1 || y === this.grid.length-1)) {
+        if (def.name === "water" && (x < 0 || y < 0 || x > this.grid[0].length-1 || y > this.grid.length-1)) {
             return write(def.interior);
         }
 
@@ -963,15 +1076,39 @@ export class Map{
         const cnt = (A?1:0) + (B?1:0) + (L?1:0) + (R?1:0);
 
         // 0 neighbors → interior
-        if (cnt === 0) return write(def.interior);
+        if (cnt === 0 && (def.name != "wall" && def.name != "woodWall")) return write(def.interior);
 
         // 1 neighbor → ATTACHED-ISLAND (dirt only), else a side
-        if (cnt === 1) {
+        if (cnt === 1 && (def.name != "wall" && def.name != "woodWall")) {
             if (def.island != null) return write(def.island);   // dirt & water islands
             if (A) return write(def.sides.up);
             if (R) return write(def.sides.right);
             if (B) return write(def.sides.down);
             return write(def.sides.left);
+        } else if ((def.name == "wall" || def.name == "woodWall")) {
+            if(cnt === 1){
+                if (A) return write(def.sides.right, this.grid[y][x]);
+                if (R) return write(def.sides.up, this.grid[y][x]);
+                if (B) return write(def.sides.left, this.grid[y][x]);
+                return write(def.sides.down, this.grid[y][x]);
+            }
+            else if(cnt === 2){
+                // special case for walls: 2 neighbors that are opposite → straight wall
+                if (A && B && !L && !R) return write(def.sides.right, this.grid[y][x]);
+                if (L && R && !A && !B) return write(def.sides.up, this.grid[y][x]);
+                // else corner
+                if (A && L && !R && !B) return write(def.corners.bottomRight, this.grid[y][x]);
+                if (A && R && !L && !B) return write(def.corners.bottomLeft, this.grid[y][x]);
+                if (B && L && !R && !A) return write(def.corners.topRight, this.grid[y][x]);
+                if (B && R && !L && !A) return write(def.corners.topLeft, this.grid[y][x]);
+            }
+            else if(cnt === 3){
+                // special case for walls: 3 neighbors → side facing missing one
+                return write(def.interior, this.grid[y][x]);
+            }
+            else{
+                return write(def.interior, this.grid[y][x]);
+            }
         }
 
         // 2 neighbors: orthogonal → corner; opposite → interior run
@@ -994,7 +1131,7 @@ export class Map{
 
     
     static addSpreadArr(x, y, newItem, index){
-        if(newItem.block){Map.navGrid[y][x] = 0}
+        if(newItem.block){Map.navGrid[y][x] = 0; Map.enemyNavGrid[y][x] = 0;}
         if(Array.isArray(this.grid[y][x])){
             if(newItem.name == 'grass'){
                 this.grid[y][x][index] = newItem.grid

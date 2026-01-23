@@ -8,7 +8,7 @@ import { Teams } from './Teams.js';
 import worldMap from 'url:./assets/worldMap.png'
 import townIcon from 'url:./assets/houseIcon.png'
 import { SQUARESIZE } from './constants';
-import { NavMeshUpdater } from './NavMeshUpdater.js';
+import { NavMeshUpdater } from './lib/navmesh/NavMeshUpdater.js';
 import { createZoomButtons, ZoomMixer } from './UI/ZoomMixer.js';
 import { NavMesh } from './lib/navmesh/navmesh.js';
 import { GameStart } from './Controllers/GameStart.js';
@@ -21,6 +21,9 @@ import playButton from 'url:./assets/playButton.png'
 import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { POWERUP_CARDS } from './Cards/PowerupCards.js';
+import { PathRegistry } from './lib/navmesh/PathRegistry.js';
+import { RegionSystem } from './lib/navmesh/RegionSystem.js';
+import { RegionDebugDrawer } from './lib/navmesh/RegionDebugDrawer.js';
 
 export var waterSourcesQuadTree;
 
@@ -48,7 +51,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.6.0', {
+        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.7.0', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         scene.menu.add([scene.logo, scene.versionText]);
@@ -755,14 +758,58 @@ export class MainMenu {
             // Prepare game state but don’t show it yet
             waterSourcesQuadTree = buildWaterQuadtree(scene.gridData);
             scene.prebuiltPolys = polys;
+            console.log(polys)
             Map.initMap();
             Map.mapFromData(scene.gridData);
+            // existing
             Map.navMesh = new NavMesh(polys);
-            // when you create the navmesh, after constructor:
             Map.navMesh._nextPolyId = Math.max(...Map.navMesh.navPolygons.map(p => p.id)) + 1;
-            scene.navMeshUpdater = new NavMeshUpdater(Map.navMesh, scene);
+            scene.navMeshUpdater = new NavMeshUpdater(Map.navMesh, scene, {
+                toggleKey: "M",
+                fillColor: 0x00ff00,
+                fillAlpha: 0.20,
+            });
             scene.navMeshUpdater.setupAddAndRemove();
+            PathRegistry.init(Map.navMesh);
             buildingManager.NavMeshUpdater = scene.navMeshUpdater;
+
+            // ✅ NEW: enemy grid (dupe) + enemy mesh (dupe) + enemy updater + enemy registry
+            Map.enemyNavGrid = Map.navGrid.map(row => row.slice());
+
+            // deep-clone polys so edits to enemy mesh don't mutate player mesh
+            const enemyPolys = (typeof structuredClone === "function")
+            ? structuredClone(polys)
+            : polys.map(p => ({
+                ...p,
+                // common shapes in your worker output: "points" and "neighbors"
+                points: (p.points || []).map(pt => ({ x: pt.x, y: pt.y })),
+                neighbors: Array.isArray(p.neighbors) ? p.neighbors.slice() : [],
+                }));
+
+            Map.enemyNavMesh = new NavMesh(enemyPolys);
+            Map.enemyNavMesh._nextPolyId = Math.max(...Map.enemyNavMesh.navPolygons.map(p => p.id)) + 1;
+
+            scene.enemyNavMeshUpdater = new NavMeshUpdater(Map.enemyNavMesh, scene, {
+                toggleKey: "N",
+                fillColor: 0xff0000,
+                fillAlpha: 0.18,
+            });
+            scene.enemyNavMeshUpdater.setupAddAndRemove();
+
+            // Give PathRegistry a second registry keyed to enemy mesh
+            PathRegistry.init(Map.enemyNavMesh);
+
+            // normal
+            Map.regionSystem = new RegionSystem(Map.navMesh, Map.navGrid);
+            Map.regionDrawer = new RegionDebugDrawer(scene, Map.navMesh, Map.regionSystem, { toggleKey: "R" });
+
+            // enemy
+            Map.enemyRegionSystem = new RegionSystem(Map.enemyNavMesh, Map.enemyNavGrid);
+            Map.enemyRegionDrawer = new RegionDebugDrawer(scene, Map.enemyNavMesh, Map.enemyRegionSystem, { toggleKey: "Y", alpha: 0.16 });
+            
+            // let managers access enemy updater too
+            buildingManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;
+
             blockResourceManager.NavMeshUpdater = scene.navMeshUpdater;
             Map.drawBuildings();
             GameStart.placePlayers();

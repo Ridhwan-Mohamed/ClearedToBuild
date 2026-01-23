@@ -22,7 +22,7 @@ export class GameStart {
         playerArray.push(new Farmer(roadSpawns[0][0], roadSpawns[0][1], teamNumber));
         playerArray.push(new Forager(roadSpawns[1][0], roadSpawns[1][1], teamNumber));
         playerArray.push(new Builder(roadSpawns[2][0], roadSpawns[2][1], teamNumber));
-        playerArray.push(new Fireman(roadSpawns[3][0], roadSpawns[3][1], teamNumber));
+        playerArray.push(new Blademaster(roadSpawns[3][0], roadSpawns[3][1], teamNumber));
         playerArray.forEach(player => House.assignPlayerToHouse(player, teamNumber));
     }
 }

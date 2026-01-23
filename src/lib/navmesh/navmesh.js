@@ -42,6 +42,13 @@ export class NavMesh {
         return this.navPolygons;
     }
 
+    getPolygonById(id) {
+        for (const p of this.navPolygons) {
+            if (p.id === id) return p;
+        }
+        return null;
+    }
+
     rebuild(){
         this.graph = new NavGraph(this.getPolygons())
     }
@@ -112,111 +119,104 @@ export class NavMesh {
      * @returns {Vector2[]|null} An array of points if a path is found, or null if no path
      */
     findPath(startPoint, endPoint) {
+        const result = this.findPathDetailed(startPoint, endPoint, { includePolys: false });
+        return result ? result.points : null;
+    }
+
+    /**
+     * Like findPath(), but returns the polygon corridor too.
+     * @returns {{points: Vector2[], polyIds: number[], startPolyId: number, endPolyId: number} | null}
+     */
+    findPathDetailed(startPoint, endPoint, opts = { includePolys: true }) {
         let startPoly = null;
         let endPoly = null;
         let startDistance = Number.MAX_VALUE;
         let endDistance = Number.MAX_VALUE;
         let d, r;
+
         const startVector = new Vector2(startPoint.x, startPoint.y);
         const endVector = new Vector2(endPoint.x, endPoint.y);
-        // Find the closest poly for the starting and ending point
+
+        // Find closest poly for start/end (same as your existing logic)
         for (const navPoly of this.navPolygons) {
             r = navPoly.boundingRadius;
-            // Start
+
             d = navPoly.centroid.distance(startVector);
             if (d <= startDistance && d <= r && navPoly.contains(startVector)) {
-                startPoly = navPoly;
-                startDistance = d;
+            startPoly = navPoly;
+            startDistance = d;
             }
-            // End
+
             d = navPoly.centroid.distance(endVector);
             if (d <= endDistance && d <= r && navPoly.contains(endVector)) {
-                endPoly = navPoly;
-                endDistance = d;
+            endPoly = navPoly;
+            endDistance = d;
             }
         }
-        // If the end point wasn't inside a polygon, run a more liberal check that allows a point
-        // to be within meshShrinkAmount radius of a polygon
-        if (!endPoly && this.meshShrinkAmount > 0) {
-            for (const navPoly of this.navPolygons) {
-                r = navPoly.boundingRadius + this.meshShrinkAmount;
-                d = navPoly.centroid.distance(endVector);
-                if (d <= r) {
-                    const { distance } = this.projectPointToPolygon(endVector, navPoly);
-                    if (distance <= this.meshShrinkAmount && distance < endDistance) {
-                        endPoly = navPoly;
-                        endDistance = distance;
-                    }
-                }
-            }
+
+        if (!endPoly) return null;
+
+        if (!startPoly) return null;
+
+        if (startPoly === endPoly) {
+            const points = [startVector, endVector];
+            return {
+            points,
+            polyIds: opts.includePolys ? [startPoly.id] : [],
+            startPolyId: startPoly.id,
+            endPolyId: endPoly.id,
+            };
         }
-        // No matching polygons locations for the end, so no path found
-        // because start point is valid normally, check end point first
-        if (!endPoly)
-            return null;
-        // Same check as above, but for the start point
-        if (!startPoly && this.meshShrinkAmount > 0) {
-            for (const navPoly of this.navPolygons) {
-                // Check if point is within bounding circle to avoid extra projection calculations
-                r = navPoly.boundingRadius + this.meshShrinkAmount;
-                d = navPoly.centroid.distance(startVector);
-                if (d <= r) {
-                    // Check if projected point is within range of a polgyon and is closer than the
-                    // previous point
-                    const { distance } = this.projectPointToPolygon(startVector, navPoly);
-                    if (distance <= this.meshShrinkAmount && distance < startDistance) {
-                        startPoly = navPoly;
-                        startDistance = distance;
-                    }
-                }
-            }
-        }
-        // No matching polygons locations for the start, so no path found
-        if (!startPoly)
-            return null;
-        // If the start and end polygons are the same, return a direct path
-        if (startPoly === endPoly)
-            return [startVector, endVector];
-        // Search!
+
         const astarPath = jsastar.astar.search(this.graph, startPoly, endPoly, {
             heuristic: this.graph.navHeuristic,
         });
-        // While the start and end polygons may be valid, no path between them
-        if (astarPath.length === 0)
-            return null;
-        // jsastar drops the first point from the path, but the funnel algorithm needs it
+
+        if (astarPath.length === 0) return null;
+
+        // jsastar drops first; funnel expects it
         astarPath.unshift(startPoly);
-        // We have a path, so now time for the funnel algorithm
+
+        // --- funnel build (same as your existing code) ---
         const channel = new Channel();
         channel.push(startVector);
+
         for (let i = 0; i < astarPath.length - 1; i++) {
             const navPolygon = astarPath[i];
             const nextNavPolygon = astarPath[i + 1];
-            // Find the portal
+
             let portal = null;
-            for (let i = 0; i < navPolygon.neighbors.length; i++) {
-                if (navPolygon.neighbors[i].id === nextNavPolygon.id) {
-                    portal = navPolygon.portals[i];
-                }
+            for (let j = 0; j < navPolygon.neighbors.length; j++) {
+            if (navPolygon.neighbors[j].id === nextNavPolygon.id) {
+                portal = navPolygon.portals[j];
+                break;
             }
-            if (!portal)
-                throw new Error("Path was supposed to be found, but portal is missing!");
-            // Push the portal vertices into the channel
+            }
+            if (!portal) throw new Error("Path was supposed to be found, but portal is missing!");
+
             channel.push(portal.start, portal.end);
         }
+
         channel.push(endVector);
-        // Pull a string along the channel to run the funnel
         channel.stringPull();
-        // Clone path, excluding duplicates
+
+        // Clone path excluding duplicates
         let lastPoint = null;
         const phaserPath = [];
         for (const p of channel.path) {
             const newPoint = p.clone();
-            if (!lastPoint || !newPoint.equals(lastPoint))
-                phaserPath.push(newPoint);
+            if (!lastPoint || !newPoint.equals(lastPoint)) phaserPath.push(newPoint);
             lastPoint = newPoint;
         }
-        return phaserPath;
+
+        const polyIds = opts.includePolys ? astarPath.map(p => p.id) : [];
+
+        return {
+            points: phaserPath,
+            polyIds,
+            startPolyId: startPoly.id,
+            endPolyId: endPoly.id,
+        };
     }
 
     calculateNewNeighbors(newPolys){

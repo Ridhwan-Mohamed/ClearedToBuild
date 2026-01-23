@@ -23,6 +23,8 @@ import { Raider } from "./Raider";
 import { Blademaster } from "./Blademaster";
 import { Brawler } from "./Brawler";
 import { AudioManager } from "../Manager/AudioManager";
+import { PathRegistry } from "../lib/navmesh/PathRegistry";
+import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
 
 export class Player {
 
@@ -49,6 +51,7 @@ export class Player {
         this.createAnim('carryWalk', 'playerCarry', 0, 2)
         this.createAnim('carryIdle', 'playerCarry', 0, 0)
         this.setUpBackToTown()
+        PathDebugDrawer.init(scene);
     }
 
     static addPlayer(x,y,team,spriteSheet='player',walk='walk',idle='idle',action='action', weapon=weapons.hands) {
@@ -205,24 +208,42 @@ export class Player {
     }
 
     static moveTo(troop, path) {
+        const {navMesh, navGrid} = this._getNavForTroop(troop);
         if (!path || path.length === 0) {
+            // Raiders: if a POI is blocked, convert to siege instead of clearing task.
+            if (troop.body?.team === 0 && typeof troop.tryBeginSiege === "function") {
+                const didSiege = troop.tryBeginSiege();
+                if (didSiege) return true;
+            }
+
             console.log("No path found or path is empty.");
-            if(troop.task){
+            if (troop.task) {
                 troop.task.assigned -= 1;
                 troop.task = null;
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+                PathRegistry.unregisterUnit(navMesh, troop);
             }
             return false;
         }
-        troop.currentPath = path
-        troop.finalPos = path[path.length - 1]
-        // Remove the starting point as it's the current position of the cube
+
+        troop.currentPath = path;
+        troop.finalPos = path[path.length - 1];
         troop.currentPath.shift();
+
+        PathDebugDrawer.onNewPath(troop);
+
+        if (troop.__pendingPolyIds && troop.__pendingPolyIds.length) {
+            PathRegistry.registerUnitPath(navMesh, troop, troop.__pendingPolyIds);
+            troop.__pendingPolyIds = [];
+        }
         return true;
     }
 
+
     static findBestStartPos(sprite, sx, sy) {
         // 🧱 3. Search surrounding 8 tiles (including diagonals)
+        const { navMesh, navGrid } = Player._getNavForTroop(sprite);
+
         const directions = [
             [-1, -1], [0, -1], [1, -1],
             [-1,  0],          [1,  0],
@@ -234,12 +255,12 @@ export class Player {
             const ny = sy + dy;
     
             // Skip out-of-bounds
-            if (ny < 0 || ny >= Map.navGrid.length || nx < 0 || nx >= Map.navGrid[0].length) {
+            if (ny < 0 || ny >= navGrid.length || nx < 0 || nx >= navGrid[0].length) {
                 continue;
             }
     
             // Check if tile is walkable
-            if (Map.navGrid[ny][nx] === 1) {
+            if (navGrid[ny][nx] === 1) {
                 // Convert to pixel position
                 const px = nx * SQUARESIZE + SQUARESIZE / 2;
                 const py = ny * SQUARESIZE + SQUARESIZE / 2;
@@ -256,64 +277,90 @@ export class Player {
         return [-1, -1];
     }
 
+    // Player.js
     static pathTo(troop, fx, fy, gridSpot = true){
-        let troopX = Math.floor(troop.x/SQUARESIZE);
-        let troopY = Math.floor(troop.y/SQUARESIZE);
+        const { navMesh, navGrid } = Player._getNavForTroop(troop);
+
+        let troopX = Math.floor(troop.x / SQUARESIZE);
+        let troopY = Math.floor(troop.y / SQUARESIZE);
+
         let startX = troop.x;
         let startY = troop.y;
-        if(!Map.navGrid[troopX][troopY]){
-            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+
+        // IMPORTANT: use navGrid for the team, not Map.navGrid
+        if (!navGrid[troopY] || navGrid[troopY][troopX] !== 1) {
+            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY); 
+            // ^ if findBestStartPos uses Map.navGrid internally, see note below
+
             if (newX === -1) {
-                console.log("No valid start tile nearby");
-                return null;
+            console.log("No valid start tile nearby");
+            return null;
             } else {
-                startX = newX * SQUARESIZE + SQUARESIZE/2;
-                startY = newY * SQUARESIZE + SQUARESIZE/2;
-                console.log("New valid tile:", newX, newY);
+            startX = newX * SQUARESIZE + SQUARESIZE/2;
+            startY = newY * SQUARESIZE + SQUARESIZE/2;
+            console.log("New valid tile:", newX, newY);
             }
         }
 
-        // Convert that center tile into world‐pixel coordinates
         let destX = fx, destY = fy;
-        if(gridSpot){
+        if (gridSpot) {
             destX = fx * SQUARESIZE + SQUARESIZE / 2;
             destY = fy * SQUARESIZE + SQUARESIZE / 2;
         }
-        
-        // Ask the navmesh to build a path back to town center
-        const path = Map.navMesh.findPath(
-          { x: startX, y: startY },
-          { x: destX,   y: destY   }
+
+        // IMPORTANT: use navMesh for the team
+        const result = navMesh.findPathDetailed(
+            { x: startX, y: startY },
+            { x: destX, y: destY },
+            { includePolys: true }
         );
-      
-        if (!path || path.length === 0) {
-          console.warn(
-            `Troop (team ${troop.body.team}) could not find a path to (${fx},${fy}).`
-          );
-          return null;
+
+        if (!result || !result.points || result.points.length === 0) {
+            console.warn(`Troop (team ${troop.body.team}) could not find a path to (${fx},${fy}).`);
+            return null;
         }
 
-        return path
+        troop.__pendingPolyIds = result.polyIds || [];
+        return result.points;
     }
 
-    static handleReMap(sprite){
-    // Attempt to re‐path from the sprite’s current world‐position to its final destination
-        const start = { x: sprite.x, y: sprite.y };
-        const end   = sprite.finalPos; // assigned earlier in Player.moveTo()
-        const newPath = Map.navMesh.findPath(start, end);
-        if (newPath && newPath.length > 0) {
-            console.log("New path found")
-            this.moveTo(sprite, newPath)
-        } else {
-            // No valid path found → abort movement
-            console.warn("No valid path found, now in trackMode")
-            sprite.currentPath = [];
-            this.setAnimState(sprite, 'idle');
-            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            return false;
+    // Player.js
+    static getValidStartWorld(troop){
+        const troopX = Math.floor(troop.x / SQUARESIZE);
+        const troopY = Math.floor(troop.y / SQUARESIZE);
+
+        // already on walkable tile
+        if (Map.navGrid?.[troopY]?.[troopX]) {
+            return { x: troop.x, y: troop.y };
         }
-        return true; // skip the rest of this frame so we don’t walk into a blocked tile
+
+        const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+        if (newX === -1) return null;
+
+        return {
+            x: newX * SQUARESIZE + SQUARESIZE/2,
+            y: newY * SQUARESIZE + SQUARESIZE/2,
+        };
     }
+
+    // static handleReMap(sprite){
+    // // Attempt to re‐path from the sprite’s current world‐position to its final destination
+    //     const start = { x: sprite.x, y: sprite.y };
+    //     const end   = sprite.finalPos; // assigned earlier in Player.moveTo()
+    //     const newPath = Map.navMesh.findPath(start, end);
+    //     if (newPath && newPath.length > 0) {
+    //         console.log("New path found")
+    //         this.moveTo(sprite, newPath)
+    //     } else {
+    //         // No valid path found → abort movement
+    //         console.warn("No valid path found, now in trackMode")
+    //         sprite.currentPath = [];
+    //         this.setAnimState(sprite, 'idle');
+    //         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+    //         return false;
+    //     }
+    //     return true; // skip the rest of this frame so we don’t walk into a blocked tile
+    // }
 
     static followPath(sprite) {
         Manager.handleDurationCheck(sprite);
@@ -350,14 +397,19 @@ export class Player {
         // 2) If we aren't walking anywhere, just idle.
         if (!sprite.currentPath || sprite.currentPath.length === 0) {
             this.setAnimState(sprite, sprite.idle);
+            PathDebugDrawer.onPathEnd(sprite); // optional cleanup
             return;
-        }
+        } 
 
         // 3) Normal movement logic
+        // Player.js - inside followPath(), in the "Normal movement logic" section
+        PathRegistry.updateUnitProgress(sprite.body.team ? Map.navMesh : Map.enemyNavMesh, sprite, new Phaser.Math.Vector2(sprite.x, sprite.y));
+        // after movement update, each tick while walking
+        PathDebugDrawer.tickUnit(sprite, this.scene.time.now);
         this.setAnimState(sprite, sprite.walk);
         let nextPoint = sprite.currentPath[0];
         // Scale speed by stamina ratio
-        const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina); 
+        const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina);
         const currentSpeed = sprite.type.speed * staminaFactor;
         if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
 
@@ -382,6 +434,7 @@ export class Player {
         // shift to next point in pathing
         if (Phaser.Math.Distance.Between(sprite.x, sprite.y, nextPoint.x, nextPoint.y) < 3) {
             sprite.currentPath.shift(); // Remove the reached point from the path
+            PathDebugDrawer.onWaypointAdvanced(sprite);
             if (sprite.currentPath.length == 0) {
                 // 🟡 FLEEING: when we reach this hop, re-evaluate threat & maybe choose next hop
                 if (sprite.state === CONTROL_STATES.FLEE_MODE) {
@@ -473,6 +526,12 @@ export class Player {
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
             sprite.roam = false;
             this.roam(sprite);
+        }
+        else if (
+            sprite.state === CONTROL_STATES.SIEGE_MODE ||
+            sprite.state === CONTROL_STATES.DESTROY_MODE_T
+        ) {
+            buildingManager.beginDestroyingTile(sprite);
         }
     }
 
@@ -772,6 +831,17 @@ export class Player {
         }
     }
 
+    static _getNavForTroop(troop) {
+        // default: player nav
+        const useEnemy = troop?.body?.team === 0;
+
+        const navMesh = (useEnemy && Map.enemyNavMesh) ? Map.enemyNavMesh : Map.navMesh;
+        const navGrid = (useEnemy && Map.enemyNavGrid) ? Map.enemyNavGrid : Map.navGrid;
+
+        return { navMesh, navGrid };
+    }
+
+
     static getFormation(centerX, centerY, troopCount) {
         const visited = new Set();
         const queue = [[centerX, centerY]];
@@ -857,6 +927,7 @@ export class Player {
     static roam(troop) {
         // start roaming
         troop.roam = true;
+        const { navMesh, navGrid } = Player._getNavForTroop(troop);
         let px = troop.x;
         let py = troop.y;
         // If this unit has a guard point, use that as the roam center
@@ -866,7 +937,7 @@ export class Player {
         }
         let troopX = Math.floor(px/SQUARESIZE)
         let troopY = Math.floor(py/SQUARESIZE)
-        if(Map.navGrid[troopY][troopX] == 0){
+        if(navGrid[troopY][troopX] == 0){
             let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
             if (newX === -1) {
                 console.log("No valid start tile nearby");
@@ -927,7 +998,7 @@ export class Player {
         if (validPositions.length) {
             // pick a random valid direction
             const dest = Phaser.Utils.Array.GetRandom(validPositions);
-            const path = Map.navMesh.findPath(
+            const path = navMesh.findPath(
                 { x: px, y: py },
                 { x: dest.x, y: dest.y }
             );

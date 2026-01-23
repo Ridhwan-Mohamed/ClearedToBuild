@@ -10,27 +10,52 @@ import { House } from "../buildings/House"
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 import { UI_ITEM_TYPES } from "../UI/UIConstants"
 import { AudioManager } from "./AudioManager"
+import { PathRegistry } from "../lib/navmesh/PathRegistry"
+import { PathRepair } from "../lib/navmesh/PathRepair"
+import { Wall } from "../buildings/Wall"
+import { Builder } from "../players/Builder"
+import { Raider } from "../players/Raider"
 
 export class buildingManager{
 
     static NavMeshUpdater;
+    static EnemyNavMeshUpdater;
     static scene;
     static blockBuildingDuration = 250;
 
-    static createBuildTileStateArray(tiles, teamNumber) {
+    static createBuildTileStateArray(tiles, teamNumber, buildTypeName = null) {
         const team = Teams.teamLists[teamNumber];
-        // make sure buildingTileStates is an array
-        if (!Array.isArray(team.buildingTileStates)) {
-          team.buildingTileStates = [];
-        }
-      
+        if (!Array.isArray(team.buildingTileStates)) team.buildingTileStates = [];
+
         tiles.forEach(tile => {
-          team.buildingTileStates.push({
+            const typeName = tile.buildTypeName ?? buildTypeName ?? "wall";
+            const buildType = TILE_TYPES[typeName] ?? TILE_TYPES.wall;
+
+            team.buildingTileStates.push({
             x: tile.x,
             y: tile.y,
             assigned: 0,
-            buildType: TILE_TYPES.wall
-          });
+            buildType,
+            });
+        });
+    }
+
+    static createDestroyTileStateArray(tiles, teamNumber) {
+        const team = Teams.teamLists[teamNumber];
+        if (!Array.isArray(team.destroyTileStates)) team.destroyTileStates = [];
+
+        tiles.forEach(t => {
+            team.destroyTileStates.push({
+            x: t.x,
+            y: t.y,
+            assigned: 0,
+            type: t.type,
+            // ✅ store what the tile WAS so Builder.js can refund correctly
+            originalGridVal: t.originalGridVal,
+
+            // ✅ drive wall HP / time pacing (beginDestroyingTile already uses wall.hp)
+            duration: 9999, // any >0; beginDestroyingTile re-ticks off wall.hp anyway
+            });
         });
     }
 
@@ -43,70 +68,95 @@ export class buildingManager{
 
     static findBuildApproachTile(buildX, buildY, troop) {
         const directions = [
-            [0, -1], [0, 1], [1, 0], [-1, 0],         // Cardinal (1 away)
-            [-1, -1], [1, -1], [-1, 1], [1, 1],       // Diagonal (1 away)
-            [0, -2], [0, 2], [2, 0], [-2, 0],         // Cardinal (2 away)
-            [-2, -1], [-2, 1], [2, -1], [2, 1],       // Extended Diagonal (2 away)
+            [0, -1], [0, 1], [1, 0], [-1, 0],
+            [-1, -1], [1, -1], [-1, 1], [1, 1],
+            [0, -2], [0, 2], [2, 0], [-2, 0],
+            [-2, -1], [-2, 1], [2, -1], [2, 1],
             [-1, -2], [1, -2], [-1, 2], [1, 2],
         ];
 
-        let troopX = Math.floor(troop.x/SQUARESIZE)
-        let troopY = Math.floor(troop.y/SQUARESIZE)
-        if(!Map.navGrid[troopX][troopY]){
-            let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-            if (newX === -1) {
-                console.log("No valid start tile nearby");
-            } else {
-                troopX = newX;
-                troopY = newY;
-                console.log("New valid tile:", newX, newY);
-            }
-        }
-    
-    
-        // 1. Build list of candidate tiles with distances
-        let candidates = [];
+        const { navMesh, navGrid } = Player._getNavForTroop(troop)
+
+        // 1) candidate tiles
+        const candidates = [];
         for (const [dx, dy] of directions) {
             const tx = buildX + dx;
             const ty = buildY + dy;
-    
-            if (tx < 0 || ty < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
-            if (!Map.navGrid[ty][tx]) continue; // Not walkable
-    
+            if (tx < 0 || ty < 0 || ty >= navGrid.length || tx >= navGrid[0].length) continue;
+            if (!navGrid[ty][tx]) continue;
+
             const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
             const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
             const dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
-    
             candidates.push({ tx, ty, dist });
         }
-    
-        // 2. Sort candidates by distance ascending
+
         candidates.sort((a, b) => a.dist - b.dist);
-    
-        // 3. Try candidates one by one
-        for (const candidate of candidates) {
-            const path = Map.navMesh.findPath(
-                { x: troopX*SQUARESIZE, y: troopY*SQUARESIZE },
-                { x: candidate.tx * SQUARESIZE + SQUARESIZE / 2, y: candidate.ty * SQUARESIZE + SQUARESIZE / 2 }
-            );
-    
+
+        // 2) try candidates using the SAME path pipeline as normal movement
+        for (const c of candidates) {
+            const path = Player.pathTo(troop, c.tx, c.ty, true); // ✅ sets troop.__pendingPolyIds
             if (path && path.length > 0) {
-                return { tx: candidate.tx, ty: candidate.ty, path };
+                return { tx: c.tx, ty: c.ty, path };
             }
-            // else try next one
         }
-    
-        return null; // ❌ No valid approach found
+
+        return null;
     }
 
     static beginBuilding(troop){
-        if(!buildingManager.scene.checkSufficientFunds(troop.task.buildType.price)){return}
-        buildingManager.scene.updateMoney(-1*troop.task.buildType.price);
+        if(!buildingManager.hasRequiredMaterials(troop.task.buildType.price, 1)){return}
+
         const x = troop.task.x;
         const y = troop.task.y;
-        Map.navGrid[y][x] = 0;
-        this.NavMeshUpdater.blockTile(x,y);
-        Map.placeTile(x,y,troop.task.buildType.name);
+        // Map.grid[y][x] = [Map.grid[y][x], troop.task.buildType.grid];
+
+        // ✅ Only block nav / navmesh if the tile is blocking
+        if (troop.task.buildType.block) {
+            Map.navGrid[y][x] = 0;
+            Map.enemyNavGrid[y][x] = 0;
+            const change = this.NavMeshUpdater.blockTile(x, y);
+            if (change && change.removedPolyIds) {
+                const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+                for (const unit of impacted) {
+                    PathRepair.repairUnitPath(unit, change.removedPolyIds, Map.navMesh);
+                }
+            }
+            const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
+            if(enemyChange && enemyChange.removedPolyIds){
+                const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                for (const unit of impacted) {
+                    PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                }
+            }
+            Map.placeTile(x,y,troop.task.buildType.name);
+        } else {
+            if(troop.task.buildType.name === "woodWall_door" || troop.task.buildType.name === "wall_door"){
+                Map.enemyNavGrid[y][x] = 0;
+                const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
+                if(enemyChange && enemyChange.removedPolyIds){
+                    const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                    for (const unit of impacted) {
+                        PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                    }
+                }
+            }
+            Map.handleGridDelete(null, troop.task.buildType, x, y);
+            Map.grid[y][x] = [Map.grid[y][x], troop.task.buildType.grid];
+            Map.navGrid[y][x] = 1;
+            Map.drawGridValue(x,y,1);
+            // IMPORTANT: do NOT call blockTile for doors
+        }
+
+        // mark dirty changes to refgions and drawers
+        this.scene.zoomMixer.updateOverviewCell(x, y, Map.grid);
+        Map.regionSystem?.markDirty?.();
+        Map.regionDrawer?.markDirty?.();
+        Map.enemyRegionSystem?.markDirty?.();
+        Map.enemyRegionDrawer?.markDirty?.();
+        Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
+
+        AudioManager.playSound("sfx_building_complete", { volume: 0.2 });
         Teams.removeFromStateArray(1, "buildingTileStates", troop.task);
         troop.task = null;
         Manager.assignOneTroopToAction(troop, Teams.teamLists[1].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
@@ -152,6 +202,8 @@ export class buildingManager{
         const startX = x;
         const startY = y;
 
+        const { navMesh, navGrid } = Player._getNavForTroop(troop)
+
         // 1) Collect all walkable perimeter tiles (as before)
         for (let dy = -1; dy <= type.lenY; dy++) {
             for (let dx = -1; dx <= type.lenX; dx++) {
@@ -161,8 +213,8 @@ export class buildingManager{
                 const isInsideBlock = dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY;
                 if (isInsideBlock) continue;
 
-                if (tx < 0 || ty < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
-                if (!Map.navGrid[ty][tx]) continue; // Not walkable
+                if (tx < 0 || ty < 0 || ty >= navGrid.length || tx >= navGrid[0].length) continue;
+                if (!navGrid[ty][tx]) continue; // Not walkable
 
                 const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
                 const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
@@ -188,7 +240,7 @@ export class buildingManager{
             tStartX = troop.body.x;
             tStartY = troop.body.y;
 
-            if (!Map.navGrid[troopY]?.[troopX]) {
+            if (!navGrid[troopY]?.[troopX]) {
                 const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
                 if (newX === -1) {
                     console.log("No valid start tile nearby");
@@ -212,40 +264,31 @@ export class buildingManager{
 
         if (
             doorTx >= 0 && doorTy >= 0 &&
-            doorTy < Map.navGrid.length &&
-            doorTx < Map.navGrid[0].length &&
-            Map.navGrid[doorTy][doorTx]            // must be walkable
+            doorTy < navGrid.length &&
+            doorTx < navGrid[0].length &&
+            navGrid[doorTy][doorTx]            // must be walkable
         ) {
             const doorWorldX = doorTx * SQUARESIZE + SQUARESIZE / 2;
             const doorWorldY = doorTy * SQUARESIZE + SQUARESIZE / 2;
 
-            const doorPath = Map.navMesh.findPath(
-                { x: tStartX, y: tStartY },
-                { x: doorWorldX, y: doorWorldY }
-            );
-
+            // inside findBuildApproachBlock, where you compute doorTx/doorTy
+            const doorPath = Player.pathTo(troop, doorTx, doorTy, true);
             if (doorPath && doorPath.length > 0) {
-                // ✅ Path straight to the "door"
                 return { tx: doorTx, ty: doorTy, path: doorPath };
             }
+
         }
 
         // 4) Fallback: previous behaviour, closest perimeter candidate
         candidates.sort((a, b) => a.dist - b.dist);
 
         for (const candidate of candidates) {
-            const path = Map.navMesh.findPath(
-                { x: tStartX, y: tStartY },
-                {
-                    x: candidate.tx * SQUARESIZE + SQUARESIZE / 2,
-                    y: candidate.ty * SQUARESIZE + SQUARESIZE / 2
-                }
-            );
-
+            const path = Player.pathTo(troop, candidate.tx, candidate.ty, true);
             if (path && path.length > 0) {
                 return { tx: candidate.tx, ty: candidate.ty, path };
             }
         }
+
 
         return null; // ❌ No valid path found
     }
@@ -254,6 +297,8 @@ export class buildingManager{
         const candidates = [];
         const startX = x;
         const startY = y;
+
+        const { navMesh, navGrid } = Player._getNavForTroop(troop)
 
         // 1) Collect all walkable perimeter tiles around footprint
         for (let dy = -1; dy <= type.lenY; dy++) {
@@ -264,8 +309,8 @@ export class buildingManager{
             const inside = dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY;
             if (inside) continue;
 
-            if (tx < 0 || ty < 0 || ty >= Map.navGrid.length || tx >= Map.navGrid[0].length) continue;
-            if (!Map.navGrid[ty][tx]) continue;
+            if (tx < 0 || ty < 0 || ty >= navGrid.length || tx >= navGrid[0].length) continue;
+            if (!navGrid[ty][tx]) continue;
 
             const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
             const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
@@ -275,10 +320,10 @@ export class buildingManager{
                 dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
             } else {
                 dist = Phaser.Math.Distance.Between(
-                tStartX * SQUARESIZE + SQUARESIZE / 2,
-                tStartY * SQUARESIZE + SQUARESIZE / 2,
-                worldX,
-                worldY
+                    tStartX * SQUARESIZE + SQUARESIZE / 2,
+                    tStartY * SQUARESIZE + SQUARESIZE / 2,
+                    worldX,
+                    worldY
                 );
             }
 
@@ -293,11 +338,11 @@ export class buildingManager{
             tStartX = troop.body.x;
             tStartY = troop.body.y;
 
-            if (!Map.navGrid[troopY]?.[troopX]) {
-            const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-            if (newX === -1) return null;
-            tStartX = newX * SQUARESIZE + SQUARESIZE / 2;
-            tStartY = newY * SQUARESIZE + SQUARESIZE / 2;
+            if (!navGrid[troopY]?.[troopX]) {
+                const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                if (newX === -1) return null;
+                tStartX = newX * SQUARESIZE + SQUARESIZE / 2;
+                tStartY = newY * SQUARESIZE + SQUARESIZE / 2;
             }
         } else {
             tStartX = tStartX * SQUARESIZE + SQUARESIZE / 2;
@@ -308,7 +353,7 @@ export class buildingManager{
         candidates.sort((a, b) => a.dist - b.dist);
 
         for (const c of candidates) {
-            const path = Map.navMesh.findPath(
+            const path = navMesh.findPath(
             { x: tStartX, y: tStartY },
             { x: c.tx * SQUARESIZE + SQUARESIZE / 2, y: c.ty * SQUARESIZE + SQUARESIZE / 2 }
             );
@@ -464,21 +509,51 @@ export class buildingManager{
                     }
                     task._hovering = false;
                     this.handlePlacement(task);
-                    let blockTiles = []
-                    let startY = task.y
-                    let startX = task.x
-                    for(let i =  startY; i < task.type.lenY + startY; i++){
-                        for(let j = startX; j < task.type.lenX + startX; j++){
-                            blockTiles.push({x: j, y: i})
+
+                    let blockTiles = [];
+                    let startY = task.y;
+                    let startX = task.x;
+
+                    for (let i = startY; i < task.type.lenY + startY; i++) {
+                        for (let j = startX; j < task.type.lenX + startX; j++) {
+                            blockTiles.push({ x: j, y: i });
+
+                            // buildings block BOTH teams (doors are handled elsewhere)
+                            Map.navGrid[i][j] = 0;
+                            Map.enemyNavGrid[i][j] = 0;
+                            Map.enemyRegionSystem?.markDirty?.();
+                            Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
                         }
                     }
-                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => {
-                        return colorFor(cell); // or however you resolve colors
-                    });
-                    this.NavMeshUpdater.blockTiles(blockTiles)
-                    Teams.removeFromStateArray(1, "blockBuildingStates", sprite.task);
-                    sprite.task = null;
-                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B);
+
+                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+
+                    // Update normal mesh
+                    const change = this.NavMeshUpdater.blockTiles(blockTiles);
+                    if (change && change.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+                        if(impacted){
+                            for (const unit of impacted) {
+                                PathRepair.repairUnitPath(unit, change.removedPolyIds, Map.navMesh);
+                            }
+                        }
+                    }
+
+                    // Update enemy mesh
+                    const enemyChange = this.EnemyNavMeshUpdater.blockTiles(blockTiles);
+                    if (enemyChange && enemyChange.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                        if(impacted){
+                            for (const unit of impacted) {
+                                PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                            }
+                        }
+                    }
+
+                    // mark dirty changes to refgions and drawers
+                    Map.regionSystem?.markDirty?.();
+                    Map.regionDrawer?.markDirty?.();
+                    Map.enemyRegionDrawer?.markDirty?.();
                 } else {
                     console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
                     sprite.timer = null;
@@ -579,18 +654,36 @@ export class buildingManager{
                     } else if (task.value && typeof task.value.destroy === "function") {
                         task.value.destroy();      // fallback: just sprite
                     }
-                    let blockTiles = []
-                    for(let i =  task.y; i < task.type.lenY + task.y; i++){
-                        for(let j = task.x; j < task.type.lenX + task.x; j++){
-                            blockTiles.push({x: j, y: i})
-                            if(Array.isArray(Map.grid[i][j])) Map.grid[i][j] = Map.grid[i][j][0]
+                    let blockTiles = [];
+                    for (let i = task.y; i < task.type.lenY + task.y; i++) {
+                        for (let j = task.x; j < task.type.lenX + task.x; j++) {
+                            blockTiles.push({ x: j, y: i });
+
+                            if (Array.isArray(Map.grid[i][j])) Map.grid[i][j] = Map.grid[i][j][0];
+
+                            // unblocked for BOTH teams
                             Map.navGrid[i][j] = 1;
+                            Map.enemyNavGrid[i][j] = 1;
+                            Map.enemyRegionSystem?.markDirty?.();
+                            Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
                         }
                     }
-                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => {
-                        return colorFor(cell); // or however you resolve colors
-                    });
-                    this.NavMeshUpdater.blockTiles(blockTiles, true)
+                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+                    // Update normal mesh (unblock)
+                    const change = this.NavMeshUpdater.blockTiles(blockTiles, true);
+                    if (change && change.removedPolyIds) {
+                        PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+                    }
+                    // Update enemy mesh (unblock)
+                    const enemyChange = this.EnemyNavMeshUpdater.blockTiles(blockTiles, true);
+                    if (enemyChange && enemyChange.removedPolyIds) {
+                        PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                    }
+                    // mark dirty changes to refgions and drawers
+                    Map.regionSystem?.markDirty?.();
+                    Map.regionDrawer?.markDirty?.();
+                    Map.enemyRegionSystem?.markDirty?.();
+                    Map.enemyRegionDrawer?.markDirty?.();
                     Teams.removeFromStateArray(teamNumber, "destroyStates", sprite.task);
                     sprite.task = null;
                     this.removeBuildingFromArray(task.x, task.y);
@@ -606,6 +699,106 @@ export class buildingManager{
 
             });
         }
+    }
+
+    // buildingManager.js
+    static beginDestroyingTile(sprite) {
+        const task = sprite.task;
+        if (!task) return;
+
+        // If task somehow invalid, bail cleanly
+        if (task.duration == null || task.duration <= 0) {
+            sprite.task = null;
+            if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+            return;
+        }
+
+        // --- HP-based wall/door destruction ---
+        // Ensure there is a Wall instance for visuals/HP tracking
+        const tx = task.tx || task.x;
+        const ty = task.ty || task.y;
+
+        const wall = Wall.getAt(tx, ty);
+
+        // If the target tile isn't a wall/door anymore, just cleanly finish this task.
+        if (!wall || !wall.active) {
+            sprite.task = null;
+            sprite.play(sprite.idle);
+            return;
+        }
+
+        // Damage amount (raiders use weapon, players use chip)
+        const damage = (!sprite.body.team)
+        ? (sprite.weapon?.baseDmg || 5)
+        : 2;
+
+        // Apply damage to the wall itself (this drives phase/frame changes)
+        const destroyed = wall.damage(damage);
+
+        // OPTIONAL: expose hp for debug UI / bars
+        task.totalHp = wall.maxHp;
+        task.hp = wall.hp;
+
+        sprite.play(sprite.action);
+
+        // If not destroyed yet, keep ticking
+        if (!destroyed) {
+        if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+            sprite.timer = this.scene.time.delayedCall(sprite.weapon.duration, () => {
+                if (!sprite.task) return;
+                this.beginDestroyingTile(sprite);
+            });
+            return;
+        }
+        // ===== DESTROY COMPLETE =====
+        if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+
+        this.scene.zoomMixer.updateOverviewCell(tx, ty, Map.grid);
+
+        Wall.destroyAt(tx, ty); // removes sprite + sets grid to grass (no redraw ownership)
+
+        // 2) make the tile walkable for BOTH teams
+        Map.navGrid[ty][tx] = 1;
+        Map.enemyNavGrid[ty][tx] = 1;
+
+        // 3) update overview texture (minimap / zoom mixer)
+        this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+
+        // 4) unblock BOTH navmeshes using the same updater pipeline your block-destroy uses
+        if(sprite.task.type.name != "wall_door" && sprite.task.type.name == "woodWall_door"){
+            const changed = this.NavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
+            if (changed && changed.removedPolyIds) {
+                PathRegistry.handlePolysRemoved(Map.navMesh, changed.removedPolyIds, changed.addedPolyIds);
+            }
+        }
+        const enemyChanged = this.EnemyNavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
+        if (enemyChanged && enemyChanged.removedPolyIds) {
+            PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChanged.removedPolyIds, enemyChanged.addedPolyIds);
+        }
+        // Builder decides: store vs auto-consume into queued wall build
+        if (sprite.body.team) {
+            Builder.onWallDestroyed(sprite, task);
+        }else{
+            Raider.siegeComplete(sprite);   
+        }
+        // 5) regions / border-index maintenance (THIS is what makes siege planning “instant”)
+        // remove this wall from border buckets, then recompute regions
+        Map.enemyRegionSystem?.removeWallFromBorderIndex?.(tx, ty);
+        Map.enemyRegionSystem?.markDirty?.();
+        Map.enemyRegionDrawer?.markDirty?.();
+
+        Map.regionSystem?.markDirty?.();
+        Map.regionDrawer?.markDirty?.();
+
+        // force recompute once so subsequent O(1) reach checks are correct immediately
+        Map.enemyRegionSystem?.ensureUpToDate?.();
+
+        // 6) clear task and let controller decide next action
+        if(!sprite.body.team){
+            sprite.play(sprite.idle);
+            sprite.task = null;
+        }
+        return true;
     }
 
     static removeBuildingFromArray(x, y) { //problematic, hard looping as we dont know who destroying and why

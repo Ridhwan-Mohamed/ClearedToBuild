@@ -217,8 +217,8 @@ export class fightManager{
 
 
     static checkForKillReward(teamNumber, target){
-        if(teamNumber){
-            this.scene.updateMoney(Phaser.Math.Between(1000, 1500));
+        if(teamNumber && target.killReward){
+            this.scene.updateMoney(target.killReward);
         }
     }
 

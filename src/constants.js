@@ -1,5 +1,5 @@
 import { UI_ITEM_TYPES } from "./UI/UIConstants";
-
+import { StageState } from "./parcelController/StageState";
 export function create2DArray(rows, cols) {
     let array = new Array(rows);
     for (let i = 0; i < rows; i++) {
@@ -42,8 +42,8 @@ export const CONTROL_STATES = {
 }
 
 export const MAX_CROP_GROWTH_STAGE = 2; // assuming 0-4 frames
-export var WORLD_DIMENSIONX = 250;
-export var WORLD_DIMENSIONY = 250;
+export var WORLD_DIMENSIONX = 100;
+export var WORLD_DIMENSIONY = 100;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
@@ -392,8 +392,11 @@ export const TILE_TYPES = {
   },
 };
 
+
+export const DRAFT_UI_X_SHIFT = 120;
+
 export const teamSetupArray = {
-    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house2, TILE_TYPES.storage],
+    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house2, TILE_TYPES.house1, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 
@@ -733,3 +736,126 @@ export function createBubbleText({
 
     return container;
 }
+
+//parcel
+// ---- Parcel/Contract system (add to constants.js) ----
+export const PARCEL = {
+  SIZE: 25,
+  // Main island top-left (world is 100x100; main parcel at 37,37 → 25 down/right)
+  MAIN_ORIGIN: { x: 37, y: 37 },
+  // Contract parcels sit one parcel away from main island; add a gap so UI isn't touching
+  GAP_TILES: 0, // distance between parcel edges
+  // World-space slot layout: W / S / E around the main parcel (N reserved for fort)
+  SLOTS: {
+    W: { dx: -25, dy: 0 },
+    S: { dx: 0, dy: 25 },
+    E: { dx: 25, dy: 0 },
+  },
+};
+
+export const PRESSURE_CONTRACT = {
+  DIFFICULTY_MIN: 1,
+  DIFFICULTY_MAX: 3,
+
+  // how many spawners per difficulty (1..3)
+  SPAWNERS_BY_DIFFICULTY: { 1: 1, 2: 2, 3: 3 },
+
+  // total raiders quota per spawner at stage 1 (scaled with stageIndex later)
+  BASE_QUOTA_PER_SPAWNER: 3,
+
+  // spawn interval (ms) drops as stage increases, down to MIN_INTERVAL_MS.
+  BASE_INTERVAL_MS: 4000,
+  MIN_INTERVAL_MS: 1500,
+  INTERVAL_DROP_PER_STAGE_MS: 250, // e.g., stage 5 => 4000 - 1000
+};
+
+// ---- Contract economy (costs + rewards) ----
+// constants.js
+import { StageState } from "./parcelController/StageState.js"; // <-- adjust path if needed
+
+export const CONTRACT_ECON = {
+  STAGE_MULT: 0.25,
+
+  COST_BASE: {
+    FARM: 150,
+    FOREST: 150,
+    ROCK: 125,
+    MILITIA: 200,
+    PRESSURE: 120,
+  },
+
+  PRESSURE_PER_DIFFICULTY: 60,
+
+  PRESSURE_BONUS_BASE: 150,
+  PRESSURE_BONUS_PER_DIFFICULTY: 75,
+
+  // ✅ deterministic raider pay (matches raider.killReward=40)
+  KILL_PAY_BASE: 40,
+};
+
+export function getContractStage(scene) {
+  // ✅ preferred: global stage state
+  if (StageState?.stageIndex != null) return StageState.stageIndex;
+
+  // fallback if you ever run without StageState wired
+  if (!scene.contractStage) scene.contractStage = 1;
+  return scene.contractStage;
+}
+
+export function estimatePressureContract(scene, difficulty = 1) {
+  const stage = getContractStage(scene);
+
+  const spawners = PRESSURE_CONTRACT.SPAWNERS_BY_DIFFICULTY[difficulty] ?? 1;
+  const quotaPerSpawner =
+    PRESSURE_CONTRACT.BASE_QUOTA_PER_SPAWNER + Math.max(0, stage - 1);
+
+  const totalKills = spawners * quotaPerSpawner;
+
+  const cost = calcContractCost(scene, "PRESSURE", difficulty);
+  const bonus = calcPressureBonus(scene, difficulty);
+
+  const killPay = CONTRACT_ECON.KILL_PAY_BASE;
+  const killTotal = totalKills * killPay;
+
+  const gross = killTotal + bonus;
+  const net = gross - cost;
+
+  return { stage, spawners, quotaPerSpawner, totalKills, killPay, killTotal, bonus, cost, gross, net };
+}
+
+export function removeFromArray(arr, obj) {
+  if (!Array.isArray(arr)) return;
+  const i = arr.indexOf(obj);
+  if (i !== -1) arr.splice(i, 1);
+}
+
+export function calcStageScaled(value, stage, mult) {
+  const m = 1 + mult * Math.max(0, stage - 1);
+  return Math.round(value * m);
+}
+
+export function calcContractCost(scene, type, difficulty = 1) {
+  const stage = getContractStage(scene);
+  const base = CONTRACT_ECON.COST_BASE[type] ?? 0;
+
+  let raw = base;
+  if (type === "PRESSURE") raw = base + CONTRACT_ECON.PRESSURE_PER_DIFFICULTY * Math.max(1, difficulty);
+
+  return calcStageScaled(raw, stage, CONTRACT_ECON.STAGE_MULT);
+}
+
+export function calcPressureBonus(scene, difficulty = 1) {
+  const stage = getContractStage(scene);
+  const raw =
+    CONTRACT_ECON.PRESSURE_BONUS_BASE +
+    CONTRACT_ECON.PRESSURE_BONUS_PER_DIFFICULTY * Math.max(1, difficulty);
+
+  return calcStageScaled(raw, stage, CONTRACT_ECON.STAGE_MULT);
+}
+
+export const RESOURCE_PARCEL = {
+  // how much water "spots" to scatter (percent of tiles)
+  WATER_SPOT_PCT: 0.06, // 6%
+  // min distance from parcel edge to place water so you don’t create open-water borders
+  WATER_EDGE_BUFFER: 2,
+};

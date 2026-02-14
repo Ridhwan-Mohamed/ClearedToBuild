@@ -1,5 +1,5 @@
 // pineTree.js  (add these imports at top)
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, CHUNK_SIZE, UIDEPTH, showAlert } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, CHUNK_SIZE, UIDEPTH, showAlert, removeFromArray } from "../constants";
 import { Teams } from "../Teams";
 import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
@@ -80,6 +80,7 @@ export class PineTree {
 
   destroy() {
     this.container.destroy(true);
+    removeFromArray(GameMap.worldPines, this);
     const i = PineTree.list.indexOf(this);
     if (i >= 0) PineTree.list.splice(i, 1);
     PineTree._unregister(this);
@@ -146,17 +147,8 @@ export class PineTree {
     const scene = PineTree.scene;
     if (!scene) return;
 
-    // only in detailed mode
-    const mode = scene.zoomMixer?.mode || 'detailed';
-    if (mode !== 'detailed') return;
-
-    PineTree._tick++;
-
-    // only iterate already-computed visible pines (no per-frame culling)
-    const strideMask = PineTree._tick % PineTree.STRIDE;
-    for (const p of PineTree.visible) {
-      if (p.updateSlot === strideMask) p.update(now);
-    }
+    // animate everything, always
+    for (const p of PineTree.list) p.update(now);
   }
 
   setUpHitDetection(){

@@ -44,11 +44,24 @@ export class RegionDebugDrawer {
   }
 
   _bindKey() {
-    this.scene.input.keyboard.on(`keydown-${this.toggleKey}`, () => {
+    this._onToggle = () => {
       this.enabled = !this.enabled;
       if (this.enabled) this.draw();
       else this.clear();
-    });
+    };
+
+    this.scene.input.keyboard.on(`keydown-${this.toggleKey}`, this._onToggle);
+  }
+
+  destroy() {
+    // unbind key
+    if (this._onToggle) {
+      this.scene.input.keyboard.off(`keydown-${this.toggleKey}`, this._onToggle);
+      this._onToggle = null;
+    }
+
+    // remove graphics + legend
+    this.clear();
   }
 
   markDirty() {
@@ -95,6 +108,7 @@ export class RegionDebugDrawer {
         this._drawLegend(Array.from(regionIds).sort((a, b) => a - b));
     }
 
+    this.scene.uiCamera.ignore(this.graphics);
   }
 
     clear() {

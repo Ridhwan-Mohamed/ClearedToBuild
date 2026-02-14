@@ -30,6 +30,7 @@ export class Raider {
         raider.isSeaRaider = false;   // sea mode is set in spawnSeaRaider
         raider.roam       = false;
         raider.maxHealth  = 100;
+        raider.killReward  = 40;   // reward for player when killed (for contract tracking)
 
         // Make sure stamina math is well-defined (even if we never drain it)
         raider.maxStamina = raider.maxStamina ?? 100;
@@ -454,6 +455,10 @@ export class Raider {
         const scene = troop.scene;
 
         Player._destroyMiniBars(troop)
+        troop.spawner?.notifyEnemyDied?.();
+
+        // ✅ count kill toward the parcel contract (updates ⚔ text + completion)
+        scene?.parcelManager?.notifyRaiderKilled?.(troop.contractId);
 
         const team = Teams.teamLists["0"];
         if (team) {

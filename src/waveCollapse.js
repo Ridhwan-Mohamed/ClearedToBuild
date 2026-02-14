@@ -22,10 +22,8 @@ export class WaveCollapse {
 
         this.seedTerrain(grid, width, height, noise, ratio);
         grid = this.convertToGridValues(grid);
-        this.scatterOnGrass(grid);
+        this.scatterOnGrass(grid, 10, TILE_TYPES.grassCrop.grid);
         this.scatterOnGrass(grid, 10, TILE_TYPES.grassBerry.grid);
-        this.scatterOnGrass(grid, 10, TILE_TYPES.grassWood.grid);
-        this.scatterOnGrass(grid, 10, TILE_TYPES.grassRock.grid);
         return grid;
     }
 

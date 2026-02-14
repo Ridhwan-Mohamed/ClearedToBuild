@@ -211,8 +211,6 @@ export class mapView extends Phaser.Scene {
         this.uiCamera.setScroll(0, 0).setZoom(1).setBackgroundColor('rgba(0,0,0,0)');
         this.scale.on('resize', ({ width, height }) => this.uiCamera.setSize(width, height));
 
-        // Bind menu to this scene and build menu UI (grid, towns, icons, Play)
-
         MainMenu.startMenuPhase();
         setupTownBoundsToggle(this);
         this.cursors = this.input.keyboard.createCursorKeys();
@@ -500,6 +498,7 @@ export class mapView extends Phaser.Scene {
         });
         this.input.on('pointermove', (pointer) => this.onPointerMove(pointer, SQUARESIZE));
         this.input.on('pointerup', () => this.onPointerUp());
+
     }
 
     handleKeyboardCameraMovement() {
@@ -1485,6 +1484,8 @@ cancelFarmSelection(exitFarmMode = false) {
 
 const config = {
     type: Phaser.AUTO,
+    parent: "game",            // or whatever div id you use
+    dom: { createContainer: true },  // <-- THIS fixes the error
     width: window.innerWidth,
     height: window.innerHeight,
     backgroundColor: '#3cb8f1',

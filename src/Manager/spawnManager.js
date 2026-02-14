@@ -85,7 +85,28 @@ export function spawnAndSend() {
         CONTROL_STATES.DESTROY_MODE
     );
 }
+export function spawnRaiderAtWorld(worldX, worldY, teamNumber = 0) {
+    const gx = Math.floor(worldX / SQUARESIZE);
+    const gy = Math.floor(worldY / SQUARESIZE);
 
+    const x = Math.max(0, Math.min(WORLD_DIMENSIONX - 1, gx));
+    const y = Math.max(0, Math.min(WORLD_DIMENSIONY - 1, gy));
+
+    // If blocked, try a tiny local search
+    const nav = Map.enemyNavGrid;
+    if (nav && nav[y] && nav[y][x] !== 1) {
+        for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= WORLD_DIMENSIONX || ny >= WORLD_DIMENSIONY) continue;
+                if (nav[ny]?.[nx] === 1) return new Raider(nx, ny, teamNumber);
+            }
+        }
+    }
+
+    return new Raider(x, y, teamNumber);
+}
 // 🌊 Spawn a single sea-raider on a random water edge, moving toward center
 export function spawnSeaRaider(scene) {
     const nav = Map.navGrid;

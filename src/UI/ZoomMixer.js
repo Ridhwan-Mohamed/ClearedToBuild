@@ -11,13 +11,23 @@ export class ZoomMixer {
   static mapIconContainer;
 
   constructor() {
-    this.mode = 'detailed'; // 'detailed' | 'overview'
+    this.mode = 'detailed';
     this.IN_THRESHOLD  = 0.45;
     this.OUT_THRESHOLD = 0.35;
     this.targetZoom = 1.0;
 
-    this.overviewImage = null; // Phaser.GameObjects.Image
+    this.overviewImage = null;
     this.texKey = 'mapOverview';
+
+    // --- NEW: accel/decel state ---
+    this.zoomVel = { v: 0 };
+    this.scrollVel = { x: 0, y: 0 };
+    this.zoomSmoothTime = 0.12;     // smaller = snappier
+    this.scrollSmoothTime = 0.10;   // keep close to zoomSmoothTime
+
+    // --- NEW: anchor for pointer-centric (or center) zoom ---
+    this.anchorWorld = null;        // {x,y} world point we want to keep stable
+    this.anchorScreen = null;       // {x,y} screen point (in pixels)
   }
 
   /** Initialize the container once per scene */
@@ -221,15 +231,19 @@ export class ZoomMixer {
     this.MIN_ZOOM = minZoom;
     this.MAX_ZOOM = maxZoom;
 
-    scene.input.on('wheel', (_pointer, _gos, _dx, dy /* deltaY */, _dz) => {
+    scene.input.on('wheel', (pointer, _gos, _dx, dy, _dz) => {
       const cam = scene.cameras.main;
+
+      // --- NEW: set anchor to pointer location (screen) + corresponding world point ---
+      this.anchorScreen = { x: pointer.x, y: pointer.y };
+      this.anchorWorld  = cam.getWorldPoint(pointer.x, pointer.y);
+
       const cur = cam.zoom;
-      const factor = Math.exp(-dy * 0.003);               // works for mouse & trackpad
-      const target = Phaser.Math.Clamp(cur * factor, this.MIN_ZOOM, this.MAX_ZOOM);
-      this.targetZoom = target;
-      this.smoothCenterZoomTo(target);                    // << center-based
+      const factor = Math.exp(-dy * 0.003);
+      this.targetZoom = Phaser.Math.Clamp(cur * factor, this.MIN_ZOOM, this.MAX_ZOOM);
     });
   }
+
 
   /** Optional keyboard shortcuts (Z/X). */
   hookKeys(zoomOut = 0.30, zoomIn = 1.00) {
@@ -328,6 +342,91 @@ export class ZoomMixer {
     return icon;
   }
 
+  update(deltaMs) {
+    const scene = ZoomMixer.scene;
+    if (!scene) return;
+
+    const cam = scene.cameras.main;
+    const dt = Math.min(0.05, deltaMs / 1000); // clamp large frame spikes
+
+    // If we don't have an anchor yet, default to camera center
+    if (!this.anchorWorld || !this.anchorScreen) {
+      const mid = cam.midPoint;
+      this.anchorWorld = { x: mid.x, y: mid.y };
+      this.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
+    }
+
+    // 1) Smooth zoom (accelerate then decelerate)
+    const newZoom = this._smoothDamp(
+      cam.zoom,
+      this.targetZoom,
+      this.zoomVel,
+      "v",
+      this.zoomSmoothTime,
+      dt,
+      10 // max zoom speed (tweak)
+    );
+    cam.zoom = newZoom;
+
+    // 2) Compute target scroll so anchorWorld stays under anchorScreen
+    // screenX = (worldX - scrollX) * zoom  => scrollX = worldX - screenX/zoom
+    let targetScrollX = this.anchorWorld.x - (this.anchorScreen.x / cam.zoom);
+    let targetScrollY = this.anchorWorld.y - (this.anchorScreen.y / cam.zoom);
+
+    // Clamp to bounds
+    const bounds = cam.getBounds();
+    const viewW = cam.width / cam.zoom;
+    const viewH = cam.height / cam.zoom;
+
+    targetScrollX = Phaser.Math.Clamp(targetScrollX, bounds.x, bounds.right - viewW);
+    targetScrollY = Phaser.Math.Clamp(targetScrollY, bounds.y, bounds.bottom - viewH);
+
+    // 3) Smooth scroll (accelerate then decelerate)
+    cam.scrollX = this._smoothDamp(
+      cam.scrollX, targetScrollX, this.scrollVel, "x", this.scrollSmoothTime, dt, 5000
+    );
+    cam.scrollY = this._smoothDamp(
+      cam.scrollY, targetScrollY, this.scrollVel, "y", this.scrollSmoothTime, dt, 5000
+    );
+
+    // 4) Your mode swap hysteresis (do it while moving, not just on tween complete)
+    if (cam.zoom <= this.OUT_THRESHOLD && this.mode !== "overview") {
+      this.swapMode("overview");
+    } else if (cam.zoom >= this.IN_THRESHOLD && this.mode !== "detailed") {
+      this.swapMode("detailed");
+    }
+  }
+
+  // --- SmoothDamp helpers (accel + decel) ---
+  _smoothDamp(current, target, velObj, velKey, smoothTime, dtSec, maxSpeed = Infinity) {
+    // critically damped-ish smoothing (Unity-style)
+    smoothTime = Math.max(0.0001, smoothTime);
+    const omega = 2 / smoothTime;
+
+    const x = omega * dtSec;
+    const exp = 1 / (1 + x + 0.48*x*x + 0.235*x*x*x);
+
+    let change = current - target;
+    const originalTo = target;
+
+    // clamp max speed
+    const maxChange = maxSpeed * smoothTime;
+    change = Phaser.Math.Clamp(change, -maxChange, maxChange);
+    target = current - change;
+
+    const vel = velObj[velKey] ?? 0;
+    const temp = (vel + omega * change) * dtSec;
+    velObj[velKey] = (vel - omega * temp) * exp;
+
+    let output = target + (change + temp) * exp;
+
+    // prevent overshoot
+    if ((originalTo - current > 0) === (output > originalTo)) {
+      output = originalTo;
+      velObj[velKey] = 0;
+    }
+    return output;
+  }
 }
 
 export function createZoomButtons(scene, opts = {}) {

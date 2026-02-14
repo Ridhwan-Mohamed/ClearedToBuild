@@ -1,7 +1,7 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, showGhostText, SQUARESIZE, TILE_TYPES, UIDEPTH } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, removeFromArray, showGhostText, SQUARESIZE, TILE_MAP, TILE_TYPES, UIDEPTH } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
@@ -160,6 +160,87 @@ export class buildingManager{
         Teams.removeFromStateArray(1, "buildingTileStates", troop.task);
         troop.task = null;
         Manager.assignOneTroopToAction(troop, Teams.teamLists[1].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
+    }
+
+    static makeWallNoBuild(x, y, gridValueOrCell = null) {
+    const cell = (gridValueOrCell == null) ? Map.grid?.[y]?.[x] : gridValueOrCell;
+
+    // overlay is either scalar, or [floor, overlay]
+    const overlayVal = Array.isArray(cell) ? cell[1] : cell;
+    if (overlayVal == null) return;
+
+    const typeName = TILE_MAP(overlayVal);
+    const buildType = TILE_TYPES[typeName];
+    if (!buildType) return;
+
+    // doors are non-block in TILE_TYPES, but we treat them as "enemy-block"
+    const isDoor = (buildType.name === "wall_door" || buildType.name === "woodWall_door");
+
+    // --- ensure Map.grid has correct layered form for doors/walls ---
+    // (important if caller passed scalar)
+    if (!Array.isArray(Map.grid?.[y]?.[x])) {
+        Map.grid[y][x] = [Map.grid[y][x], overlayVal];
+    } else {
+        Map.grid[y][x][1] = overlayVal;
+    }
+
+    // --- NAV GRIDS ---
+    const hasPlayerNav = Array.isArray(Map.navGrid) && Array.isArray(Map.navGrid[y]);
+    const hasEnemyNav  = Array.isArray(Map.enemyNavGrid) && Array.isArray(Map.enemyNavGrid[y]);
+
+    // walls block both; doors block enemy only
+    if (buildType.block && !isDoor) {
+        if (hasPlayerNav) Map.navGrid[y][x] = 0;
+        if (hasEnemyNav)  Map.enemyNavGrid[y][x] = 0;
+    } else if (isDoor) {
+        if (hasPlayerNav) Map.navGrid[y][x] = 1;   // players can cross doors
+        if (hasEnemyNav)  Map.enemyNavGrid[y][x] = 0; // enemies cannot
+    }
+
+    // --- NAV MESH (ONLY if nav grids exist; otherwise redraw/menu will explode) ---
+    // IMPORTANT: never attempt to rebuild polygons if grids aren’t ready yet.
+    try {
+        if (buildType.block && !isDoor) {
+        if (hasPlayerNav && this.NavMeshUpdater?.blockTile && Map.navMesh) {
+            const change = this.NavMeshUpdater.blockTile(x, y);
+            if (change?.removedPolyIds) {
+            const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+            for (const unit of impacted) PathRepair.repairUnitPath(unit, change.removedPolyIds, Map.navMesh);
+            }
+        }
+        if (hasEnemyNav && this.EnemyNavMeshUpdater?.blockTile && Map.enemyNavMesh) {
+            const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
+            if (enemyChange?.removedPolyIds) {
+            const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+            for (const unit of impacted) PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+            }
+        }
+        } else if (isDoor) {
+        // door blocks ENEMY navmesh only
+        if (hasEnemyNav && this.EnemyNavMeshUpdater?.blockTile && Map.enemyNavMesh) {
+            const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
+            if (enemyChange?.removedPolyIds) {
+            const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+            for (const unit of impacted) PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+            }
+        }
+        // do NOT block player navmesh for doors
+        }
+    } catch (e) {
+        // swallow during menu/redraw phase; navmesh can be rebuilt once the world is fully initialized
+        console.warn("makeWallNoBuild: skipped navmesh update (nav not ready yet)", e);
+    }
+
+    // --- VISUALS ---
+    // Put the actual tile art down. For doors, you want layer-1 to exist so map.js change (above) shows it.
+    Map.drawGridValue(x, y, 1);
+
+    // --- REGION / OVERVIEW ---
+    this.scene?.zoomMixer?.updateOverviewCell?.(x, y, Map.grid);
+    Map.regionSystem?.markDirty?.();
+    Map.regionDrawer?.markDirty?.();
+    Map.enemyRegionSystem?.markDirty?.();
+    Map.enemyRegionDrawer?.markDirty?.();
     }
 
     static assignTroopToBuildBlock(teamNumber){
@@ -651,7 +732,11 @@ export class buildingManager{
                     const targetObj = task.value?.buildingRef || task.value;
                     if (targetObj && typeof targetObj.destroy === "function") {
                         targetObj.destroy();       // calls ClayOven/House/StorageBuilding.destroy
+                        if(task.type == TILE_TYPES.pine){
+                            removeFromArray(Map.worldPines, targetObj);
+                        }
                     } else if (task.value && typeof task.value.destroy === "function") {
+                        removeFromArray(Map.worldStones, task.value);
                         task.value.destroy();      // fallback: just sprite
                     }
                     let blockTiles = [];

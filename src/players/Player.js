@@ -411,7 +411,7 @@ export class Player {
         // Scale speed by stamina ratio
         const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina);
         const currentSpeed = sprite.type.speed * staminaFactor;
-        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
+        // if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
 
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);

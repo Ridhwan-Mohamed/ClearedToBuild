@@ -24,11 +24,22 @@ export class NavMeshUpdater {
     }
 
     _setupToggleKey() {
-        this.scene.input.keyboard.on(`keydown-${this._toggleKey}`, () => {
+        this._onToggle = () => {
             this.debugEnabled = !this.debugEnabled;
             if (this.debugEnabled) this.drawDebug();
             else this.clearDebug();
-        });
+        };
+        this.scene.input.keyboard.on(`keydown-${this._toggleKey}`, this._onToggle);
+    }
+
+    destroy() {
+        // remove key listener
+        if (this._onToggle) {
+            this.scene.input.keyboard.off(`keydown-${this._toggleKey}`, this._onToggle);
+            this._onToggle = null;
+        }
+        // kill any drawn graphics
+        this.clearDebug();
     }
 
     drawDebug() {
@@ -90,11 +101,10 @@ export class NavMeshUpdater {
     
                 this.debugGraphics.push(neighborGraphics);
             }
+
         }
+        this.scene.uiCamera.ignore(this.debugGraphics);
     }
-    
-    
-    
 
     clearDebug() {
         for (const g of this.debugGraphics) {
@@ -193,7 +203,6 @@ export class NavMeshUpdater {
         const addedPolyIds = newNavPolys.map(p => p.id);
         const neighborPolyIds = Array.from(neighborPolys).map(p => p.id);
 
-    
         // Step 9: Remove old polys
         for (const oldPoly of affectedPolys) {
             this.navMesh.removePolygon(oldPoly);

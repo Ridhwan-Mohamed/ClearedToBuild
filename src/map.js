@@ -2,7 +2,7 @@ import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY,
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./players/Player";
-import { buildingArray, clearBuildingArray, spawnPoints, townRoads, turretTeams } from "./town";
+import { buildingArray, spawnPoints, townRoads, turretTeams } from "./town";
 import { Teams } from "./Teams";
 import { buildingManager } from "./Manager/buildingManager";
 import { seedManager } from "./Manager/seedManager";
@@ -16,6 +16,7 @@ import { VisibilitySystem } from "./UI/VisibilitySystem";
 import { AudioManager } from "./Manager/AudioManager";
 import { WallPlacementController } from "./Controllers/WallPlacementController";
 import { Wall } from "./buildings/Wall";
+import { UI_ITEM_TYPES } from "./UI/UIConstants";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -51,6 +52,8 @@ export class Map{
     static cameraBounds;
     static worldPines = [];
     static worldStones = [];
+    static worldSpawners = [];
+
 
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
@@ -494,6 +497,31 @@ export class Map{
             else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
+        const scene = this.scene;
+        const startCfg = scene?.startCfg ?? scene?.draftStartCfg;  // pick whichever you actually store
+        const s = startCfg?.supplies;
+
+        if (s) {
+            const team1 = Teams.teamLists["1"];
+            const storage = team1?.storageList?.[0];
+            if (storage) {
+                // nuke defaults created in StorageBuilding constructor
+                storage.storageItems = Array(storage.capacity).fill(null);
+
+                // map startCfg keys -> UI item types used by StorageBuilding
+                const add = (type, amount) => {
+                const n = Math.max(0, Math.floor(amount ?? 0));
+                if (n > 0) storage.addItem(type, n);
+                };
+
+                add(UI_ITEM_TYPES.seedCrop,   s.seeds);
+                add(UI_ITEM_TYPES.seedBerry,  s.berries);
+                add(UI_ITEM_TYPES.food,       s.food);
+                add(UI_ITEM_TYPES.wood,       s.wood);
+                add(UI_ITEM_TYPES.stone,      s.stone);
+                add(UI_ITEM_TYPES.clean_water, s.clean_water);
+            }
+        }
         // map.js — after the draw loop inside drawBuildings(), add:
         const townLightSources = [];
         for (let i = 0; i < buildingArray.length; i++) {
@@ -618,8 +646,11 @@ export class Map{
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
                     const name = type.name;
                     this.drawGridValue(x, y, 0);
-                    if (type && type.spread) {
-                        this.drawGridValue(x, y, 1)
+                    // Always draw top layer for walls/doors (even though they're not spread)
+                    if (Wall.isWallOrDoorCell(this.grid[y][x])) {
+                        buildingManager.makeWallNoBuild(x,y, this.grid[y][x][1]);
+                    } else if (type && type.spread) {
+                        this.drawGridValue(x, y, 1);
                     }
                 } else {
                     this.drawGridValue(x, y);
@@ -679,6 +710,29 @@ export class Map{
         return node;
     }
 
+
+    // Convenience for bulk painting rectangles
+    static fillGroundRect(x0, y0, w, h, tileType) {
+        for (let y = y0; y < y0 + h; y++) {
+            for (let x = x0; x < x0 + w; x++) {
+            if (!this.grid[y] || this.grid[y][x] == null) continue;
+            this.setGroundTile(x, y, tileType);
+            }
+        }
+    }
+
+    static setGroundRect(x, y, w, h, tileType = "dirt") {
+    this.fillGroundRect(x, y, w, h, tileType);
+    }
+
+    static setWater(x, y) {
+    this.setGroundTile(x, y, "water");
+    }
+
+    static setWaterRect(x, y, w, h) {
+    this.fillGroundRect(x, y, w, h, "water");
+    }
+    
     static drawGridValue(x, y, index = -1) {
         const cell = this.grid[y]?.[x];
         if (cell == null) return;
@@ -885,6 +939,60 @@ export class Map{
         return overlays.filter(Boolean);
     }
 
+// --- map.js (DROP-IN REPLACEMENT) -----------------------------------------
+
+// Kill whatever sprites we previously stored for this cell in Map.blocks
+static _clearStoredCellSprites(gx, gy) {
+  const idx = gy * WORLD_DIMENSIONX + gx;
+  const existing = this.blocks[idx];
+  if (!existing) return;
+
+  // existing can be sprite OR [floorSprite, blockSprite] OR nested arrays of sprites
+  this._destroyNode(existing);
+  this.blocks[idx] = null;
+}
+
+// Returns true if val (numeric tile code) maps to water
+static _isWaterVal(val) {
+  return TILE_MAP(val) === "water";
+}
+
+// map.js
+static setGroundTile(gx, gy, tileType) {
+  const def = TILE_TYPES[tileType];
+  if (!def) return;
+  if (!this.grid?.[gy] || this.grid[gy][gx] == null) return;
+
+  // 1) Actually WRITE the grid value, using the same placement logic as the rest of the game.
+  if (def.complex) {
+    // placeTile will update this cell + potentially adjust neighbor tile VALUES
+    this.placeTile(gx, gy, tileType);
+  } else {
+    // simple tiles must still update the grid, not just draw
+    // (checkAndPlace exists in Map and is used elsewhere for writing grid cells)
+    const depth = (def.depth != null) ? def.depth : FLOORDEPTH;
+    this.checkAndPlace(gx, gy, def.grid, depth);
+  }
+
+
+  // 3) Nav grids: only the current cell's passability changes here
+  const blocks = (tileType === "water" || tileType === "wall" || tileType === "woodWall");
+  this.navGrid[gy][gx] = blocks ? 0 : 1;
+  this.enemyNavGrid[gy][gx] = blocks ? 0 : 1;
+}
+
+// Bulk paint helper
+static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
+  for (let y = y0; y < y0 + h; y++) {
+    if (!this.grid[y]) continue;
+    for (let x = x0; x < x0 + w; x++) {
+      if (this.grid[y][x] == null) continue;
+      this.setGroundTile(x, y, tileType, opts);
+    }
+  }
+}
+
+    // --- /map.js --------------------------------------------------------------
     static handleGridDelete(block, type, x, y){
         if(type.name == "wall" || type.name == "woodWall" || type.name == "wall_door" || type.name == "woodWall_door"){
             const idx = y * WORLD_DIMENSIONX + x;
@@ -1054,9 +1162,10 @@ export class Map{
                 return val;
             }
             if(this.grid[y][x] && pairUnder && Array.isArray(this.grid[y][x]) && def.block){
-                this.handleGridDelete(null, def, x, y);
-                this.grid[y][x] = [this.grid[y][x], val];
-                if (draw) this.drawGridValue(x,y,1);
+                this._destroyNode(this.blocks[y*WORLD_DIMENSIONX+x]);
+                this.grid[y][x] = [pairUnder
+                    , val];
+                if (draw) this.drawGridValue(x,y);
                 return val;
             }
             this.grid[y][x] = (pairUnder != null) ? [pairUnder, val] : val;
@@ -1065,7 +1174,7 @@ export class Map{
         };
 
         // bounds guard for water
-        if (def.name === "water" && (x < 0 || y < 0 || x > this.grid[0].length-1 || y > this.grid.length-1)) {
+        if (def.name === "water" && (x < 1 || y < 1 || x > this.grid[0].length-2 || y > this.grid.length-2)) {
             return write(def.interior);
         }
 
@@ -1214,6 +1323,10 @@ export class Map{
     }
 
     static handleLoadNonSpread(posX,posY,item,index=-1){
+        if(item == TILE_TYPES.pine){
+            this.addBlockItem(posX,posY,item)
+            return new PineTree(posX, posY);
+        }
         if(item.name == 'turret'){
             Turret.baseItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[0])
                 .setDepth(item.depth) 
@@ -1223,6 +1336,8 @@ export class Map{
             const itemToPlace = Turret.baseItem;
             Turret.topItem.team = turretTeams[`${posX},${posY}`]
             const top = Turret.topItem
+            this._worldAdd(top);
+            this._worldAdd(itemToPlace);
             this.addBlockItem(posX,posY,item)
             itemToPlace.setInteractive();
             itemToPlace.sx = posX
@@ -1308,6 +1423,7 @@ export class Map{
                 });
                 if (item.name === 'pine') Map.worldPines.push(itemToPlace);
                 if (item.name === 'rock') Map.worldStones.push(itemToPlace);
+                this._worldAdd(itemToPlace);
             }
             itemToPlace.on('pointerover', () => {
                 if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
@@ -1336,6 +1452,7 @@ export class Map{
                 }
             });
             this.placingItem = null;
+            return itemToPlace;
         }
     }
 

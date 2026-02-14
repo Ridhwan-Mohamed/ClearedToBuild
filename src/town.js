@@ -59,7 +59,7 @@ export function setupTownBoundsToggle(scene) {
     });
   }
 
-export function generateTown(grid, buildings, teamNumber, startX = -1, startY = -1, navGrid = Map.navGrid) {
+export function generateTown(grid, buildings, teamNumber, startX = -1, startY = -1, navGrid = null, tag = null) {
     grid = structuredClone(grid);
     buildings = structuredClone(buildings);
     let gridWidth = grid[0].length;
@@ -83,7 +83,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
         }
     }
     const firstIndex = buildingArray.length;
-    placeBuilding(grid, townCenterX, townCenterY, buildings[0], navGrid, teamNumber);
+    placeBuilding(grid, townCenterX, townCenterY, buildings[0], teamNumber, navGrid, tag);
     const center = getValidCenterTile(townCenterX, townCenterY, buildings[0])
     Teams.teamLists[`${teamNumber}`].center[0] = center.tx
     Teams.teamLists[`${teamNumber}`].center[1] = center.ty
@@ -102,7 +102,7 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                 if(canFit.success){
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
                     if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
-                    placeBuilding(grid, canFit.x, canFit.y, curBuilding, navGrid, teamNumber);
+                    placeBuilding(grid, canFit.x, canFit.y, curBuilding, teamNumber, navGrid, tag);
                     buildings.splice(i, 1);
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding, teamNumber);
                     outerRoads.push(newOuterRoads); // Add new surrounding roads
@@ -223,12 +223,12 @@ export function placeSpawns(grid, navGrid) {
 }
 
 // Function to place a building
-function placeBuilding(grid, x, y, building, navGrid, teamNumber) {
-    buildingArray.push([x,y,building,teamNumber])
+function placeBuilding(grid, x, y, building, teamNumber, navGrid = null, tag = null) {
+    buildingArray.push([x,y,building,teamNumber,tag])
     for (let i = 0; i < building.lenY; i++) {
         for (let j = 0; j < building.lenX; j++) {
             grid[y + i][x + j] = [TILE_TYPES.road.grid,building.grid]; // Mark as building
-            navGrid[y + i][x + j] = 0
+            if(navGrid) navGrid[y + i][x + j] = 0;
         }
     }
 }

@@ -11,6 +11,7 @@ import { AudioManager } from "./AudioManager"
 export class blockResourceManager{
 
     static NavMeshUpdater;
+    static EnemyNavMeshUpdater;
     static scene;
     static woodBreakDuration = 1500;
     static rockBreakDuration = 2500
@@ -106,6 +107,7 @@ export class blockResourceManager{
                     }
                     
                     this.NavMeshUpdater.blockTiles(blockTiles, true);
+                    this.EnemyNavMeshUpdater.blockTiles(blockTiles, true);
                     buildingManager.removeBuildingFromArray(task.x, task.y);
                     VisibilitySystem.onOccluderChangedRect(task.x, task.y, task.type.lenX, task.type.lenY, /*isBlock=*/false);
                 }

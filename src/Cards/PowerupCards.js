@@ -16,6 +16,7 @@ import { ClayOven } from '../buildings/ClayOven'
 import { buildingManager } from '../Manager/buildingManager'
 import { StaminaManager } from '../Manager/staminaManager'
 import { weapons } from '../weapons'
+import { Builder } from '../players/Builder'
 
 export function loadCardData(scene){
     scene.load.image('icon_speed_boots', icon_speed_boots);
@@ -103,7 +104,24 @@ export const POWERUP_CARDS = [
             Forager.speed /= 2
         }
     },
-
+    {
+        id: "builder_speed_2x",
+        image: "icon_speed_boots",
+        name: "Bolstrous Builders",
+        text: "Builders move 2x faster.",
+        type: "player",
+        target: "Builders",
+        OUTLINE: "#4433ff", // forager tint
+        probability: 15,
+        apply: () => {
+            console.log("Apply 2x speed to Builders");
+            Builder.speed *= 2
+        },
+        remove: () => {
+            console.log("Removing 2x speed to Builders");
+            Builder.speed /= 2
+        }
+    },
     // ===== STAMINA EFFICIENCY – 50% less stamina burn =====
     {
         id: "farmer_stamina_half",
@@ -177,7 +195,24 @@ export const POWERUP_CARDS = [
             Forager.stamina *= 2;
         },
     },
-
+    {
+        id: "builder_stamina_half",
+        image: "icon_battery",
+        name: "Efficient Builders",
+        text: "Builders use 50% less stamina over time.",
+        type: "player",
+        target: "Builders",
+        OUTLINE: "#4433ff",
+        probability: 15,
+        apply: () => {
+            console.log("Apply 50% stamina efficiency to Builders");
+            Builder.stamina /= 2;
+        },
+        remove: () => {
+            console.log("Removing 50% stamina efficiency to Builders");
+            Builder.stamina *= 2;
+        },
+    },
     // ===== CLAY OVENS – 2x cooking speed =====
     {
         id: "oven_speed_2x",

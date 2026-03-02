@@ -17,6 +17,7 @@ import { AudioManager } from "./Manager/AudioManager";
 import { WallPlacementController } from "./Controllers/WallPlacementController";
 import { Wall } from "./buildings/Wall";
 import { UI_ITEM_TYPES } from "./UI/UIConstants";
+import { TowerBuilding } from "./buildings/Tower";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -32,6 +33,7 @@ const colors = {
 
 export class Map{
     static barrier;
+    static structureBarrier;
     static graphics;
     static grid;
     static navGrid
@@ -493,6 +495,9 @@ export class Map{
                 const level = 1; // or derive from map/seed
                 const pine = new PineTree(buildingArray[i][0], buildingArray[i][1], level);
                 this.worldPines.push(pine);
+            }
+            else if (buildingArray[i][2].name === TILE_TYPES.tower.name){
+                new TowerBuilding(buildingArray[i][0], buildingArray[i][1], buildingArray[i][3], { isFortObjective: true });
             }
             else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
             if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
@@ -1195,30 +1200,31 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             if (B) return write(def.sides.down);
             return write(def.sides.left);
         } else if ((def.name == "wall" || def.name == "woodWall")) {
+
+            const floorUnderHere = this._pickFloorValFromCell(this.grid[y]?.[x]);
+
             if(cnt === 1){
-                if (A) return write(def.sides.right, this.grid[y][x]);
-                if (R) return write(def.sides.up, this.grid[y][x]);
-                if (B) return write(def.sides.left, this.grid[y][x]);
-                return write(def.sides.down, this.grid[y][x]);
+                if (A) return write(def.sides.right, floorUnderHere);
+                if (R) return write(def.sides.up,    floorUnderHere);
+                if (B) return write(def.sides.left,  floorUnderHere);
+                return      write(def.sides.down,  floorUnderHere);
             }
             else if(cnt === 2){
-                // special case for walls: 2 neighbors that are opposite → straight wall
-                if (A && B && !L && !R) return write(def.sides.right, this.grid[y][x]);
-                if (L && R && !A && !B) return write(def.sides.up, this.grid[y][x]);
-                // else corner
-                if (A && L && !R && !B) return write(def.corners.bottomRight, this.grid[y][x]);
-                if (A && R && !L && !B) return write(def.corners.bottomLeft, this.grid[y][x]);
-                if (B && L && !R && !A) return write(def.corners.topRight, this.grid[y][x]);
-                if (B && R && !L && !A) return write(def.corners.topLeft, this.grid[y][x]);
+                if (A && B && !L && !R) return write(def.sides.right,         floorUnderHere);
+                if (L && R && !A && !B) return write(def.sides.up,            floorUnderHere);
+                if (A && L && !R && !B) return write(def.corners.bottomRight, floorUnderHere);
+                if (A && R && !L && !B) return write(def.corners.bottomLeft,  floorUnderHere);
+                if (B && L && !R && !A) return write(def.corners.topRight,    floorUnderHere);
+                if (B && R && !L && !A) return write(def.corners.topLeft,     floorUnderHere);
             }
             else if(cnt === 3){
-                // special case for walls: 3 neighbors → side facing missing one
-                return write(def.interior, this.grid[y][x]);
+                return write(def.interior, floorUnderHere);
             }
             else{
-                return write(def.interior, this.grid[y][x]);
+                return write(def.interior, floorUnderHere);
             }
         }
+
 
         // 2 neighbors: orthogonal → corner; opposite → interior run
         if (A && L && !R && !B) return write(def.corners.bottomRight);
@@ -1371,6 +1377,31 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
                 .setInteractive({ cursor: 'pointer' });
             this.addBlockItem(posX,posY,item)
             const itemToPlace = this.placingItem
+            itemToPlace.startFlash = () => {
+                if (itemToPlace.flashTween) return;
+                itemToPlace.flashTween = Map.scene.tweens.addCounter({
+                    from: 0,
+                    to: 1,
+                    duration: 350,
+                    yoyo: true,
+                    repeat: -1,
+                    onUpdate: (tw) => {
+                        const on = tw.getValue() > 0.5;
+                        if (on) itemToPlace.setTint(0x636363); 
+                        else itemToPlace.clearTint();
+                    }
+                });
+            };
+
+            itemToPlace.stopFlash = () => {
+                if (itemToPlace.flashTween) {
+                    itemToPlace.flashTween.stop();
+                    itemToPlace.flashTween.remove();
+                    itemToPlace.flashTween = null;
+                }
+                itemToPlace.clearTint();
+            };
+            
             itemToPlace.sx = posX + Math.floor(item.lenX)
             itemToPlace.sy = posY + Math.floor(item.lenY)
             itemToPlace.lenX = item.lenX
@@ -1380,26 +1411,38 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             if (item.name === 'pine' || item.name === 'rock') {
                 itemToPlace.resourceType = item.name;
                 itemToPlace.health = 3;
-                // 🟡 outline persists until resource is destroyed
 
                 itemToPlace.on('pointerdown', () => {
+                    const sceneNow = this.scene.time.now;
+
+                    // DOUBLE CLICK: cancel this resource job and stop foragers
+                    if (itemToPlace._lastClickTime && (sceneNow - itemToPlace._lastClickTime) < 300) {
+                        itemToPlace.stopFlash();
+                        blockResourceManager.cancelBlockResourceTask(1, itemToPlace.task || itemToPlace);
+
+                        // remove from resource arrays so it isn’t targeted again
+                        if (item.name === 'pine') {
+                            Map.worldPines = Map.worldPines.filter(v => v !== itemToPlace);
+                        }
+                        if (item.name === 'rock') {
+                            Map.worldStones = Map.worldStones.filter(v => v !== itemToPlace);
+                        }
+                        return;
+                    }
+                    itemToPlace._lastClickTime = sceneNow;
+
+                    // SINGLE CLICK: start flashing when active/queued
+                    itemToPlace.startFlash();
+
                     const teamList = Teams.teamLists['1'].blockResourceList;
-                    const foragerQueue = Teams.teamLists['1'].foragerQueue
+                    const foragerQueue = Teams.teamLists['1'].foragerQueue;
+
                     // ✅ accessibility gate for legacy sprites (pine/rock)
                     if (!buildingManager.isBlockAccessible(posX, posY, item)) {
                         showAlert(this.scene, "Can't reach that resource");
                         return;
                     }
                     if (!itemToPlace.task) {
-                        // Create a new task if none exists
-                        if (!itemToPlace.queuedOutline) {
-                            itemToPlace.queuedOutline = Map.scene.add.graphics();
-                            itemToPlace.queuedOutline.setDepth(UIDEPTH);
-                            itemToPlace.queuedOutline.lineStyle(2, 0xffff00, 1);
-                            const xStart = itemToPlace.x-(itemToPlace.lenX/2*SQUARESIZE)
-                            const yStart = itemToPlace.y-(itemToPlace.lenY/2*SQUARESIZE)
-                            itemToPlace.queuedOutline.strokeRect(xStart, yStart, SQUARESIZE*itemToPlace.lenX, SQUARESIZE*itemToPlace.lenY);
-                        }
                         const task = {
                             x: posX,
                             y: posY,

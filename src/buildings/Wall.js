@@ -1,7 +1,8 @@
 // Wall.js
-import { Map as GameMap } from "../map";
+import { Map as GameMap } from "../map.js";
 import { TILE_MAP, TILE_TYPES, SQUARESIZE } from "../constants";
 import { WallPlacementController } from "../Controllers/WallPlacementController";
+import { Teams } from "../Teams";
 
 export class Wall {
   // registry by "x,y"
@@ -59,7 +60,7 @@ export class Wall {
   }
 
   // ---- creation / ensure
-  static ensureAt(scene, x, y) {
+  static ensureAt(scene, x, y, team = 1) {
     const cell = GameMap.grid?.[y]?.[x];
     if (cell == null) return null;
     if (!this.isWallOrDoorCell(cell)) return null;
@@ -73,7 +74,7 @@ export class Wall {
 
     // If none exists (or it was deactivated), create fresh.
     if (!w || !w.active) {
-      w = new Wall(scene, x, y, v);
+      w = new Wall(scene, x, y, team, v);
       this.byCell.set(k, w);
       return w;
     }
@@ -116,15 +117,51 @@ export class Wall {
 
       if (w.isDoor) {
         w.sprite = scene.add.sprite(cx, cy, w.doorKey, 0);
+        w.sprite.setScale(0.05);
+        scene.tweens.add({
+            targets: w.sprite,
+            scaleX: 1,
+            scaleY: 1,
+            ease: "Back.easeOut",
+        });
         w.sprite.setAngle(WallPlacementController.doorAngleForCell(GameMap.grid, x, y, w.doorKey));
         WallPlacementController.bindDoorSprite(scene, w.sprite);
       } else {
         w.sprite = scene.add.sprite(cx, cy, w.baseKey, 0);
-
+        w.sprite.setScale(0.05);
+        scene.tweens.add({
+            targets: w.sprite,
+            scaleX: 1,
+            scaleY: 1,
+            duration: 120,
+            ease: "Back.easeOut",
+        });
         // angle depends on numeric grid val (edge/corner)
         const ang = WallPlacementController._angleForWallPiece(v);
         w.sprite.setAngle(ang);
       }
+
+      // ✅ create/refresh collider (invisible)
+      if (w.collider) {
+        GameMap.structureBarrier?.remove(w.collider, true, true);
+        w.collider = null;
+      }
+
+      w.collider = scene.physics.add.staticImage(w.sprite.x, w.sprite.y, "barrier");
+      w.collider.setAlpha(0);
+
+      // IMPORTANT: use setSize (physics), then refreshBody (bakes it)
+      w.collider.setSize(SQUARESIZE, SQUARESIZE);
+      w.collider.refreshBody();
+
+      // tie back to wall
+      w.collider.wallRef = w;
+
+      // add to group
+      GameMap.structureBarrier.add(w.collider);
+
+      // make clickable (you already have sprite; ensure interactive if needed)
+      w.sprite.setInteractive({ useHandCursor: true });
 
       const def = w.isDoor
         ? TILE_TYPES[w.doorKey]
@@ -175,19 +212,27 @@ export class Wall {
   // ---- destruction entrypoint
   static destroyAt(x, y) {
     const w = this.getAt(x, y);
+
+    if (w?.collider) {
+      GameMap.structureBarrier?.remove(w.collider, true, true);
+      w.collider.destroy();
+      w.collider = null;
+    }
+
+    if (w?.sprite) {
+      w.sprite.destroy();
+      w.sprite = null;
+    }
+
     if (w) w.destroy();
-
-    // Replace grid tile to grass WITHOUT going through Map.drawGridValue
-    // (we don't want redraw to own these)
-    GameMap.grid[y][x] = TILE_TYPES.grass.grid;
-
     return true;
   }
 
-  constructor(scene, x, y, gridVal) {
+  constructor(scene, x, y, team, gridVal) {
     this.scene = scene;
     this.x = x;
     this.y = y;
+    this.team = team;
 
     const kind = Wall.kindFromGridVal(gridVal);
     if (!kind) {
@@ -199,6 +244,7 @@ export class Wall {
     this.isDoor = kind.isDoor;
     this.baseKey = kind.baseKey;  // e.g. wall_edge / wall_corner / wall_interior / woodWall_edge...
     this.doorKey = kind.doorKey;  // e.g. wall_door / woodWall_door
+    this.tileType = TILE_TYPES.wall
 
     const hpKey =
       this.material === "stone"
@@ -226,6 +272,31 @@ export class Wall {
       const ang = WallPlacementController._angleForWallPiece(gridVal);
       this.sprite.setAngle(ang);
     }
+
+    // Wall.js (inside Wall ctor / ensureAt creation)
+    this.sprite.setOrigin(0.5);
+
+    // ✅ make clickable (if not already)
+    this.sprite.setInteractive({ useHandCursor: true });
+
+    // // ✅ create collider for projectile collisions
+    this.collider = scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
+    this.collider.setDisplaySize(SQUARESIZE, SQUARESIZE).setAlpha(0);
+    this.collider.refreshBody();              // <-- REQUIRED for static bodies after resize
+    GameMap.structureBarrier.add(this.collider);
+    
+
+    this.collider.wallRef = this;
+    this.collider.isWall = true;
+    this.collider.team = team;
+
+
+    // ✅ backref so collision handler can identify a wall
+    this.sprite.wallRef = this;
+    this.sprite.isWall = true;
+
+
+    this._wireEnemyClick();
 
     // depth: use the underlying type for depth
     const def = this.isDoor
@@ -282,6 +353,46 @@ export class Wall {
     this.sprite.setFrame(this._doorFrameFor(this.phase, this.isOpen));
   }
 
+  _wireEnemyClick() {
+    if (!this.sprite || !this.sprite.setInteractive || !this.scene) return;
+
+    this.sprite.removeAllListeners?.("pointerdown");
+    this.sprite.setInteractive({ cursor: "pointer" });
+    this.sprite.team = this.team;
+
+    this.sprite.on("pointerdown", () => {
+      const playerTeam = 1;
+      if (this.team === playerTeam) return;
+
+      const list = Teams.teamLists[playerTeam];
+      if (!list) return;
+
+      const cell = GameMap.grid?.[this.y]?.[this.x];
+      const topVal = Array.isArray(cell) ? cell[1] : cell;
+
+      const task = {
+        x: this.x,
+        y: this.y,
+        duration: 3000,
+        type: TILE_TYPES[TILE_MAP(topVal)],
+        originalGridVal: topVal,
+        assigned: 0,
+      };
+
+      const exists = list.enemyDestroyTileStates?.some(
+        t => t?.x === task.x && t?.y === task.y && t?.type === task.type
+      );
+
+      if (exists) Teams.removeFromStateArray(playerTeam, "enemyDestroyTileStates", task);
+      else Teams.addToStateArrayIfNotExists(playerTeam, "enemyDestroyTileStates", task);
+
+      // click flash: dark → normal
+      this.sprite.setTint(0x666666);
+      this.scene.time.delayedCall(120, () => {
+        if (this.sprite?.active) this.sprite.clearTint();
+      });
+    });
+  }
 
   damage(amount) {
     if (!this.active) return false;
@@ -326,9 +437,24 @@ export class Wall {
     if (!this.active) return;
     this.active = false;
 
+    // ✅ remove collider
+    if (this.collider) {
+      GameMap.structureBarrier?.remove(this.collider, true, true);
+
+      // ✅ critical: static bodies can keep colliding unless explicitly destroyed
+      this.collider.destroy();
+
+      this.collider = null;
+    }
+    
+    if (Array.isArray(GameMap.grid[this.y][this.x])) {
+      GameMap.grid[this.y][this.x] = GameMap.grid[this.y][this.x][0]; // restore to base numeric value
+    }else{
+      GameMap.grid[this.y][this.x] = TILE_TYPES.grass.grid; // empty
+    }
+
     // remove sprite
     if (this.sprite) {
-      // doorGroup has dead children sometimes; Phaser tolerates destroy()
       this.sprite.destroy();
       this.sprite = null;
     }
@@ -336,4 +462,5 @@ export class Wall {
     // remove registry
     Wall.byCell.delete(Wall.keyFor(this.x, this.y));
   }
+
 }

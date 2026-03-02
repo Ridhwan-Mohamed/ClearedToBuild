@@ -104,7 +104,7 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 12,
-    lenX: 3, lenY: 3,
+    lenX: 4, lenY: 4,
     depth: BLOCKDEPTH+2,
     resource: UI_ITEM_TYPES.wood,
     images: ['pine1','pine2','pine3']
@@ -326,7 +326,7 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 46,
-    lenX: 2, lenY: 2,
+    lenX: 3, lenY: 3,
     depth: BLOCKDEPTH+2,
     resource: UI_ITEM_TYPES.stone,
     images: ['rock1','rock2','rock3']
@@ -389,6 +389,66 @@ export const TILE_TYPES = {
     spriteSheet: true,
     complex: false,
     price: { wood: 1 }
+  },
+  fort_floor : {
+    name: "fort_floor",
+    spread: true,
+    block: false,
+    complex: true,
+    grid: 68,                 // interior code (kept the same)
+    interior: 68,             // interior
+    island:   69,             // island (cap)
+    sides:    { up: 70, down: 71, left: 72, right: 73 },
+    corners:  { topLeft: 74, topRight: 75, bottomLeft: 76, bottomRight: 77 },
+    depth: FLOORDEPTH,
+    assets: {
+      interior: { key: 'fort_interior', sheet: false },
+      island:   { key: 'fort_island',   sheet: false },
+      edge:     { key: 'fort_edge',     sheet: false },
+      corner:   { key: 'fort_corner',   sheet: false }
+    }
+  },
+  tower :  {
+    name: "tower",
+    value: "tower",
+    spriteSheet: true,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 78,
+    depth: BLOCKDEPTH,
+    lenX: 5, lenY: 5,
+    stayBlocked: true,
+  },
+    // ── Fort enemy buildings (64x64 sheets, 2 frames) ──
+  prison: {
+    name: "prison",
+    value: "prison_closed",
+    spriteSheet: true,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 79,
+    depth: BLOCKDEPTH,
+    lenX: 4,
+    lenY: 4,
+    maxHealth: 450,
+    stayBlocked: true, 
+  },
+
+  bank: {
+    name: "bank",
+    value: "bank_closed",
+    spriteSheet: true,
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 80,
+    depth: BLOCKDEPTH,
+    lenX: 4,
+    lenY: 4,
+    maxHealth: 500,
+    stayBlocked: true,
   },
 };
 
@@ -482,7 +542,22 @@ export const TILE_ARR = [
   'wood_blcWall', // 64
   'wood_brcWall', // 65
   'wall_door',     // 66 wall door
-  'woodWall_door'  // 67 wood wall door
+  'woodWall_door',  // 67 wood wall door
+
+  'fort_interior', // 68 fort floor interior
+  'fort_island',   // 69 fort floor island
+  'fort_edge',     // 70 fort floor edge
+  'fort_edge',     // 71 fort floor edge (flipped)
+  'fort_edge',     // 72 fort floor edge (rotated)
+  'fort_edge',     // 73 fort floor edge (rotated+flipped)
+  'fort_corner',   // 74 fort floor corner (TL)
+  'fort_corner',   // 75 fort floor corner (TR)
+  'fort_corner',   // 76 fort floor corner (BL)
+  'fort_corner',   // 77 fort floor corner (BR)
+
+  'tower',      // 78
+  'prison_closed', // 79
+  'bank_closed',   // 80
 ];
 
 // --- TILE_MAP (full) ---
@@ -519,6 +594,12 @@ export function TILE_MAP(val){
   else if (val >= 57 && val <= 65) return "woodWall";
   else if (val == 66) return "wall_door";
   else if (val == 67) return "woodWall_door";
+  else if (val >= 68 && val <= 77) return "fort_floor";
+  else if (val == 78) return "tower";
+  else if (val == 79) return "prison";
+  else if (val == 80) return "bank";
+
+  return null;
 }
 
 
@@ -587,9 +668,9 @@ export function clearTaskPlusTimer(sprite){
 export const gridColors = {
     water:  0x3cb8f1,
     wall: 0x808080,
-    woodWall: 0x808080,
+    woodWall: 0x65350f,
     wall_door: 0x5a5a5a,
-    wall_door: 0x5a5a5a,
+    woodWall_door: 0x2e1503,
     dirt:   0x4c2b18,
     grass:  0x33cc33,
     house1: 0x8b0000,
@@ -605,6 +686,7 @@ export const gridColors = {
     pine: 0x006400,
     rock: 0x5a682b,
     crops: 0xFCF55F,
+    fort_floor: 0x777777,
 };
 
 export const GHOST_ITEM_ICONS = {
@@ -652,7 +734,19 @@ export function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isM
         duration: 600,
         onComplete: () => ghost.destroy()
     });
+
+    scene.uiCamera.ignore(ghost);
 } 
+
+// --- Enemy building hover panel tuning (Bank + Prison) -----------------
+export const ENEMY_BUILDING_HOVER_UI = {
+  // how far above the sprite's TOP the panel sits (bigger = higher)
+  PANEL_Y_OFFSET: 0,
+
+  // text offsets *within* the panel (relative to panel center)
+  LINE1_DY: -9,
+  LINE2_DY: 6,
+};
 
 export function createBubbleText({
     scene,

@@ -11,6 +11,8 @@ export default class PlayerTab {
     this.selected = null;
     this.rows = new Map(); // sprite.id -> { row, hpBar, stBar, nameText, bg }
     this.refreshEvt = null;
+    this.BAR_SEG_UNIT = 25;
+    this.BAR_SEG_GAP  = 1;
 
     // ---- config ----
     this.W = Math.floor(scene.scale.width - 40); // will be constrained by bottom bar
@@ -111,31 +113,61 @@ export default class PlayerTab {
         const rr = (w, h, r, color) =>
             scene.rexUI.add.roundRectangle(0, 0, w, h, r, color);
 
-        function makeBar(width, height, fillColor) {
-            // OverlapSizer so fill sits above background
-            const s = scene.rexUI.add.overlapSizer({ width, height });
+        const makeSegmentedBar = (width, height, fillColor) => {
+        const bg = rr(width, height, 4, 0x353535);
+        const g  = scene.add.graphics();
+        const c  = scene.add.container(0, 0, [bg, g]);
+        c.setSize(width, height);
 
-            const bg   = rr(width, height, 4, 0x353535);
-            const fill = rr(Math.max(1, width - 6), height - 6, 4, fillColor)
-                .setOrigin(0, 0.5);
+        const innerPad = 3;
+        const innerW = width - innerPad * 2;
+        const innerH = height - innerPad * 2;
+        const segUnit = ui.BAR_SEG_UNIT;
+        const gap = ui.BAR_SEG_GAP;
 
-            s.addBackground(bg);
-            s.add(fill, {
-                key: 'fill',
-                align: 'left',
-                expand: false,
-                padding: { left: 3, right: 3 }
-            });
-            s.layout();
+        c.setValues = (cur, max) => {
+            const safeMax = Math.max(0, max ?? 0);
+            const safeCur = Math.max(0, Math.min(cur ?? 0, safeMax || (cur ?? 0)));
+            const segCount = Math.max(1, Math.ceil((safeMax || segUnit) / segUnit));
+            const lastFrac = (safeMax % segUnit) === 0 ? 1 : (safeMax % segUnit) / segUnit;
 
-            s.setPercent = (pct) => {
-                const p = Phaser.Math.Clamp(pct, 0, 1);
-                fill.width = Math.max(1, (width - 6) * p);
-                s.layout();
-            };
+            const totalGap = (segCount - 1) * gap;
+            const baseSegW = Math.max(1, (innerW - totalGap) / segCount);
 
-            return s;
-        }
+            g.clear();
+            const x0 = -width / 2 + innerPad;
+            const y0 = -height / 2 + innerPad;
+
+            g.fillStyle(0x222222, 1);
+            for (let i = 0; i < segCount; i++) {
+            const isLast = (i === segCount - 1);
+            const w = baseSegW * (isLast ? lastFrac : 1);
+            const x = x0 + i * (baseSegW + gap);
+            g.fillRect(x, y0, w, innerH);
+            }
+
+            const filledSegs = (safeCur / segUnit);
+            g.fillStyle(fillColor, 1);
+            for (let i = 0; i < segCount; i++) {
+            const isLast = (i === segCount - 1);
+            const w = baseSegW * (isLast ? lastFrac : 1);
+            const x = x0 + i * (baseSegW + gap);
+            const r = Phaser.Math.Clamp(filledSegs - i, 0, 1);
+            if (r <= 0) continue;
+            g.fillRect(x, y0, w * r, innerH);
+            }
+        };
+
+        c.setValues(0, segUnit);
+        return c;
+        };
+
+        // Detail panel rows now:
+        const hpBar = makeSegmentedBar(BAR_W, BAR_H, 0xFF5A70);
+        const hpVal = scene.add.text(0, 0, '0/0', { fontSize: 12, color: '#EDEDED' });
+
+        const stBar = makeSegmentedBar(BAR_W, BAR_H, 0x69D6FF);
+        const stVal = scene.add.text(0, 0, '0/0', { fontSize: 12, color: '#EDEDED' });
 
         function makeButton(labelText, onClick) {
             const label = scene.rexUI.add.label({
@@ -225,18 +257,16 @@ export default class PlayerTab {
             scene.add.text(0, 0, 'HP', { fontSize: 12, color: '#B0B0B0' }),
             0, 'center', { right: 4 }, false
         );
-        const hpBar = makeBar(BAR_W, BAR_H, 0xFF5A70);
-        hpBar.setPercent(hpPct);
         hpRow.add(hpBar, 0, 'center', 0, false);
+        hpRow.add(hpVal, 0, 'center', 0, false);
 
         const stRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
         stRow.add(
             scene.add.text(0, 0, 'ST', { fontSize: 12, color: '#B0B0B0' }),
             0, 'center', { right: 4 }, false
         );
-        const stBar = makeBar(BAR_W, BAR_H, 0x69D6FF);
-        stBar.setPercent(stPct);
         stRow.add(stBar, 0, 'center', 0, false);
+        stRow.add(stVal, 0, 'center', 0, false);
 
         barsCol.add(hpRow, 0, 'left', 0, false);
         barsCol.add(stRow, 0, 'left', 0, false);
@@ -304,9 +334,18 @@ export default class PlayerTab {
         // ---------- return with setters ----------
         return {
             panel,
-            portrait, // expose portrait
-            setHP(pct) { hpBar.setPercent(pct); },
-            setST(pct) { stBar.setPercent(pct); },
+            portrait, 
+            setHPValues(cur, max) {
+                hpBar.setValues(cur ?? 0, max ?? 0);
+                hpVal.setText(`${cur ?? 0}/${max ?? 0}`);
+            },
+            setSTValues(cur, max) {
+                stBar.setValues(cur ?? 0, max ?? 0);
+                stVal.setText(`${cur ?? 0}/${max ?? 0}`);
+            },
+            // (optional) keep these if you still use pct anywhere
+            setHP(pct) { hpBar.setValues((pct ?? 0) * ui.BAR_SEG_UNIT, ui.BAR_SEG_UNIT); },
+            setST(pct) { stBar.setValues((pct ?? 0) * ui.BAR_SEG_UNIT, ui.BAR_SEG_UNIT); },
             setUnit(u) {
                 detailsText.setText(
                     `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
@@ -462,9 +501,9 @@ export default class PlayerTab {
         team1.sort((a, b) => (this.typeOf(a).localeCompare(this.typeOf(b))) || (a.name || '').localeCompare(b.name || ''));
 
         team1.forEach(sprite => {
-        const row = this.createRow(sprite);
-        this.listBody.add(row, { expand: true });
-        this.rows.set(sprite.id, row.userData);
+            const row = this.createRow(sprite);
+            this.listBody.add(row, { expand: true });
+            this.rows.set(sprite.id, row.userData);
         });
 
         this.listBody.layout();
@@ -507,21 +546,61 @@ export default class PlayerTab {
         );
 
         // helper for mini bars
-        function makeMiniBar(width, height, fillColor) {
-            const s = scene.rexUI.add.overlapSizer({ width, height });
-            const bg   = scene.add.rectangle(0, 0, width, height, 0x222222).setOrigin(0, 0.5);
-            const fill = scene.add.rectangle(0, 0, width, height, fillColor).setOrigin(0, 0.5);
-            s.addBackground(bg);
-            s.add(fill, { key: 'fill', align: 'left', expand: true });
-            return { sizer: s, fill };
+        function makeMiniSegBar(width, height, fillColor, ui) {
+        const bg = scene.add.rectangle(0,0,width,height,0x222222).setOrigin(0,0.5);
+        const g  = scene.add.graphics();
+        const c  = scene.add.container(0,0,[bg,g]);
+        c.setSize(width, height);
+
+        const segUnit = ui.BAR_SEG_UNIT;
+        const gap = ui.BAR_SEG_GAP;
+        const innerPad = 1;
+        const innerW = width - innerPad*2;
+        const innerH = height - innerPad*2;
+
+        c.setValues = (cur, max) => {
+            const safeMax = Math.max(0, max ?? 0);
+            const safeCur = Math.max(0, Math.min(cur ?? 0, safeMax || (cur ?? 0)));
+            const segCount = Math.max(1, Math.ceil((safeMax || segUnit) / segUnit));
+            const lastFrac = (safeMax % segUnit) === 0 ? 1 : (safeMax % segUnit)/segUnit;
+
+            const totalGap = (segCount - 1) * gap;
+            const baseSegW = Math.max(1, (innerW - totalGap) / segCount);
+
+            g.clear();
+            const x0 = -width/2 + innerPad;
+            const y0 = -height/2 + innerPad;
+
+            g.fillStyle(0x111111, 1);
+            for (let i=0;i<segCount;i++){
+            const isLast = i===segCount-1;
+            const w = baseSegW*(isLast?lastFrac:1);
+            const x = x0 + i*(baseSegW+gap);
+            g.fillRect(x,y0,w,innerH);
+            }
+
+            const filledSegs = safeCur / segUnit;
+            g.fillStyle(fillColor,1);
+            for (let i=0;i<segCount;i++){
+            const isLast = i===segCount-1;
+            const w = baseSegW*(isLast?lastFrac:1);
+            const x = x0 + i*(baseSegW+gap);
+            const r = Phaser.Math.Clamp(filledSegs - i, 0, 1);
+            if (r<=0) continue;
+            g.fillRect(x,y0,w*r,innerH);
+            }
+        };
+
+        c.setValues(0, segUnit);
+        return c;
         }
 
-        const hp = makeMiniBar(90, 6, 0xff4d4d);
-        const st = makeMiniBar(90, 6, 0x4dd2ff);
+        const hp = makeMiniSegBar(90, 6, 0xff4d4d, this);
+        const st = makeMiniSegBar(90, 6, 0x4dd2ff, this);
 
         const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
-            .add(hp.sizer, 0, 'left', 0, false)
-            .add(st.sizer, 0, 'left', 0, false);
+            .add(hp, 0, 'left', 0, false)
+            .add(st, 0, 'left', 0, false);
 
         const row = scene.rexUI.add.sizer({
             orientation: 'x',
@@ -541,8 +620,8 @@ export default class PlayerTab {
         // store refs on row
         row.userData = {
             sprite,
-            hpBar: hp.fill,
-            stBar: st.fill,
+            hpBar: hp,
+            stBar: st,
             nameText: name,
             bg,
             row,
@@ -590,8 +669,12 @@ export default class PlayerTab {
             portraitKey
         });
 
-        this.detailCard.setHP((s.health ?? 0) / 100);
-        this.detailCard.setST((s.stamina ?? 0) / (s.maxStamina || 100));
+        const maxHP = s.maxHealth ?? 100;
+        const maxST = s.maxStamina ?? s.maxStaminaValue ?? 100;
+
+        // Segmented bars + correct labels (current / type max)
+        this.detailCard.setHPValues?.(s.health ?? 0, maxHP);
+        this.detailCard.setSTValues?.(s.stamina ?? 0, maxST);
         this.detailCard.setPrices({ seed: price, sleep: null });
 
         const state = s.state;
@@ -632,8 +715,8 @@ export default class PlayerTab {
             weapon: '—',
             portraitKey: null
         });
-        this.detailCard.setHP(0);
-        this.detailCard.setST(0);
+        this.detailCard.setHPValues?.(100, 100);
+        this.detailCard.setSTValues?.(100, 100);
         this.detailCard.setPrices({ seed: 0, sleep: null });
         this.detailCard.setButtonsLayout?.({
             isFriendly: false,
@@ -715,8 +798,11 @@ export default class PlayerTab {
     }
 
     updateRowBars({ sprite: s, hpBar, stBar }) {
-        hpBar.width = 90 * Math.max(0, Math.min(1, (s.health ?? 0) / 100));
-        stBar.width = 90 * Math.max(0, Math.min(1, (s.stamina ?? 0) / (s.maxStamina || 100)));
+        const maxHP = s.maxHealth ?? 100;
+        const maxST = s.maxStamina ?? s.maxStaminaValue ?? 100;
+
+        hpBar.setValues?.(s.health ?? 0, maxHP);
+        stBar.setValues?.(s.stamina ?? 0, maxST);
     }
 
     typeOf(s) {

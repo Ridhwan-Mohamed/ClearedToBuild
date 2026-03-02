@@ -117,7 +117,7 @@ export class PineTree {
     const c1y = Math.floor((gy1 - 1) / CHUNK_SIZE);
 
     // pine footprint in grid cells
-    const FOOT = 3; // 3x3
+    const FOOT = 4; // 3x3
 
     for (let cy = c0y; cy <= c1y; cy++) {
       for (let cx = c0x; cx <= c1x; cx++) {
@@ -185,29 +185,38 @@ export class PineTree {
 
     // click: either queue block-resource job OR create destroy job
     this.hit.on('pointerdown', () => {
+      const scene = PineTree.scene;
       const team = Teams.teamLists['1'];
       if (!team) return;
 
-      // queue block resource gather job (like the previous sprite logic)
+      // --- double click detect ---
+      const now = scene.time.now;
+      if (this._lastClickTime && (now - this._lastClickTime) < 300) {
+        // DOUBLE CLICK: cancel harvest job + stop flash + remove from queues
+        this.stopFlash();
+        blockResourceManager.cancelBlockResourceTask(1, this.task || this);
+
+        // if you want double click to instantly remove the tree object too:
+        if (this.queuedOutline) { this.queuedOutline.destroy(); this.queuedOutline = null; }
+        this.destroy();
+        return;
+      }
+      this._lastClickTime = now;
+
+      // --- SINGLE CLICK: normal queue behaviour ---
       const teamList = team.blockResourceList;
       const foragerQueue = team.foragerQueue;
 
       if (!buildingManager.isBlockAccessible(this.gridX, this.gridY, TILE_TYPES.pine)) {
-        showAlert(scene, "Can't reach that tree");  // or console.warn
+        showAlert(scene, "Can't reach that tree");
         return;
       }
 
-      if (!this.task) {
-        // draw yellow “queued” outline once
-        if (!this.queuedOutline) {
-          this.queuedOutline = GameMap.scene.add.graphics();
-          this.queuedOutline.setDepth(UIDEPTH);
-          this.queuedOutline.lineStyle(2, 0xffff00, 1);
-          const xStart = this.container.x - (SQUARESIZE * 3) / 2;
-          const yStart = this.container.y - (SQUARESIZE * 3) / 2;
-          this.queuedOutline.strokeRect(xStart, yStart, SQUARESIZE * 3, SQUARESIZE * 3);
-        }
+      // start flashing as soon as it becomes “active/queued”
+      this.startFlash();
 
+
+      if (!this.task) {
         const task = {
           x: this.gridX,
           y: this.gridY,
@@ -229,6 +238,45 @@ export class PineTree {
 
   }
 
+  startFlash() {
+    const scene = PineTree.scene;
+    if (!scene) return;
+
+    // already flashing
+    if (this.flashTween) return;
+
+    // flash by toggling tintFill on/off (reads as “brighter”)
+    this.flashTween = scene.tweens.addCounter({
+      from: 0,
+      to: 1,
+      duration: 350,
+      yoyo: true,
+      repeat: -1,
+      onUpdate: (tw) => {
+        const v = tw.getValue();
+        const on = v > 0.5;
+        const layers = [this.base, this.mid, this.top];
+
+        for (const s of layers) {
+          if (!s) continue;
+          if (on) s.setTint(0x636363);
+          else s.clearTint();
+        }
+      }
+    });
+  }
+
+  stopFlash() {
+    if (this.flashTween) {
+      this.flashTween.stop();
+      this.flashTween.remove();
+      this.flashTween = null;
+    }
+    if (this.base) this.base.clearTint();
+    if (this.mid) this.mid.clearTint();
+    if (this.top) this.top.clearTint();
+  }
+
   applyBlockDamage(remaining) {
     this.health = remaining;
 
@@ -244,7 +292,7 @@ export class PineTree {
       this.setLevel(3);
     } else {
       // destroyed
-      if (this.queuedOutline) { this.queuedOutline.destroy(); this.queuedOutline = null; }
+      this.stopFlash();
       this.destroy();
     }
   }

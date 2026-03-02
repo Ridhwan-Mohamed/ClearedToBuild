@@ -26,6 +26,7 @@ import { DraftStartMenu } from './UI/DraftUI/DraftStartMenu.js';
 import { ParcelSpawnController } from './parcelSpawn/ParcelSpawnController.js';
 import { ParcelManager } from './parcel_system/ParcelManager.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
+import { spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
@@ -783,6 +784,17 @@ export class MainMenu {
                 blockResourceManager.NavMeshUpdater = this.navMeshUpdater;
                 blockResourceManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
             };
+            // --- North Fort (raid/boss island) ---
+            // Spawn immediately so you can see it on load.
+            spawnNorthFort({
+                scene,
+                map: Map,
+                mainIslandOrigin: PARCEL.MAIN_ORIGIN,
+            });
+            // Keep the minimap/overview synced after painting
+            scene.zoomMixer?.buildOverviewTextureFromGrid?.(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+            Map._uiIgnoreWorldLayer?.();
+
             // Fade out everything in menu + loading UI
             const fadeTargets = [scene.menu, scene.logoMini, loading];
             scene.cameras.main.ignore(scene.logoMini);

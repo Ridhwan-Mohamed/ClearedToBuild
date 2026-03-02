@@ -18,6 +18,7 @@ export class ZoomMixer {
 
     this.overviewImage = null;
     this.texKey = 'mapOverview';
+    this.zoomOutLocked = false;
 
     // --- NEW: accel/decel state ---
     this.zoomVel = { v: 0 };
@@ -145,6 +146,8 @@ export class ZoomMixer {
   // Zoom to targetZoom around the camera center (no pointer reference)
   smoothCenterZoomTo(targetZoom, duration = 300, ease = 'Quad.easeInOut') {
     const scene = ZoomMixer.scene;
+    if (!scene) return;
+    if (this.zoomOutLocked || scene.stageCompleteLock) return;
     const cam   = scene.cameras.main;
 
     const mid = cam.midPoint;
@@ -188,6 +191,7 @@ export class ZoomMixer {
     if (mode === 'overview') {
       scene.keyboardSpeed = 30;
       Map.deleteAllGridElements();
+      scene.parcelSpawnUI.setVisible(false);
 
       this.overviewImage.setVisible(true);
       scene.tweens.add({ targets: this.overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
@@ -201,6 +205,7 @@ export class ZoomMixer {
       this.mode = 'overview';
     } else {
       scene.keyboardSpeed = 10;
+      scene.parcelSpawnUI.setVisible(true);
       Map.reDraw();
       scene.tweens.add({
         targets: this.overviewImage,
@@ -232,6 +237,7 @@ export class ZoomMixer {
     this.MAX_ZOOM = maxZoom;
 
     scene.input.on('wheel', (pointer, _gos, _dx, dy, _dz) => {
+      if (this.zoomOutLocked || scene.stageCompleteLock) return;
       const cam = scene.cameras.main;
 
       // --- NEW: set anchor to pointer location (screen) + corresponding world point ---
@@ -397,6 +403,14 @@ export class ZoomMixer {
     }
   }
 
+  setZoomOutLocked(v) {
+    this.zoomOutLocked = !!v;
+
+    if (this.zoomOutLocked && this.mode === "overview") {
+      this.swapMode("detailed", 0);
+    }
+  }
+
   // --- SmoothDamp helpers (accel + decel) ---
   _smoothDamp(current, target, velObj, velKey, smoothTime, dtSec, maxSpeed = Infinity) {
     // critically damped-ish smoothing (Unity-style)
@@ -509,3 +523,4 @@ export function createZoomButtons(scene, opts = {}) {
 
   return ui;
 }
+

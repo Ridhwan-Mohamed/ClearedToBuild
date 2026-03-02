@@ -28,7 +28,7 @@ import player from 'url:./assets/Players/player.png'
 import gun1 from 'url:./assets/Players/gun1.png'
 import playerAction from 'url:./assets/Players/playerAction.png'
 import playerCarry from 'url:./assets/Players/playerCarry.png'
-import { playerDict, setupTownBoundsToggle, townBounds } from './town.js';
+import { playerDict, setupTownBoundsToggle, townBounds, townRoads } from './town.js';
 import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './Manager/buildingManager.js';
@@ -75,6 +75,15 @@ import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
 import { AudioManager } from './Manager/AudioManager.js';
 import { WallPlacementController } from './Controllers/WallPlacementController.js';
 import { WallDestroyController } from './Controllers/WallDestroyController.js';
+import { TowerBuilding } from './buildings/Tower.js';
+import { Bank } from './buildings/Bank.js';
+import { Prison } from './buildings/Prison.js';
+import { TowerPressureController } from './parcel_system/TowerPressureController.js';
+import { StageState } from './parcelController/StageState.js';
+import { loadShipMarketAssets } from './UI/ShipMarket.js';
+import { ensureStageHud } from './UI/StageHud.js';
+import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
+import { respawnNorthFort } from './parcel_system/FortRaidParcel.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -187,8 +196,12 @@ export class mapView extends Phaser.Scene {
         HouseUI.init(this);
         MainMenu.attach(this);
         PineTree.init(this);
+        TowerBuilding.scene = this;
+        Bank.scene = this;
+        Prison.scene = this;
         WallPlacementController.preload(this);
         loadCardData(this);
+        loadShipMarketAssets(this);
     }
 
     create() {
@@ -225,10 +238,32 @@ export class mapView extends Phaser.Scene {
             this
         );
 
-        this.cursors = this.input.keyboard.createCursorKeys();
+        GameMap.structureBarrier = this.physics.add.staticGroup(); // structures (walls/buildings) persistent
+        this.physics.add.collider(
+            Projectile.projectileGroup,
+            GameMap.structureBarrier,
+            Projectile.handleStructureCollision,
+            null,
+            this
+        );
 
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.towerPressureController = new TowerPressureController(this, { /* your opts */ });
+        // explosion spritesheet (single row, 5 frames)
+        this.createAnim('explosions', 0, 10, 4);
+
+        // stage completion lock
+        this.stageCompleteLock = false;
+        this._movementLocked = false;
+
+        // listen for fort destruction
+        StageState.onFortDestroyed(({ stageIndex, meta }) => {
+            this.startStageCompleteSequence(stageIndex, meta);
+        });
+        ensureStageHud(this, { stagesPerSeason: 5 });
+        
         // Variable to store the current text object
-        let currentText;
+        let currentText; 
 
         // Variable to store the current text objects
         let selectionCountText;
@@ -502,6 +537,7 @@ export class mapView extends Phaser.Scene {
     }
 
     handleKeyboardCameraMovement() {
+        if (this.stageCompleteLock || this._movementLocked) return;
         const camera = this.cameras.main;
         const speed = this.keyboardSpeed; // Camera movement speed
         const { width, height } = camera;
@@ -1476,6 +1512,311 @@ cancelFarmSelection(exitFarmMode = false) {
         spr.destroy();
     }
 
+    startStageCompleteSequence(stageIndex, meta) {
+        if (this.stageCompleteLock) return;
+        this.stageCompleteLock = true;
+
+        const cam = this.cameras.main;
+
+        // lock camera/inputs immediately, but keep simulation running for troop evacuation
+        this._movementLocked = true;
+
+        // Send friendlies out of fort before reward selection.
+        this._sendFortPlayersBackToTown(meta?.bounds);
+
+        // Force zoom-in cinematic framing.
+        if (this.zoomMixer) {
+            this.zoomMixer.targetZoom = 1;
+            this.zoomMixer.smoothCenterZoomTo(1, 250);
+        }
+
+        // Disable zoom changes during stage-end sequence.
+        this.zoomMixer?.setZoomOutLocked?.(true);
+
+        this.tweens.add({
+            targets: cam,
+            scrollX: 50 * SQUARESIZE - cam.width / 2,
+            scrollY: 24.5 * SQUARESIZE - cam.height / 2,
+            duration: 450,
+            ease: 'Quad.easeInOut',
+            onComplete: () => {
+                this.zoomMixer?.smoothCenterZoomTo(1, 200);
+
+                AudioManager.playSound('sfx_end_stage_explosions');
+                this.cameras.main.shake(1000, 0.01);
+
+                this.tweens.add({
+                    targets: this.cameras.main,
+                    zoom: { from: 1.01, to: 1 },
+                    duration: 1000,
+                    ease: 'Quad.easeOut'
+                });
+
+                this._playFortExplosions(meta, () => {
+                    this._showStageCompletedGhost(stageIndex);
+
+                    // Wait for evac to finish (or timeout) BEFORE pausing for rewards.
+                    this._waitForFortEvacuation(meta?.bounds, 4500, () => {
+                        this._openFortRewards(stageIndex, meta);
+                    });
+                });
+
+                // fade fort shortly after explosions begin
+                this.time.delayedCall(120, () => {
+                    GameMap.reDraw();
+                    this._fadeOutFortStructures(meta);
+                });
+            }
+        });
+    }
+
+    _openFortRewards(stageIndex, meta) {
+        // Now freeze gameplay for selection.
+        this.clock.paused = true;
+
+        this._activeRewardUI?.destroy?.();
+        this._activeRewardUI = openFortRewardSelection(this, {
+            stageIndex,
+            meta,
+            onComplete: () => {
+                this._activeRewardUI = null;
+
+                // Progress stage/season AFTER reward is chosen.
+                StageState.completeFortCycle({ reason: 'fort_reward_collected' }, { stagesPerSeason: 5 });
+
+                // Fully clear old fort state and spawn the next fort.
+                const mainIslandOrigin = this.parcelManager?.mainIslandOrigin;
+                this._activeFort = respawnNorthFort({
+                    scene: this,
+                    map: GameMap,
+                    mainIslandOrigin,
+                    oldMeta: meta,
+                });
+
+                // Release sequence locks.
+                this._movementLocked = false;
+                this.stageCompleteLock = false;
+                this.clock.paused = false;
+                this.zoomMixer?.setZoomOutLocked?.(false);
+                this._stageHud?.recompute?.();
+                this.events.emit('stage:changed');
+                this.events.emit('season:changed');
+            }
+        });
+    }
+
+    _waitForFortEvacuation(bounds, timeoutMs = 7000, done = null) {
+        if (!bounds) {
+            done?.();
+            return;
+        }
+
+        const startedAt = this.time.now;
+
+        const tick = () => {
+            const elapsed = this.time.now - startedAt;
+            // Keep re-issuing return orders while sequence runs.
+            this._sendFortPlayersBackToTown(bounds);
+
+            const allOut = !this._areFortPlayersStillInside(bounds);
+
+            if (allOut) {
+                done?.();
+                return;
+            }
+
+            if (elapsed >= timeoutMs) {
+                this._forceEvacuateFortPlayers(bounds);
+                done?.();
+                return;
+            }
+
+            this.time.delayedCall(150, tick);
+        };
+
+        tick();
+    }
+
+    _areFortPlayersStillInside(bounds) {
+        const team = Teams.teamLists?.['1'];
+        const players = team?.playerList || [];
+
+        for (const troop of players) {
+            if (!troop?.active || !troop.body) continue;
+
+            const gx = Math.floor(troop.x / SQUARESIZE);
+            const gy = Math.floor(troop.y / SQUARESIZE);
+            const inside = gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
+            if (inside) return true;
+        }
+
+        return false;
+    }
+
+    _sendFortPlayersBackToTown(bounds) {
+        if (!bounds) return;
+
+        const team = Teams.teamLists?.['1'];
+        const players = team?.playerList || [];
+
+        for (const troop of players) {
+            if (!troop?.active || !troop.body) continue;
+
+            const gx = Math.floor(troop.x / SQUARESIZE);
+            const gy = Math.floor(troop.y / SQUARESIZE);
+            const inside = gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
+            if (!inside) continue;
+
+            Teams.sendTroopToTown(troop);
+        }
+    }
+
+    _forceEvacuateFortPlayers(bounds) {
+        if (!bounds) return;
+
+        const roads = townRoads['1'] || [];
+        if (!roads.length) return;
+
+        const team = Teams.teamLists?.['1'];
+        const players = team?.playerList || [];
+
+        for (const troop of players) {
+            if (!troop?.active || !troop.body) continue;
+
+            const gx = Math.floor(troop.x / SQUARESIZE);
+            const gy = Math.floor(troop.y / SQUARESIZE);
+            const inside = gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
+            if (!inside) continue;
+
+            const [tx, ty] = Phaser.Utils.Array.GetRandom(roads);
+            const px = tx * SQUARESIZE + SQUARESIZE / 2;
+            const py = ty * SQUARESIZE + SQUARESIZE / 2;
+
+            troop.setVelocity?.(0, 0);
+            if (typeof troop.body.reset === 'function') {
+                troop.body.reset(px, py);
+            } else {
+                troop.setPosition?.(px, py);
+            }
+
+            Teams.sendTroopToTown(troop);
+        }
+    }
+
+    _getTowerCenter(meta) {
+        const tower = meta?.refs?.tower;
+
+        if (tower?.sprite) {
+            return {
+            x: tower.sprite.x,
+            y: tower.sprite.y
+            };
+        }
+
+        const b = meta?.bounds;
+        return {
+            x: ((b.minx + b.maxx) / 2) * SQUARESIZE,
+            y: ((b.miny + b.maxy) / 2) * SQUARESIZE
+        };
+    }
+
+    _playFortExplosions(meta, onDone) {
+        const bounds = meta?.bounds;
+        const tower = meta?.refs?.tower;
+
+        const spots = [];
+
+        // ⭐ EXACT tower explosion
+        if (tower?.sprite) {
+            spots.push({
+            x: tower.sprite.x,
+            y: tower.sprite.y
+            });
+        }
+
+        // remaining explosions (4 total minimum)
+        const extraCount = Phaser.Math.Between(3, 4);
+
+        for (let i = 0; i < extraCount; i++) {
+            const gx = Phaser.Math.Between(bounds.minx + 1, bounds.maxx - 1);
+            const gy = Phaser.Math.Between(bounds.miny + 1, bounds.maxy - 1);
+
+            spots.push({
+            x: gx * SQUARESIZE + SQUARESIZE / 2,
+            y: gy * SQUARESIZE + SQUARESIZE / 2
+            });
+        }
+
+        let finished = 0;
+
+        spots.forEach(p => {
+            const fx = this.add.sprite(p.x, p.y, 'explosions')
+            .setDepth(9999);
+
+            fx.play('explosions');
+
+            fx.once('animationcomplete', () => {
+            fx.destroy();
+            finished++;
+            if (finished === spots.length) onDone?.();
+            });
+        });
+    }
+
+    _fadeOutFortStructures(meta) {
+        const track = meta?.refs?.fortTrack;
+
+        // Best path: fade ONLY tracked fort sprites
+        if (track?.sprites?.length) {
+            // optionally also disable their physics bodies
+            (track.bodies || []).forEach(b => { try { b.enable = false; } catch(e){} });
+
+            this.tweens.add({
+            targets: track.sprites,
+            alpha: 0,
+            duration: 550,
+            ease: 'Quad.easeInOut',
+            onComplete: () => {
+                track.sprites.forEach(s => { if (s?.destroy) s.destroy(); });
+            }
+            });
+            return;
+        }
+
+        // Fallback (if something was not tracked yet): do nothing.
+    }
+
+    _showStageCompletedGhost(stageIndex) {
+
+        const txt = this.add.text(
+            this.scale.width / 2,
+            this.scale.height / 2,
+            `STAGE ${stageIndex} COMPLETED`,
+            {
+            fontFamily: 'monospace',
+            fontSize: '72px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 8
+            }
+        )
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(99999)
+        .setAlpha(0);
+
+        this.cameras.main.ignore(txt);
+
+        this.tweens.add({
+            targets: txt,
+            alpha: 1,
+            duration: 250,
+            yoyo: true,
+            hold: 1000,
+            onComplete: () => txt.destroy()
+        });
+    }
+
 }
 
 
@@ -1511,3 +1852,13 @@ const config = {
 
 
 new Phaser.Game(config);
+
+
+
+
+
+
+
+
+
+

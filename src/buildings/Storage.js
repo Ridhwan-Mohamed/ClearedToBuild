@@ -20,6 +20,22 @@ export class StorageBuilding {
                 'storage'
             ).setDepth(BLOCKDEPTH)
         );
+        this.sprite.setInteractive({ useHandCursor: true });
+        this.sprite.buildingRef = this;
+        this.sprite.isBuilding = true;
+
+        const tileType = TILE_TYPES.storage || { lenX: 1, lenY: 1 };
+        const w = (tileType.lenX || 1) * SQUARESIZE;
+        const h = (tileType.lenY || 1) * SQUARESIZE;
+
+        this.collider = StorageBuilding.scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
+        this.collider.setDisplaySize(w, h).setAlpha(0);
+        Map.structureBarrier.add(this.collider);
+
+        this.collider.buildingRef = this;
+        this.collider.isBuilding = true;
+        this.collider.team = this.teamNumber;
+
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
 
@@ -394,6 +410,11 @@ export class StorageBuilding {
     destroy() {
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
+
+        if (this.collider) {
+            Map.structureBarrier?.remove(this.collider, true, true);
+            this.collider = null;
+        }
 
         this.sprite?.destroy();
         if (this.healthBarBg) this.healthBarBg.destroy();

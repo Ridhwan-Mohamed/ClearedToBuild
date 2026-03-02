@@ -47,6 +47,19 @@ import pine2 from 'url:./assets/pine2.png'
 import pine1 from 'url:./assets/pine1.png'
 import rock2 from 'url:./assets/rock2.png'
 import rock1 from 'url:./assets/rock1.png'
+import fort_interior from 'url:./assets/fortTiles/fort_interior.png'
+import fort_edge from 'url:./assets/fortTiles/fort_edge.png'
+import fort_corner from 'url:./assets/fortTiles/fort_corner.png'
+import fort_island from 'url:./assets/fortTiles/fort_island.png'
+import tower from 'url:./assets/fortTiles/tower.png'
+import tower_destroyed from 'url:./assets/fortTiles/tower_destroyed.png'
+import prison_closed from 'url:./assets/fortTiles/prison_closed.png'
+import prison_opened from 'url:./assets/fortTiles/prison_opened.png'
+import bank_closed from 'url:./assets/fortTiles/bank_closed.png'
+import bank_opened from 'url:./assets/fortTiles/bank_opened.png'
+import explosions from 'url:./assets/explosion.png'
+import rewardMiniCard from 'url:./assets/reward/mini_card.png'
+import rewardTreasureChest from 'url:./assets/reward/treasure_chest.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -102,11 +115,24 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('road_edge', road_edge); 
         scene.load.image('road_corner', road_corner); 
         scene.load.image('road_island', road_island);
+        scene.load.image('fort_interior', fort_interior);
+        scene.load.image('fort_edge', fort_edge);
+        scene.load.image('fort_corner', fort_corner);
+        scene.load.image('fort_island', fort_island);
         scene.load.image('grassCrop', grassCrop);
         scene.load.image('grassBerry', grassBerry);
         scene.load.image('grassWood', grassWood);
         scene.load.image('grassRock', grassRock);
         scene.load.image('storage', storage);
+        scene.load.spritesheet('tower', tower, { frameWidth: 80, frameHeight: 80});
+        scene.load.spritesheet('tower_destroyed', tower_destroyed, { frameWidth: 80, frameHeight: 80 });
+        scene.load.spritesheet('prison_closed', prison_closed, { frameWidth: 64, frameHeight: 64 });
+        scene.load.spritesheet('prison_opened', prison_opened, { frameWidth: 64, frameHeight: 64 });
+        scene.load.spritesheet('bank_closed', bank_closed, { frameWidth: 64, frameHeight: 64 });
+        scene.load.spritesheet('bank_opened', bank_opened, { frameWidth: 64, frameHeight: 64 });
+        scene.load.spritesheet('explosions', explosions, { frameWidth: 77, frameHeight: 74 });
+        scene.load.image('reward_mini_card', rewardMiniCard);
+        scene.load.spritesheet('reward_treasure_chest', rewardTreasureChest, { frameWidth: 100, frameHeight: 80 });
     }
 
     create() {
@@ -221,4 +247,5 @@ export class itemTab extends Phaser.Scene {
         }
     }
 }
+
 

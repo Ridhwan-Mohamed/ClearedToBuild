@@ -4,6 +4,7 @@ import PlayerTab from "./PlayerTab";
 import StorageTab from "./storageTab";
 import CardsTab from "./CardsTab";   
 import HousesTab from "./HousesTab"
+import BuildTab from "./BuildTab";
 
 const COLOR_DARK = 0x260e04;
 const COLOR_FUNCTIONS = 0x800080;  // Purple
@@ -12,6 +13,7 @@ const COLOR_OVENS     = 0xff0000;  // Red
 const COLOR_STORAGE   = 0x8B4513;  // Brown
 const COLOR_CARDS     = 0xFFD700;  // gold for cards
 const COLOR_BROWNISH  = 0x2d251e;  // brown for house
+const COLOR_BUILD     = 0x002952;  // grey for build tab
 
 // after EXPANDED/COLLAPSED:
 const COLLAPSED = 32;     // how much of the bar stays visible when hidden
@@ -120,11 +122,13 @@ export function CreateBottomBar(scene) {
     if (key !== 'ovens')   scene.clayTab?.hide?.();
     if (key !== 'storage') scene.storageTab?.hide?.();
     if (key !== 'houses')  scene.housesTab?.hide?.();
+    if (key !== 'build') scene.buildTab?.hide?.();
 
     if (key === 'ovens')   scene.clayTab?.onShow?.();
     if (key === 'storage') scene.storageTab?.onShow?.();
     if (key === 'players') scene.playerTab?.onShow?.();
     if (key === 'houses')  scene.housesTab?.onShow?.();
+    if (key === 'build') scene.buildTab?.onShow?.();
   });
 
   // default page
@@ -172,6 +176,7 @@ var CreateButtons = function (scene) {
     space: { left : 0 },
     buttons: [
       CreateLabel(scene, 'Functions', COLOR_FUNCTIONS, TAB_W).setName('functions'),
+      CreateLabel(scene, 'Build', COLOR_BUILD, TAB_W).setName('build'),
       CreateLabel(scene, 'Players',   COLOR_PLAYERS,   TAB_W).setName('players'),
       CreateLabel(scene, 'Clay Ovens',COLOR_OVENS,     TAB_W).setName('ovens'),
       CreateLabel(scene, 'Storage',   COLOR_STORAGE,   TAB_W).setName('storage'),
@@ -240,6 +245,10 @@ var CreatePages = function (scene) {
     ClayOvenTab.ensureBlankTexture(scene);
     pages.add(clayTab.view, { key: 'ovens', expand: true });
     scene.clayTab = clayTab;
+
+    // inside CreatePages(scene) where other tabs are created
+    scene.buildTab = new BuildTab(scene, 0, 0, scene.scale.width, EXPANDED - 40); // pass dimensions to BuildTab
+    pages.add(scene.buildTab.view, { key: 'build', expand: true });
 
     const storageTab = new StorageTab(scene);
     pages.add(storageTab.view, { key: 'storage', expand: true });

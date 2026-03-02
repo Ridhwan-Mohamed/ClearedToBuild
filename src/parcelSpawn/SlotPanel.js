@@ -4,6 +4,7 @@ import { ForestPage } from "./pages/ForestPage.js";
 import { RockPage } from "./pages/RockPage.js";
 import { PressurePage } from "./pages/PressurePage.js";
 import { calcContractCost } from "../constants.js";
+import { MarketPage } from "./pages/MarketPage.js";
 
 export class SlotPanel {
   constructor(scene, cfg) {
@@ -18,13 +19,16 @@ export class SlotPanel {
 
     this._state = "GRID"; // GRID | PAGE
     this._page = null;
+    this._pressureMode = false;
+    this._pressureText = null;
 
     this._buildFrame();
     this._buildGrid();
   }
 
   _buildFrame() {
-    const g = this.scene.add.graphics();
+    this.frameG = this.scene.add.graphics();
+    const g = this.frameG;
     g.setScrollFactor(1);
 
     // Hollow outline (no fill) + subtle inner glass
@@ -43,6 +47,25 @@ export class SlotPanel {
     }).setOrigin(0.5, 0);
     this.header.setScrollFactor(1);
     this.container.add(this.header);
+  }
+
+  _ensurePressureText() {
+    if (this._pressureText) return;
+
+    // Under the header, centered
+    this._pressureText = this.scene.add.text(0, -this.H/2 + 24, "", {
+      fontFamily: "monospace",
+      fontSize: "13px",
+      color: "#ffffff",
+      stroke: "#000000",
+      strokeThickness: 3,
+      align: "center",
+      wordWrap: { width: this.W - 24 }
+    }).setOrigin(0.5, 0);
+
+    this._pressureText.setScrollFactor(1);
+    this._pressureText.setVisible(false);
+    this.container.add(this._pressureText);
   }
 
   _titleForSlot() {
@@ -105,6 +128,7 @@ export class SlotPanel {
     if (type === "FOREST") this._page = new ForestPage(this.scene, this);
     else if (type === "ROCK") this._page = new RockPage(this.scene, this);
     else if (type === "PRESSURE") this._page = new PressurePage(this.scene, this);
+    else if (type === "MARKET") this._page = new MarketPage(this.scene, this);
     else {
       this._page = new BasePage(this.scene, this, {
         title: `${type} (todo)`,
@@ -123,11 +147,13 @@ export class SlotPanel {
 
   back() {
     this._clearPage();
-    this.gridObjects.forEach(o => o.setVisible(true));
+    // When pressure overlay is active, keep grid hidden.
+    this.gridObjects.forEach(o => o.setVisible(!this._pressureMode));
     this._state = "GRID";
   }
 
   resetToGrid() {
+    this.clearPressureState();
     this.back();
   }
 
@@ -147,6 +173,7 @@ export class SlotPanel {
       console.warn("SlotPanel.commit: scene.parcelManager missing");
       return;
     }
+    if (this._pressureMode) return;
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
@@ -167,6 +194,7 @@ export class SlotPanel {
       else if (type === "FARM") pm.startFarm?.(this.id);          // add startFarm below
       else if (type === "MILITIA") pm.startMilitia?.(this.id);    // stub below
       else if (type === "PRESSURE") pm.startPressure(this.id, difficulty);
+      else if (type === "MARKET") pm.startMarket(this.id);
       else console.warn("Unknown contract type:", type);
     } catch (e) {
       console.error("Contract commit failed:", e);
@@ -175,10 +203,149 @@ export class SlotPanel {
       return;
     }
 
-    this.setVisible(false);
+    this.playCloseTween(() => this.setVisible(false));
+  }
+
+  _ensurePressureText() {
+    if (this._pressureText) return;
+
+    // Put it near the top of the panel
+    this._pressureText = this.scene.add.text(
+      0, -this.H/2 + 18,
+      "",
+      { fontFamily: "Arial", fontSize: "16px", color: "#ffffff", align: "center" }
+    ).setOrigin(0.5, 0).setScrollFactor(1).setDepth(9999);
+
+    this.container.add(this._pressureText);
+    this._pressureText.setVisible(false);
+  }
+
+  setPressureCountdown({ remainingText, spawners, enemies, enemyType }) {
+    this._ensurePressureText();
+    this._pressureMode = true;
+
+    // Hide normal UI while pressure is active
+    this.gridObjects?.forEach(o => o.setVisible(false));
+    if (this._page?.container) this._page.container.setVisible(false);
+
+    this._pressureText.setVisible(true);
+    this._pressureText.setText(
+      `⏳ Next raid: ${remainingText}\n` +
+      `Spawners: ${spawners} | Enemies: ${enemies} | Type: ${enemyType}`
+    );
+  }
+
+  setPressureLive({ spawners, enemies, enemyType }) {
+    this._ensurePressureText();
+    this._pressureMode = true;
+
+    this.gridObjects?.forEach(o => o.setVisible(false));
+    if (this._page?.container) this._page.container.setVisible(false);
+
+    this._pressureText.setVisible(true);
+    this._pressureText.setText(
+      `⚠️ RAID IN PROGRESS\n` +
+      `Spawners: ${spawners} | Enemies: ${enemies} | Type: ${enemyType}`
+    );
+  }
+
+  clearPressureState() {
+    this._pressureMode = false;
+    if (this._pressureText) this._pressureText.setVisible(false);
+
+    // Restore normal UI (only if panel is visible)
+    this.gridObjects?.forEach(o => o.setVisible(true));
+    if (this._page?.container) this._page.container.setVisible(true);
   }
 
   setVisible(v) {
+    const was = this.container.visible;
     this.container.setVisible(v);
+
+    if (v && !was) {
+      // if we're being shown after being hidden, open tween
+      this.playOpenTween();
+    }
   }
+
+  playCloseTween(onDone) {
+    // prevent double-trigger
+    if (this._closing) return;
+    this._closing = true;
+
+    const targets = [
+      this.container,
+      this.header,
+      this.frameG,
+      ...(this.gridObjects ?? []),
+    ].filter(Boolean);
+
+    // fade buttons + header + frame
+    this.scene.tweens.add({
+      targets,
+      alpha: 0,
+      duration: 120,
+      ease: "Quad.easeIn",
+    });
+
+    // “frame closes into center” feel: scale down the whole panel container
+    this.container.setOrigin?.(0.5, 0.5); // harmless if container ignores it
+    this.scene.tweens.add({
+      targets: this.container,
+      scaleX: 0.05,
+      scaleY: 0.05,
+      duration: 160,
+      ease: "Back.easeIn",
+      onComplete: () => {
+        this._closing = false;
+        // reset scale for next open
+        this.container.setScale(1);
+        this.container.setAlpha(1);
+        this.header?.setAlpha(1);
+        this.frameG?.setAlpha(1);
+        this.gridObjects?.forEach(o => o.setAlpha?.(1));
+        onDone?.();
+      },
+    });
+  }
+
+  playOpenTween() {
+    // prevent re-open spam
+    if (this._opening) return;
+    this._opening = true;
+
+    // start collapsed
+    this.container.setScale(0.05);
+    this.container.setAlpha(0);
+    this.header?.setAlpha(0);
+    this.frameG?.setAlpha(0);
+    this.gridObjects?.forEach(o => o.setAlpha?.(0));
+
+    // scale open
+    this.scene.tweens.add({
+      targets: this.container,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: 1,
+      duration: 180,
+      ease: "Back.easeOut",
+    });
+
+    // fade in internals slightly after
+    const targets = [
+      this.header,
+      this.frameG,
+      ...(this.gridObjects ?? []),
+    ].filter(Boolean);
+
+    this.scene.tweens.add({
+      targets,
+      alpha: 1,
+      duration: 160,
+      delay: 40,
+      ease: "Quad.easeOut",
+      onComplete: () => { this._opening = false; }
+    });
+  }
+
 }

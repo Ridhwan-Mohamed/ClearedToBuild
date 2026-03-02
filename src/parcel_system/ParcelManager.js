@@ -56,6 +56,43 @@ export class ParcelManager {
 
     return id;
   }
+  startMarket(slotId) {
+    if (this.slotToContractId[slotId]) return null;
+
+    const id = `MARKET_${slotId}_${Date.now()}`;
+    const origin = this.getSlotOrigin(slotId);
+
+    const inst = new ParcelContractInstance({
+      id,
+      type: "MARKET",
+      slotId,
+      origin,
+      scene: this.scene,
+      rng: this.rng,
+      map: this.map,
+      parcelManager: this,
+    });
+
+    this.slotToContractId[slotId] = id;
+    this.contractsById.set(id, inst);
+
+    inst.spawn();
+
+    this.scene.rebuildBothNavMeshes();
+    this.scene.zoomMixer.buildOverviewTextureFromGrid(
+      this.map.grid,
+      SQUARESIZE,
+      (cell) => colorFor(cell)
+    );
+
+    this.map._uiIgnoreWorldLayer();
+
+    // hide slot UI while active
+    const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
+    slotPanel?.setVisible?.(false);
+
+    return id;
+  }
 
 
   _startResource(slotId, type) {
@@ -83,6 +120,12 @@ export class ParcelManager {
     this.scene.rebuildBothNavMeshes();
     this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
     this.map._uiIgnoreWorldLayer();
+
+    // Hide the slot UI while a contract is active (no outline during play)
+    const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
+    slotPanel?.clearPressureState?.();
+    slotPanel?.setVisible?.(false);
+
     return id;
   }
 
@@ -113,6 +156,10 @@ export class ParcelManager {
     this.scene.rebuildBothNavMeshes();
     this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
     this.map._uiIgnoreWorldLayer();
+    // Hide the slot UI while a pressure contract is active (no outline during play)
+    const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
+    slotPanel?.clearPressureState?.();
+    slotPanel?.setVisible?.(false);
     return id;
   }
 
@@ -128,9 +175,18 @@ export class ParcelManager {
       this.scene.updateMoney(+bonus);
     }
 
-    // ✅ re-show the contract UI panel for that slot
-    this.scene.parcelSpawnUI.showSlot(slotId);
+    // If this slot is owned by a standing tower, let the tower controller
+    // immediately restart the countdown UI.
+    const tpc = this.scene.towerPressureController;
+    const ownedByTower = !!tpc?.isSlotUnderTowerPressure?.(slotId);
 
+    if (ownedByTower) {
+      // Tower owns this slot: tower controller will re-show the slot + countdown.
+      tpc?.handleSlotFreed?.(slotId);
+    } else {
+      // Normal slot: re-show the regular contract UI panel.
+      this.scene.parcelSpawnUI.showSlot(slotId);
+    }
   }
 
   notifyRaiderKilled(contractId) {
@@ -143,6 +199,12 @@ export class ParcelManager {
     if (!contractId) return;
     const inst = this.contractsById.get(contractId);
     if (inst) inst.onRaiderSpawned();
+  }
+
+  notifySpawnerDestroyed(contractId, unspawnedCount) {
+    if (!contractId) return;
+    const inst = this.contractsById.get(contractId);
+    if (inst) inst.onSpawnerDestroyed?.(unspawnedCount);
   }
 
   spawnSpawnerBuilding({ gx, gy, contractId, plannedEnemies, spawnIntervalMs }) {

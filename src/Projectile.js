@@ -4,6 +4,7 @@ import { Map } from "./map";
 import { fightManager } from "./Manager/fightManager";
 import { Player } from "./players/Player";
 import { Teams } from "./Teams";
+import { buildingManager } from "./Manager/buildingManager";
 
 export class Projectile {
     static scene;
@@ -60,32 +61,67 @@ export class Projectile {
         const x1 = Math.floor(target.x / SQUARESIZE);
         const y1 = Math.floor(target.y / SQUARESIZE);
 
-        const points = Phaser.Geom.Line.BresenhamPoints(
-            new Phaser.Geom.Line(x0, y0, x1, y1)
-        );
+        // --- NEW: compute "ignore rectangle" if target is a multi-tile building ---
+        // Works if the sprite has buildingRef with x/y in tile coords (your Tower has this.x/this.y)
+        // and TILE_TYPES entry has lenX/lenY.
+        let ignoreMinX = null, ignoreMinY = null, ignoreMaxX = null, ignoreMaxY = null;
 
-        for (const point of points) {
-            const cell = Map.grid[point.y]?.[point.x];
+        const building = target?.buildingRef || null;
+        if (building) {
+            // tile anchor for the building (top-left)
+            const bx = building.x ?? building.tilePos?.tileX;
+            const by = building.y ?? building.tilePos?.tileY;
 
-            if (Array.isArray(cell)) {
-                const key  = TILE_MAP(cell[1]);
-                const type = TILE_TYPES[key];
+            const tt = building.type || building.tileType || null; // depends on how you store it
+            const lenX = tt?.lenX ?? 1;
+            const lenY = tt?.lenY ?? 1;
 
-                // ❌ still block on walls, houses, storage, etc.
-                // ✅ but DO NOT block on water – it's not visually occluding.
-                if (type && type.block && key !== "water") {
-                    return false;
-                }
+            if (Number.isFinite(bx) && Number.isFinite(by)) {
+            ignoreMinX = bx;
+            ignoreMinY = by;
+            ignoreMaxX = bx + lenX - 1;
+            ignoreMaxY = by + lenY - 1;
             }
         }
 
-        return true; // clear shot
+        const line = new Phaser.Geom.Line(x0, y0, x1, y1);
+        const points = Phaser.Geom.Line.BresenhamPoints(line);
+
+        for (const p of points) {
+            // --- NEW: don't let target building block itself ---
+            if (
+            ignoreMinX != null &&
+            p.x >= ignoreMinX && p.x <= ignoreMaxX &&
+            p.y >= ignoreMinY && p.y <= ignoreMaxY
+            ) {
+            continue;
+            }
+
+            const cell = Map.grid[p.y]?.[p.x];
+            if (!Array.isArray(cell)) continue;
+
+            const key = TILE_MAP(cell[1]);
+            const type = TILE_TYPES[key];
+
+            // keep your current rule: water doesn't block; walls/doors don't block LOS
+            const isWallish =
+            type === TILE_TYPES.wall ||
+            type === TILE_TYPES.woodWall ||
+            type === TILE_TYPES.wall_door ||
+            type === TILE_TYPES.woodWall_door;
+
+            if (type && type.block && key !== "water" && !isWallish) {
+            return false;
+            }
+        }
+
+        return true;
     }
 
     static handleCollision(target, projectile) {
         const result = fightManager.calculateHitResultFromWeapon(projectile.weapon);
         if (result.hit) {
-
+        
             // 🔴 Apply on-hit effects to the victim (flash, timer cancel, knockback team 0)
             const attacker = projectile.player || null;
             fightManager.applyHitReaction(target, attacker);
@@ -130,6 +166,132 @@ export class Projectile {
             );
         }
 
+        projectile.destroy();
+    }
+
+    static handleStructureCollision(projectile, hit) {
+        const weapon = projectile.weapon;
+        const result = fightManager.calculateHitResultFromWeapon(weapon);
+
+        // MISS -> text + kill bullet
+        if (!result.hit) {
+            // best-effort text anchor
+            const hx = hit?.x ?? projectile.x;
+            const hy = hit?.y ?? projectile.y;
+
+            showGhostText(
+            Projectile.scene,
+            hx,
+            hy - 10,
+            "MISS",
+            projectile.team,
+            false,
+            true
+            );
+
+            projectile.destroy();
+            return;
+        }
+
+        const dmg = result.damage;
+        const shooter = projectile.player || null;
+        const teamNumber = projectile.team;
+
+        // -----------------------
+        // WALL HIT (tile task)
+        // -----------------------
+        if (hit.wallRef) {
+            const wall = hit.wallRef;
+
+            // If this shot is coming from a destroy task, decrement the TASK duration/HP
+            // rather than random wall HP, so completion uses the same pipeline.
+            const t = shooter?.task;
+
+            // fallback: if you have wall HP system, use it
+            const destroyed = wall.damage(dmg);
+            
+            if (destroyed) {
+                buildingManager._completeDestroyTile(shooter, t, wall.x, wall.y);
+            }
+
+            showGhostText(
+                Projectile.scene,
+                wall.sprite?.x ?? hit.x,
+                (wall.sprite?.y ?? hit.y) - 10,
+                `${result.isCrit ? "CRIT " : ""}${dmg}`,
+                teamNumber,
+                result.isCrit
+            );
+            
+
+            projectile.destroy();
+            return;
+        }
+
+        // -----------------------
+        // BUILDING HIT (block task)
+        // -----------------------
+        if (hit.buildingRef) {
+            const building = hit.buildingRef;
+
+            // If shooter is on a destroy task, decrement shared task duration and call building.onDamaged
+            const t = shooter?.task;
+
+            if (shooter && t) {
+            // ensure we have a max for bar math
+            t.totalDuration = t.totalDuration ?? t.duration;
+
+            t.duration = Math.max(0, t.duration - dmg);
+            // ✅ Keep building HP synced to shared task HP (so UI + later clicks stay correct)
+            if (building) {
+                building.maxHealth = building.maxHealth ?? t.totalDuration;
+                building.health = t.duration;
+            }
+
+            // trigger the old animations + red bar behavior (tower already implements this)
+            const targetObj = t.value?.buildingRef || t.value; // matches your task pattern :contentReference[oaicite:1]{index=1}
+            if (targetObj && typeof targetObj.onDamaged === "function") {
+                targetObj.onDamaged(dmg, t.duration, t.totalDuration);
+            } else if (building && typeof building.onDamaged === "function") {
+                building.onDamaged(dmg, t.duration, t.totalDuration);
+            }
+
+            // floating damage text (still useful even if onDamaged has it)
+            const bx = building.sprite?.x ?? hit.x;
+            const by = building.sprite?.y ?? hit.y;
+            showGhostText(
+                Projectile.scene,
+                bx,
+                by - 10,
+                `${result.isCrit ? "CRIT " : ""}${dmg}`,
+                teamNumber,
+                result.isCrit
+            );
+
+            // FINISH: complete shared task and cleanup others
+            if (t.duration <= 0) {
+                buildingManager._completeDestroyBlock(shooter, t);
+            }
+
+            projectile.destroy();
+            return;
+            }
+
+            // No task: treat as normal "damage building health" path if present
+            if (typeof building.takeDamage === "function") {
+            building.takeDamage(dmg);
+            } else if (typeof building.onDamaged === "function") {
+            // if you store real health, you’d pass current/max; here best-effort:
+            building.onDamaged(dmg, Math.max(0, (building.health ?? 0) - dmg), building.maxHealth ?? building.health ?? 1);
+            building.health = Math.max(0, (building.health ?? 0) - dmg);
+            if (building.health <= 0 && typeof building.destroy === "function") building.destroy();
+            }
+
+            projectile.destroy();
+            return;
+        }
+
+        // unknown structure collider
         projectile.destroy();
     }
 }

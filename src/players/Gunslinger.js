@@ -7,6 +7,10 @@ import { weapons } from '../weapons.js';
 import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { Manager } from '../Manager/Manager.js';
+import { Wall } from '../buildings/Wall.js';
+import { Projectile } from '../Projectile.js';
+
 
 export class Gunslinger {
 
@@ -59,13 +63,119 @@ export class Gunslinger {
         Teams.teamLists[teamNumber].fighterList.push(sprite);
         sprite.destroySelf = () => Gunslinger.destroy(sprite);
 
+        // --- destroy target gate: range + LOS ---
+        sprite._getDestroyTarget = () => {
+            const t = sprite.task;
+            if (!t) return null;
+
+            // Tile-destroy (walls/doors): use tx/ty if present
+            if (sprite.state === CONTROL_STATES.DESTROY_MODE_T) {
+                const tx = t.tx ?? t.x;
+                const ty = t.ty ?? t.y;
+                // Wall is not necessarily a physics object; we use its sprite
+                const wall = Wall.getAt(tx, ty);
+                return wall?.sprite ? wall.sprite : null;
+            }
+
+            // Block-destroy (buildings): task.value is usually a building instance or sprite
+            const obj = t.value?.buildingRef || t.value;
+            if (!obj) return null;
+
+            // ✅ Prefer collider (center) for aiming + LOS + distance
+            if (obj.collider?.active) return obj.collider;
+
+            // else sprite if available
+            if (obj.sprite?.active) return obj.sprite;
+
+            // else raw sprite-like object
+            return obj;        
+        };
+
+        sprite._canShootDestroyTarget = () => {
+            const target = sprite._getDestroyTarget();
+            if (!target || !target.active) return false;
+
+            const dist = Phaser.Math.Distance.Between(sprite.x, sprite.y, target.x, target.y);
+            if (dist > sprite.weapon.range) return false;
+
+            // use projectile LOS check (it already walks Map.grid and blocks on walls etc)
+            return Projectile.hasLineOfSight(sprite, target);
+        };
+
+        // --- if we can't shoot, we should be moving (repath) instead of firing ---
+        sprite._ensureShootPositionOrRepath = () => {
+            if (!sprite.task) return false;
+            if (sprite._canShootDestroyTarget()) return true;
+
+            // cancel any firing loop
+            if (sprite.timer) {
+                sprite.timer.remove(false);
+                sprite.timer = null;
+            }
+
+            // repath toward task center (existing destroy approach logic still works)
+            // IMPORTANT: we don't need adjacency anymore because followPath will stop early once shootable
+            const teamNum = sprite.body.team;
+            const { navMesh, navGrid } = Player._getNavForTroop(sprite);
+
+            const tx = sprite.task.tx ?? sprite.task.x;
+            const ty = sprite.task.ty ?? sprite.task.y;
+
+            const troopX = Math.floor(sprite.x / SQUARESIZE);
+            const troopY = Math.floor(sprite.y / SQUARESIZE);
+            if (!navGrid[troopX]?.[troopY]) return false;
+
+            const path = navMesh.findPath(
+                { x: sprite.x, y: sprite.y },
+                { x: tx * SQUARESIZE + SQUARESIZE / 2, y: ty * SQUARESIZE + SQUARESIZE / 2 }
+            );
+
+            if (path && path.length) {
+                Player.moveTo(sprite, path);
+                return false;
+            }
+
+            // if no path, just fail the gate
+            return false;
+        };
+
         return sprite;
     }
 
     static update(troop) {
         Player.updateTracking(troop);
 
-        if(troop.task || troop.track) {return;}
+        // ✅ If we are destroying, keep validating range+LOS.
+        // If not shootable, cancel firing and repath.
+        if ( troop.task &&
+            (troop.state === CONTROL_STATES.DESTROY_MODE || troop.state === CONTROL_STATES.DESTROY_MODE_T)
+            ) {
+            troop._ensureShootPositionOrRepath?.();
+            return; // we don't want auto-assign logic while task is active
+        }
+
+        if (troop.task || troop.track) { return; }
+
+
+        const team = Teams.teamLists[troop.body.team];
+        if (team?.enemyDestroyTileStates?.length) {
+            Manager.assignOneTroopToAction(
+                troop,
+                team.enemyDestroyTileStates,
+                CONTROL_STATES.DESTROY_MODE_T
+            );
+            return;
+        }
+
+        if (team?.enemyDestroyStates?.length) {
+            Manager.assignOneTroopToAction(
+                troop,
+                team.enemyDestroyStates,
+                CONTROL_STATES.DESTROY_MODE
+            );
+            return;
+        }
+        
         else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);
         }

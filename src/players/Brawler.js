@@ -6,6 +6,7 @@ import { weapons } from '../weapons.js';
 import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { Manager } from '../Manager/Manager.js';
 
 export class Brawler {
 
@@ -62,6 +63,24 @@ export class Brawler {
     static update(troop) {
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
+        const team = Teams.teamLists[troop.body.team];
+        if (team?.enemyDestroyTileStates?.length) {
+            Manager.assignOneTroopToAction(
+                troop,
+                team.enemyDestroyTileStates,
+                CONTROL_STATES.DESTROY_MODE_T
+            );
+            return;
+        }
+
+        if (team?.enemyDestroyStates?.length) {
+            Manager.assignOneTroopToAction(
+                troop,
+                team.enemyDestroyStates,
+                CONTROL_STATES.DESTROY_MODE
+            );
+            return;
+        }
         if (!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam)
             Player.roam(troop);
     }

@@ -14,7 +14,7 @@ export class Turret{
     static placeItem(item){
         this.baseItem = this.scene.add.sprite(0, 0, item.value[0])
             .setAlpha(0.5) // Make it semi-transparent
-            .setDepth(item.depth) 
+            .setDepth(item.depth)
             .setInteractive()
         this.baseItem.blocked = false;
         this.topItem = this.scene.add.sprite(0, 0, item.value[1])

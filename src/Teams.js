@@ -40,6 +40,8 @@ export class Teams {
         buildings: [],
         buildingFixTasks: [],
         siegeTileStates: [],
+        enemyDestroyStates: [],      // spawners + towers (enemy-owned buildings)
+        enemyDestroyTileStates: [],  // enemy walls/doors (tile-based)
       };
   
       // initialize a Set for each control state

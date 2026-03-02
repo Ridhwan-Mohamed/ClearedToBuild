@@ -78,13 +78,12 @@ export class blockResourceManager{
                         task.value.setTexture(frames[idx]);
                     }
                 } else {
+                    if (typeof task.value?.stopFlash === "function") {
+                        task.value.stopFlash();
+                    }
                     if (typeof task.value?.applyBlockDamage === 'function') {
-                        task.value.applyBlockDamage(0); // will self-destroy + clean the outline
+                        task.value.applyBlockDamage(0); // will self-destroy
                     } else {
-                        if (task.value.queuedOutline) {
-                            task.value.queuedOutline.destroy();
-                            task.value.queuedOutline = null;
-                        }
                         task.value.destroy();
                     }
                     let blockTiles = [];
@@ -118,8 +117,6 @@ export class blockResourceManager{
                 sprite.timer = null;
                 if(task.remaining < 0){
                     Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
-                    task.value.queuedOutline.destroy();
-                    value.queuedOutline = null;
                 }
                 const finishedWoodJob = sprite.task?.type == TILE_TYPES.pine;
                 AudioManager.setHarvestActive(sprite, finishedWoodJob ? "wood" : "rock", false);
@@ -127,4 +124,56 @@ export class blockResourceManager{
             });
         }
     }
+
+    static cancelBlockResourceTask(teamNumber, taskOrValue) {
+        const team = Teams.teamLists[`${teamNumber}`];
+        if (!team) return;
+
+        // Accept either a task object or a sprite/value that has .task
+        const task = taskOrValue?.forageType === 'block'
+            ? taskOrValue
+            : (taskOrValue?.task || null);
+
+        if (!task) return;
+
+        // Remove from queues (both places, because your code uses both)
+        Teams.removeFromStateArray(teamNumber, "foragerQueue", task);
+        Teams.removeFromStateArray(teamNumber, "blockResourceList", task);
+
+        if (typeof task.value?.stopFlash === "function") {
+            task.value.stopFlash();
+        }
+
+        // Stop any foragers currently working THIS task
+        const foragers = team.foragerList || [];
+        for (const f of foragers) {
+            if (f?.task !== task) continue;
+
+            // stop timer/anim/audio and clear task
+            if (f.timer) {
+                f.timer.remove(false);
+                f.timer = null;
+            }
+
+            const isWoodJob = task.type === TILE_TYPES.pine;
+            AudioManager.setHarvestActive(f, isWoodJob ? "wood" : "rock", false);
+
+            f.task = null;
+            Teams.movePlayerState(f, CONTROL_STATES.TRACK_MODE);
+            if (f.idle) f.play(f.idle);
+
+            // If no other tasks exist, send back to town; otherwise let them pick a new one
+            if (!team.foragerQueue || team.foragerQueue.length === 0) {
+                Teams.sendTroopToTown(f);
+            } else {
+                Manager.assignOneTroopToAction(f, team.foragerQueue, CONTROL_STATES.TRACK_MODE);
+            }
+        }
+
+        // Clear task on the resource itself (prevents “stuck flashing”)
+        if (task.value?.task === task) {
+            task.value.task = null;
+        }
+    }
+
 }

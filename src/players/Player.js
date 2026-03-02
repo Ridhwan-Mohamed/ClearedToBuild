@@ -33,13 +33,19 @@ export class Player {
     static troops = [];
     static characters;
     static selected = [];
-    // mini health/stamina bars config
-    static MINI_BAR_WIDTH      = 26;
-    static MINI_BAR_HEIGHT     = 3;
-    static MINI_BAR_OFFSET_Y   = 6;      // below the feet
+    // mini health/stamina bars config (segmented)
+    static MINI_BAR_HEIGHT     = 5;
+    static MINI_BAR_OFFSET_Y   = 8;      // below the feet
     static MINI_BAR_HIT_MS     = 2000;   // show for 2s after hit
 
-
+    // Segmentation: each sub-rect represents this many points.
+    // Last segment is truncated when max isn't divisible by this unit.
+    static MINI_BAR_SEG_UNIT   = 20;
+    static MINI_BAR_GAP        = 1;
+    static MINI_BAR_PAD        = 1;
+    static MINI_BAR_MAX_W      = 110;    // clamps on-screen width
+    static MINI_BAR_BASE_SEG_W = 4;      // pre-scale width per segment before clamping
+    
     static init(scene){
         this.scene = scene;
         this.characters = this.scene.physics.add.group({});
@@ -165,7 +171,7 @@ export class Player {
                 if(!Player.scene.checkSufficientBerries(1)) return;
                 Player.scene.updateBerry(-1);
                 StorageManager.consumeItemFromStorage(cube.body.team, UI_ITEM_TYPES.seedBerry);
-                cube.health += 30;
+                cube.health = Math.min(cube.maxHealth, cube.health + 30);
                 return;
             }
             // Clicked an enemy (team 0) → pick a fighter and send it after this target
@@ -399,7 +405,24 @@ export class Player {
             this.setAnimState(sprite, sprite.idle);
             PathDebugDrawer.onPathEnd(sprite); // optional cleanup
             return;
-        } 
+        }
+        
+        // ✅ Gunslinger: if we're in destroy mode and we already have range + LOS, stop pathing and start firing
+        if (
+        sprite?.active &&
+        sprite.isGunslinger &&
+        sprite.task &&
+        (sprite.state === CONTROL_STATES.DESTROY_MODE || sprite.state === CONTROL_STATES.DESTROY_MODE_T)
+        ) {
+            const ok = sprite._canShootDestroyTarget?.();
+            if (ok) {
+                sprite.body.setVelocity(0, 0);
+                sprite.currentPath.length = 0; // stop pathing but keep the path data for now (so we can resume if LOS breaks)
+                // keep path intact (so if LOS breaks we can resume), but start action now
+                this.doAction(sprite);
+                return;
+            }
+        }
 
         // 3) Normal movement logic
         // Player.js - inside followPath(), in the "Normal movement logic" section
@@ -411,7 +434,7 @@ export class Player {
         // Scale speed by stamina ratio
         const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina);
         const currentSpeed = sprite.type.speed * staminaFactor;
-        // if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina);}
+        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina).toFixed(0);}
 
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);
@@ -1451,129 +1474,216 @@ export class Player {
     //------------------------------MINI BAR LOGIC---------------------------
 
     static _ensureMiniBars(troop) {
-        if (troop._miniBarsInit || !this.scene || !troop) return;
-        const scene = this.scene;
+    if (troop._miniBarsInit || !this.scene || !troop) return;
 
-        const W = this.MINI_BAR_WIDTH;
-        const H = this.MINI_BAR_HEIGHT;
+    troop._hpSegBg = [];
+    troop._hpSegFill = [];
+    troop._stSegBg = [];
+    troop._stSegFill = [];
 
-        const isEnemy = troop.body?.team === 0;
+    troop._miniBarsSegCap = 0;
+    troop._miniBarsInit = true;
+    }
 
-        // HP bg + fill
-        const hpBg = scene.add.rectangle(0, 0, W, H, 0x000000, 0.7)
-            .setOrigin(0.5, 0.5)
-            .setDepth(BLOCKDEPTH + 2);
+    static _rebuildMiniBarSegments(troop, segCap) {
+    const scene = this.scene;
+    const H = this.MINI_BAR_HEIGHT;
+    const pad = this.MINI_BAR_PAD;
 
-        const hpFillColor = isEnemy ? 0xff3333 : 0x00ff00;
+    const isEnemy = troop.body?.team === 0;
+    const hpFillColor = isEnemy ? 0xff3333 : 0x00ff00;
+    const stFillColor = 0x0088ff;
 
-        const hpFill = scene.add.rectangle(0, 0, W, H, hpFillColor)
-            .setOrigin(0, 0.5) // left-anchored
-            .setDepth(BLOCKDEPTH + 3);
+    const mkBg = () => scene.add.rectangle(0, 0, 1, H, 0x000000, 0.75)
+        .setOrigin(0, 0.5)
+        .setDepth(BLOCKDEPTH + 2)
+        .setStrokeStyle(1, 0xffffff, 0.25);
 
-        troop._hpBarBg = hpBg;
-        troop._hpBarFill = hpFill;
+    const mkFill = (fillColor) => scene.add.rectangle(0, 0, 1, H - pad, fillColor, 1)
+        .setOrigin(0, 0.5)
+        .setDepth(BLOCKDEPTH + 3);
 
-        // Only create stamina bars for non-enemies
+    while ((troop._miniBarsSegCap || 0) < segCap) {
+        const hpBg = mkBg();
+        const hpFill = mkFill(hpFillColor);
+        scene.uiCamera.ignore(hpBg);
+        scene.uiCamera.ignore(hpFill);
+        troop._hpSegBg.push(hpBg);
+        troop._hpSegFill.push(hpFill);
+
+        // stamina only for friendlies (reduces clutter)
         if (!isEnemy) {
-            const stBg = scene.add.rectangle(0, 0, W, H, 0x000000, 0.7)
-            .setOrigin(0.5, 0.5)
-            .setDepth(BLOCKDEPTH + 2);
-
-            const stFill = scene.add.rectangle(0, 0, W, H, 0x0088ff)
-            .setOrigin(0, 0.5) // left-anchored
-            .setDepth(BLOCKDEPTH + 3);
-
-            troop._stBarBg = stBg;
-            troop._stBarFill = stFill;
-
-            stBg.setVisible(false);
-            stFill.setVisible(false);
-        } else {
-            troop._stBarBg = null;
-            troop._stBarFill = null;
+        const stBg = mkBg();
+        const stFill = mkFill(stFillColor);
+        scene.uiCamera.ignore(stBg);
+        scene.uiCamera.ignore(stFill);
+        troop._stSegBg.push(stBg);
+        troop._stSegFill.push(stFill);
         }
 
-        troop._miniBarsInit = true;
+        troop._miniBarsSegCap++;
+    }
 
-        hpBg.setVisible(false);
-        hpFill.setVisible(false);
+    for (let i = 0; i < troop._miniBarsSegCap; i++) {
+        troop._hpSegBg[i]?.setVisible(false);
+        troop._hpSegFill[i]?.setVisible(false);
+        troop._stSegBg[i]?.setVisible(false);
+        troop._stSegFill[i]?.setVisible(false);
+    }
     }
 
     static _destroyMiniBars(troop) {
-        const keys = ['_hpBarBg', '_hpBarFill', '_stBarBg', '_stBarFill'];
-        keys.forEach(k => {
-            if (troop[k]) {
-            troop[k].destroy();
-            troop[k] = null;
-            }
-        });
-        troop._miniBarsInit = false;
+    const kill = (arr) => {
+        if (!arr) return;
+        for (const o of arr) o?.destroy?.();
+    };
+
+    kill(troop._hpSegBg);
+    kill(troop._hpSegFill);
+    kill(troop._stSegBg);
+    kill(troop._stSegFill);
+
+    troop._hpSegBg = null;
+    troop._hpSegFill = null;
+    troop._stSegBg = null;
+    troop._stSegFill = null;
+
+    troop._miniBarsSegCap = 0;
+    troop._miniBarsInit = false;
+    }
+
+    static _layoutSegmentBar({ bgArr, fillArr, xLeft, y, totalW, cur, max, segUnit, gap, pad, segCap }) {
+    const safeMax = Math.max(0.0001, Number(max) || 0);
+    const safeCur = Phaser.Math.Clamp(Number(cur) || 0, 0, safeMax);
+
+    const segCount = Math.max(1, Math.ceil(safeMax / segUnit));
+    const lastFrac = Phaser.Math.Clamp((safeMax % segUnit) / segUnit || 1, 0.05, 1);
+
+    const innerW = Math.max(1, totalW - pad * 2);
+    const baseSegW = (innerW - (segCount - 1) * gap) / segCount;
+
+    // drain capacity so the last segment truncation behaves naturally
+    let remaining = safeCur;
+
+    for (let i = 0; i < segCap; i++) {
+        const show = i < segCount;
+        const bg = bgArr?.[i];
+        const fill = fillArr?.[i];
+        if (!bg || !fill) continue;
+
+        if (!show) {
+        bg.setVisible(false);
+        fill.setVisible(false);
+        continue;
+        }
+
+        const isLast = i === segCount - 1;
+        const segW = baseSegW * (isLast ? lastFrac : 1);
+        const segX = xLeft + pad + i * (baseSegW + gap);
+
+        bg.setPosition(segX, y);
+        bg.width = segW;
+        bg.setVisible(true);
+
+        const segCapVal = segUnit * (isLast ? lastFrac : 1);
+        const ratio = Phaser.Math.Clamp(remaining / segCapVal, 0, 1);
+        const fillW = segW * ratio;
+
+        fill.setPosition(segX, y);
+        fill.width = fillW;
+        fill.setVisible(fillW > 0.25);
+
+        remaining -= segCapVal;
+    }
     }
 
     static _updateMiniBars(troop) {
-        if (!this.scene || !troop || !troop.active) return;
+    if (!this.scene || !troop || !troop.active) return;
 
-        const scene = this.scene;
+    const scene = this.scene;
 
-        const now = scene.time.now || 0;
-        const fromHit   = troop._miniBarLastHit && (now - troop._miniBarLastHit < this.MINI_BAR_HIT_MS);
-        const fromHover = !!troop._miniBarHover;
-        const fromTab   = !!troop._miniBarSelectedFromTab;
-        const shouldShow = fromHit || fromHover || fromTab;
+    const now = scene.time.now || 0;
+    const fromHit   = troop._miniBarLastHit && (now - troop._miniBarLastHit < this.MINI_BAR_HIT_MS);
+    const fromHover = !!troop._miniBarHover;
+    const fromTab   = !!troop._miniBarSelectedFromTab;
+    const shouldShow = fromHit || fromHover || fromTab;
 
-        if (!shouldShow) {
-            if (troop._miniBarsInit) {
-            troop._hpBarBg?.setVisible(false);
-            troop._hpBarFill?.setVisible(false);
-            troop._stBarBg?.setVisible(false);
-            troop._stBarFill?.setVisible(false);
-            }
-            return;
+    if (!shouldShow) {
+        if (troop._miniBarsInit) {
+        for (let i = 0; i < (troop._miniBarsSegCap || 0); i++) {
+            troop._hpSegBg?.[i]?.setVisible(false);
+            troop._hpSegFill?.[i]?.setVisible(false);
+            troop._stSegBg?.[i]?.setVisible(false);
+            troop._stSegFill?.[i]?.setVisible(false);
         }
-
-        this._ensureMiniBars(troop);
-
-        const W = this.MINI_BAR_WIDTH;
-        const H = this.MINI_BAR_HEIGHT;
-
-        const isEnemy = troop.body?.team === 0;
-
-        const baseX = troop.x;
-        const baseY = troop.y + (troop.displayHeight || SQUARESIZE) / 2 + this.MINI_BAR_OFFSET_Y;
-
-        // HP bg centered
-        troop._hpBarBg.setPosition(baseX, baseY);
-
-        // HP fill left-anchored
-        const leftX = baseX - W / 2;
-        troop._hpBarFill.setPosition(leftX, baseY);
-
-        const maxHP = troop.maxHealth || (troop.body?.team === 1 ? 200 : 100);
-        const hpPct = Phaser.Math.Clamp((troop.health ?? 0) / maxHP, 0, 1);
-
-        troop._hpBarFill.width = W * hpPct;
-        troop._hpBarFill.height = H;
-
-        troop._hpBarBg.setVisible(true);
-        troop._hpBarFill.setVisible(true);
-
-        // No stamina bar for enemies
-        if (!isEnemy && troop._stBarBg && troop._stBarFill) {
-            troop._stBarBg.setPosition(baseX, baseY + H + 2);
-            troop._stBarFill.setPosition(leftX, baseY + H + 2);
-
-            const maxST = troop.maxStamina || troop.maxStaminaValue || 100;
-            const stPct = Phaser.Math.Clamp((troop.stamina ?? 0) / maxST, 0, 1);
-
-            troop._stBarFill.width = W * stPct;
-            troop._stBarFill.height = H;
-
-            troop._stBarBg.setVisible(true);
-            troop._stBarFill.setVisible(true);
-        } else {
-            troop._stBarBg?.setVisible(false);
-            troop._stBarFill?.setVisible(false);
         }
+        return;
+    }
+
+    this._ensureMiniBars(troop);
+
+    const H = this.MINI_BAR_HEIGHT;
+    const segUnit = this.MINI_BAR_SEG_UNIT;
+    const gap = this.MINI_BAR_GAP;
+    const pad = this.MINI_BAR_PAD;
+
+    const isEnemy = troop.body?.team === 0;
+
+    // type caps
+    const maxHP = troop.maxHealth ?? (troop.body?.team === 1 ? 200 : 100);
+    const maxST = troop.maxStamina ?? troop.maxStaminaValue ?? 100;
+
+    // bar length scales by the *larger* of HP/ST, so both bars match length
+    const maxForSize = isEnemy ? maxHP : Math.max(maxHP, maxST);
+
+    const sizeSegCount = Math.max(1, Math.ceil(maxForSize / segUnit));
+    let totalW = sizeSegCount * this.MINI_BAR_BASE_SEG_W + (sizeSegCount - 1) * gap + pad * 2;
+    if (totalW > this.MINI_BAR_MAX_W) totalW = this.MINI_BAR_MAX_W;
+
+    if ((troop._miniBarsSegCap || 0) < sizeSegCount) {
+        this._rebuildMiniBarSegments(troop, sizeSegCount);
+    }
+
+    const baseX = troop.x;
+    const baseY = troop.y + (troop.displayHeight || SQUARESIZE) / 2 + this.MINI_BAR_OFFSET_Y;
+    const xLeft = baseX - totalW / 2;
+
+    // HP: always visible when shouldShow
+    this._layoutSegmentBar({
+        bgArr: troop._hpSegBg,
+        fillArr: troop._hpSegFill,
+        xLeft,
+        y: baseY,
+        totalW,
+        cur: troop.health ?? 0,
+        max: maxHP,
+        segUnit,
+        gap,
+        pad,
+        segCap: troop._miniBarsSegCap || 0
+    });
+
+    // Stamina: friendlies only
+    if (!isEnemy) {
+        this._layoutSegmentBar({
+        bgArr: troop._stSegBg,
+        fillArr: troop._stSegFill,
+        xLeft,
+        y: baseY + H + 2,
+        totalW,
+        cur: troop.stamina ?? 0,
+        max: maxST,
+        segUnit,
+        gap,
+        pad,
+        segCap: troop._miniBarsSegCap || 0
+        });
+    } else {
+        for (let i = 0; i < (troop._miniBarsSegCap || 0); i++) {
+        troop._stSegBg?.[i]?.setVisible(false);
+        troop._stSegFill?.[i]?.setVisible(false);
+        }
+    }
     }
 
     // called by hover in configureCubeInteractivity
@@ -1595,5 +1705,26 @@ export class Player {
             t._miniBarSelectedFromTab = (t === selectedTroop);
         });
     }
+
+static onWallDestroyed(troop, task) {
+  const teamNumber = troop.body.team;
+  Teams.removeFromStateArray(teamNumber, "enemyDestroyTileStates", task);
+
+  troop.task = null;
+  if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
+  troop.play(troop.idle);
+  Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+}
+
+static onBlockDestroyed(troop, task) {
+  const teamNumber = troop.body.team;
+  Teams.removeFromStateArray(teamNumber, "enemyDestroyStates", task);
+
+  troop.task = null;
+  if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
+  troop.play(troop.idle);
+  Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+}
+
       
 }

@@ -6,6 +6,9 @@
 import { SQUARESIZE, TILE_MAP, TILE_TYPES, UIDEPTH } from "../../constants.js";
 import { buildingArray, generateTown } from "../../town.js";
 import { Map as GameMap } from "../../map.js";
+import { Player } from "../../players/Player.js";
+
+
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 
 function getFloorVal(cellVal){
@@ -46,9 +49,12 @@ export class DraftStartPreviewController {
     this.srcW = menuRefs.srcW;
     this.srcH = menuRefs.srcH;
     this.hoverGfx = this.scene.add.graphics().setDepth(UIDEPTH - 2);
-    this.wallGhostGfx = this.scene.add.graphics().setDepth(UIDEPTH - 3);
+    this.scene.uiCamera.ignore(this.hoverGfx);
+    this.wallGhostGfx = this.scene.add.graphics().setDepth(UIDEPTH);
+    this.scene.uiCamera.ignore(this.wallGhostGfx);
     this._hover = null;
     this._lastWallBounds = null;
+    this._lastGhostBounds = null;
 
     this.placed = []; // {x,y,typeKey,type,lenX,lenY,teamnum,tag}
     this._houseToggle = 0;
@@ -138,12 +144,19 @@ export class DraftStartPreviewController {
     this.hoverGfx.fillRect(x, y, w, h);
 
     // ghost walls (only if wall toggle is on)
-    this.wallGhostGfx.clear();
     if (!state?.extras?.wall || !ok) return;
 
     const bounds = this._boundsOfPlacedPlusRect({ x:gridX, y:gridY, w:t.lenX, h:t.lenY });
     if (!bounds) return;
 
+    if (this._sameBounds(bounds, this._lastWallBounds)) {
+      this.wallGhostGfx.clear();
+      return;
+    }
+    if (this._sameBounds(bounds, this._lastGhostBounds)) return;
+    this._lastGhostBounds = bounds;
+
+    this.wallGhostGfx.clear();
     this._drawGhostWalls(bounds, state.extras.wallType);
   }
 
@@ -158,6 +171,32 @@ export class DraftStartPreviewController {
       miny: Math.min(b.miny, r.y),
       maxx: Math.max(b.maxx, r.x + r.w - 1),
       maxy: Math.max(b.maxy, r.y + r.h - 1),
+    };
+  }
+
+  _sameBounds(a, b) {
+    if (!a || !b) return false;
+    return a.minx === b.minx && a.miny === b.miny && a.maxx === b.maxx && a.maxy === b.maxy;
+  }
+
+  _boundsOfPlacedExcluding(exclude) {
+    const ps = this.placed.filter(p => p.tag === "draftPreview" && p !== exclude);
+    if (!ps.length) return null;
+
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const p of ps) {
+      minx = Math.min(minx, p.x);
+      miny = Math.min(miny, p.y);
+      maxx = Math.max(maxx, p.x + p.lenX - 1);
+      maxy = Math.max(maxy, p.y + p.lenY - 1);
+    }
+
+    // apply padding once (same as _boundsOfPlaced)
+    return {
+      minx: clamp(minx - WALL_PAD, 1, this.srcW - 2),
+      miny: clamp(miny - WALL_PAD, 1, this.srcH - 2),
+      maxx: clamp(maxx + WALL_PAD, 1, this.srcW - 2),
+      maxy: clamp(maxy + WALL_PAD, 1, this.srcH - 2),
     };
   }
 
@@ -405,22 +444,59 @@ export class DraftStartPreviewController {
     };
   }
 
-  _typeTint(type) {
-    // tweak as you like; the point is “readable in zoom-out”
-    switch (type) {
-      case "farmer": return 0x8b5a2b;
-      case "forager": return 0x2ecc71;
-      case "fireman": return 0xff9933;
-      case "gunslinger": return 0x9999ff;
-      default: return 0xffffff;
+  _safeDestroyIcon(icon) {
+    if (!icon) return;
+
+    // If something (old code) attached a pseudo-body, don't let it crash cleanup.
+    try {
+      if (icon.body && typeof icon.body.destroy === "function") icon.body.destroy();
+    } catch (e) {}
+
+    icon.destroy?.();
+  }
+
+  _applyPlayerTint(icon, typeKey) {
+    // If this icon doesn't have a physics body, we attach a SHIM that:
+    // - exposes .team for Player.applyDefaultTint
+    // - exposes .destroy() so any old cleanup code calling body.destroy won't crash
+    const needsShim = !icon.body || typeof icon.body.destroy !== "function";
+    if (needsShim) {
+      icon._tintShim = icon._tintShim || {
+        team: 1,
+        destroy: () => {},  // <- critical: prevents `this.body.destroy is not a function`
+      };
+      icon.body = icon._tintShim;
     }
+
+    icon.body.team = 1;
+
+    // clear role flags
+    icon.isFarmer = false;
+    icon.isForager = false;
+    icon.isFireman = false;
+    icon.isGunslinger = false;
+    icon.isBuilder = false;
+    icon.isBlademaster = false;
+    icon.isBrawler = false;
+
+    switch ((typeKey || "").toLowerCase()) {
+      case "farmer":      icon.isFarmer = true; break;
+      case "forager":     icon.isForager = true; break;
+      case "fireman":     icon.isFireman = true; break;
+      case "gunslinger":  icon.isGunslinger = true; break;
+      case "builder":     icon.isBuilder = true; break;
+      case "blademaster": icon.isBlademaster = true; break;
+      case "brawler":     icon.isBrawler = true; break;
+    }
+
+    Player.applyDefaultTint(icon);
   }
 
   _setSpawnIcons(points) {
     // reuse icons
     while (this._spawnIcons.length > points.length) {
       const icon = this._spawnIcons.pop();
-      icon.destroy();
+      this._safeDestroyIcon(icon);
     }
 
     for (let i = 0; i < points.length; i++) {
@@ -441,20 +517,18 @@ export class DraftStartPreviewController {
       } else {
         icon.setPosition(worldX, worldY);
       }
-      icon.setTint(this._typeTint(p.type));
+      this._applyPlayerTint(icon, p.type);
     }
   }
 
   clearDraftPlayerIcons() {
-    // If you used a Phaser container:
     if (this.spawnIconContainer) {
-      this.spawnIconContainer.destroy(true); // destroy children too
+      this.spawnIconContainer.destroy(true);
       this.spawnIconContainer = null;
     }
 
-    // If you tracked raw objects in an array:
     if (this._spawnIcons) {
-      for (const obj of this._spawnIcons) obj?.destroy?.();
+      for (const icon of this._spawnIcons) this._safeDestroyIcon(icon);
       this._spawnIcons.length = 0;
     }
   }
@@ -803,6 +877,7 @@ export class DraftStartPreviewController {
     placeDoorNear(b.minx, midY, 0, 1, maxStepsY);
     // right edge
     placeDoorNear(b.maxx, midY, 0, 1, maxStepsY);
+    this._lastGhostBounds = null;
   }
 
   clearWall(){
@@ -860,6 +935,7 @@ export class DraftStartPreviewController {
   }
 
   setMoveHover(selected, state, gridX, gridY) {
+
     const ok = this._canMoveAt(selected, gridX, gridY).ok;
 
     // draw hover rect at target location using selected footprint
@@ -875,27 +951,63 @@ export class DraftStartPreviewController {
     this.hoverGfx.fillStyle(ok ? 0x00ff00 : 0xff0000, 0.10);
     this.hoverGfx.fillRect(x, y, w, h);
 
-    // ghost walls if enabled: union current placed bounds + "moved-to" rect
-    this.wallGhostGfx.clear();
+    // ghost walls if enabled: union "placed without selected" + "moved-to rect"
     if (!state?.extras?.wall || !ok) return;
 
-    // union bounds: treat selected as if it were at (gridX,gridY)
-    const b = this._boundsOfPlaced();
     const movedRect = { x: gridX, y: gridY, w: t.lenX, h: t.lenY };
 
-    // temporarily compute bounds without changing placed array
-    const minx = Math.min(b.minx + WALL_PAD, movedRect.x) - WALL_PAD;
-    const miny = Math.min(b.miny + WALL_PAD, movedRect.y) - WALL_PAD;
-    const maxx = Math.max(b.maxx - WALL_PAD, movedRect.x + movedRect.w - 1) + WALL_PAD;
-    const maxy = Math.max(b.maxy - WALL_PAD, movedRect.y + movedRect.h - 1) + WALL_PAD;
+    // bounds of everything else (excluding the selected building)
+    const b0 = this._boundsOfPlacedExcluding(selected);
 
+    // base bounds is either existing (without selected) or just movedRect
+    let minx = movedRect.x;
+    let miny = movedRect.y;
+    let maxx = movedRect.x + movedRect.w - 1;
+    let maxy = movedRect.y + movedRect.h - 1;
+
+    if (b0) {
+      // IMPORTANT: b0 is already padded, so unpad to real footprint bounds first
+      const unpad = {
+        minx: b0.minx + WALL_PAD,
+        miny: b0.miny + WALL_PAD,
+        maxx: b0.maxx - WALL_PAD,
+        maxy: b0.maxy - WALL_PAD,
+      };
+
+      minx = Math.min(unpad.minx, movedRect.x);
+      miny = Math.min(unpad.miny, movedRect.y);
+      maxx = Math.max(unpad.maxx, movedRect.x + movedRect.w - 1);
+      maxy = Math.max(unpad.maxy, movedRect.y + movedRect.h - 1);
+    }
+
+    // apply padding ONCE for the ghost ring
     const bounds = {
-      minx: clamp(minx, 1, this.srcW - 2),
-      miny: clamp(miny, 1, this.srcH - 2),
-      maxx: clamp(maxx, 1, this.srcW - 2),
-      maxy: clamp(maxy, 1, this.srcH - 2)
+      minx: clamp(minx - WALL_PAD, 1, this.srcW - 2),
+      miny: clamp(miny - WALL_PAD, 1, this.srcH - 2),
+      maxx: clamp(maxx + WALL_PAD, 1, this.srcW - 2),
+      maxy: clamp(maxy + WALL_PAD, 1, this.srcH - 2),
     };
 
+    // before drawing ghost
+    if (this._sameBounds(bounds, this._lastGhostBounds)) {
+      // bounds unchanged -> don't redraw, and crucially don't leave ghost over finalized walls
+      // Option A: keep as-is (no work)
+      // Option B (recommended): if walls are already applied for these bounds, hide ghost
+      if (this._sameBounds(bounds, this._lastWallBounds)) {
+        this.wallGhostGfx.clear();
+      }
+      return;
+    }
+
+    this._lastGhostBounds = bounds;
+
+    // if these bounds match already-applied wall bounds, don't show ghost
+    if (this._sameBounds(bounds, this._lastWallBounds)) {
+      this.wallGhostGfx.clear();
+      return;
+    }
+
+    this.wallGhostGfx.clear();
     this._drawGhostWalls(bounds, state.extras.wallType);
   }
 

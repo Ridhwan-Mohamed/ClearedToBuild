@@ -6,7 +6,8 @@ import { createPressureSpawners } from "./PressureSpawner.js";
 import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
 import { Map as GameMap } from "../map.js";
 import { TILE_TYPES, TILE_MAP, SQUARESIZE, colorFor, removeFromArray } from "../constants.js";
-import { PineTree } from "../buildings/pineTree.js";
+import { spawnMarketShip, DEFAULT_SUPPLY_PRICES } from "../UI/ShipMarket";
+import { DraftStartState } from "../UI/DraftUI/DraftStartState"; // adjust path to your real location
 
 function fmtMMSS(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -38,6 +39,7 @@ export class ParcelContractInstance {
     this.scene = scene;
     this.rng = rng;
     this.placedObjects = [];
+    this._completed = false;
 
     // ✅ default to imported GameMap if not provided
     this.map = map ?? GameMap;
@@ -80,6 +82,11 @@ export class ParcelContractInstance {
       this.timerText.setText(`⚔ ${this.killed}/${this.totalPlannedEnemies}`);
       return;
     }
+    if (this.type === "MARKET") {
+      const remaining = this.expireAt ? (this.expireAt - this.scene.time.now) : 0;
+      this.timerText.setText(`🛒 ${fmtMMSS(remaining)}`);
+      return;
+    }
 
     const remaining = this.expireAt ? (this.expireAt - this.scene.time.now) : 0;
     this.timerText.setText(`${this.type === "FOREST" ? "🌲" : "🪨"} ${fmtMMSS(remaining)}`);
@@ -114,10 +121,19 @@ export class ParcelContractInstance {
     let placed = 0;
     let tries = 0;
 
+    const tileType = nodeType === "pine" ? TILE_TYPES.pine : TILE_TYPES.rock;
+
+    // pick anchors so the whole footprint stays inside the parcel
+    const minX = this.origin.x + 1;
+    const minY = this.origin.y + 1;
+    const maxX = this.origin.x + (PARCEL_SIZE - 1) - tileType.lenX;
+    const maxY = this.origin.y + (PARCEL_SIZE - 1) - tileType.lenY;
+
     while (placed < count && tries < triesMax) {
       tries++;
-      const gx = this.origin.x + randInt(this.rng, 1, PARCEL_SIZE - 2);
-      const gy = this.origin.y + randInt(this.rng, 1, PARCEL_SIZE - 2);
+
+      const gx = randInt(this.rng, minX, maxX);
+      const gy = randInt(this.rng, minY, maxY);
 
       const cell = GameMap.grid?.[gy]?.[gx];
       if (cell == null) continue;
@@ -127,29 +143,27 @@ export class ParcelContractInstance {
       const topName = TILE_MAP(top);
       if (topName === "water") continue;
 
-      // don't double-place onto blocked cells (houses/walls/etc)
-      if (GameMap._cellIsBlocking?.(gx, gy)) continue;
+      // IMPORTANT: reject if ANY tile in the footprint is blocked
+      if (GameMap.checkBlockPositionGen(gx, gy, tileType.lenX, tileType.lenY)) continue;
 
-      const tileType = nodeType === "pine" ? TILE_TYPES.pine : TILE_TYPES.rock;
       try {
-        if(nodeType === "pine") {
-          const obj = GameMap.handleLoadNonSpread(gx, gy, TILE_TYPES.pine);
-          obj.contractId = this.id;                   // optional: tag for cleanup
-          obj.slotId = this.slotId;                   // optional
+        const obj = GameMap.handleLoadNonSpread(gx, gy, tileType);
+        if (!obj) continue;
 
-          GameMap.worldPines.push(obj);               // keep your existing pattern
-          this.placedObjects.push(obj);              // track for contract cleanup
-          placed++;
-        } else { 
-          const obj = GameMap.handleLoadNonSpread(gx, gy, tileType);
-          if (obj) this.placedObjects.push(obj);
-          placed++;
-        }
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+
+        if (nodeType === "pine") GameMap.worldPines.push(obj);
+        else GameMap.worldStones.push(obj);
+
+        this.placedObjects.push(obj);
+        placed++;
       } catch (e) {
-        // ignore failures (rare)
+        // ignore failures
       }
     }
   }
+
 
   spawn() {
     const M = this.map; // Map class
@@ -183,8 +197,7 @@ export class ParcelContractInstance {
       this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
       return;
     }
-
-    if (this.type === "PRESSURE") {
+    else if (this.type === "PRESSURE") {
       // Land fill
       setGroundRect(this.origin.x, this.origin.y, PARCEL_SIZE, PARCEL_SIZE);
 
@@ -201,8 +214,45 @@ export class ParcelContractInstance {
 
       this._startUITick();
     }
+    else if (this.type === "MARKET") {
+      // paint ground or do nothing — market doesn’t need terrain changes
+
+      const ms = 60_000; // 1 minute (changeable)
+      this.expireAt = this.scene.time.now + ms;
+
+      // Timer UI tick reuse
+      this._startUITick();
+
+      // Parcel center in WORLD coordinates
+      const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
+      const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
+
+      // Pull prices from DraftStartState (single source of truth)
+      // If you already have a live DraftStartState instance stored somewhere, use that instead.
+      const prices = new DraftStartState().prices.supplies; // :contentReference[oaicite:3]{index=3}
+
+      // Spawn ship docked near this parcel
+      this._marketShipHandle = spawnMarketShip(this.scene, {
+        parcelCenterWorld: { x: cx, y: cy },
+        slotId: this.slotId,
+        teamNumber: 1,
+        durationMs: ms,
+        prices
+      });
+
+      // Contract completion
+      this.timerEvent = this.scene.time.delayedCall(ms, () => {
+        // IMPORTANT: don't show contract UI until the ship fully leaves
+        const h = this._marketShipHandle;
+        if (h?.depart) h.depart(() => this.complete("timeout"));
+        else this.complete("timeout");
+      }, null, this);
+      return;
+    }
     GameMap._uiIgnoreWorldLayer();
   }
+
+  
 
   onRaiderSpawned() {
     this.spawned++;
@@ -222,7 +272,33 @@ export class ParcelContractInstance {
     }
   }
 
+  onSpawnerDestroyed(unspawnedCount) {
+    if (this._completed) return;
+    if (this.type !== "PRESSURE") return;
+
+    const n = Math.max(0, unspawnedCount | 0);
+
+    // ✅ “add the spawner’s enemies that were destroyed” to contract progress
+    // We bump BOTH spawned and killed so your existing completion math stays consistent.
+    this.spawned += n;
+    this.killed += n;
+
+    this.pm.onContractProgressChanged?.(this);
+
+    // ✅ if ALL pressure spawner buildings are destroyed, kill the contract now
+    const allDead = this.spawners?.length
+      ? this.spawners.every(s => !s?.building || s.building._destroyed === true)
+      : true;
+
+    if (allDead) {
+      this.complete("spawners_destroyed");
+    }
+  }
+
   complete(reason) {
+    if (this._completed) return;
+    this._completed = true;
+     
     if (this.timerEvent) {
       this.timerEvent.remove(false);
       this.timerEvent = null;
@@ -251,6 +327,11 @@ export class ParcelContractInstance {
       obj.destroy?.();
     }
     this.placedObjects = [];
+
+    if(this.type === "MARKET") {
+      this._marketShipHandle?.destroy?.();
+      this._marketShipHandle = null;
+    }
 
     for (const s of this.spawners) {
       try { s.building?.destroy?.(); } catch {}

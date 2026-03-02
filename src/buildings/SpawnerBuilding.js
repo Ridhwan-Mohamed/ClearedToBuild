@@ -9,8 +9,9 @@
 //
 // You already have a TILE_TYPES.spawn entry; this file focuses on behaviour.
 import { Map } from "../map.js";
-import { TILE_TYPES, SQUARESIZE } from "../constants.js";
+import { TILE_TYPES, SQUARESIZE, BLOCKDEPTH } from "../constants.js";
 import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
+import { Teams } from "../Teams.js";
 
 export class SpawnerBuilding {
   /**
@@ -45,11 +46,79 @@ export class SpawnerBuilding {
     this.textureKey = opts.textureKey ?? TILE_TYPES.spawn.value; // assumes TILE_TYPES.spawn exists
 
     this._destroyed = false;
+    const tileType = TILE_TYPES.spawn;
 
+    const item = TILE_TYPES.spawn;
     // create visuals
-    this.sprite = scene.add.image(worldX, worldY, this.textureKey);
+    this.sprite = Map.addToWorldStatic(
+        scene.add.sprite(
+            (gx + Math.floor(item.lenX/2)) * SQUARESIZE,
+            (gy + Math.floor(item.lenY/2)) * SQUARESIZE,
+            tileType.name
+        ).setDepth(BLOCKDEPTH)
+    );
+    this.team = opts.team ?? 0;   // enemy default
+    // this.sprite = scene.add.image(worldX, worldY, this.textureKey);
+    this.sprite.setInteractive({ useHandCursor: true });
+    // keep sprite interactive/visible (no physics needed on it)
+    this.sprite.buildingRef = this;
+    this.sprite.isBuilding = true;
+
+    // ✅ invisible collider (static body) for projectile collisions
+    const w = (tileType.lenX || 1) * SQUARESIZE;
+    const h = (tileType.lenY || 1) * SQUARESIZE;
+
+    this.collider = this.scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
+    this.collider.setDisplaySize(w, h).setAlpha(0);
+    Map.structureBarrier.add(this.collider);
+
+    // collision backrefs live on collider
+    this.collider.buildingRef = this;
+    this.collider.isBuilding = true;
+    this.collider.team = this.team;
+
+
+    this.sprite.buildingRef = this;
+    this.sprite.team = this.team;
     this.sprite.setOrigin(0.5, 0.5);
     this.sprite.setDepth(50);
+
+
+    this.sprite.setInteractive({ cursor: "pointer" });
+    this.sprite.buildingRef = this;
+    this.sprite.team = this.team;
+
+    this.sprite.on("pointerdown", () => {
+      const playerTeam = 1;
+      if (this.team === playerTeam) return;
+
+      const list = Teams.teamLists[playerTeam];
+      if (!list) return;
+
+      const task = {
+        x: this.tilePos.tileX,
+        y: this.tilePos.tileY,
+        duration: this.hp,
+        totalDuration: this.maxHp,
+        value: this.sprite,
+        type: TILE_TYPES.spawn,
+        assigned: 0,
+      };
+
+      this.tileType = TILE_TYPES.spawn; // Ensure tileType is set for the task
+
+      const exists = list.enemyDestroyStates?.some(
+        t => t?.x === task.x && t?.y === task.y && t?.type === task.type
+      );
+
+      if (exists) Teams.removeFromStateArray(playerTeam, "enemyDestroyStates", task);
+      else Teams.addToStateArrayIfNotExists(playerTeam, "enemyDestroyStates", task);
+
+      this.sprite.setTint(0x666666);
+      this.scene.time.delayedCall(120, () => {
+        if (this.sprite?.active) this.sprite.clearTint();
+      });
+    });
 
     // ✅ ensure it’s actually on the world layer
     if (typeof Map._worldAdd === "function") Map._worldAdd(this.sprite);
@@ -154,6 +223,11 @@ export class SpawnerBuilding {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+
+    // ✅ credit unspawned enemies to the contract when spawner is destroyed
+    const unspawned = Math.max(0, this.quotaRemaining | 0);
+    this.scene?.parcelManager?.notifySpawnerDestroyed?.(this.contractId, unspawned);
+
     if (this.timer) this.timer.remove(false);
     this.sprite?.destroy();
     this.counterText?.destroy();

@@ -18,7 +18,7 @@ export class Manager {
                     if(this.tooManyAssigned(task, state)) continue;
                     if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
                     let approachTile;
-                    if(state == CONTROL_STATES.BUILD_MODE_T){
+                    if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                         approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                     }else if(this.blockType(state)){
                         // DESTROY should path to ANY perimeter tile
@@ -89,7 +89,7 @@ export class Manager {
                 if(this.tooManyAssigned(task, state)) continue;
                 if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
                 let approachTile;
-                if(state == CONTROL_STATES.BUILD_MODE_T){
+                if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                     approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                 }else if(this.blockType(state)){
                     if (state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) {
@@ -162,7 +162,7 @@ export class Manager {
             if(this.tooManyAssigned(task, state)) return;
             if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) return; 
             let approachTile;
-            if(state == CONTROL_STATES.BUILD_MODE_T){
+            if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                 approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
             }else if(this.blockType(state)){
                 approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)

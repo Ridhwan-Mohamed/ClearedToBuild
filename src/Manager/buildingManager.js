@@ -15,6 +15,10 @@ import { PathRepair } from "../lib/navmesh/PathRepair"
 import { Wall } from "../buildings/Wall"
 import { Builder } from "../players/Builder"
 import { Raider } from "../players/Raider"
+import { Brawler } from "../players/Brawler"
+import { Blademaster } from "../players/Blademaster"
+import { Gunslinger } from "../players/Gunslinger"
+import { Projectile } from "../Projectile"
 
 export class buildingManager{
 
@@ -679,29 +683,60 @@ export class buildingManager{
             return;
         }
 
-        if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(1000, () => {
-                if(!sprite.active || sprite.state != CONTROL_STATES.DESTROY_MODE) return;
-                let teamNumber = sprite.body.team;
-                if (!task || task.duration <= 0){
-                    console.log(`sprite: ${sprite.id} delete mode within timer `)
-                    sprite.task = null;
-                    if(sprite.timer){
-                        sprite.timer.remove(false);
-                        sprite.timer = null;
-                    }
-                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
+        sprite.timer = this.scene.time.delayedCall(1000, () => {
+            if(!sprite.active || sprite.state != CONTROL_STATES.DESTROY_MODE) return;
+            let teamNumber = sprite.body.team;
+            if (!task || task.duration <= 0){
+                console.log(`sprite: ${sprite.id} delete mode within timer `)
+                sprite.task = null;
+                if(sprite.timer){
+                    sprite.timer.remove(false);
+                    sprite.timer = null;
+                }
+                Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
+                return;
+            }
+
+            // Ensure totalDuration snapshot exists (you already do this)
+            if (!task.totalDuration) task.totalDuration = task.duration;
+
+            // ✅ Gunslinger: fire projectile; projectile applies damage to *task.duration* via callback
+            if (sprite.isGunslinger && sprite.weapon?.projectile) {
+                // range+LOS gate (you already added these helpers in Gunslinger)
+                if (!sprite._canShootDestroyTarget?.()) {
+                    if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+                    sprite._ensureShootPositionOrRepath?.();
                     return;
                 }
 
-                // Initialize max health snapshot for this destroy job
-                if (!task.totalDuration) {
-                    task.totalDuration = task.duration;
-                }
+                const targetSprite = sprite._getDestroyTarget?.();
+                if (!targetSprite || !targetSprite.active) return;
 
-                // Compute damage for this tick
+                const ang = Phaser.Math.Angle.Between(sprite.x, sprite.y, targetSprite.x, targetSprite.y);
+
+                const proj = new Projectile(
+                    sprite.x, sprite.y, ang,
+                    sprite.body.team,
+                    sprite.weapon,
+                    sprite,
+                    true
+                );
+
+                sprite.play(sprite.action);
+
+                // cadence: schedule next shot if task still alive
+                if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+                sprite.timer = this.scene.time.delayedCall(sprite.weapon.duration, () => {
+                    if (!sprite.task) return;
+                    this.beginDestroyingBlock(sprite);
+                });
+
+                return;
+            }
+            else{
+                // --- non-gunslinger path (existing melee/chip) stays the same ---
                 let damage;
-                if (!sprite.body.team) {
+                if (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger)) {
                     // Raiders / enemies: use their weapon to damage buildings
                     damage = sprite.weapon?.baseDmg || 5;
                     AudioManager.playWeaponAttack(sprite, sprite.weapon);
@@ -719,71 +754,28 @@ export class buildingManager{
                 if (targetObj && typeof targetObj.onDamaged === "function") {
                     targetObj.onDamaged(damage, task.duration, task.totalDuration);
                 }
+            }
 
+            sprite.play(sprite.action);
+            
+            if (task.duration <= 0) {
+                if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+                console.log("Done Destroying.");
+                AudioManager.playSound("sfx_building_collapse");
+                this._completeDestroyBlock(sprite, task);   // ✅ single source of truth
+                return;
+            }
+            else {
+                console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
+                sprite.timer.remove(false);
+                sprite.timer = null;
+                AudioManager.playSound("sfx_building_damage");
+                // 🔥 Restart another delayed call if still destroying
+                this.beginDestroyingBlock(sprite);
+            }
 
-                sprite.play(sprite.action);
-                
-                if (task.duration <= 0) {
-                    sprite.timer.remove(false);
-                    sprite.timer = null;
-                    console.log("Done Destroying.");
-                    AudioManager.playSound("sfx_building_collapse");
-                    sprite.play(sprite.idle);
-                    const targetObj = task.value?.buildingRef || task.value;
-                    if (targetObj && typeof targetObj.destroy === "function") {
-                        targetObj.destroy();       // calls ClayOven/House/StorageBuilding.destroy
-                        if(task.type == TILE_TYPES.pine){
-                            removeFromArray(Map.worldPines, targetObj);
-                        }
-                    } else if (task.value && typeof task.value.destroy === "function") {
-                        removeFromArray(Map.worldStones, task.value);
-                        task.value.destroy();      // fallback: just sprite
-                    }
-                    let blockTiles = [];
-                    for (let i = task.y; i < task.type.lenY + task.y; i++) {
-                        for (let j = task.x; j < task.type.lenX + task.x; j++) {
-                            blockTiles.push({ x: j, y: i });
-
-                            if (Array.isArray(Map.grid[i][j])) Map.grid[i][j] = Map.grid[i][j][0];
-
-                            // unblocked for BOTH teams
-                            Map.navGrid[i][j] = 1;
-                            Map.enemyNavGrid[i][j] = 1;
-                            Map.enemyRegionSystem?.markDirty?.();
-                            Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
-                        }
-                    }
-                    this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
-                    // Update normal mesh (unblock)
-                    const change = this.NavMeshUpdater.blockTiles(blockTiles, true);
-                    if (change && change.removedPolyIds) {
-                        PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
-                    }
-                    // Update enemy mesh (unblock)
-                    const enemyChange = this.EnemyNavMeshUpdater.blockTiles(blockTiles, true);
-                    if (enemyChange && enemyChange.removedPolyIds) {
-                        PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
-                    }
-                    // mark dirty changes to refgions and drawers
-                    Map.regionSystem?.markDirty?.();
-                    Map.regionDrawer?.markDirty?.();
-                    Map.enemyRegionSystem?.markDirty?.();
-                    Map.enemyRegionDrawer?.markDirty?.();
-                    Teams.removeFromStateArray(teamNumber, "destroyStates", sprite.task);
-                    sprite.task = null;
-                    this.removeBuildingFromArray(task.x, task.y);
-                    Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
-                } else {
-                    console.log(`sprite: ${sprite.id} continue building with new duration ${task.duration}`)
-                    sprite.timer.remove(false);
-                    sprite.timer = null;
-                    AudioManager.playSound("sfx_building_damage");
-                    // 🔥 Restart another delayed call if still destroying
-                    this.beginDestroyingBlock(sprite);
-                }
-
-            });
-        }
+        });
+    
     }
 
     // buildingManager.js
@@ -812,13 +804,48 @@ export class buildingManager{
             return;
         }
 
-        // Damage amount (raiders use weapon, players use chip)
-        const damage = (!sprite.body.team)
-        ? (sprite.weapon?.baseDmg || 5)
-        : 2;
+        // ✅ Gunslinger fires a projectile at the wall; projectile schedules impact
+        let destroyed = false; // ✅ must exist for both paths
 
-        // Apply damage to the wall itself (this drives phase/frame changes)
-        const destroyed = wall.damage(damage);
+        // ✅ Gunslinger fires a projectile at the wall; projectile drives wall.hp
+        if (sprite.isGunslinger && sprite.weapon?.projectile) {
+            // Range+LOS gate
+            if (!sprite._canShootDestroyTarget?.()) {
+                sprite._ensureShootPositionOrRepath?.();
+                return;
+            }
+
+            const targetSprite = wall.sprite;
+            const ang = Phaser.Math.Angle.Between(sprite.x, sprite.y, targetSprite.x, targetSprite.y);
+
+            const proj = new Projectile(
+                sprite.x, sprite.y, ang,
+                sprite.body.team,
+                sprite.weapon,
+                sprite,
+                true            
+            );
+
+            sprite.play(sprite.action);
+
+            // cadence: keep shooting until destroyed (don’t rely on `destroyed` here)
+            if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+            sprite.timer = this.scene.time.delayedCall(sprite.weapon.duration, () => {
+                if (!sprite.task) return;
+                this.beginDestroyingTile(sprite);
+            });
+
+            return; // ✅ IMPORTANT: prevent falling through to melee path
+        }
+        else{
+            // Damage amount (raiders use weapon, players use chip)
+            const damage = (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger))
+            ? (sprite.weapon?.baseDmg || 5)
+            : 2;
+
+            // Apply damage to the wall itself (this drives phase/frame changes)
+            destroyed = wall.damage(damage);
+        }
 
         // OPTIONAL: expose hp for debug UI / bars
         task.totalHp = wall.maxHp;
@@ -862,7 +889,11 @@ export class buildingManager{
         }
         // Builder decides: store vs auto-consume into queued wall build
         if (sprite.body.team) {
-            Builder.onWallDestroyed(sprite, task);
+            if(sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger){
+                Player.onWallDestroyed(sprite, task);
+            }else{
+                Builder.onWallDestroyed(sprite, task);
+            }
         }else{
             Raider.siegeComplete(sprite);   
         }
@@ -885,6 +916,162 @@ export class buildingManager{
         }
         return true;
     }
+
+    static _completeDestroyBlock(sprite, task) {
+        const teamNumber = sprite.body.team;
+
+        // stop repeating
+        if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+
+        sprite.play(sprite.idle);
+
+        // destroy the building object/sprite
+        const targetObj = task.value?.buildingRef || task.value;
+
+        if (targetObj && typeof targetObj.destroy === "function") {
+            targetObj.destroy(); // calls ClayOven/House/StorageBuilding.destroy
+            if (task.type == TILE_TYPES.pine) {
+                removeFromArray(Map.worldPines, targetObj);
+            }
+        } else if (task.value && typeof task.value.destroy === "function") {
+            removeFromArray(Map.worldStones, task.value);
+            task.value.destroy(); // fallback: just sprite
+        }
+
+        if(task.type.block || task.type.stayBlocked){
+            // unblock tiles under footprint
+            const blockTiles = [];
+            for (let i = task.y; i < task.type.lenY + task.y; i++) {
+                for (let j = task.x; j < task.type.lenX + task.x; j++) {
+                    blockTiles.push({ x: j, y: i });
+
+                    if (Array.isArray(Map.grid[i][j])) Map.grid[i][j] = Map.grid[i][j][0];
+
+                    // unblocked for BOTH teams
+                    Map.navGrid[i][j] = 1;
+                    Map.enemyNavGrid[i][j] = 1;
+
+                    Map.enemyRegionSystem?.markDirty?.();
+                    Map.enemyRegionSystem?.ensureUpToDate?.();
+                }
+            }
+
+            // refresh overview
+            this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+
+            // unblock normal navmesh
+            const change = this.NavMeshUpdater.blockTiles(blockTiles, true);
+            if (change && change.removedPolyIds) {
+                PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+            }
+
+            // unblock enemy navmesh
+            const enemyChange = this.EnemyNavMeshUpdater.blockTiles(blockTiles, true);
+            if (enemyChange && enemyChange.removedPolyIds) {
+                PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+            }
+
+            // mark dirty regions/drawers
+            Map.regionSystem?.markDirty?.();
+            Map.regionDrawer?.markDirty?.();
+            Map.enemyRegionSystem?.markDirty?.();
+            Map.enemyRegionDrawer?.markDirty?.();
+        }
+
+        // per-unit callbacks (kept from your completion block)
+        if (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger) {
+            Player.onBlockDestroyed(sprite, task);
+        }
+
+        // ✅ remove the shared task from the team queue
+        Teams.removeFromStateArray(teamNumber, "destroyStates", task);
+
+        // ✅ remove building record + clear task from the killer
+        this.removeBuildingFromArray(task.x, task.y);
+        sprite.task = null;
+
+        // ✅ reassign the killer
+        Manager.assignOneTroopToAction(sprite, Teams.teamLists[teamNumber].destroyStates, CONTROL_STATES.DESTROY_MODE);
+    }
+
+
+    static _completeDestroyTile(sprite, task, tx, ty) {
+        // stop repeating
+        if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
+
+        // update overview + visuals
+        this.scene.zoomMixer.updateOverviewCell(tx, ty, Map.grid);
+
+        // remove wall sprite + clear grid overlay
+        Wall.destroyAt(tx, ty);
+
+        // walkable for BOTH teams now (door logic handled below)
+        Map.navGrid[ty][tx] = 1;
+        Map.enemyNavGrid[ty][tx] = 1;
+
+        // minimap/overview refresh
+        this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+
+        // --- navmesh unblock rules ---
+        // Walls (woodWall/wall) unblock BOTH meshes.
+        // Doors: you were treating doors as "enemy-block" only when placed; once destroyed, unblock enemy mesh, and player mesh is already unblocked.
+        const typeName = task?.type?.name;
+
+        const isDoor = (typeName === "wall_door" || typeName === "woodWall_door");
+        const isWall = !isDoor; // (in your use-case destroyTile tasks are walls/doors)
+
+        // unblock player mesh only for walls (doors never blocked player mesh)
+        if (isWall) {
+            const changed = this.NavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
+            if (changed?.removedPolyIds) {
+            PathRegistry.handlePolysRemoved(Map.navMesh, changed.removedPolyIds, changed.addedPolyIds);
+            }
+        }
+
+        // unblock enemy mesh for both walls + doors
+        const enemyChanged = this.EnemyNavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
+        if (enemyChanged?.removedPolyIds) {
+            PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChanged.removedPolyIds, enemyChanged.addedPolyIds);
+        }
+
+        // region/border maintenance (siege)
+        Map.enemyRegionSystem?.removeWallFromBorderIndex?.(tx, ty);
+        Map.enemyRegionSystem?.markDirty?.();
+        Map.enemyRegionDrawer?.markDirty?.();
+
+        Map.regionSystem?.markDirty?.();
+        Map.regionDrawer?.markDirty?.();
+
+        Map.enemyRegionSystem?.ensureUpToDate?.();
+
+        // task cleanup + troop cleanup
+        if (sprite.body.team) {
+            // player units
+            if (sprite.type === Brawler || sprite.type === Blademaster || sprite.type === Gunslinger) {
+            Player.onWallDestroyed?.(sprite, task);
+            } else {
+            Builder.onWallDestroyed?.(sprite, task);
+            }
+        } else {
+            // raiders
+            Raider.siegeComplete?.(sprite);
+        }
+
+        // remove task from appropriate queue
+        // For player demolition: destroyTileStates
+        // For enemy-destroy commands: enemyDestroyTileStates (if you’re using that)
+        const teamList = Teams.teamLists[sprite.body.team];
+        if (teamList?.destroyTileStates) Teams.removeFromStateArray(sprite.body.team, "destroyTileStates", task);
+        if (teamList?.enemyDestroyTileStates) Teams.removeFromStateArray(sprite.body.team, "enemyDestroyTileStates", task);
+
+        sprite.task = null;
+        sprite.play(sprite.idle);
+
+        // reassign next
+        Manager.assignOneTroopToAction(sprite, teamList?.destroyTileStates ?? [], CONTROL_STATES.DESTROY_MODE_T);
+    }
+
+
 
     static removeBuildingFromArray(x, y) { //problematic, hard looping as we dont know who destroying and why
         // 1) Remove from global town.buildingArray

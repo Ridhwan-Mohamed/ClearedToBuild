@@ -109,10 +109,13 @@ export class buildingManager{
     }
 
     static beginBuilding(troop){
-        if(!buildingManager.hasRequiredMaterials(troop.task.buildType.price, 1)){return}
+        const teamNumber = troop.body.team ?? 1;
+        if(!buildingManager.hasRequiredMaterials(troop.task.buildType.price, teamNumber)){return}
 
         const x = troop.task.x;
         const y = troop.task.y;
+        const buildTypeName = troop.task.buildType?.name;
+        const isDoor = (buildTypeName === "wall_door" || buildTypeName === "woodWall_door");
         // Map.grid[y][x] = [Map.grid[y][x], troop.task.buildType.grid];
 
         // ✅ Only block nav / navmesh if the tile is blocking
@@ -134,21 +137,62 @@ export class buildingManager{
                 }
             }
             Map.placeTile(x,y,troop.task.buildType.name);
-        } else {
-            if(troop.task.buildType.name === "woodWall_door" || troop.task.buildType.name === "wall_door"){
-                Map.enemyNavGrid[y][x] = 0;
-                const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
-                if(enemyChange && enemyChange.removedPolyIds){
-                    const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
-                    for (const unit of impacted) {
-                        PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
-                    }
-                }
+            if (buildTypeName === "wall" || buildTypeName === "woodWall") {
+                Wall.ensureAt(this.scene, x, y, teamNumber);
             }
+        } else {
             Map.handleGridDelete(null, troop.task.buildType, x, y);
             Map.grid[y][x] = [Map.grid[y][x], troop.task.buildType.grid];
-            Map.navGrid[y][x] = 1;
+            if (isDoor) {
+                const blocksPlayer = teamNumber === 0;
+                const blocksEnemy = teamNumber !== 0;
+
+                Map.navGrid[y][x] = blocksPlayer ? 0 : 1;
+                Map.enemyNavGrid[y][x] = blocksEnemy ? 0 : 1;
+
+                if (blocksPlayer) {
+                    const playerChange = this.NavMeshUpdater.blockTile(x, y);
+                    if (playerChange && playerChange.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, playerChange.removedPolyIds, playerChange.addedPolyIds);
+                        for (const unit of impacted) {
+                            PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
+                        }
+                    }
+                } else {
+                    const playerChange = this.NavMeshUpdater.blockTiles([{ x, y }], true);
+                    if (playerChange && playerChange.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, playerChange.removedPolyIds, playerChange.addedPolyIds);
+                        for (const unit of impacted) {
+                            PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
+                        }
+                    }
+                }
+
+                if (blocksEnemy) {
+                    const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
+                    if (enemyChange && enemyChange.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                        for (const unit of impacted) {
+                            PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                        }
+                    }
+                } else {
+                    const enemyChange = this.EnemyNavMeshUpdater.blockTiles([{ x, y }], true);
+                    if (enemyChange && enemyChange.removedPolyIds) {
+                        const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                        for (const unit of impacted) {
+                            PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                        }
+                    }
+                }
+            } else {
+                Map.navGrid[y][x] = 1;
+                Map.enemyNavGrid[y][x] = 1;
+            }
             Map.drawGridValue(x,y,1);
+            if (isDoor) {
+                Wall.ensureAt(this.scene, x, y, teamNumber);
+            }
             // IMPORTANT: do NOT call blockTile for doors
         }
 
@@ -161,9 +205,9 @@ export class buildingManager{
         Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
 
         AudioManager.playSound("sfx_building_complete", { volume: 0.2 });
-        Teams.removeFromStateArray(1, "buildingTileStates", troop.task);
+        Teams.removeFromStateArray(teamNumber, "buildingTileStates", troop.task);
         troop.task = null;
-        Manager.assignOneTroopToAction(troop, Teams.teamLists[1].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
+        Manager.assignOneTroopToAction(troop, Teams.teamLists[teamNumber].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
     }
 
     static makeWallNoBuild(x, y, gridValueOrCell = null) {
@@ -177,8 +221,14 @@ export class buildingManager{
     const buildType = TILE_TYPES[typeName];
     if (!buildType) return;
 
-    // doors are non-block in TILE_TYPES, but we treat them as "enemy-block"
+    // doors are non-block in TILE_TYPES; ownership decides which side is blocked
     const isDoor = (buildType.name === "wall_door" || buildType.name === "woodWall_door");
+    const ownerWall = Wall.getAt(x, y);
+    const inferredOwnerTeam =
+        (Map.navGrid?.[y]?.[x] === 0 && Map.enemyNavGrid?.[y]?.[x] === 1) ? 0 :
+        (Map.navGrid?.[y]?.[x] === 1 && Map.enemyNavGrid?.[y]?.[x] === 0) ? 1 :
+        1;
+    const ownerTeam = ownerWall?.team ?? inferredOwnerTeam;
 
     // --- ensure Map.grid has correct layered form for doors/walls ---
     // (important if caller passed scalar)
@@ -192,13 +242,15 @@ export class buildingManager{
     const hasPlayerNav = Array.isArray(Map.navGrid) && Array.isArray(Map.navGrid[y]);
     const hasEnemyNav  = Array.isArray(Map.enemyNavGrid) && Array.isArray(Map.enemyNavGrid[y]);
 
-    // walls block both; doors block enemy only
+    // walls block both; doors block only the opposing side of the owner
     if (buildType.block && !isDoor) {
         if (hasPlayerNav) Map.navGrid[y][x] = 0;
         if (hasEnemyNav)  Map.enemyNavGrid[y][x] = 0;
     } else if (isDoor) {
-        if (hasPlayerNav) Map.navGrid[y][x] = 1;   // players can cross doors
-        if (hasEnemyNav)  Map.enemyNavGrid[y][x] = 0; // enemies cannot
+        const blocksPlayer = ownerTeam === 0;
+        const blocksEnemy = ownerTeam !== 0;
+        if (hasPlayerNav) Map.navGrid[y][x] = blocksPlayer ? 0 : 1;
+        if (hasEnemyNav)  Map.enemyNavGrid[y][x] = blocksEnemy ? 0 : 1;
     }
 
     // --- NAV MESH (ONLY if nav grids exist; otherwise redraw/menu will explode) ---
@@ -220,15 +272,28 @@ export class buildingManager{
             }
         }
         } else if (isDoor) {
-        // door blocks ENEMY navmesh only
-        if (hasEnemyNav && this.EnemyNavMeshUpdater?.blockTile && Map.enemyNavMesh) {
-            const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
-            if (enemyChange?.removedPolyIds) {
-            const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
-            for (const unit of impacted) PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+        const blocksPlayer = ownerTeam === 0;
+        const blocksEnemy = ownerTeam !== 0;
+
+        if (hasPlayerNav && this.NavMeshUpdater && Map.navMesh) {
+            const playerChange = blocksPlayer
+                ? this.NavMeshUpdater.blockTile(x, y)
+                : this.NavMeshUpdater.blockTiles([{ x, y }], true);
+            if (playerChange?.removedPolyIds) {
+                const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, playerChange.removedPolyIds, playerChange.addedPolyIds);
+                for (const unit of impacted) PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
             }
         }
-        // do NOT block player navmesh for doors
+
+        if (hasEnemyNav && this.EnemyNavMeshUpdater && Map.enemyNavMesh) {
+            const enemyChange = blocksEnemy
+                ? this.EnemyNavMeshUpdater.blockTile(x, y)
+                : this.EnemyNavMeshUpdater.blockTiles([{ x, y }], true);
+            if (enemyChange?.removedPolyIds) {
+                const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                for (const unit of impacted) PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+            }
+        }
         }
     } catch (e) {
         // swallow during menu/redraw phase; navmesh can be rebuilt once the world is fully initialized
@@ -863,57 +928,7 @@ export class buildingManager{
             return;
         }
         // ===== DESTROY COMPLETE =====
-        if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
-
-        this.scene.zoomMixer.updateOverviewCell(tx, ty, Map.grid);
-
-        Wall.destroyAt(tx, ty); // removes sprite + sets grid to grass (no redraw ownership)
-
-        // 2) make the tile walkable for BOTH teams
-        Map.navGrid[ty][tx] = 1;
-        Map.enemyNavGrid[ty][tx] = 1;
-
-        // 3) update overview texture (minimap / zoom mixer)
-        this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
-
-        // 4) unblock BOTH navmeshes using the same updater pipeline your block-destroy uses
-        if(sprite.task.type.name != "wall_door" && sprite.task.type.name == "woodWall_door"){
-            const changed = this.NavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
-            if (changed && changed.removedPolyIds) {
-                PathRegistry.handlePolysRemoved(Map.navMesh, changed.removedPolyIds, changed.addedPolyIds);
-            }
-        }
-        const enemyChanged = this.EnemyNavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
-        if (enemyChanged && enemyChanged.removedPolyIds) {
-            PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChanged.removedPolyIds, enemyChanged.addedPolyIds);
-        }
-        // Builder decides: store vs auto-consume into queued wall build
-        if (sprite.body.team) {
-            if(sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger){
-                Player.onWallDestroyed(sprite, task);
-            }else{
-                Builder.onWallDestroyed(sprite, task);
-            }
-        }else{
-            Raider.siegeComplete(sprite);   
-        }
-        // 5) regions / border-index maintenance (THIS is what makes siege planning “instant”)
-        // remove this wall from border buckets, then recompute regions
-        Map.enemyRegionSystem?.removeWallFromBorderIndex?.(tx, ty);
-        Map.enemyRegionSystem?.markDirty?.();
-        Map.enemyRegionDrawer?.markDirty?.();
-
-        Map.regionSystem?.markDirty?.();
-        Map.regionDrawer?.markDirty?.();
-
-        // force recompute once so subsequent O(1) reach checks are correct immediately
-        Map.enemyRegionSystem?.ensureUpToDate?.();
-
-        // 6) clear task and let controller decide next action
-        if(!sprite.body.team){
-            sprite.play(sprite.idle);
-            sprite.task = null;
-        }
+        this._completeDestroyTile(sprite, task, tx, ty);
         return true;
     }
 
@@ -996,6 +1011,9 @@ export class buildingManager{
 
 
     static _completeDestroyTile(sprite, task, tx, ty) {
+        const wall = Wall.getAt(tx, ty);
+        const ownerTeam = wall?.team ?? 1;
+
         // stop repeating
         if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
 
@@ -1018,20 +1036,21 @@ export class buildingManager{
         const typeName = task?.type?.name;
 
         const isDoor = (typeName === "wall_door" || typeName === "woodWall_door");
-        const isWall = !isDoor; // (in your use-case destroyTile tasks are walls/doors)
+        const unblockPlayer = !isDoor || ownerTeam === 0;
+        const unblockEnemy = !isDoor || ownerTeam !== 0;
 
-        // unblock player mesh only for walls (doors never blocked player mesh)
-        if (isWall) {
+        if (unblockPlayer) {
             const changed = this.NavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
             if (changed?.removedPolyIds) {
             PathRegistry.handlePolysRemoved(Map.navMesh, changed.removedPolyIds, changed.addedPolyIds);
             }
         }
 
-        // unblock enemy mesh for both walls + doors
-        const enemyChanged = this.EnemyNavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
-        if (enemyChanged?.removedPolyIds) {
-            PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChanged.removedPolyIds, enemyChanged.addedPolyIds);
+        if (unblockEnemy) {
+            const enemyChanged = this.EnemyNavMeshUpdater.blockTiles([{ x: tx, y: ty }], true);
+            if (enemyChanged?.removedPolyIds) {
+                PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChanged.removedPolyIds, enemyChanged.addedPolyIds);
+            }
         }
 
         // region/border maintenance (siege)
@@ -1067,8 +1086,11 @@ export class buildingManager{
         sprite.task = null;
         sprite.play(sprite.idle);
 
-        // reassign next
-        Manager.assignOneTroopToAction(sprite, teamList?.destroyTileStates ?? [], CONTROL_STATES.DESTROY_MODE_T);
+        // reassign next (prefer enemy wall queue when present)
+        const nextDestroyQueue = (teamList?.enemyDestroyTileStates?.length ?? 0) > 0
+            ? teamList.enemyDestroyTileStates
+            : (teamList?.destroyTileStates ?? []);
+        Manager.assignOneTroopToAction(sprite, nextDestroyQueue, CONTROL_STATES.DESTROY_MODE_T);
     }
 
 
@@ -1246,3 +1268,4 @@ export class buildingManager{
     }
 
 }
+

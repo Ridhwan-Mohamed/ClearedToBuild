@@ -22,6 +22,7 @@ import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Raider } from "./Raider";
 import { Blademaster } from "./Blademaster";
 import { Brawler } from "./Brawler";
+import { FortGrunt } from "./FortGrunt";
 import { AudioManager } from "../Manager/AudioManager";
 import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
@@ -431,10 +432,20 @@ export class Player {
         PathDebugDrawer.tickUnit(sprite, this.scene.time.now);
         this.setAnimState(sprite, sprite.walk);
         let nextPoint = sprite.currentPath[0];
-        // Scale speed by stamina ratio
-        const staminaFactor = Math.max(0.2, sprite.stamina / sprite.maxStamina);
-        const currentSpeed = sprite.type.speed * staminaFactor;
-        if(!sprite.roam && sprite.stamina > 0) {sprite.stamina = Math.max(0, sprite.stamina - sprite.type.stamina).toFixed(0);}
+        // Team 0 units (raiders/grunts) do not use stamina for movement.
+        const baseSpeed = sprite?.type?.speed ?? sprite.speed ?? 0;
+        let currentSpeed = baseSpeed;
+        if (sprite.body.team === 1) {
+            const maxStamina = Number(sprite.maxStamina) > 0 ? Number(sprite.maxStamina) : 100;
+            const stamina = Number.isFinite(Number(sprite.stamina)) ? Number(sprite.stamina) : maxStamina;
+            const staminaFactor = Math.max(0.2, stamina / maxStamina);
+            currentSpeed = baseSpeed * staminaFactor;
+
+            if (!sprite.roam && stamina > 0) {
+                const drain = Number(sprite?.type?.stamina) || 0;
+                sprite.stamina = Math.max(0, stamina - drain);
+            }
+        }
 
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);
@@ -692,6 +703,12 @@ export class Player {
         let mostClosest = null;
         let shortestDistance = Infinity;
         let search = !troop.forcedTarget; //always check for optimal enemy
+        const regionSystem = troop.body.team === 0 ? Map.enemyRegionSystem : Map.regionSystem;
+        const canStudyTarget = (body) => {
+            if (!body) return false;
+            if (!regionSystem?.canReachWorldToWorld) return true;
+            return regionSystem.canReachWorldToWorld(troop.x, troop.y, body.x, body.y);
+        };
         // troop.state == CONTROL_STATES.TRACK_TARGET ? search = false : search = true;
         if(search){
             // Troop position
@@ -699,6 +716,7 @@ export class Player {
 
             neighbours.forEach(neighbour => {
                 if (neighbour === troop.body || neighbour.team == troop.body.team || (neighbour.gameObject && !neighbour.gameObject.active) || neighbour.dontTrack) return; // Ignore itself or untrackable neighbors
+                if (!canStudyTarget(neighbour)) return; // Ignore targets in disconnected regions
 
                 // Neighbor position
                 const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
@@ -717,7 +735,13 @@ export class Player {
         // We found a closest enemy body (mostClosest)
         // Use tile change on SQUARESIZE grid to decide if we need a new path.
         if (troop.track && (troop.track[0] === mostClosest || troop.state === CONTROL_STATES.TRACK_TARGET)) {
-            const go = mostClosest.gameObject;
+            const trackedBody = (troop.track[0] === mostClosest) ? mostClosest : troop.track[0];
+            if (!canStudyTarget(trackedBody)) {
+                troop.track = null;
+                return false;
+            }
+
+            const go = trackedBody?.gameObject;
             if (!go) return false;
 
             const lastTileX = Math.floor(troop.track[1].x / SQUARESIZE);
@@ -737,6 +761,7 @@ export class Player {
         }
         else if (mostClosest) {
             // New target acquired
+            if (!canStudyTarget(mostClosest)) return false;
             const go = mostClosest.gameObject;
             if (!go) return false;
 
@@ -1093,7 +1118,9 @@ export class Player {
 
 
     static updateTracking(troop){
-        const overlapDist = troop.body.team ? 100 : 20;
+        const fallbackDist = troop.body.team ? 100 : 20;
+        const awareness = troop?.awareness ?? troop?.type?.awareness;
+        const overlapDist = Number.isFinite(awareness) ? awareness : fallbackDist;
         const neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, overlapDist);
         const hasWeapon = !!troop.weapon;
 
@@ -1327,6 +1354,9 @@ export class Player {
             else if (troop.isBrawler) {
                 Brawler.update(troop);
             }
+            else if (troop.isFortGrunt) {
+                FortGrunt.update(troop);
+            }
             else if (troop.isFarmer) {
                 Farmer.update(troop);
             }
@@ -1450,6 +1480,9 @@ export class Player {
                 break;
             case cube.isBrawler:
                 tint = 0xFFD712;
+                break;
+            case cube.isFortGrunt:
+                tint = 0x8b0000;
                 break;
             case cube.body.team === 1:
                 tint = 0x64ff32; // Green for your team

@@ -60,7 +60,7 @@ export class Wall {
   }
 
   // ---- creation / ensure
-  static ensureAt(scene, x, y, team = 1) {
+  static ensureAt(scene, x, y, team = undefined) {
     const cell = GameMap.grid?.[y]?.[x];
     if (cell == null) return null;
     if (!this.isWallOrDoorCell(cell)) return null;
@@ -72,12 +72,24 @@ export class Wall {
     const k = this.keyFor(x, y);
     let w = this.byCell.get(k);
 
+    const hasExplicitTeam = team !== undefined && team !== null;
+    const resolvedTeam = hasExplicitTeam ? team : (w?.team ?? 1);
+
     // If none exists (or it was deactivated), create fresh.
     if (!w || !w.active) {
-      w = new Wall(scene, x, y, team, v);
+      w = new Wall(scene, x, y, resolvedTeam, v);
       this.byCell.set(k, w);
+      w.team = resolvedTeam;
+      if (w.collider) w.collider.team = resolvedTeam;
+      if (w.sprite) w.sprite.team = resolvedTeam;
       return w;
     }
+
+    if (hasExplicitTeam) {
+      w.team = resolvedTeam;
+    }
+    if (w.collider) w.collider.team = w.team;
+    if (w.sprite) w.sprite.team = w.team;
 
     // ---- Refresh path: keep existing HP/phase/open state, but allow sprite swap/rotation ----
     const nextIsDoor = kind.isDoor;
@@ -156,6 +168,8 @@ export class Wall {
 
       // tie back to wall
       w.collider.wallRef = w;
+      w.collider.team = w.team;
+      w.sprite.team = w.team;
 
       // add to group
       GameMap.structureBarrier.add(w.collider);

@@ -5,11 +5,18 @@ import { PARCEL_SIZE } from "./ParcelConfig.js";
 import { TILE_TYPES, SQUARESIZE, TILE_MAP, colorFor } from "../constants.js";
 import { StageState } from "../parcelController/StageState.js";
 import { TowerBuilding } from "../buildings/Tower.js";
-import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Wall } from "../buildings/Wall.js";
 import { Prison } from "../buildings/Prison.js";
 import { Bank } from "../buildings/Bank.js";
 import { Teams } from "../Teams.js";
+import Phaser from "phaser";
+import { FortGrunt } from "../players/FortGrunt.js";
+
+export const FORT_GRUNT_CONFIG = {
+  BASE_COUNT: 2,
+  PER_STAGE: 1,
+  MAX_COUNT: 12,
+};
 
 function randInt(min, maxInclusive) {
   return Math.floor(Math.random() * (maxInclusive - min + 1)) + min;
@@ -164,7 +171,7 @@ export function spawnNorthFort({
   wallPadding = 2,             // extra tiles between tower footprint and walls
   wallType = "woodWall",       // "woodWall" | "wall" (stone)
   doorType = "woodWall_door",  // matching door
-  raiderCount = 3,
+  fortGruntCount = null,
 } = {}) {
   if (!scene || !map || !mainIslandOrigin) return null;
 
@@ -366,6 +373,29 @@ export function spawnNorthFort({
 
   placeFortDoor(map, doorX, doorY, doorType, fortTrack);
 
+  const fortRoads = [];
+  for (let y = miny + 1; y <= maxy - 1; y++) {
+    for (let x = minx + 1; x <= maxx - 1; x++) {
+      if (map.enemyNavGrid?.[y]?.[x] === 1) fortRoads.push([x, y]);
+    }
+  }
+
+  const stageIndex = Math.max(1, StageState.stageIndex || 1);
+  const desiredCount = fortGruntCount ?? Math.min(
+    FORT_GRUNT_CONFIG.MAX_COUNT,
+    FORT_GRUNT_CONFIG.BASE_COUNT + (stageIndex - 1) * FORT_GRUNT_CONFIG.PER_STAGE
+  );
+
+  const spawnPool = [...fortRoads];
+  for (let i = 0; i < desiredCount && spawnPool.length > 0; i++) {
+    const pick = Phaser.Utils.Array.RemoveRandomElement(spawnPool);
+    if (!pick) break;
+    const [gx, gy] = pick;
+    const grunt = new FortGrunt(gx, gy, 0);
+    grunt.fortBounds = { minx, miny, maxx, maxy };
+    grunt.fortRoads = fortRoads;
+  }
+
   try {
     scene.rebuildBothNavMeshes?.();
     map._uiIgnoreWorldLayer?.();
@@ -389,6 +419,7 @@ export function spawnNorthFort({
     tower: towerInstance,
     bank: bankInst,
     prison: prisonInst,
+    fortRoads,
     bounds: { minx, miny, maxx, maxy }
   };
 }
@@ -413,6 +444,7 @@ export function clearNorthFort({ scene, map, meta } = {}) {
   if (!scene || !map || !meta?.bounds) return;
 
   const bounds = meta.bounds;
+  const enemyTeam = Teams.teamLists?.["0"];
 
   // 1) Remove tracked visuals/colliders if still around
   const track = meta?.refs?.fortTrack;
@@ -435,6 +467,20 @@ export function clearNorthFort({ scene, map, meta } = {}) {
         try { Wall.destroyAt(x, y); } catch {}
       }
     }
+  }
+
+  // 2.5) Remove fort-bound grunts from previous cycle.
+  if (enemyTeam?.playerList?.length) {
+    const toRemove = enemyTeam.playerList.filter((troop) => {
+      if (!troop?.active || !troop?.isFortGrunt) return false;
+      const gx = Math.floor((troop.x ?? 0) / SQUARESIZE);
+      const gy = Math.floor((troop.y ?? 0) / SQUARESIZE);
+      return _cellInBounds(gx, gy, bounds);
+    });
+
+    toRemove.forEach((troop) => {
+      try { troop.destroySelf?.(); } catch {}
+    });
   }
 
   // Also clear queued destroy tasks that point at stale fort objects.

@@ -5,9 +5,6 @@
 niceness
    - animate contract ui ✔️
 
-Map
-   - fix three stack logic
-
 Team 1 attack logic
    - add functional logic for destroying enemy buildings ✔️
    - add functional logic for destroying enemy walls ✔️
@@ -23,11 +20,15 @@ Tower
    - Wire in destruction sprite ✔️
 
 Enemies
-   - make Enemy type Fort Grunt
-      - stay in fort
-      - attack team 1
-      - show lvl as well 
-   - add troops to fort, increase count based on stage
+   - make Enemy type Fort Grunt✔️
+      - stay in fort ✔️
+      - attack team 1 ✔️
+   - add troops to fort, increase count based on stage ✔️
+
+Rewards ✔️
+   - Cards ✔️
+   - Treasure Chest ✔️
+   - Players ✔️
 
 Pressure_Spawner
    - make spawners spawn based on times and with varying spawner counts and amounts ✔️
@@ -38,10 +39,11 @@ POIS
    - prison (destruction yields new teammates) ✔️
 
 Season
-   - have UI showing what season you are in
-   - Have reward for completion (moneys plus non card powerups)
+   - have UI showing what season you are in ✔️
+   - Have reward for completion (moneys plus non card powerups) ✔️
 
 Minor fixes
+   - Map fix three stack logic
    - give wall breaking audio
    - Town name never gets changed
    - Start farming box is always red

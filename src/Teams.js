@@ -163,15 +163,19 @@ export class Teams {
     
       // Extract the saved center tile for this team
       const roads = townRoads[`${troop.body.team}`];
-      if (!roads || roads.length === 0) return null;
+      Teams.sendTroopToRoadPool(troop, roads, CONTROL_STATES.BACK_TO_TOWN);
+    }
 
-      const [x, y] = Phaser.Utils.Array.GetRandom(roads);      
+    static sendTroopToRoadPool(troop, roads, moveState = CONTROL_STATES.BACK_TO_TOWN) {
+      if (!troop?.body || !Array.isArray(roads) || roads.length === 0) return null;
+
+      const [x, y] = Phaser.Utils.Array.GetRandom(roads);
       const path = Player.pathTo(troop, x, y);
-      if(!path) return; 
-    
-      this.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN);
-      // Hand off that path to Player.moveTo
+      if (!path) return null;
+
+      this.movePlayerState(troop, moveState);
       Player.moveTo(troop, path);
+      return path;
     }
       
 

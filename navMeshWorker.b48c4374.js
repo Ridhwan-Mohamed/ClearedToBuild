@@ -1355,6 +1355,7 @@ parcelHelpers.export(exports, "gridColors", ()=>gridColors);
 parcelHelpers.export(exports, "GHOST_ITEM_ICONS", ()=>GHOST_ITEM_ICONS);
 parcelHelpers.export(exports, "colorFor", ()=>colorFor);
 parcelHelpers.export(exports, "showGhostText", ()=>showGhostText);
+parcelHelpers.export(exports, "ENEMY_BUILDING_HOVER_UI", ()=>ENEMY_BUILDING_HOVER_UI);
 parcelHelpers.export(exports, "createBubbleText", ()=>createBubbleText);
 parcelHelpers.export(exports, "PARCEL", ()=>PARCEL);
 parcelHelpers.export(exports, "PRESSURE_CONTRACT", ()=>PRESSURE_CONTRACT);
@@ -1490,8 +1491,8 @@ const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 12,
-        lenX: 3,
-        lenY: 3,
+        lenX: 4,
+        lenY: 4,
         depth: BLOCKDEPTH + 2,
         resource: (0, _uiconstants.UI_ITEM_TYPES).wood,
         images: [
@@ -1791,8 +1792,8 @@ const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 46,
-        lenX: 2,
-        lenY: 2,
+        lenX: 3,
+        lenY: 3,
         depth: BLOCKDEPTH + 2,
         resource: (0, _uiconstants.UI_ITEM_TYPES).stone,
         images: [
@@ -1883,6 +1884,88 @@ const TILE_TYPES = {
         price: {
             wood: 1
         }
+    },
+    fort_floor: {
+        name: "fort_floor",
+        spread: true,
+        block: false,
+        complex: true,
+        grid: 68,
+        interior: 68,
+        island: 69,
+        sides: {
+            up: 70,
+            down: 71,
+            left: 72,
+            right: 73
+        },
+        corners: {
+            topLeft: 74,
+            topRight: 75,
+            bottomLeft: 76,
+            bottomRight: 77
+        },
+        depth: FLOORDEPTH,
+        assets: {
+            interior: {
+                key: 'fort_interior',
+                sheet: false
+            },
+            island: {
+                key: 'fort_island',
+                sheet: false
+            },
+            edge: {
+                key: 'fort_edge',
+                sheet: false
+            },
+            corner: {
+                key: 'fort_corner',
+                sheet: false
+            }
+        }
+    },
+    tower: {
+        name: "tower",
+        value: "tower",
+        spriteSheet: true,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 78,
+        depth: BLOCKDEPTH,
+        lenX: 5,
+        lenY: 5,
+        stayBlocked: true
+    },
+    // ── Fort enemy buildings (64x64 sheets, 2 frames) ──
+    prison: {
+        name: "prison",
+        value: "prison_closed",
+        spriteSheet: true,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 79,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4,
+        maxHealth: 450,
+        stayBlocked: true
+    },
+    bank: {
+        name: "bank",
+        value: "bank_closed",
+        spriteSheet: true,
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 80,
+        depth: BLOCKDEPTH,
+        lenX: 4,
+        lenY: 4,
+        maxHealth: 500,
+        stayBlocked: true
     }
 };
 const DRAFT_UI_X_SHIFT = 120;
@@ -1986,7 +2069,20 @@ const TILE_ARR = [
     'wood_blcWall',
     'wood_brcWall',
     'wall_door',
-    'woodWall_door' // 67 wood wall door
+    'woodWall_door',
+    'fort_interior',
+    'fort_island',
+    'fort_edge',
+    'fort_edge',
+    'fort_edge',
+    'fort_edge',
+    'fort_corner',
+    'fort_corner',
+    'fort_corner',
+    'fort_corner',
+    'tower',
+    'prison_closed',
+    'bank_closed'
 ];
 function TILE_MAP(val) {
     if (val == 1) return "grass";
@@ -2013,6 +2109,11 @@ function TILE_MAP(val) {
     else if (val >= 57 && val <= 65) return "woodWall";
     else if (val == 66) return "wall_door";
     else if (val == 67) return "woodWall_door";
+    else if (val >= 68 && val <= 77) return "fort_floor";
+    else if (val == 78) return "tower";
+    else if (val == 79) return "prison";
+    else if (val == 80) return "bank";
+    return null;
 }
 function gridPos(x, y) {
     return {
@@ -2063,9 +2164,9 @@ function clearTaskPlusTimer(sprite) {
 const gridColors = {
     water: 0x3cb8f1,
     wall: 0x808080,
-    woodWall: 0x808080,
+    woodWall: 0x65350f,
     wall_door: 0x5a5a5a,
-    wall_door: 0x5a5a5a,
+    woodWall_door: 0x2e1503,
     dirt: 0x4c2b18,
     grass: 0x33cc33,
     house1: 0x8b0000,
@@ -2080,7 +2181,8 @@ const gridColors = {
     storage: 0x7d4900,
     pine: 0x006400,
     rock: 0x5a682b,
-    crops: 0xFCF55F
+    crops: 0xFCF55F,
+    fort_floor: 0x777777
 };
 const GHOST_ITEM_ICONS = {
     food: "\uD83C\uDF56",
@@ -2116,7 +2218,15 @@ function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isMiss = f
         duration: 600,
         onComplete: ()=>ghost.destroy()
     });
+    scene.uiCamera.ignore(ghost);
 }
+const ENEMY_BUILDING_HOVER_UI = {
+    // how far above the sprite's TOP the panel sits (bigger = higher)
+    PANEL_Y_OFFSET: 0,
+    // text offsets *within* the panel (relative to panel center)
+    LINE1_DY: -9,
+    LINE2_DY: 6
+};
 function createBubbleText({ scene, target, text, textColor = '#ffffff', bgColor = 'rgba(0,0,0,0.6)', fontSize = 10, duration = 1200, floatOffset = 18, fadeDuration = 350 }) {
     if (!scene || !target) return;
     // Base text (world-space)
@@ -2371,20 +2481,129 @@ const UI_ITEM_TYPES = {
 
 },{"@parcel/transformer-js/src/esmodule-helpers.js":"fn8Fk"}],"fb4wq":[function(require,module,exports,__globalThis) {
 // parcelController/StageState.js
-// Minimal stage scaffold (you'll extend when forts exist).
+// Stage/season progression + north-fort win condition (supports multiple towers)
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
 parcelHelpers.export(exports, "StageState", ()=>StageState);
 const StageState = {
     stageIndex: 1,
     seasonIndex: 1,
-    // You can tick this up when a fort is destroyed.
+    STAGES_PER_SEASON: 5,
+    // Fort towers that exist in the world (registered by TowerBuilding)
+    _fortTowers: new Set(),
+    // Fort objective state (per season)
+    _fortObjective: {
+        active: false,
+        seasonIndex: 1,
+        requiredCount: 0,
+        destroyedSet: new Set(),
+        completed: false,
+        meta: null
+    },
+    _listeners: {
+        seasonAdvanced: new Set(),
+        fortDestroyed: new Set()
+    },
+    onSeasonAdvanced (fn) {
+        if (typeof fn === "function") this._listeners.seasonAdvanced.add(fn);
+        return ()=>this._listeners.seasonAdvanced.delete(fn);
+    },
+    onFortDestroyed (fn) {
+        if (typeof fn === "function") this._listeners.fortDestroyed.add(fn);
+        return ()=>this._listeners.fortDestroyed.delete(fn);
+    },
+    // Called by TowerBuilding when a fort objective tower is created
+    registerFortTower (towerRef) {
+        if (towerRef) this._fortTowers.add(towerRef);
+    },
+    // Called by TowerBuilding when it is destroyed (optional hygiene)
+    unregisterFortTower (towerRef) {
+        if (towerRef) this._fortTowers.delete(towerRef);
+    },
     advanceStage () {
         this.stageIndex += 1;
     },
-    advanceSeason () {
+    advanceSeason (meta = {}) {
         this.seasonIndex += 1;
-        this.stageIndex += 1;
+        this.stageIndex = 1;
+        // Reset objective and tower registry for next season (fresh world)
+        this._fortTowers.clear();
+        this._fortObjective = {
+            active: false,
+            seasonIndex: this.seasonIndex,
+            requiredCount: 0,
+            destroyedSet: new Set(),
+            completed: false,
+            meta: null
+        };
+        for (const fn of this._listeners.seasonAdvanced)try {
+            fn({
+                seasonIndex: this.seasonIndex,
+                stageIndex: this.stageIndex,
+                ...meta
+            });
+        } catch (_) {}
+    },
+    // Call AFTER reward selection to move to next stage/season and reset fort objective state.
+    completeFortCycle (meta = {}, opts = {}) {
+        const stagesPerSeason = Math.max(1, Number(opts.stagesPerSeason ?? this.STAGES_PER_SEASON) || 5);
+        if (this.stageIndex >= stagesPerSeason) this.advanceSeason({
+            reason: "fort_defeated",
+            ...meta
+        });
+        else {
+            this.stageIndex += 1;
+            this._fortTowers.clear();
+            this._fortObjective = {
+                active: false,
+                seasonIndex: this.seasonIndex,
+                requiredCount: 0,
+                destroyedSet: new Set(),
+                completed: false,
+                meta: null
+            };
+        }
+        return {
+            seasonIndex: this.seasonIndex,
+            stageIndex: this.stageIndex
+        };
+    },
+    /**
+   * Arm the north-fort objective for the CURRENT season.
+   * Call after all fort towers are spawned/created.
+   */ setFortObjective (meta = {}) {
+        const snapshotCount = Number.isFinite(meta.requiredTowerCount) && meta.requiredTowerCount > 0 ? Math.floor(meta.requiredTowerCount) : this._fortTowers.size > 0 ? this._fortTowers.size : 1;
+        this._fortObjective.active = true;
+        this._fortObjective.seasonIndex = this.seasonIndex;
+        this._fortObjective.requiredCount = snapshotCount;
+        this._fortObjective.destroyedSet = new Set();
+        this._fortObjective.completed = false;
+        this._fortObjective.meta = meta;
+    },
+    /**
+   * Called by TowerBuilding.destroy()
+   * Counts down fort towers; only completes when requiredCount reached.
+   */ notifyFortTowerDestroyed (towerRef) {
+        const obj = this._fortObjective;
+        if (!obj.active) return false;
+        if (obj.completed) return false;
+        // Only count towers that were registered as fort towers
+        if (!this._fortTowers.has(towerRef)) return false;
+        // Do not double-count
+        if (obj.destroyedSet.has(towerRef)) return false;
+        obj.destroyedSet.add(towerRef);
+        // Not done yet -> just counted
+        if (obj.destroyedSet.size < obj.requiredCount) return true;
+        // Completed (reward + progression handled by scene callback)
+        obj.completed = true;
+        for (const fn of this._listeners.fortDestroyed)try {
+            fn({
+                seasonIndex: this.seasonIndex,
+                stageIndex: this.stageIndex,
+                meta: obj.meta
+            });
+        } catch (_) {}
+        return true;
     }
 };
 

@@ -1,46 +1,7 @@
 📈 Advancing TODOS
 
-[ramadan era] Gameify Update-5 - forts, season UI/logic, pressure spawner logic
+[ramadan era] Gameify Update-6 - Fighting logic, troop control
 
-niceness
-   - animate contract ui ✔️
-
-Team 1 attack logic
-   - add functional logic for destroying enemy buildings ✔️
-   - add functional logic for destroying enemy walls ✔️
-   - Make Gunslinger shoot the wall, not hit it ✔️
-
-forts
-   - walled in fort with inifnite enemy spawner ✔️
-   - also enemy troops in it that are stronger than spawned enemies ✔️
-   - tower to defeat like clash to end fort and end season ✔️
-   - on destruction of fort, make all spawner raiders dies, fort clear, shake screen and draw random explosions on north fort ✔️ 
-
-Tower
-   - Wire in destruction sprite ✔️
-
-Enemies
-   - make Enemy type Fort Grunt✔️
-      - stay in fort ✔️
-      - attack team 1 ✔️
-   - add troops to fort, increase count based on stage ✔️
-
-Rewards ✔️
-   - Cards ✔️
-   - Treasure Chest ✔️
-   - Players ✔️
-
-Pressure_Spawner
-   - make spawners spawn based on times and with varying spawner counts and amounts ✔️
-   - show UI in the top right showing next spawner count and direction and enemy types ✔️
-
-POIS
-   - Bank (destruction yields money) ✔️
-   - prison (destruction yields new teammates) ✔️
-
-Season
-   - have UI showing what season you are in ✔️
-   - Have reward for completion (moneys plus non card powerups) ✔️
 
 Minor fixes
    - Map fix three stack logic

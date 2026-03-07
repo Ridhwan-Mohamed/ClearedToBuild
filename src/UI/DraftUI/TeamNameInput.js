@@ -12,7 +12,7 @@ export class TeamNameInput {
     this.scene = scene;
     this.onChange = opts.onChange ?? (() => {});
 
-    const width = opts.width ?? 260;
+    const width = opts.width ?? 220;
 
     const html = `
       <div style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
@@ -26,13 +26,18 @@ export class TeamNameInput {
           value="${(opts.initialValue ?? "").replaceAll('"', '&quot;')}"
           style="
             width:${width}px;
-            padding:10px 12px;
-            font-size:16px;
-            border-radius:10px;
-            border:1px solid rgba(255,255,255,0.25);
-            background:rgba(20,20,20,0.8);
+            padding:6px 10px;
+            font-size:14px;
+            font-family:monospace;
+            border-radius:8px;
+            border:none;
+            box-shadow:none;
+            -webkit-appearance:none;
+            appearance:none;
+            background:rgba(20,20,20,0.9);
             color:white;
             outline:none;
+            caret-color:white;
           "
         />
       </div>
@@ -54,7 +59,7 @@ export class TeamNameInput {
 
     // Clicking outside should blur (better on mobile)
     // Use DOM bounding rect (DOMElement doesn't always have getBounds())
-    scene.input.on("pointerdown", (pointer) => {
+    this._outsidePointerHandler = (pointer) => {
       const e = pointer?.event;
       if (!e) return;
 
@@ -69,7 +74,8 @@ export class TeamNameInput {
         y >= rect.top && y <= rect.bottom;
 
       if (!inside) input.blur();
-    });
+    };
+    scene.input.on("pointerdown", this._outsidePointerHandler);
   }
 
   setValue(v) {
@@ -78,6 +84,10 @@ export class TeamNameInput {
   }
 
   destroy() {
+    if (this._outsidePointerHandler) {
+      this.scene?.input?.off?.("pointerdown", this._outsidePointerHandler);
+      this._outsidePointerHandler = null;
+    }
     this.dom?.destroy();
   }
 }

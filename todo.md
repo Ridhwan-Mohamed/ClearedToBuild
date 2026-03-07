@@ -1,17 +1,29 @@
 📈 Advancing TODOS
 
-[ramadan era] Gameify Update-6 - Fighting logic, troop control
+[ramadan era] Gameify Update-6 - Fighting logic, team-1 breach logic, troop control
 
+ui camera scene
+   - make the ui camera scene
 
+Fighting polish
+   - brainstorm best fight design
+   - fix error where fighting is sometimes paused
+   - fix error when hits are done to far
+   - fix targetting software
+
+Team-1 breach logic
+   - make it so a selected group of troops can be sent to a building and do a similar breach design that raiders do if building closed off
+
+Backlogs:
 Minor fixes
-   - Map fix three stack logic
-   - give wall breaking audio
-   - Town name never gets changed
+   - team name not working with wasd
    - Start farming box is always red
+Major fixes
+   - Map fix three stack logic
    - Path update on new region creation (goes through last placed tile)
 ---------------------------------------------------------------------------------------------------------------------------------
 📦 BackLog
     - 🔄 Make redraw a webworker and handle edge cases
 ----------------------------------------------------------------------------------------------------------------------------------
 ⏳ Down the Line
-Fighting polish, Player Logic Polish, UI polish, QOL polish, Map polish, Art polish, Cards+, Sound polish
+UI polish, QOL polish, Map polish, Art polish, Cards+, Sound polish

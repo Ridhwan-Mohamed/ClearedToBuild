@@ -1,7 +1,7 @@
 // === StorageTab.js ===
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
-import { showAlert } from '../../constants'
+import { TILE_TYPES, showAlert } from '../../constants'
 
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
@@ -266,7 +266,7 @@ export default class StorageTab {
       Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
         x: b.gridX ?? b.x,
         y: b.gridY ?? b.y,
-        type: b.buildType, // storage should already carry this
+        type: b.buildType ?? b.type ?? TILE_TYPES.storage,
         value: b,
         assigned: 0,
       });

@@ -11,6 +11,7 @@ import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { AudioManager } from '../Manager/AudioManager.js';
+import { Scheduler } from '../ai/scheduler/Scheduler.js';
 
 export class Farmer {
 
@@ -73,130 +74,72 @@ export class Farmer {
 
         // 1. If manually assigned via tilling or harvesting
         if (troop.task) return;
+        if (Scheduler.stepUnit(troop)) return;
+
+        if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
+            Player.roam(troop);
+        }
+    }
+
+    static tryAssignSeedFlow(troop, preferredSpot = null) {
         const teamData = Teams.teamLists[troop.body.team];
+        if (!teamData) return false;
 
-        // ---- Carry state / seed detection ----
-        const isCarryingAnything = StorageManager.isCarrying(troop);
         const carrying = troop.carrying;
-        const seedItemType = UI_ITEM_TYPES.seedCrop;     // <-- seed item used for planting
-        const carryingSeeds = (carrying && carrying === seedItemType);
+        const seedItemType = UI_ITEM_TYPES.seedCrop;
+        const carryingSeeds = carrying && carrying === seedItemType;
 
-        // 2. If carrying something that is NOT seeds, send it to storage as before
-        if (isCarryingAnything && !carryingSeeds) {
-            const assigned = StorageManager.tryCreateStorageDeliveryTask(troop);
-            if (assigned) return;
-        }
+        const reserveAndFetch = (spot) => {
+            if (!spot) return false;
+            spot.reservedBy = troop;
+            troop.pendingFarmSpot = spot;
 
-        // 3. Harvest ready crops (same logic as before, but we keep it before tilling)
-        const readyCrop = teamData.TeamFarmSpots?.[0];
-        if (readyCrop && !isCarryingAnything) {
-            const isHarvesting = Manager.assignOneTroopToAction(
-                troop,
-                Teams.teamLists[troop.body.team].TeamFarmSpots,
-                CONTROL_STATES.R_FARM_MODE
-            );
-            if (isHarvesting) return;
-        }
+            if (carryingSeeds) {
+                if (spot.reservedBy === troop) delete spot.reservedBy;
+                troop.pendingFarmSpot = null;
+                return Manager.assignTaskToTroop(troop, spot, CONTROL_STATES.FARM_MODE);
+            }
 
-        // 3.5. Tilling / planting flow:
-        //  - Find an unreserved till spot
-        //  - Mark it reserved by this farmer (so only 1 farmer per tile)
-        //  - Create a storage pickup job for seeds
-        //  - After seeds are picked up, come back and FARM that exact tile
+            const gotPickup = StorageManager.tryCreateStoragePickupTask(troop, seedItemType);
+            if (gotPickup) return true;
 
-        const tillSpots = teamData.tileList || [];
+            if (spot.reservedBy === troop) delete spot.reservedBy;
+            troop.pendingFarmSpot = null;
+            return false;
+        };
 
-        // --- Case A: we already have a reserved till spot ---
         if (troop.pendingFarmSpot) {
             const plot = troop.pendingFarmSpot;
-
-            // If we already fetched seeds, go plant this specific spot
             if (carryingSeeds) {
                 if (plot.reservedBy === troop) delete plot.reservedBy;
                 troop.pendingFarmSpot = null;
-
-                Manager.assignTaskToTroop(
-                    troop,
-                    plot,
-                    CONTROL_STATES.FARM_MODE
-                );
-                return;
+                return Manager.assignTaskToTroop(troop, plot, CONTROL_STATES.FARM_MODE);
             }
-
-            // No seeds yet: try to create a pickup job for seeds
-            const gotPickup = StorageManager.tryCreateStoragePickupTask(
-                troop,
-                seedItemType
-            );
-            if (gotPickup) return;
-
-            // If no seeds available at all, release the reservation so the tile
-            // can be used later when seeds exist.
+            if (StorageManager.tryCreateStoragePickupTask(troop, seedItemType)) return true;
             if (plot.reservedBy === troop) delete plot.reservedBy;
             troop.pendingFarmSpot = null;
-            // fall through to watering / roaming
-        } else {
-            // --- Case B: no reserved till spot yet: try to claim one ---
-            if (tillSpots.length) {
-                // "unassigned" here = not reserved & not already at max workers
-                const spot = tillSpots.find(
-                    (s) => !s.reservedBy && !Manager.tooManyAssigned(s, 1)
-                );
-
-                if (spot) {
-                    // Reserve this tile for this farmer only
-                    spot.reservedBy = troop;
-                    troop.pendingFarmSpot = spot;
-
-                    // If we already have seeds on us (e.g. leftover from previous run),
-                    // just go plant immediately.
-                    if (carryingSeeds) {
-                        if (spot.reservedBy === troop) delete spot.reservedBy;
-                        troop.pendingFarmSpot = null;
-
-                        Manager.assignTaskToTroop(
-                            troop,
-                            spot,
-                            CONTROL_STATES.FARM_MODE
-                        );
-                        return;
-                    }
-
-                    // Otherwise: go fetch seeds from storage
-                    const gotPickup = StorageManager.tryCreateStoragePickupTask(
-                        troop,
-                        seedItemType
-                    );
-                    if (gotPickup) {
-                        return;
-                    }else{
-                        spot.reservedBy = null;
-                        troop.pendingFarmSpot = null;
-                    }
-
-                    // If no seeds can be picked up right now, we keep the reservation
-                    // for a bit so this farmer will keep trying once storage has seeds.
-                    // If you want to immediately release it on failure, uncomment:
-                    // if (spot.reservedBy === troop) delete spot.reservedBy;
-                    // troop.pendingFarmSpot = null;
-                }
-            }
+            return false;
         }
 
-        // 4. Water crops
+        const tillSpots = teamData.tileList || [];
+        if (preferredSpot && !preferredSpot.reservedBy && !Manager.tooManyAssigned(preferredSpot, 1)) {
+            return reserveAndFetch(preferredSpot);
+        }
+        const spot = tillSpots.find((s) => !s.reservedBy && !Manager.tooManyAssigned(s, 1));
+        return reserveAndFetch(spot);
+    }
+
+    static tryAssignWaterWork(troop, preferredCrop = null) {
+        if (!troop.waterBucket.count) {
+            this.assignWaterTask(troop);
+            return true;
+        }
+        if (preferredCrop) {
+            return Manager.assignOneTroopToAction(troop, [preferredCrop], CONTROL_STATES.WATER_CROPS_MODE);
+        }
         const cropNeedingWater = Teams.getCropsNeedingWater(troop.body.team);
-        if (cropNeedingWater.length) {
-            if (!troop.waterBucket.count) {
-                this.assignWaterTask(troop);
-                return;
-            }
-            const isWatering = Manager.assignOneTroopToAction(troop, cropNeedingWater, CONTROL_STATES.WATER_CROPS_MODE);
-            if(isWatering) return;
-        }
-        // 5. roam
-        else if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
-            Player.roam(troop);
-        }
+        if (!cropNeedingWater.length) return false;
+        return Manager.assignOneTroopToAction(troop, cropNeedingWater, CONTROL_STATES.WATER_CROPS_MODE);
     }
 
     static assignWaterTask(troop) {

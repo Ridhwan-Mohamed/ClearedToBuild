@@ -2,7 +2,7 @@
 // === HousesTab.js ===
 import { Teams } from '../../Teams';
 import { StaminaManager } from '../../Manager/staminaManager.js';
-import { CONTROL_STATES, SQUARESIZE, showAlert } from '../../constants';
+import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, showAlert } from '../../constants';
 
 export default class HousesTab {
   constructor(scene, teamNumber = 1) {
@@ -162,7 +162,7 @@ export default class HousesTab {
       Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
         x: b.gridX ?? b.x,
         y: b.gridY ?? b.y,
-        type: b.buildType, // house should already carry this
+        type: b.buildType ?? b.type ?? TILE_TYPES.house1,
         value: b,
         assigned: 0,
       });

@@ -6,6 +6,7 @@ import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { Scheduler } from '../ai/scheduler/Scheduler.js';
  
 export class Forager {
 
@@ -65,14 +66,7 @@ export class Forager {
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (forager.task) return;
 
-        if (StorageManager.isCarrying(forager)) {
-            return StorageManager.tryCreateStorageDeliveryTask(forager);
-        }
-
-        const queue = Teams.teamLists[forager.body.team].foragerQueue;
-        if (queue.length) {
-            Manager.assignOneTroopToAction(forager, queue, CONTROL_STATES.TRACK_MODE);
-        }
+        if (Scheduler.stepUnit(forager)) return;
 
         if (!forager.task && forager.state === CONTROL_STATES.TRACK_MODE && !forager.roam) {
             Player.roam(forager);

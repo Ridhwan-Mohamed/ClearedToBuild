@@ -70,6 +70,7 @@ import mediumBasePine from 'url:./assets/trees/mediumBasePine.png';
 import mediumMiddlePine from 'url:./assets/trees/mediumMiddlePine.png';
 import mediumTopPine from 'url:./assets/trees/mediumTopPine.png';
 import { PineTree } from './buildings/pineTree.js';
+import { RockNode } from './buildings/RockNode.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
 import { AudioManager } from './Manager/AudioManager.js';
@@ -81,7 +82,6 @@ import { Prison } from './buildings/Prison.js';
 import { TowerPressureController } from './parcel_system/TowerPressureController.js';
 import { StageState } from './parcelController/StageState.js';
 import { loadShipMarketAssets } from './UI/ShipMarket.js';
-import { ensureStageHud } from './UI/StageHud.js';
 import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
 import { respawnNorthFort } from './parcel_system/FortRaidParcel.js';
 
@@ -196,6 +196,7 @@ export class mapView extends Phaser.Scene {
         HouseUI.init(this);
         MainMenu.attach(this);
         PineTree.init(this);
+        RockNode.init(this);
         TowerBuilding.scene = this;
         Bank.scene = this;
         Prison.scene = this;
@@ -260,7 +261,6 @@ export class mapView extends Phaser.Scene {
         StageState.onFortDestroyed(({ stageIndex, meta }) => {
             this.startStageCompleteSequence(stageIndex, meta);
         });
-        ensureStageHud(this, { stagesPerSeason: 5 });
         
         // Variable to store the current text object
         let currentText; 
@@ -463,7 +463,7 @@ export class mapView extends Phaser.Scene {
                 this.isBrushActive = true;  
                 this.brushTiles = [];
             }
-            else if (this.breakItems.text != 'Place'){
+            else if ((this.breakItems?.text ?? "") != 'Place'){
                 let x = pointer.worldX;
                 let y = pointer.worldY;
 
@@ -1580,6 +1580,9 @@ cancelFarmSelection(exitFarmMode = false) {
             meta,
             onComplete: () => {
                 this._activeRewardUI = null;
+
+                // Stage transition cleanup: remove any lingering pressure parcels + their raiders.
+                this.parcelManager?.forceClearPressureContracts?.("stage_end_cleanup");
 
                 // Progress stage/season AFTER reward is chosen.
                 StageState.completeFortCycle({ reason: 'fort_reward_collected' }, { stagesPerSeason: 5 });

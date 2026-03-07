@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert, UIDEPTH, clearTaskPlusTimer } from "../constants";
+import { BLOCKDEPTH, SQUARESIZE, CONTROL_STATES, TILE_TYPES, TILE_MAP, WORLD_DIMENSIONX, WORLD_DIMENSIONY, showAlert, UIDEPTH } from "../constants";
 import Phaser from "phaser";
 import { Map } from "../map";
 import { tillManager } from "../Manager/tillManager";
@@ -26,6 +26,7 @@ import { FortGrunt } from "./FortGrunt";
 import { AudioManager } from "../Manager/AudioManager";
 import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
+import { InterruptController } from "../ai/scheduler/InterruptController";
 
 export class Player {
 
@@ -1083,39 +1084,9 @@ export class Player {
     }
 
     static handleStateIntteruptStart(troop, targetState) {
-        // If we're already in the desired state (TRACK_TARGET or FLEE_MODE),
-        // nothing to do – this interrupt was already handled.
         if (troop.state === targetState) return;
-
-        // Drop any active task + timer via helper if available
-        if (typeof clearTaskPlusTimer === 'function') {
-            clearTaskPlusTimer(troop);
-        } else {
-            if (troop.task) {
-                if (typeof troop.task.assigned === 'number' && troop.task.assigned > 0) {
-                    troop.task.assigned -= 1;
-                }
-                troop.task = null;
-            }
-            if (troop.timer) {
-                troop.timer.remove(false);
-                troop.timer = null;
-            }
-        }
-
-        // Stop current movement / roaming
-        troop.roam = false;
-        if (troop.currentPath && troop.currentPath.length) {
-            troop.currentPath.length = 0;
-        }
-        if (troop.body && troop.body.setVelocity) {
-            troop.body.setVelocity(0, 0);
-        }
-
-        // Actually switch state (TRACK_TARGET or FLEE_MODE)
-        Teams.movePlayerState(troop, targetState);
+        InterruptController.interruptTroop(troop, "state_interrupt", targetState);
     }
-
 
     static updateTracking(troop){
         const fallbackDist = troop.body.team ? 100 : 20;

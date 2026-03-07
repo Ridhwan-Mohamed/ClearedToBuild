@@ -908,6 +908,9 @@ export class buildingManager{
             ? (sprite.weapon?.baseDmg || 5)
             : 2;
 
+            AudioManager.playWeaponAttack(sprite, sprite.weapon);
+
+
             // Apply damage to the wall itself (this drives phase/frame changes)
             destroyed = wall.damage(damage);
         }

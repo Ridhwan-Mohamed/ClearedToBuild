@@ -27,10 +27,35 @@ import { ParcelSpawnController } from './parcelSpawn/ParcelSpawnController.js';
 import { ParcelManager } from './parcel_system/ParcelManager.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import { spawnNorthFort } from './parcel_system/FortRaidParcel.js';
+import { ensureStageHud } from './UI/StageHud.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
     static scene = null;
+
+    static _upsertTeamTownIcon(teamName = "My Team") {
+        const scene = MainMenu.scene;
+        if (!scene) return;
+
+        const b1 = townBounds[1];
+        if (!b1) return;
+
+        const cx = ((b1.minx + b1.maxx) / 2) * SQUARESIZE;
+        const cy = ((b1.miny + b1.maxy) / 2) * SQUARESIZE;
+
+        if (!scene._teamTownIcon || !scene._teamTownIcon.active) {
+            scene._teamTownIcon = ZoomMixer.createZoomInvariantIcon(
+                'townIcon',
+                teamName,
+                cx,
+                cy,
+                { baseScale: 1.1 }
+            );
+        }
+
+        scene._teamTownIcon.setPosition(cx, cy);
+        scene._teamTownIcon.setDescription?.(teamName);
+    }
 
     /** Bind the live Phaser scene so static methods can use it */
     static attach(scene) {
@@ -393,6 +418,12 @@ export class MainMenu {
             repaintBounds
         });
 
+        scene.events.off("draftTeamNameChanged");
+        scene.events.on("draftTeamNameChanged", (name) => {
+            MainMenu._upsertTeamTownIcon(name);
+        });
+        MainMenu._upsertTeamTownIcon(scene.draftMenu?.state?.teamName || "My Team");
+
         // IMPORTANT: make sure the draft UI is NOT rendered by the main camera
         scene.cameras.main.ignore(scene.draftMenu.container);
 
@@ -703,6 +734,8 @@ export class MainMenu {
             
             // let managers access enemy updater too
             buildingManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;
+
+            ensureStageHud(scene, { stagesPerSeason: 5 });
 
             blockResourceManager.NavMeshUpdater = scene.navMeshUpdater;
             blockResourceManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;

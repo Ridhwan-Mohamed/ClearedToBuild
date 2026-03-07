@@ -3,6 +3,7 @@ import Phaser from "phaser";
 import { Player } from "./Player";
 import { Teams } from "../Teams";
 import { weapons } from "../weapons";
+import { ZoomMixer } from "../UI/ZoomMixer";
 
 export class FortGrunt {
     static speed = 130;      // near brawler speed
@@ -35,6 +36,7 @@ export class FortGrunt {
         grunt.unitTint = FortGrunt.tint;
         grunt.awareness = FortGrunt.awareness;
         grunt.destroySelf = () => FortGrunt.destroy(grunt);
+        ZoomMixer.createPlayerMoniker(grunt);
 
         return grunt;
     }

@@ -13,7 +13,7 @@ export function ensureStageHud(scene, {
   stagesPerSeason = 5,
   seasons = DEFAULT_SEASONS,
   x = 12,
-  y = 10
+  y = 50
 } = {}) {
   if (scene._stageHud) return scene._stageHud;
 

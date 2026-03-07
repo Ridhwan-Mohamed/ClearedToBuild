@@ -10,6 +10,7 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Wall } from '../buildings/Wall.js';
 import { Projectile } from '../Projectile.js';
+import { Scheduler } from '../ai/scheduler/Scheduler.js';
 
 
 export class Gunslinger {
@@ -156,27 +157,9 @@ export class Gunslinger {
 
         if (troop.task || troop.track) { return; }
 
+        if (Scheduler.stepUnit(troop)) return;
 
-        const team = Teams.teamLists[troop.body.team];
-        if (team?.enemyDestroyTileStates?.length) {
-            Manager.assignOneTroopToAction(
-                troop,
-                team.enemyDestroyTileStates,
-                CONTROL_STATES.DESTROY_MODE_T
-            );
-            return;
-        }
-
-        if (team?.enemyDestroyStates?.length) {
-            Manager.assignOneTroopToAction(
-                troop,
-                team.enemyDestroyStates,
-                CONTROL_STATES.DESTROY_MODE
-            );
-            return;
-        }
-        
-        else if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
+        if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);
         }
     }

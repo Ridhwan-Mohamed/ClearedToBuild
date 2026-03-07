@@ -313,6 +313,12 @@ export class ZoomMixer {
 
     scene.uiCamera?.ignore(label);
 
+    // allow live hover-label updates (e.g., team/town renaming)
+    icon._zoomLabel = label;
+    icon.setDescription = (text) => {
+      label.setText(text ?? "");
+    };
+
     ZoomMixer.mapIconContainer.add([icon, label]);
     return icon;
   }

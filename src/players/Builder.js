@@ -9,6 +9,7 @@ import { Manager } from '../Manager/Manager.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { StorageBuilding } from '../buildings/Storage.js';
 import { Wall } from '../buildings/Wall.js';
+import { Scheduler } from '../ai/scheduler/Scheduler.js';
 
 export class Builder {
 
@@ -79,22 +80,8 @@ export class Builder {
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (troop.task) return;
 
-        const team = Teams.teamLists[troop.body.team];
-
-        if (team.destroyTileStates?.length) {
-            Manager.assignOneTroopToAction(troop, team.destroyTileStates, CONTROL_STATES.DESTROY_MODE_T);
-        } else if (team.destroyStates?.length) {
-            Manager.assignOneTroopToAction(troop, team.destroyStates, CONTROL_STATES.DESTROY_MODE);
-        } else if (team.blockBuildingStates?.length) { 
-            const blockBuildList = team.blockBuildingStates;
-            Manager.assignOneTroopToAction(troop, blockBuildList, CONTROL_STATES.BUILD_MODE_B);
-        } else if (team.buildingTileStates?.length) {
-            const tileList = team.buildingTileStates;
-            Manager.assignOneTroopToAction(troop, tileList, CONTROL_STATES.BUILD_MODE_T);
-        } else if (team.buildingFixTasks.length){
-            const fixList = team.buildingFixTasks;
-            Manager.assignOneTroopToAction(troop, fixList, CONTROL_STATES.FIX_BUILDING);
-        } else if (!troop.task && !troop.track && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
+        if (Scheduler.stepUnit(troop)) return;
+        if (!troop.task && !troop.track && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
         }
     }

@@ -5,6 +5,7 @@ import { fightManager } from "./Manager/fightManager";
 import { Player } from "./players/Player";
 import { Teams } from "./Teams";
 import { buildingManager } from "./Manager/buildingManager";
+import { AudioManager } from "./Manager/AudioManager";
 
 export class Projectile {
     static scene;
@@ -25,6 +26,8 @@ export class Projectile {
         }
         const startX = x + offsetX;
         const startY = y + offsetY;
+
+        if(player) AudioManager.playWeaponAttack(player, player.weapon);
 
         // Create a graphics object for the rectangle
         const newCube = Projectile.scene.physics.add.sprite(startX, startY, 'cube');

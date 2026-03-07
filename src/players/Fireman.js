@@ -12,6 +12,7 @@ import { buildingManager } from '../Manager/buildingManager.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { AudioManager } from '../Manager/AudioManager.js';
+import { Scheduler } from '../ai/scheduler/Scheduler.js';
 
 const MAX_CARRY = 1;
 
@@ -76,35 +77,7 @@ export class Fireman {
 
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (troop.task) return;
-
-        const outputList = Teams.teamLists[troop.body.team].ovenPickupJobs;
-        if (outputList) {
-            const unassignedTask = outputList.find(val => val.assigned < val.amount);
-            if (unassignedTask) {
-                Manager.assignOneTroopToAction(troop, outputList, CONTROL_STATES.GET_FROM_OVEN);
-                return;
-            }
-        }
-
-        // Try to find refill job
-        if (Fireman.assignFromOvenFuelJobs(troop)) return;
-
-        // Try to work on an oven job, if any
-        if (Fireman.assignFromOvenJobs(troop)) return;
-
-        const carrying = StorageManager.isCarrying(troop);
-        if (carrying) {
-            const carryEntry = troop.carrying?.cooksTo;
-            if (!carryEntry) return;
-
-            if (troop.pendingFuelJob && troop.carrying && troop.carrying.item === UI_ITEM_TYPES.wood) {
-                // skip list creation entirely
-                return Fireman.deliverFuelToOven(troop);
-            }
-
-            const assigned = this.maybeAssignOvenDeliveryTask(troop, troop.carrying, 1);
-            if (assigned) return;
-        }
+        if (Scheduler.stepUnit(troop)) return;
 
         if (!troop.task && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);

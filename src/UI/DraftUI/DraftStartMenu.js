@@ -2,6 +2,7 @@
 
 import { DraftStartState } from "./DraftStartState.js";
 import { DraftStartPreviewController } from "./DraftStartPreviewController.js";
+import { TeamNameInput } from "./TeamNameInput.js";
 import { POWERUP_CARDS } from "../../Cards/PowerupCards.js";
 import { DRAFT_UI_X_SHIFT, UIDEPTH } from "../../constants.js";
 
@@ -58,6 +59,8 @@ export class DraftStartMenu {
     // ✅ destroy preview controller graphics/containers
     this.preview?.destroy?.();
     this.preview = null;
+    this.teamNameInput?.destroy?.();
+    this.teamNameInput = null;
 
     this.container?.destroy(true);
     this.container = null;
@@ -78,16 +81,17 @@ export class DraftStartMenu {
     const title = s.add.text(18, 14, "Founding Draft", { fontSize: "18px", fontStyle: "bold", color: "#ffffff"}).setScrollFactor(0);
     this.container.add(title);
 
-    // Team name (tap/click to edit via prompt)
+    // Team name (inline text box)
     const teamLabel = s.add.text(18, 44, "Team:", { fontSize: "14px", color: "#bbbbbb"}).setScrollFactor(0);
-    const teamName = s.add.text(70, 44, this.state.teamName, { fontSize: "14px", fontStyle: "bold", color: "#ffffff"})
-      .setScrollFactor(0).setInteractive({ cursor: "pointer" });
-    teamName.on("pointerdown", () => {
-      const next = window.prompt("Team name", this.state.teamName);
-      if (next != null) this.state.setTeamName(next);
+    this.container.add([teamLabel]);
+    this.teamNameInput = new TeamNameInput(s, {
+      x: 210,
+      y: 52,
+      width: 180,
+      placeholder: "Team name",
+      initialValue: this.state.teamName,
+      onChange: (v) => this.state.setTeamName(v),
     });
-    this.container.add([teamLabel, teamName]);
-    this.ui.teamName = teamName;
 
     // Money readout
     const money = s.add.text(18, 70, "", { fontSize: "14px", fontStyle: "bold", color: "#8fe388"}).setScrollFactor(0);
@@ -609,7 +613,11 @@ export class DraftStartMenu {
 
   _refreshUI(){
     this.state.recalc();
-    this.ui.teamName?.setText(this.state.teamName);
+    const domInput = this.teamNameInput?.dom?.node?.querySelector?.("input");
+    if (domInput && domInput.value !== this.state.teamName) {
+      this.teamNameInput.setValue(this.state.teamName);
+    }
+    this.scene.events.emit("draftTeamNameChanged", this.state.teamName);
     this.ui.money?.setText(`Money left: $${this.state.cash}`);
 
     // Crew values + price labels

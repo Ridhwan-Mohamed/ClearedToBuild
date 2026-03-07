@@ -10,8 +10,13 @@ export class Manager {
         if (taskList.length <= 0) return;
         for(let troop of troopList){
             const {navMesh, navGrid} = Player._getNavForTroop(troop);
+            const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
             if(!force && !Player.playerAvailible(troop)) continue;
             for(let task of taskList){
+                if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
+                    task.type = task?.value?.buildType || task?.value?.type || null;
+                    if (!task.type) continue;
+                }
                 if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
                 else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
                 if(this.buildType(state)){
@@ -38,6 +43,7 @@ export class Manager {
                         if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type
                         troop.task = task;
                         troop.task.assigned += 1;
+                        this._setTaskMeta(troop, task, state, arrayKey);
                         Player.moveTo(troop, approachTile.path)
                         break;
                     }
@@ -61,6 +67,7 @@ export class Manager {
                     troop.roam = false;
                     task.assigned += 1;
                     troop.task = task
+                    this._setTaskMeta(troop, task, state, arrayKey);
                     let troopX = Math.floor(troop.body.x/SQUARESIZE);
                     let troopY = Math.floor(troop.body.y/SQUARESIZE);
                     if(!navGrid[troopX][troopY]){
@@ -82,7 +89,12 @@ export class Manager {
 
     static assignOneTroopToAction(troop, taskList, state){
         const {navMesh, navGrid} = Player._getNavForTroop(troop);
+        const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
         for(let task of taskList){
+            if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
+                task.type = task?.value?.buildType || task?.value?.type || null;
+                if (!task.type) continue;
+            }
             if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
             else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
             if(this.buildType(state)){
@@ -107,6 +119,7 @@ export class Manager {
                     if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                     troop.task = task;
                     troop.task.assigned += 1;
+                    this._setTaskMeta(troop, task, state, arrayKey);
                     Player.moveTo(troop, approachTile.path)
                     return true;
                 }
@@ -128,6 +141,7 @@ export class Manager {
                 troop.roam = false;
                 task.assigned += 1;
                 troop.task = task
+                this._setTaskMeta(troop, task, state, arrayKey);
                 let troopX = Math.floor(troop.body.x/SQUARESIZE);
                 let troopY = Math.floor(troop.body.y/SQUARESIZE);
                 if(!navGrid[troopX][troopY]){
@@ -156,6 +170,10 @@ export class Manager {
 
     static assignTaskToTroop(troop, task, state){
         const {navMesh, navGrid} = Player._getNavForTroop(troop);
+        if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
+            task.type = task?.value?.buildType || task?.value?.type || null;
+            if (!task.type) return false;
+        }
         if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
         else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
         if(this.buildType(state)){
@@ -173,6 +191,7 @@ export class Manager {
                 if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                 troop.task = task;
                 troop.task.assigned += 1;
+                this._setTaskMeta(troop, task, state, null);
                 Player.moveTo(troop, approachTile.path)
                 return true;
             }
@@ -194,6 +213,7 @@ export class Manager {
             troop.roam = false;
             task.assigned += 1;
             troop.task = task
+            this._setTaskMeta(troop, task, state, null);
             let troopX = Math.floor(troop.body.x/SQUARESIZE);
             let troopY = Math.floor(troop.body.y/SQUARESIZE);
             if(!navGrid[troopX][troopY]){
@@ -279,6 +299,26 @@ export class Manager {
 
         // All other tasks: only 1 assignment allowed
         return task.assigned > 0;
+    }
+
+    static _setTaskMeta(troop, task, state, arrayKey) {
+        troop.taskMeta = {
+            state,
+            team: troop.body.team,
+            arrayKey,
+            phase: troop.carrying ? "post_pickup" : "pre_pickup",
+            kind: task?.taskType || task?.forageType || task?.type?.name || "generic",
+            taskId: `${task?.x ?? task?.tx ?? "?"},${task?.y ?? task?.ty ?? "?"}:${task?.type?.name ?? task?.taskType ?? "?"}`,
+        };
+    }
+
+    static _resolveArrayKeyFromList(teamNumber, listRef) {
+        const team = Teams.teamLists[teamNumber];
+        if (!team || !listRef) return null;
+        for (const key of Object.keys(team)) {
+            if (team[key] === listRef) return key;
+        }
+        return null;
     }
 
 }

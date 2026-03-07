@@ -12,6 +12,7 @@ import { blockResourceManager } from "./Manager/BlockResourceManager";
 import { ClayOven } from "./buildings/ClayOven";
 import { mapView } from "./mapView";
 import { PineTree } from "./buildings/pineTree";
+import { RockNode } from "./buildings/RockNode";
 import { VisibilitySystem } from "./UI/VisibilitySystem";
 import { AudioManager } from "./Manager/AudioManager";
 import { WallPlacementController } from "./Controllers/WallPlacementController";
@@ -495,6 +496,11 @@ export class Map{
                 const level = 1; // or derive from map/seed
                 const pine = new PineTree(buildingArray[i][0], buildingArray[i][1], level);
                 this.worldPines.push(pine);
+            }
+            else if(buildingArray[i][2].name === TILE_TYPES.rock.name) {
+                const level = 1;
+                const rock = new RockNode(buildingArray[i][0], buildingArray[i][1], level);
+                this.worldStones.push(rock);
             }
             else if (buildingArray[i][2].name === TILE_TYPES.tower.name){
                 new TowerBuilding(buildingArray[i][0], buildingArray[i][1], buildingArray[i][3], { isFortObjective: true });
@@ -1329,9 +1335,13 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     }
 
     static handleLoadNonSpread(posX,posY,item,index=-1){
-        if(item == TILE_TYPES.pine){
+        if(item?.name === TILE_TYPES.pine.name){
             this.addBlockItem(posX,posY,item)
             return new PineTree(posX, posY);
+        }
+        if(item?.name === TILE_TYPES.rock.name){
+            this.addBlockItem(posX,posY,item)
+            return new RockNode(posX, posY);
         }
         if(item.name == 'turret'){
             Turret.baseItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[0])
@@ -1408,7 +1418,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             itemToPlace.lenY = item.lenY
             if(item == TILE_TYPES.spawn) spawnPoints.push([posX, posY, itemToPlace])
             if(index>-1) buildingArray[index][3] = itemToPlace;
-            if (item.name === 'pine' || item.name === 'rock') {
+            if (item.name === 'pine') {
                 itemToPlace.resourceType = item.name;
                 itemToPlace.health = 3;
 
@@ -1423,9 +1433,6 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
                         // remove from resource arrays so it isn’t targeted again
                         if (item.name === 'pine') {
                             Map.worldPines = Map.worldPines.filter(v => v !== itemToPlace);
-                        }
-                        if (item.name === 'rock') {
-                            Map.worldStones = Map.worldStones.filter(v => v !== itemToPlace);
                         }
                         return;
                     }
@@ -1465,7 +1472,6 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
                     blockResourceManager.assingTroopsToGetBlockResources(1);
                 });
                 if (item.name === 'pine') Map.worldPines.push(itemToPlace);
-                if (item.name === 'rock') Map.worldStones.push(itemToPlace);
                 this._worldAdd(itemToPlace);
             }
             itemToPlace.on('pointerover', () => {

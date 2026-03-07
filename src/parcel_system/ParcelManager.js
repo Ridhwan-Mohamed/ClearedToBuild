@@ -3,6 +3,7 @@ import { SpawnerBuilding } from "../buildings/SpawnerBuilding.js";
 import { calcPressureBonus, colorFor, getContractStage, SQUARESIZE, TILE_TYPES } from "../constants.js";
 import { PARCEL_SIZE, CONTRACT_SLOTS } from "./ParcelConfig.js";
 import { ParcelContractInstance } from "./ParcelContractInstance.js";
+import { Player } from "../players/Player.js";
 
 export class ParcelManager {
   constructor({ scene, opts }) {
@@ -205,6 +206,35 @@ export class ParcelManager {
     if (!contractId) return;
     const inst = this.contractsById.get(contractId);
     if (inst) inst.onSpawnerDestroyed?.(unspawnedCount);
+  }
+
+  forceClearPressureContracts(reason = "stage_end_cleanup") {
+    const entries = [];
+    for (const [id, inst] of this.contractsById.entries()) {
+      if (inst?.type === "PRESSURE") entries.push([id, inst]);
+    }
+    if (!entries.length) return 0;
+
+    const pressureIds = new Set(entries.map(([id]) => id));
+
+    // Remove raiders tied to pressure contracts without counting as kills/completions.
+    const troops = (Player.troops || []).slice();
+    for (const troop of troops) {
+      if (!troop?.active || !troop?.isRaider) continue;
+      if (!pressureIds.has(troop.contractId)) continue;
+      troop.contractId = null;
+      troop.spawner = null;
+      try { troop.destroySelf?.(); } catch {}
+    }
+
+    // Force-complete each pressure parcel (sinks terrain + removes spawners + frees slot).
+    for (const [, inst] of entries) {
+      try {
+        inst.complete?.(reason);
+      } catch {}
+    }
+
+    return entries.length;
   }
 
   spawnSpawnerBuilding({ gx, gy, contractId, plannedEnemies, spawnIntervalMs }) {

@@ -21,7 +21,6 @@ export class Brawler {
             'player'
         );
 
-        Player.scene.uiCamera.ignore(sprite);
 
         sprite.setInteractive();
         sprite.setDepth(BLOCKDEPTH + 1);
@@ -44,6 +43,7 @@ export class Brawler {
         sprite.walk = 'walk';
         sprite.idle = 'idle';
         sprite.action = 'action';
+        sprite.swim = 'swim';
 
         sprite.isBrawler = true;
 

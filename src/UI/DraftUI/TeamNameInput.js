@@ -54,8 +54,12 @@ export class TeamNameInput {
 
     // Enter to blur (desktop)
     input.addEventListener("keydown", (e) => {
+      // Prevent Phaser/global hotkeys from firing while typing.
+      e.stopPropagation();
       if (e.key === "Enter") input.blur();
     });
+    input.addEventListener("keyup", (e) => e.stopPropagation());
+    input.addEventListener("keypress", (e) => e.stopPropagation());
 
     // Clicking outside should blur (better on mobile)
     // Use DOM bounding rect (DOMElement doesn't always have getBounds())

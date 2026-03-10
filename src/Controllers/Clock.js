@@ -51,7 +51,6 @@ export class Clock {
 
         this.externalText = null;
 
-        // scene.uiCamera.ignore([Clock.overlay]);   // overlay is only seen by main cam
     }
 
     update() {
@@ -111,10 +110,13 @@ export class Clock {
         else if (this.isDayStart() && !this.powerupScreenShown) {
             AudioManager.setIsNight(false);
             this.powerupScreenShown = true;
-            openPowerupScreen(this.scene);
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
-            this.pause();
+            // Daily popup pause is opt-in; default flow keeps gameplay running.
+            if (this.scene?.enableDailyPowerupPopup) {
+                openPowerupScreen(this.scene);
+                this.pause();
+            }
         } else {
             this.lastSend = null;
         }
@@ -157,3 +159,4 @@ export class Clock {
         this.paused = false;
     }
 }
+

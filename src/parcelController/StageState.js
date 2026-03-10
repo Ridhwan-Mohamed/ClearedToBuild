@@ -5,6 +5,10 @@ export const StageState = {
   stageIndex: 1,      // 1..STAGES_PER_SEASON within a season
   seasonIndex: 1,
   STAGES_PER_SEASON: 5,
+  START_OVERRIDE: {
+    seasonIndex: 1,
+    stageIndex: 5,
+  },
 
   // Fort towers that exist in the world (registered by TowerBuilding)
   _fortTowers: new Set(),
@@ -46,6 +50,29 @@ export const StageState = {
 
   advanceStage() {
     this.stageIndex += 1;
+  },
+
+  applyStartOverride(override = null) {
+    const src = override ?? this.START_OVERRIDE ?? {};
+    const season = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
+    const stage = Math.max(
+      1,
+      Math.min(this.STAGES_PER_SEASON, Math.floor(Number(src.stageIndex ?? 1) || 1))
+    );
+
+    this.seasonIndex = season;
+    this.stageIndex = stage;
+
+    // Fresh objective state for forced start points.
+    this._fortTowers.clear();
+    this._fortObjective = {
+      active: false,
+      seasonIndex: this.seasonIndex,
+      requiredCount: 0,
+      destroyedSet: new Set(),
+      completed: false,
+      meta: null,
+    };
   },
 
   advanceSeason(meta = {}) {

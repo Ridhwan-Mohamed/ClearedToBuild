@@ -1517,10 +1517,6 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         // put into static world layer (so it's logically grouped)
         Map.worldStaticLayer.add(obj);
 
-        // IMPORTANT: UI cam must not render it
-        const uiCam = Map.scene?.uiCamera;
-        if (uiCam) uiCam.ignore(obj);
-
         return obj;
     }
 
@@ -1532,14 +1528,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     }
 
     static _uiIgnoreWorldLayer() {
-        const cam = this.scene?.uiCamera;
-        if (!cam || !this.worldLayer) return;
-
-        const gridKids   = Map.worldLayer?.getChildren?.() || [];
-        // static layer only needs to be ignored once per object, BUT ignoring again is harmless
-        const staticKids = Map.worldStaticLayer?.getChildren?.() || [];
-
-        cam.ignore([...gridKids, ...staticKids]);
+        return;
     }
 
     static getPixelRGBA(x, y) {

@@ -29,6 +29,7 @@ import TLCDirt from 'url:./assets/Dirt/TLCDirt.png'
 // import BLCDirt from 'url:./assets/Dirt/BLCDirt.png'
 import WaterImg from 'url:./assets/water/waterImg.png'
 import playerImg from 'url:./assets/Players/playerImg.png'
+import playerSwim from 'url:./assets/Players/playerSwim.png'
 import house1 from 'url:./assets/house1.png'
 import house2 from 'url:./assets/house2.png'
 import well from 'url:./assets/well.png'
@@ -87,6 +88,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('image7a', turret)
         scene.load.image('image8', WaterImg); //water image
         scene.load.image('image9', playerImg); //water image
+        scene.load.spritesheet('playerSwim', playerSwim, { frameWidth: 16, frameHeight: 16 });
         scene.load.image('image10', house1Img);
         scene.load.image('wall', Wall);
         scene.load.image('tWall', TWall); // Top wall

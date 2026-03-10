@@ -44,7 +44,15 @@ export class RegionDebugDrawer {
   }
 
   _bindKey() {
+    const isTyping = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+    };
+
     this._onToggle = () => {
+      if (isTyping()) return;
       this.enabled = !this.enabled;
       if (this.enabled) this.draw();
       else this.clear();
@@ -108,7 +116,6 @@ export class RegionDebugDrawer {
         this._drawLegend(Array.from(regionIds).sort((a, b) => a - b));
     }
 
-    this.scene.uiCamera.ignore(this.graphics);
   }
 
     clear() {
@@ -205,3 +212,4 @@ export class RegionDebugDrawer {
         }
     }
 }
+

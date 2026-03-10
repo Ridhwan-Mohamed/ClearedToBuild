@@ -48,18 +48,19 @@ export class Manager {
                         break;
                     }
                 }else if (state == CONTROL_STATES.TRACK_TARGET){
-                    //add the logic for tracking the dipshit
-                    const path = Player.pathTo(troop, task.x, task.y, false); 
-                    if(path){
-                        troop.roam = false;
-                        troop.track = [null,null];
-                        troop.track[0] = task.body;
-                        troop.track[1] = {x: task.x, y: task.y};
+                    troop.roam = false;
+                    troop.track = [task.body, { x: task.x, y: task.y }];
+                    if (task.target) troop.forcedTarget = task.target;
+                    if (force) Player.handleStateIntteruptStart(troop);
+                    Teams.movePlayerState(troop, state);
+                    const path = Player.pathTo(troop, task.x, task.y, false);
+                    if (path) {
                         Player.moveTo(troop, path);
-                        if(force) Player.handleStateIntteruptStart(troop)
-                        Teams.movePlayerState(troop, state);
-                        break;
+                    } else {
+                        troop.currentPath = [];
+                        troop.body?.setVelocity?.(0, 0);
                     }
+                    break;
                 }else {
                     if(this.tooManyAssigned(task, state)) continue;
                     if(force) Player.handleStateIntteruptStart(troop)
@@ -124,17 +125,18 @@ export class Manager {
                     return true;
                 }
             }else if (state == CONTROL_STATES.TRACK_TARGET){
-                //add the logic for tracking the dipshit
+                troop.roam = false;
+                troop.track = [task.body, { x: task.x, y: task.y }];
+                if (task.target) troop.forcedTarget = task.target;
+                Teams.movePlayerState(troop, state);
                 const path = Player.pathTo(troop, task.x, task.y, false);
                 if(path){
-                    troop.roam = false;
-                    troop.track = [null,null];
-                    troop.track[0] = task.body;
-                    troop.track[1] = {x: task.x, y: task.y};
                     Player.moveTo(troop, path);
-                    Teams.movePlayerState(troop, state);
-                    return true;
+                } else {
+                    troop.currentPath = [];
+                    troop.body?.setVelocity?.(0, 0);
                 }
+                return true;
             }else{
                 if(this.tooManyAssigned(task, state)) continue;
                 Teams.movePlayerState(troop, state)
@@ -196,17 +198,18 @@ export class Manager {
                 return true;
             }
         }else if (state == CONTROL_STATES.TRACK_TARGET){
-            //add the logic for tracking the dipshit
+            troop.roam = false;
+            troop.track = [task.body, { x: task.x, y: task.y }];
+            if (task.target) troop.forcedTarget = task.target;
+            Teams.movePlayerState(troop, state);
             const path = Player.pathTo(troop, task.x, task.y, false);
             if(path){
-                troop.roam = false;
-                troop.track = [null,null];
-                troop.track[0] = task.body;
-                troop.track[1] = {x: task.x, y: task.y};
                 Player.moveTo(troop, path);
-                Teams.movePlayerState(troop, state);
-                return true;
+            } else {
+                troop.currentPath = [];
+                troop.body?.setVelocity?.(0, 0);
             }
+            return true;
         }else{
             if(this.tooManyAssigned(task, state)) return;
             Teams.movePlayerState(troop, state)

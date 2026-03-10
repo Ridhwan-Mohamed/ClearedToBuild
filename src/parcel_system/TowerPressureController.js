@@ -48,12 +48,17 @@ export class TowerPressureController {
   }
 
   /** Register a tower to start spawning pressure waves. */
-  registerTower(tower) {
+  registerTower(tower, preferredSlotId = null) {
     if (!tower || this._towerState.has(tower)) return;
+
+    const normalizedPreferred = SLOT_IDS.includes(preferredSlotId)
+      ? preferredSlotId
+      : (SLOT_IDS.includes(tower?.pressureSlotId) ? tower.pressureSlotId : null);
 
     const st = {
       tower,
       currentSlotId: null,
+      preferredSlotId: normalizedPreferred,
       countdownEvent: null,
       uiTickEvent: null,
       countdownEndsAt: 0,
@@ -104,8 +109,30 @@ export class TowerPressureController {
   }
 
   getTowerSlotId(tower) {
-    const st = this._towerStates?.get?.(tower);
+    const st = this._towerState?.get?.(tower);
     return st?.currentSlotId ?? null;
+  }
+
+  getTowerPressureInfo(tower) {
+    const st = this._towerState?.get?.(tower);
+    if (!st) return null;
+
+    const slotId = st.currentSlotId ?? null;
+    const now = this.scene?.time?.now ?? 0;
+    const remainingMs = Math.max(0, (st.countdownEndsAt ?? 0) - now);
+    const hasActiveRaid = !!(slotId && this.scene?.parcelManager?.slotToContractId?.[slotId]);
+
+    let phase = "arming";
+    if (hasActiveRaid) phase = "raid_live";
+    else if (remainingMs > 0) phase = "countdown";
+    else if (st.waitingForContractToEnd) phase = "waiting_slot";
+
+    return {
+      slotId,
+      phase,
+      remainingMs,
+      remainingText: fmtMMSS(remainingMs),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -145,6 +172,11 @@ export class TowerPressureController {
       const lockOwner = this._slotLocks.get(s);
       return !lockOwner || lockOwner === st.tower;
     });
+
+    // Prefer strict ownership when the tower has an assigned lane.
+    if (st.preferredSlotId) {
+      return candidates.includes(st.preferredSlotId) ? st.preferredSlotId : null;
+    }
 
     // safest bet: stay on current if it's free
     if (st.currentSlotId && candidates.includes(st.currentSlotId)) return st.currentSlotId;
@@ -254,7 +286,7 @@ export class TowerPressureController {
     const difficulty = this._difficultyForCurrentStage();
 
     // Spawn the negative parcel.
-    pm.startPressure(slotId, difficulty);
+    pm.startPressure(slotId, difficulty, { source: "tower", ownerTower: st.tower });
 
     // Slot is now occupied; we wait for ParcelManager.removeContract to call handleSlotFreed().
     st.waitingForContractToEnd = true;

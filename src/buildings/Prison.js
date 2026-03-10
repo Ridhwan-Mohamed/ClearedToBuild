@@ -13,6 +13,7 @@ import { Fireman } from "../players/Fireman.js";
 import { Builder } from "../players/Builder.js";
 import { Forager } from "../players/Forager.js";
 import { Player } from "../players/Player.js";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 
 const DEFAULT_LOCKED_TYPES = [
@@ -103,6 +104,10 @@ export class Prison {
     this.sprite = Map.addToWorldStatic(
       this.scene.add.sprite(px, py, "prison_closed", 0).setOrigin(0).setDepth(BLOCKDEPTH)
     );
+    const cx = x + Math.floor((lenX || 4) / 2);
+    const cy = y + Math.floor((lenY || 4) / 2);
+    this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 7, boost: 0.12 });
+    this.lightId = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 2 });
 
     this.sprite.play("prison_closed_idle");
     this.sprite.setInteractive({ cursor: "pointer" });
@@ -266,8 +271,6 @@ export class Prison {
 
     this.uiContainer.add([this.panelBg, this.panelIcon, this.panelText1, this.panelText2]);
 
-    // World-space UI → show on main camera, hide from uiCamera (same pattern you used)
-    this.scene.uiCamera?.ignore([this.uiContainer]);
   }
 
   _updatePanel() {
@@ -434,6 +437,14 @@ export class Prison {
 
     if (this.healthBarBg) this.healthBarBg.destroy();
     if (this.healthBar) this.healthBar.destroy();
+    if (this.visionId != null) {
+      VisibilitySystem.removeVisionBubble(this.visionId);
+      this.visionId = null;
+    }
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
 
     this.uiContainer?.destroy(true);
     this.uiContainer = null;

@@ -6,6 +6,7 @@ import { BLOCKDEPTH, ENEMY_BUILDING_HOVER_UI, SQUARESIZE, TILE_TYPES, UIDEPTH, s
 import { Map } from "../map";
 import { StageState } from "../parcelController/StageState";
 import { Teams } from "../Teams";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 
 // Reward curve defaults (override via opts)
@@ -63,6 +64,10 @@ export class Bank {
     this.sprite = Map.addToWorldStatic(
       this.scene.add.sprite(px, py, "bank_closed", 0).setOrigin(0).setDepth(BLOCKDEPTH)
     );
+    const cx = x + Math.floor((lenX || 4) / 2);
+    const cy = y + Math.floor((lenY || 4) / 2);
+    this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 7, boost: 0.12 });
+    this.lightId = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 2 });
 
     this.sprite.play("bank_closed_idle");
     this.sprite.setInteractive({ cursor: "pointer" });
@@ -215,8 +220,6 @@ export class Bank {
 
     this.uiContainer.add([this.panelBg, this.panelText1, this.panelText2]);
 
-    // Keep UI world-space while hiding from uiCamera (same as your pattern)
-    this.scene.uiCamera?.ignore([this.uiContainer]);
   }
 
   _updatePanel() {
@@ -366,6 +369,14 @@ export class Bank {
 
     if (this.healthBarBg) this.healthBarBg.destroy();
     if (this.healthBar) this.healthBar.destroy();
+    if (this.visionId != null) {
+      VisibilitySystem.removeVisionBubble(this.visionId);
+      this.visionId = null;
+    }
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
 
     // clear hover UI
     this.uiContainer?.destroy(true);

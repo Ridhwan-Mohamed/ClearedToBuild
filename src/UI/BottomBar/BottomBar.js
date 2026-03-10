@@ -138,8 +138,6 @@ export function CreateBottomBar(scene) {
   // (optional) spacebar toggle
   scene.input.keyboard.on('keydown-SPACE', () => toggleBottomBar());
 
-  // hide from main camera
-  scene.cameras.main.ignore(ui);
   scene.housesTab?.hide?.();
 }
 

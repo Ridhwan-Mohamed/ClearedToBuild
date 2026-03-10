@@ -30,7 +30,9 @@ export class ParcelContractInstance {
     rng,
     map,          // ✅ Map class
     parcelManager,
-    difficulty
+    difficulty,
+    pressureSource = "manual",
+    pressureOwnerTower = null,
   }) {
     this.id = id;
     this.type = type;
@@ -46,6 +48,8 @@ export class ParcelContractInstance {
 
     this.pm = parcelManager;
     this.difficulty = difficulty || 1;
+    this.pressureSource = pressureSource;
+    this.pressureOwnerTower = pressureOwnerTower;
 
     this.timerEvent = null;
     this.uiTickEvent = null;
@@ -72,7 +76,6 @@ export class ParcelContractInstance {
       stroke: "#000000",
       strokeThickness: 4,
     }).setOrigin(0.5, 1).setDepth(9999);
-    this.scene.uiCamera.ignore(this.timerText);
   }
 
   _updateTimerText() {

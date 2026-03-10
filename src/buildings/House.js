@@ -121,7 +121,6 @@ export class House {
             return icon;
         });
 
-        this.scene.uiCamera.ignore([this.uiContainer])
     }
 
     clearIcons() {

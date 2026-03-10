@@ -735,7 +735,6 @@ export function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isM
         onComplete: () => ghost.destroy()
     });
 
-    scene.uiCamera.ignore(ghost);
 } 
 
 // --- Enemy building hover panel tuning (Bank + Prison) -----------------
@@ -785,11 +784,6 @@ export function createBubbleText({
     .setOrigin(0.5)
     .setDepth(9999)
     .setScrollFactor(1, 1);   // 🔹 world, not UI
-
-    // Make sure uiCamera does NOT render these
-    if (scene.uiCamera) {
-        scene.uiCamera.ignore([label, bg]);
-    }
 
     const container = { label, bg, target };
 
@@ -953,3 +947,4 @@ export const RESOURCE_PARCEL = {
   // min distance from parcel edge to place water so you don’t create open-water borders
   WATER_EDGE_BUFFER: 2,
 };
+

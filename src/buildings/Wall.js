@@ -3,6 +3,7 @@ import { Map as GameMap } from "../map.js";
 import { TILE_MAP, TILE_TYPES, SQUARESIZE } from "../constants";
 import { WallPlacementController } from "../Controllers/WallPlacementController";
 import { Teams } from "../Teams";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class Wall {
   // registry by "x,y"
@@ -192,6 +193,7 @@ export class Wall {
       w.maxHp = maxHp;
       w.phase = phase;
       w.isOpen = open;
+      w._bindVisibility();
 
       // force visuals to match current phase/open state
       // (this will set the correct frame)
@@ -214,6 +216,7 @@ export class Wall {
 
     // Make sure current visuals reflect current HP (phase may change over time)
     w._applyVisuals();
+    w._bindVisibility();
 
     return w;
   }
@@ -323,6 +326,7 @@ export class Wall {
     GameMap.worldStaticLayer.add(this.sprite);
 
     this.active = true;
+    this._bindVisibility();
     this._applyVisuals(); // init phase visuals
   }
 
@@ -446,6 +450,28 @@ export class Wall {
     });
   }
 
+  _bindVisibility() {
+    const cx = this.x + 0.5;
+    const cy = this.y + 0.5;
+    if (this.visionId == null) {
+      this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 2.4, boost: 0.08 });
+    }
+    if (this.lightId == null) {
+      this.lightId = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 2.0, brightness: 1.2 });
+    }
+  }
+
+  _clearVisibility() {
+    if (this.visionId != null) {
+      VisibilitySystem.removeVisionBubble(this.visionId);
+      this.visionId = null;
+    }
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
+  }
+
 
   destroy() {
     if (!this.active) return;
@@ -472,6 +498,8 @@ export class Wall {
       this.sprite.destroy();
       this.sprite = null;
     }
+
+    this._clearVisibility();
 
     // remove registry
     Wall.byCell.delete(Wall.keyFor(this.x, this.y));

@@ -17,7 +17,6 @@ import { teamSetupArray } from './constants';
 import { buildWaterQuadtree } from './lib/waterQuadTree.js'
 import start from 'url:./assets/start.png'
 import playButton from 'url:./assets/playButton.png'
-import { CreateBottomBar } from './UI/BottomBar/BottomBar.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { PathRegistry } from './lib/navmesh/PathRegistry.js';
 import { RegionSystem } from './lib/navmesh/RegionSystem.js';
@@ -27,21 +26,48 @@ import { ParcelSpawnController } from './parcelSpawn/ParcelSpawnController.js';
 import { ParcelManager } from './parcel_system/ParcelManager.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import { spawnNorthFort } from './parcel_system/FortRaidParcel.js';
-import { ensureStageHud } from './UI/StageHud.js';
+import { StageState } from './parcelController/StageState.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
     static scene = null;
 
-    static _upsertTeamTownIcon(teamName = "My Team") {
+    static _upsertTeamTownIcon(teamName = "My Team", placedBuildings = null) {
         const scene = MainMenu.scene;
         if (!scene) return;
 
-        const b1 = townBounds[1];
-        if (!b1) return;
+        let cx = null;
+        let cy = null;
 
-        const cx = ((b1.minx + b1.maxx) / 2) * SQUARESIZE;
-        const cy = ((b1.miny + b1.maxy) / 2) * SQUARESIZE;
+        if (Array.isArray(placedBuildings) && placedBuildings.length) {
+            let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+            for (const b of placedBuildings) {
+                const t = TILE_TYPES[b?.typeKey] || TILE_TYPES[b?.type] || { lenX: 1, lenY: 1 };
+                const bx = b?.x ?? 0;
+                const by = b?.y ?? 0;
+                minx = Math.min(minx, bx);
+                miny = Math.min(miny, by);
+                maxx = Math.max(maxx, bx + (t.lenX || 1) - 1);
+                maxy = Math.max(maxy, by + (t.lenY || 1) - 1);
+            }
+            cx = ((minx + maxx + 1) / 2) * SQUARESIZE;
+            cy = ((miny + maxy + 1) / 2) * SQUARESIZE;
+        }
+
+        if (cx == null || cy == null) {
+            const teamCenter = Teams.teamLists?.['1']?.center;
+            if (Array.isArray(teamCenter) && Number.isFinite(teamCenter[0]) && Number.isFinite(teamCenter[1])) {
+                cx = teamCenter[0] * SQUARESIZE + SQUARESIZE / 2;
+                cy = teamCenter[1] * SQUARESIZE + SQUARESIZE / 2;
+            }
+        }
+
+        if (cx == null || cy == null) {
+            const b1 = townBounds[1];
+            if (!b1) return;
+            cx = ((b1.minx + b1.maxx) / 2) * SQUARESIZE;
+            cy = ((b1.miny + b1.maxy) / 2) * SQUARESIZE;
+        }
 
         if (!scene._teamTownIcon || !scene._teamTownIcon.active) {
             scene._teamTownIcon = ZoomMixer.createZoomInvariantIcon(
@@ -72,26 +98,32 @@ export class MainMenu {
     /** Build the preview/selection UI in screen space (on UI camera) */
     static startMenuPhase() {
         const scene = MainMenu.scene;
-        const centerX = scene.scale.width / 2;
-        const centerY = scene.scale.height / 2;
+        const overlayScene = scene.uiScene || scene;
+        const centerX = overlayScene.scale.width / 2;
+        const centerY = overlayScene.scale.height / 2;
 
         // Logo + version (your existing assets/keys)
-        scene.menu = scene.add.container(0,0).setDepth(9998).setScrollFactor(0);
-        scene.logo = scene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        scene.versionText = scene.add.text(scene.scale.width - 75, scene.scale.height - 20, 'v0.9.2', {
+        const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
+        const logo = overlayScene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.3', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
-        scene.menu.add([scene.logo, scene.versionText]);
-        scene.cameras.main.ignore(scene.menu);
+        menu.add([logo, versionText]);
 
-        scene.startButton = scene.add.image(centerX, centerY + 260, 'startBtn')
+        // Keep refs on world scene for existing handoff/fade code.
+        scene.menu = menu;
+        scene.logo = logo;
+        scene.versionText = versionText;
+
+        const startButton = overlayScene.add.image(centerX, centerY + 260, 'startBtn')
             .setOrigin(0.5)
             .setInteractive({ cursor: 'pointer' });
-        scene.menu.add(scene.startButton);
+        menu.add(startButton);
+        scene.startButton = startButton;
 
         // Wiggle animation
-        scene.tweens.add({
-            targets: scene.startButton,
+        overlayScene.tweens.add({
+            targets: startButton,
             angle: { from: -2, to: 2 },
             duration: 2000,
             yoyo: true,
@@ -100,8 +132,8 @@ export class MainMenu {
         });
 
         // Make button pulse a little
-        scene.tweens.add({
-            targets: scene.startButton,
+        overlayScene.tweens.add({
+            targets: startButton,
             alpha: 0.25,
             duration: 600,
             yoyo: true,
@@ -109,8 +141,8 @@ export class MainMenu {
         });
 
         // Float
-        scene.tweens.add({
-        targets: scene.logo,
+        overlayScene.tweens.add({
+        targets: logo,
         y: centerY - 10,
         duration: 1200,
         yoyo: true,
@@ -119,8 +151,8 @@ export class MainMenu {
         });
 
         // Wiggle
-        scene.tweens.add({
-        targets: scene.logo,
+        overlayScene.tweens.add({
+        targets: logo,
         angle: { from: -2, to: 2 },
         duration: 1500,
         yoyo: true,
@@ -129,8 +161,8 @@ export class MainMenu {
         });
 
         // Pulse
-        scene.tweens.add({
-        targets: scene.logo,
+        overlayScene.tweens.add({
+        targets: logo,
         scale: { from: 1, to: 1.05 },
         duration: 1200,
         yoyo: true,
@@ -139,27 +171,29 @@ export class MainMenu {
         });
 
 
-        scene.startButton.on('pointerdown', () => {
+        startButton.on('pointerdown', () => {
+            startButton.disableInteractive();
             // Animate logo up and shrink
-            scene.tweens.add({
-                targets: scene.logo,
+            overlayScene.tweens.add({
+                targets: logo,
                 y: 80, scale: 0.25,
                 duration: 1000,
                 alpha: 0,
                 ease: 'Cubic.easeInOut',
-                onComplete: () => scene.logo.destroy()
+                onComplete: () => logo.destroy()
             });
 
             // Fade out the start button
-            scene.tweens.add({
-                targets: scene.startButton,
+            overlayScene.tweens.add({
+                targets: startButton,
                 alpha: 0,
                 duration: 300,
-                onComplete: () => scene.startButton.destroy()
+                onComplete: () => startButton.destroy()
             });
 
             // Delay slightly, then build the map/town select UI
-            scene.time.delayedCall(1500, () => {
+            overlayScene.time.delayedCall(1500, () => {
+                menu.destroy();
                 MainMenu.buildMapSelectPhase();
             });
         });
@@ -167,15 +201,17 @@ export class MainMenu {
 
     static buildMapSelectPhase(){
         const scene = MainMenu.scene;
-        const centerX = scene.scale.width / 2;
-        const centerY = scene.scale.height / 2;
+        const overlayScene = scene.uiScene || scene;
+        const centerX = overlayScene.scale.width / 2;
+        const centerY = overlayScene.scale.height / 2;
 
-        scene.logoMini = scene.add.image(centerX + DRAFT_UI_X_SHIFT, 80, 'logoMini').setOrigin(0.5).setAlpha(0);
-        scene.tweens.add({ targets: scene.logoMini, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
-        scene.cameras.main.ignore(scene.logoMini);
+        const logoMini = overlayScene.add.image(centerX + DRAFT_UI_X_SHIFT, 80, 'logoMini').setOrigin(0.5).setAlpha(0);
+        // Keep world-scene ref for existing cleanup code.
+        scene.logoMini = logoMini;
+        overlayScene.tweens.add({ targets: logoMini, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
         // Drop / bob down slightly
-        scene.tweens.add({
-            targets: scene.logoMini,
+        overlayScene.tweens.add({
+            targets: logoMini,
             y: 65,                   // lower than its initial 55
             duration: 2000,
             yoyo: true,
@@ -183,8 +219,8 @@ export class MainMenu {
             ease: 'Sine.easeInOut'
         });
         // Wiggle side to side
-        scene.tweens.add({
-            targets: scene.logoMini,
+        overlayScene.tweens.add({
+            targets: logoMini,
             angle: { from: -1.5, to: 1.5 },
             duration: 2500,
             yoyo: true,
@@ -192,8 +228,8 @@ export class MainMenu {
             ease: 'Sine.easeInOut'
         });
         // Pulse scale gently
-        scene.tweens.add({
-            targets: scene.logoMini,
+        overlayScene.tweens.add({
+            targets: logoMini,
             scale: { from: 1, to: 1.04 },
             duration: 1800,
             yoyo: true,
@@ -336,7 +372,6 @@ export class MainMenu {
         //     .setScrollFactor(1);
 
         // scene.waterOverlay = waterOverlay;
-        // scene.uiCamera.ignore(waterOverlay);
 
         // // gentle alpha pulse
         // scene.tweens.add({
@@ -355,7 +390,6 @@ export class MainMenu {
             .setDepth(UIDEPTH-2)
             .setAlpha(0);
 
-        scene.uiCamera.ignore(scene.menuPreview);
 
         const cam = scene.cameras.main;
         cam.roundPixels = true;
@@ -367,7 +401,6 @@ export class MainMenu {
         cam.centerOn((worldW / 2) - dxWorld, worldH / 2);
 
 
-        scene.uiCamera.ignore(scene.menuPreview); // don’t show on UI cam
 
         // mainMenu.js, right after cam.setZoom(0.5);
         scene.zoomMixer = new ZoomMixer();
@@ -406,48 +439,58 @@ export class MainMenu {
         // flag if you use it anywhere else
         scene.isMainMenuPreview = true;
 
-        // destroy old if re-entering
-        scene.draftMenu?.destroy?.();
+        // Build draft UI on UI scene so world camera zoom does not scale it.
+        const draftScene = scene.uiScene || scene.scene.get('GameUIScene') || scene;
+        draftScene.menuPreview = scene.menuPreview;
+        draftScene.fullRepaintPreview = scene.fullRepaintPreview?.bind(scene);
+        draftScene.draftMenu?.destroy?.();
         Teams.newTeam(1);
 
         // build the draft UI (v5)
-            scene.draftMenu = DraftStartMenu.build(scene, {
+            const draftMenu = DraftStartMenu.build(draftScene, {
             srcW,
             srcH,
             gridData: scene.gridData,
-            repaintBounds
+            repaintBounds,
+            worldScene: scene
         });
+        scene.draftMenu = draftMenu;
+        draftScene.draftMenu = draftMenu;
 
-        scene.events.off("draftTeamNameChanged");
-        scene.events.on("draftTeamNameChanged", (name) => {
+        draftScene.events.off("draftTeamNameChanged");
+        draftScene.events.on("draftTeamNameChanged", (name) => {
             MainMenu._upsertTeamTownIcon(name);
         });
-        MainMenu._upsertTeamTownIcon(scene.draftMenu?.state?.teamName || "My Team");
+        scene._draftTownIconUnsub?.();
+        scene._draftTownIconUnsub = draftMenu?.state?.onChange?.((st) => {
+            MainMenu._upsertTeamTownIcon(st.teamName, st.placedBuildings);
+        });
+        MainMenu._upsertTeamTownIcon(draftMenu?.state?.teamName || "My Team", draftMenu?.state?.placedBuildings);
 
         // IMPORTANT: make sure the draft UI is NOT rendered by the main camera
-        scene.cameras.main.ignore(scene.draftMenu.container);
 
         // Confirm → start game with cfg
-        scene.events.off("draftConfirmed");
-        scene.events.on("draftConfirmed", (startCfg) => {
+        draftScene.events.off("draftConfirmed");
+        draftScene.events.on("draftConfirmed", (startCfg) => {
         // store it so beginLoadingAndHandOff + GameStart can use it
         scene.startCfg = startCfg;
 
         // fade out the draft UI if you want
-        scene.tweens.add({
-            targets: scene.draftMenu.container,
+        draftScene.tweens.add({
+            targets: draftMenu.container,
             alpha: 0,
             duration: 200,
             ease: "Quad.easeInOut",
             onComplete: () => {
-                scene.draftMenu?.preview?.clearDraftPlayerIcons?.();
-                scene.draftMenu.destroy();
+                draftMenu?.preview?.clearDraftPlayerIcons?.();
+                draftMenu.destroy();
+                scene._draftTownIconUnsub?.();
+                scene._draftTownIconUnsub = null;
                 MainMenu.beginLoadingAndHandOff(startCfg);
             }
         });
         });
         scene.tweens.add({ targets: scene.menuPreview, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
-        // uiCamera sees menu by default
     }
 
     static buildTeamSelectUI_OnMenuPreview(srcW, srcH, scale) {
@@ -638,7 +681,6 @@ export class MainMenu {
             0x000000, 0.65
         ).setOrigin(0).setAlpha(0);
         loading.add(darkBg);
-        scene.cameras.main.ignore(loading)
 
         if (ZoomMixer.mapIconContainer) {
             ZoomMixer.mapIconContainer.iterate(child => {
@@ -735,14 +777,12 @@ export class MainMenu {
             // let managers access enemy updater too
             buildingManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;
 
-            ensureStageHud(scene, { stagesPerSeason: 5 });
-
             blockResourceManager.NavMeshUpdater = scene.navMeshUpdater;
             blockResourceManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;
             Map.drawBuildings();
+            if (scene.clock) scene.clock.paused = false;
             GameStart.placePlayers(startCfg);
-            CreateBottomBar(scene);
-            scene.sceneButtons();
+            scene.uiScene?.initGameplayUI?.();
             VisibilitySystem.init(scene);           // build blockers + occlusion from the map
             scene.parcelSpawnUI = new ParcelSpawnController(scene, {
                 islandTileX: 37,
@@ -819,6 +859,7 @@ export class MainMenu {
             };
             // --- North Fort (raid/boss island) ---
             // Spawn immediately so you can see it on load.
+            StageState.applyStartOverride();
             spawnNorthFort({
                 scene,
                 map: Map,
@@ -830,7 +871,6 @@ export class MainMenu {
 
             // Fade out everything in menu + loading UI
             const fadeTargets = [scene.menu, scene.logoMini, loading];
-            scene.cameras.main.ignore(scene.logoMini);
             scene.tweens.add({
                 targets: fadeTargets,
                 alpha: 0,
@@ -874,3 +914,4 @@ export class MainMenu {
     }
 
 }
+

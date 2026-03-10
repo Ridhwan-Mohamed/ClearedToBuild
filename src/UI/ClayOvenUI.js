@@ -84,7 +84,6 @@ export class ClayOvenUI {
         }).setOrigin(0.5).setDepth(UIDEPTH).setScrollFactor(0);
 
         oven.minorUI = [bg, status];
-        this.scene.uiCamera.ignore(oven.minorUI);
 
         // 🔁 Frame-by-frame position update in screen space
         oven.minorUIUpdater = () => {
@@ -243,7 +242,6 @@ export class ClayOvenUI {
 
         // === Save UI handle ===
         this.openUIs.set(oven, container);
-        this.scene.uiCamera.ignore(container);
     }
 
     static closeMajor(oven) {

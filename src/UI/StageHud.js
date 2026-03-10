@@ -2,7 +2,7 @@
 // src/UI/StageHud.js
 //
 // Tiny world-space HUD label for Season + Stage.
-// Hidden from uiCamera (so it renders with the world camera like your parcel timer text).
+// Renders with the world camera.
 
 import { UIDEPTH } from "../constants";
 import { StageState } from "../parcelController/StageState";
@@ -26,7 +26,6 @@ export function ensureStageHud(scene, {
   }).setOrigin(0, 0).setDepth((UIDEPTH ?? 2000) + 1000);
 
   // world-only
-  scene.uiCamera?.ignore(txt);
   txt.setScrollFactor(0);
 
   function recompute() {

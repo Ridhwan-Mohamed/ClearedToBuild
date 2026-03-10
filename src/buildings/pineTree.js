@@ -4,6 +4,7 @@ import { Teams } from "../Teams";
 import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { buildingManager } from "../Manager/buildingManager";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class PineTree {
   static scene;
@@ -49,6 +50,7 @@ export class PineTree {
     this.updateSlot = ((gridX + gridY) % PineTree.STRIDE);
 
     this.setLevel(level);
+    this.lightId = VisibilitySystem.addLightSource({ x: gridX + 1.5, y: gridY + 1.5, r: 4.0, brightness: 1.0 });
     PineTree.list.push(this);
     PineTree._register(this);
   }
@@ -79,6 +81,10 @@ export class PineTree {
   }
 
   destroy() {
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
     this.container.destroy(true);
     removeFromArray(GameMap.worldPines, this);
     const i = PineTree.list.indexOf(this);

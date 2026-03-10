@@ -21,7 +21,6 @@ export class Blademaster {
             'player'
         );
 
-        Player.scene.uiCamera.ignore(sprite);
 
         sprite.setInteractive();
         sprite.setDepth(BLOCKDEPTH + 1);
@@ -44,6 +43,7 @@ export class Blademaster {
         sprite.walk = 'walk';
         sprite.idle = 'idle';
         sprite.action = 'action';
+        sprite.swim = 'swim';
 
         sprite.isBlademaster = true;
 

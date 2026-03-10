@@ -183,11 +183,6 @@ export class WallDestroyController {
       fontStyle: 'bold'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH + 51);
 
-    // keep out of main camera? (these are UI so ignore world camera scrolling)
-    if (this.scene.uiCamera) {
-      // uiCamera renders UI; so ignore them in main, or just scrollFactor(0) is enough in your setup.
-      this.scene.cameras.main.ignore([this.finalizeUI, this.finalizeText]);
-    }
   }
 
   _syncFinalizeUI() {

@@ -123,10 +123,8 @@ export default class BuildTab {
 
     this.view = scene.add.container(0, 0).setDepth(UIDEPTH);
     this.container = this.view; // if you referenced this.container elsewhere
-    scene.cameras.main.ignore(this.view);
     this.container.setOrigin?.(0, 0); // safe if available
 
-    scene.cameras.main.ignore(this.container);
     scene.buildTab = this;
 
     this._buildDefs = this._makeBuildDefs();
@@ -405,13 +403,14 @@ export default class BuildTab {
     if (this._placeClickBound) return;
     this._placeClickBound = true;
 
-    this.scene.input.on("pointerdown", (pointer) => {
+    const inputScene = this.scene.worldScene ?? this.scene;
+    inputScene.input.on("pointerdown", (pointer) => {
       if (!this.pendingDef || this.pendingDef.isWall) return;
       if (!GameMap.isPlacing || !GameMap.placingItem) return;
       if (GameMap.placingItem.blocked) return;
 
       // Don’t place through the bottom bar
-      if (pointer.y > this.scene.scale.height - 180 && this.scene.uiBottomBar?.expanded) return;
+      if (pointer.y > inputScene.scale.height - 180 && this.scene.uiBottomBar?.expanded) return;
 
       const tile = TILE_TYPES[this.pendingDef.tileTypeName];
       if (!tile) return;
@@ -440,7 +439,7 @@ export default class BuildTab {
       showAlert(this.scene, "Built!", "#aaffaa");
     });
 
-    this.scene.input.keyboard.on("keydown-ESC", () => {
+    inputScene.input.keyboard.on("keydown-ESC", () => {
       if (!this.pendingDef) return;
       if (this.pendingDef.isWall && this.scene.wallPlacer?.active) return;
       this._clearSelection(true);
@@ -450,7 +449,6 @@ export default class BuildTab {
   onShow() {}
   hide() {}
 }
-
 
 
 

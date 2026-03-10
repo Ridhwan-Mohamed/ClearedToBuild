@@ -24,7 +24,6 @@ export class Gunslinger {
             SQUARESIZE * y + SQUARESIZE / 2,
             'gun1'
         );
-        Player.scene.uiCamera.ignore(sprite);
         
         sprite.setInteractive();
         sprite.setOrigin(0.5, 0.5);
@@ -47,7 +46,8 @@ export class Gunslinger {
         sprite.animState = 'gun1Idle';
         sprite.walk = 'gun1Walk';
         sprite.idle = 'gun1Idle';
-        sprite.action = 'action';
+        sprite.action = 'gun1Idle';
+        sprite.swim = 'swim';
 
         sprite.isGunslinger = true;
 

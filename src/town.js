@@ -26,12 +26,20 @@ export function clearBuildingArray(){
 export const turretTeams = {}
 
 export function setupTownBoundsToggle(scene) {
+    const isTyping = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+    };
+
     let boundsGroup = null;
     let showing = false;
   
     // Listen for "T" key
     const keyT = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     keyT.on('down', () => {
+      if (isTyping()) return;
       if (showing) {
         // Remove all drawn bounds
         boundsGroup.clear(true, true);

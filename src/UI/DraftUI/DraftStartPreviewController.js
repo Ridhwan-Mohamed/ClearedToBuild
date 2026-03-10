@@ -34,6 +34,7 @@ function isBlockedBaseTile(cellVal){
 export class DraftStartPreviewController {
   constructor(scene, menuRefs) {
     this.scene = scene;
+    this.worldScene = menuRefs.worldScene || scene.menuPreview?.scene || scene;
     this.gridData = menuRefs.gridData;
     // Baseline terrain snapshot (no draft buildings). Used to rebuild on edits.
     this.terrainGrid = this.gridData.map(row => row.slice());
@@ -41,17 +42,14 @@ export class DraftStartPreviewController {
     this.spawnPoints = []; // [{x,y,type}]
     this._roadTilesCache = null;
     this.spawnIconContainer?.destroy?.();
-    this.spawnIconContainer = this.scene.add.container(0, 0).setDepth(UIDEPTH - 1);
-    this.scene.uiCamera?.ignore(this.spawnIconContainer);
+    this.spawnIconContainer = this.worldScene.add.container(0, 0).setDepth(UIDEPTH - 1);
     this._spawnIcons = []; // Phaser Images
     this.repaintBounds = menuRefs.repaintBounds;
     this.fullRepaint = menuRefs.fullRepaintPreview;
     this.srcW = menuRefs.srcW;
     this.srcH = menuRefs.srcH;
-    this.hoverGfx = this.scene.add.graphics().setDepth(UIDEPTH - 2);
-    this.scene.uiCamera.ignore(this.hoverGfx);
-    this.wallGhostGfx = this.scene.add.graphics().setDepth(UIDEPTH);
-    this.scene.uiCamera.ignore(this.wallGhostGfx);
+    this.hoverGfx = this.worldScene.add.graphics().setDepth(UIDEPTH - 2);
+    this.wallGhostGfx = this.worldScene.add.graphics().setDepth(UIDEPTH);
     this._hover = null;
     this._lastWallBounds = null;
     this._lastGhostBounds = null;
@@ -508,10 +506,10 @@ export class DraftStartPreviewController {
 
       let icon = this._spawnIcons[i];
       if (!icon) {
-        icon = this.scene.add.image(worldX, worldY, "playerIcon")
+        icon = this.worldScene.add.image(worldX, worldY, "playerIcon")
           .setOrigin(0.5)
           .setDepth(UIDEPTH - 1);
-        icon.setScale(1/this.scene.cameras.main.zoom); // adjust if needed for your preview zoom
+        icon.setScale(1 / this.worldScene.cameras.main.zoom); // adjust if needed for your preview zoom
         this.spawnIconContainer.add(icon);
         this._spawnIcons[i] = icon;
       } else {
@@ -636,8 +634,12 @@ export class DraftStartPreviewController {
       "draftPreview"     // <-- ADD THIS PARAM in generateTown -> placeBuilding
     );
 
-    // If your generateTown returns { grid }, adopt it; if it mutates in-place, skip this.
-    if (res) this.scene.gridData = res; this.gridData = res;
+    // If your generateTown returns a new grid, update both UI + world scene refs.
+    if (res) {
+      this.gridData = res;
+      this.scene.gridData = res;
+      this.worldScene.gridData = res;
+    }
 
     // Sync internal placed list from buildingArray tag
     this.placed = [];

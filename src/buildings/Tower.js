@@ -5,6 +5,7 @@ import { BLOCKDEPTH, ENEMY_BUILDING_HOVER_UI, SQUARESIZE, TILE_TYPES, UIDEPTH, s
 import { Map } from "../map";
 import { StageState } from "../parcelController/StageState";
 import { Teams } from "../Teams";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 /**
  * TowerBuilding
@@ -56,6 +57,10 @@ export class TowerBuilding {
         .setDepth(BLOCKDEPTH)
         .setInteractive({ cursor: "pointer" })
     );
+    const cx = x + Math.floor((lenX || 1) / 2);
+    const cy = y + Math.floor((lenY || 1) / 2);
+    this.visionId = VisibilitySystem.addVisionBubble({ x: cx, y: cy, r: 7, boost: 0.12 });
+    this.lightId = VisibilitySystem.addLightSource({ x: cx, y: cy, r: 6, brightness: 2 });
 
     this.sprite.setInteractive({ useHandCursor: true });
     // keep sprite interactive/visible (no physics needed on it)
@@ -75,7 +80,7 @@ export class TowerBuilding {
     this.collider.buildingRef = this;
     Map.structureBarrier.add(this.collider);
 
-    if (this.isPressureTower && this.pressureSlotId) {
+    if (this.isPressureTower) {
       this.scene?.towerPressureController?.registerTower?.(this, this.pressureSlotId);
     }
 
@@ -287,8 +292,6 @@ export class TowerBuilding {
 
     this.uiContainer.add([this.panelBg, this.panelText1, this.panelText2]);
 
-    // World-space UI → show on main camera, hide from uiCamera
-    this.scene.uiCamera?.ignore([this.uiContainer]);
   }
 
   _updatePanel() {
@@ -301,8 +304,24 @@ export class TowerBuilding {
 
     const hp = `HP: ${Math.max(0, this.health)}/${this.maxHealth}`;
     const tpc = this.scene?.towerPressureController;
-    const slotId = tpc?.getTowerSlotId?.(this) ?? null;
-    const pressure = slotId ? `Pressure target: ${slotId}` : (tpc ? "Pressure target: (picking...)" : "Pressure: (inactive)");
+    const info = tpc?.getTowerPressureInfo?.(this) ?? null;
+    const laneLabel = (slotId) => {
+      if (slotId === "W") return "West";
+      if (slotId === "E") return "East";
+      if (slotId === "S") return "South";
+      return null;
+    };
+
+    let pressure = "Raid lane: inactive";
+    if (tpc && info?.slotId) {
+      const lane = laneLabel(info.slotId) || info.slotId;
+      if (info.phase === "raid_live") pressure = `Raid lane ${lane}: LIVE`;
+      else if (info.phase === "countdown") pressure = `Raid lane ${lane}: ${info.remainingText}`;
+      else if (info.phase === "waiting_slot") pressure = `Raid lane ${lane}: waiting`;
+      else pressure = `Raid lane ${lane}: arming`;
+    } else if (tpc) {
+      pressure = "Raid lane: assigning";
+    }
 
     this.panelText1.setText(hp);
     this.panelText2.setText(pressure);
@@ -346,6 +365,14 @@ export class TowerBuilding {
 
     if (this.healthBarBg) this.healthBarBg.destroy();
     if (this.healthBar) this.healthBar.destroy();
+    if (this.visionId != null) {
+      VisibilitySystem.removeVisionBubble(this.visionId);
+      this.visionId = null;
+    }
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
     // ✅ match Prison behavior: keep sprite, swap to destroyed anim, disable interaction
     if (this.sprite?.active) {
       this.sprite.setTexture("tower_destroyed", 0);

@@ -23,7 +23,6 @@ export class Builder {
             'player'
         );
 
-        Player.scene.uiCamera.ignore(sprite);
 
         sprite.setInteractive();
         sprite.setOrigin(0.5, 0.5);
@@ -47,6 +46,7 @@ export class Builder {
         sprite.walk = 'walk';
         sprite.idle = 'idle';
         sprite.action = 'action';
+        sprite.swim = 'swim';
         sprite.carry = 'carry';
 
         sprite.isBuilder = true;

@@ -11,12 +11,27 @@ import { Bank } from "../buildings/Bank.js";
 import { Teams } from "../Teams.js";
 import Phaser from "phaser";
 import { FortGrunt } from "../players/FortGrunt.js";
+import { VisibilitySystem } from "../UI/VisibilitySystem.js";
 
 export const FORT_GRUNT_CONFIG = {
   BASE_COUNT: 2,
   PER_STAGE: 1,
+  PER_SEASON: 2,
   MAX_COUNT: 12,
 };
+
+export const FORT_TOWER_CONFIG = {
+  STAGE_1_2: 1,
+  STAGE_3_4: 2,
+  STAGE_5_BOSS: 3,
+};
+
+function getTowerCountForStage(stageIndex) {
+  const s = Math.max(1, Number(stageIndex || 1));
+  if (s >= 5) return FORT_TOWER_CONFIG.STAGE_5_BOSS;
+  if (s >= 3) return FORT_TOWER_CONFIG.STAGE_3_4;
+  return FORT_TOWER_CONFIG.STAGE_1_2;
+}
 
 function randInt(min, maxInclusive) {
   return Math.floor(Math.random() * (maxInclusive - min + 1)) + min;
@@ -191,6 +206,10 @@ export function spawnNorthFort({
   const innerY = origin.y + inset;
   map.setGroundRect?.(innerX, innerY, inner, inner, "fort_floor");
 
+  const stageIndex = Math.max(1, StageState.stageIndex || 1);
+  const seasonIndex = Math.max(1, StageState.seasonIndex || 1);
+  const towerCount = getTowerCountForStage(stageIndex);
+
   // 3) Pick a random tower spot inside the inner rect (with safe margins)
   const towerType = TILE_TYPES.tower ?? { lenX: 1, lenY: 1, name: "tower" };
   const tw = towerType.lenX ?? 1;
@@ -204,18 +223,20 @@ export function spawnNorthFort({
   const maxGY = innerY + inner - th - margin;
 
   // "back middle" = near the NORTH edge, centered on X
-  const towerGX = clamp(
+  const anchorGX = clamp(
     Math.floor(innerX + (inner / 2) - (tw / 2)),
     minGX,
     maxGX
   );
 
   // push tower toward the back (north). keep it legal.
-  const towerGY = clamp(
+  const anchorGY = clamp(
     innerY + margin,   // as far north as we safely can
     minGY,
     maxGY
   );
+  const towerGX = anchorGX;
+  const towerGY = anchorGY;
 
   // Make sure TowerBuilding has a scene
   TowerBuilding.scene = TowerBuilding.scene ?? scene;
@@ -233,6 +254,62 @@ export function spawnNorthFort({
   objectiveTowers.push(towerInstance);
   _trackFortThing(fortTrack, towerInstance);
 
+  const extraTowerSpots = [];
+  const remainingPressureSlots = dirs.filter((d) => d !== pressureSlotId);
+  if (towerCount > 1) {
+    const taken = new Set([`${towerGX},${towerGY}`]);
+    const towerGap = 1;
+    const placedTowerFps = [{ x: towerGX, y: towerGY, w: tw, h: th }];
+    const pref = [
+      { x: clamp(towerGX - (tw + towerGap), minGX, maxGX), y: clamp(towerGY, minGY, maxGY) },
+      { x: clamp(towerGX + (tw + towerGap), minGX, maxGX), y: clamp(towerGY, minGY, maxGY) },
+      { x: clamp(towerGX, minGX, maxGX), y: clamp(towerGY + (th + towerGap), minGY, maxGY) },
+    ];
+    const canPlace = (gx, gy) => {
+      const key = `${gx},${gy}`;
+      if (taken.has(key)) return false;
+      if (gx < minGX || gy < minGY || gx > maxGX || gy > maxGY) return false;
+      for (let yy = gy; yy < gy + th; yy++) {
+        for (let xx = gx; xx < gx + tw; xx++) {
+          if (!inBounds(map, xx, yy) || isWaterCell(map, xx, yy)) return false;
+        }
+      }
+
+      const fp = { x: gx, y: gy, w: tw, h: th };
+      const padded = expandedFootprint(fp, towerGap);
+      for (const p of placedTowerFps) {
+        if (footprintOverlaps(padded, expandedFootprint(p, towerGap))) return false;
+      }
+      return true;
+    };
+    const pushSpot = (gx, gy) => {
+      if (!canPlace(gx, gy)) return false;
+      taken.add(`${gx},${gy}`);
+      extraTowerSpots.push({ x: gx, y: gy });
+      placedTowerFps.push({ x: gx, y: gy, w: tw, h: th });
+      return true;
+    };
+
+    for (const c of pref) {
+      if (objectiveTowers.length + extraTowerSpots.length >= towerCount) break;
+      pushSpot(c.x, c.y);
+    }
+    for (let i = 0; i < 300 && objectiveTowers.length + extraTowerSpots.length < towerCount; i++) {
+      pushSpot(randInt(minGX, maxGX), randInt(minGY, maxGY));
+    }
+
+    for (const spot of extraTowerSpots) {
+      const slotForTower = remainingPressureSlots.shift() ?? null;
+      const tower = new TowerBuilding(spot.x, spot.y, 0, {
+        isFortObjective: true,
+        isPressureTower: true,
+        pressureSlotId: slotForTower,
+      });
+      objectiveTowers.push(tower);
+      _trackFortThing(fortTrack, tower);
+    }
+  }
+
 
   // 3.5) Place bank + prison near the tower with a 1-tile gap,
   // then wall around the whole cluster (tower+bank+prison).
@@ -248,6 +325,9 @@ export function spawnNorthFort({
   // We enforce separation by expanding "no-go" by gap around each placed footprint.
   const placed = [];
   placed.push(towerFp);
+  for (const spot of extraTowerSpots) {
+    placed.push({ x: spot.x, y: spot.y, w: tw, h: th });
+  }
 
   function tryPlaceAroundTower(objType, ctorFn) {
     const objW = objType.lenX ?? 4;
@@ -380,10 +460,11 @@ export function spawnNorthFort({
     }
   }
 
-  const stageIndex = Math.max(1, StageState.stageIndex || 1);
   const desiredCount = fortGruntCount ?? Math.min(
     FORT_GRUNT_CONFIG.MAX_COUNT,
-    FORT_GRUNT_CONFIG.BASE_COUNT + (stageIndex - 1) * FORT_GRUNT_CONFIG.PER_STAGE
+    FORT_GRUNT_CONFIG.BASE_COUNT +
+      (stageIndex - 1) * FORT_GRUNT_CONFIG.PER_STAGE +
+      (seasonIndex - 1) * (FORT_GRUNT_CONFIG.PER_SEASON ?? 0)
   );
 
   const spawnPool = [...fortRoads];
@@ -402,15 +483,25 @@ export function spawnNorthFort({
   } catch (_) {}
 
   // Arm the fort objective AFTER everything is spawned and bounds are known
+  const parcelBounds = {
+    minx: origin.x,
+    miny: origin.y,
+    maxx: origin.x + size - 1,
+    maxy: origin.y + size - 1,
+  };
+
   StageState.setFortObjective({
     parcel: "north_fort",
     requiredTowerCount: objectiveTowers.length, // supports multiple towers
+    requiredFortEnemyCount: desiredCount,
     bounds: { minx, miny, maxx, maxy },
     refs: {
       // camera / explosions want one explicit tower ref
       tower: objectiveTowers[0] || null,
       // your fade-out system expects this (best path)
       fortTrack, // assuming you already built fortTrack = { sprites:[], bodies:[] }
+      // full 25x25 fort parcel bounds (used for evacuation gating)
+      parcelBounds,
     },
   });
 
@@ -445,6 +536,11 @@ export function clearNorthFort({ scene, map, meta } = {}) {
 
   const bounds = meta.bounds;
   const enemyTeam = Teams.teamLists?.["0"];
+
+  // Remove any lingering FoW light/vision sources from this fort area.
+  // This guards against objects that were faded/destroyed without running
+  // their normal destroy hooks.
+  VisibilitySystem.clearSourcesInBounds(bounds.minx, bounds.miny, bounds.maxx, bounds.maxy);
 
   // 1) Remove tracked visuals/colliders if still around
   const track = meta?.refs?.fortTrack;

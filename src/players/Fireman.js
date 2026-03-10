@@ -23,7 +23,6 @@ export class Fireman {
 
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
-        Player.scene.uiCamera.ignore(sprite);        
         sprite.setInteractive();
         sprite.id = Player.count++;
         sprite.setOrigin(0.5, 0.5);
@@ -43,6 +42,7 @@ export class Fireman {
         sprite.walk = 'walk';
         sprite.idle = 'idle';
         sprite.action = 'action';
+        sprite.swim = 'swim';
         sprite.name = NameGenerator.generate();
         sprite.skip = false; //flag for manager task allocation
 

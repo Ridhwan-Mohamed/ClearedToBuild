@@ -38,7 +38,6 @@ export class ZoomMixer {
 
     ZoomMixer.mapIconContainer = scene.add.container(0, 0).setDepth(UIDEPTH - 1);
     // hide from UI camera
-    scene.uiCamera?.ignore(ZoomMixer.mapIconContainer);
   }
 
   /** Use an *existing* texture (e.g., 'mapPreview') as the overview overlay. */
@@ -68,7 +67,6 @@ export class ZoomMixer {
       .setVisible(false);
 
     // Make sure UI camera doesn't render the overlay
-    scene.uiCamera?.ignore(this.overviewImage);
   }
 
   /** Build (or rebuild) the overview texture from a grid. */
@@ -108,7 +106,6 @@ export class ZoomMixer {
       .setVisible(false);
 
     // Make sure UI camera doesn't render the overlay
-    scene.uiCamera?.ignore(this.overviewImage);
   }
 
   updateOverviewCell(gridX, gridY, grid, lenx=1, leny=1) {
@@ -254,11 +251,19 @@ export class ZoomMixer {
   /** Optional keyboard shortcuts (Z/X). */
   hookKeys(zoomOut = 0.30, zoomIn = 1.00) {
     const scene = ZoomMixer.scene;
+    const isTyping = () => {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = (el.tagName || "").toUpperCase();
+      return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+    };
     scene.input.keyboard.on('keydown-Z', () => {
+      if (isTyping()) return;
       this.targetZoom = zoomOut;
       this.smoothCenterZoomTo(zoomOut);
     });
     scene.input.keyboard.on('keydown-X', () => {
+      if (isTyping()) return;
       this.targetZoom = zoomIn;
       this.smoothCenterZoomTo(zoomIn);
     });
@@ -281,7 +286,6 @@ export class ZoomMixer {
     icon.setScale(baseScale / cam.zoom);
 
     // ✅ hide this icon from the UI camera
-    scene.uiCamera?.ignore(icon);
 
     // Hover label
     const label = scene.add.text(x, y - 20, description, {
@@ -311,7 +315,6 @@ export class ZoomMixer {
       });
     });
 
-    scene.uiCamera?.ignore(label);
 
     // allow live hover-label updates (e.g., team/town renaming)
     icon._zoomLabel = label;

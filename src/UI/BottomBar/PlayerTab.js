@@ -39,8 +39,6 @@ export default class PlayerTab {
       callback: () => this.tick(),
     });
 
-    // hide root container from main camera
-    scene.cameras.main.ignore(this.root);
   }
 
     destroy() {

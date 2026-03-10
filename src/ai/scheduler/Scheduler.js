@@ -2,6 +2,7 @@ import { CONTROL_STATES } from "../../constants";
 import { Manager } from "../../Manager/Manager";
 import { StorageManager } from "../../Manager/StorageManager";
 import { UI_ITEM_TYPES } from "../../UI/UIConstants";
+import { Player } from "../../players/Player";
 import { TaskBoard } from "../tasks/TaskBoard";
 import { POLICIES } from "../policies";
 
@@ -96,6 +97,26 @@ export class Scheduler {
                 return troop.type?.assignFromOvenFuelJobs?.(troop) || false;
             case "oven_fill":
                 return troop.type?.assignFromOvenJobs?.(troop) || false;
+            case "enemy_unit": {
+                const target = candidate.ref?.gameObject || candidate.ref?.target || candidate.ref;
+                if (!target?.active || !target?.body) return false;
+                return Manager.assignOneTroopToAction(troop, [{
+                    x: target.x,
+                    y: target.y,
+                    body: target.body,
+                    assigned: 0,
+                    forced: !!candidate.ref?.forced,
+                    target,
+                }], CONTROL_STATES.TRACK_TARGET);
+            }
+            case "enemy_destroy_block": {
+                const ok = Manager.assignOneTroopToAction(troop, [candidate.ref], CONTROL_STATES.DESTROY_MODE);
+                if (ok) return true;
+
+                const target = candidate.ref?.value?.buildingRef || candidate.ref?.value || candidate.ref;
+                if (Player._planBreachTicketsForTarget?.(troop, target)) return true;
+                return false;
+            }
             default: {
                 const state = this._stateForTicket(candidate.kind);
                 if (state == null) return false;
@@ -120,6 +141,8 @@ export class Scheduler {
             case "enemy_destroy_tile":
             case "destroy_tile":
                 return CONTROL_STATES.DESTROY_MODE_T;
+            case "enemy_unit":
+                return CONTROL_STATES.TRACK_TARGET;
             case "enemy_destroy_block":
             case "destroy_block":
                 return CONTROL_STATES.DESTROY_MODE;

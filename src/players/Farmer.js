@@ -21,7 +21,6 @@ export class Farmer {
 
     constructor(x, y, teamNumber) {
         const farmer = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, 'player');
-        Player.scene.uiCamera.ignore(farmer);
         farmer.setInteractive();
         farmer.id = this.count;
         Player.count += 1;
@@ -43,6 +42,7 @@ export class Farmer {
         farmer.walk = 'walk';
         farmer.idle = 'idle';
         farmer.action = 'action';
+        farmer.swim = 'swim';
         farmer.carrying = null;
         farmer.waterBucket = {count: 0};
         farmer.oldState = null;

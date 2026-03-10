@@ -108,6 +108,19 @@ export class fightManager{
         const weapon = sprite.weapon;
         if (!weapon) return;
 
+        const inRangeNow = Phaser.Math.Distance.Between(sprite.x, sprite.y, target.x, target.y) <= weapon.range;
+        const hasLoSNow = !weapon.projectile || Projectile.hasLineOfSight(sprite, target);
+        if (!inRangeNow || !hasLoSNow) {
+            if (sprite.timer) {
+                sprite.timer.remove(false);
+                sprite.timer = null;
+            }
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_TARGET);
+            Player.setAnimState(sprite, sprite.walk);
+            Player.updateTracking(sprite);
+            return;
+        }
+
         if (!sprite.timer) {
             Player.setAnimState(sprite, sprite.action);
 
@@ -133,6 +146,15 @@ export class fightManager{
                 }
 
                 const target = currentTracked.gameObject;
+                const inRange = Phaser.Math.Distance.Between(sprite.x, sprite.y, target.x, target.y) <= weapon.range;
+                const hasLoS = !weapon.projectile || Projectile.hasLineOfSight(sprite, target);
+                if (!inRange || !hasLoS) {
+                    Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_TARGET);
+                    Player.setAnimState(sprite, sprite.walk);
+                    sprite.timer = null;
+                    Player.updateTracking(sprite);
+                    return;
+                }
 
                 // 🧨 Projectile weapon (gunslinger, etc.)
                 if (weapon.projectile) {
@@ -200,6 +222,7 @@ export class fightManager{
                 // ☠️ Target defeated
                 if (target.health <= 0) {
                     this.checkForKillReward(sprite.body.team, target);
+                    Player._cleanupCombatTicketForTarget?.(sprite.body.team, target);
                     target.destroySelf();
                     sprite.track = null;
                     sprite.forcedTarget = null;

@@ -4,7 +4,7 @@
 // World-space "market ship" that docks beside the parcel that bought the Market contract.
 // - No navgrid: ship is a sprite + pile sprites.
 // - Hover a pile -> tiny world-space buy widget above it.
-// - UI is hidden from uiCamera (only rendered by main/world camera).
+// - UI is rendered on the active world camera.
 // - Purchases are blocked if storage can't accept the full amount.
 //
 // Usage:
@@ -161,8 +161,6 @@ function createHoverMenu(scene) {
 
   c.add(zone);
 
-  // Hide from uiCamera (world-only)
-  scene.uiCamera?.ignore(c);
 
   const bg = scene.add.rectangle(0, 0, MENU_W, MENU_H, 0x000000, 0.72).setOrigin(0.5);
   bg.setStrokeStyle(2, 0xffffff, 0.65);
@@ -463,7 +461,6 @@ export function spawnMarketShip(scene, {
   }
 
   const container = scene.add.container(startX, startY).setDepth((UIDEPTH ?? 2000) + 50);
-  scene.uiCamera?.ignore(container); // world-only
 
   const ship = scene.add.image(0, 0, "market_ship").setOrigin(0.5).setAngle(angleDeg);
   container.add(ship);

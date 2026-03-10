@@ -103,8 +103,6 @@ export class DraftStartMenu {
     this.mapOverlayContainer?.destroy?.();
     this.mapOverlayContainer = this.scene.add.container(0, 0).setDepth(UIDEPTH + 10);
 
-    // If you have a UI camera that draws the left column, ignore this overlay so it stays on the map.
-    this.scene.cameras.main.ignore(this.mapOverlayContainer);
 
     // Hint text (hidden by default; only shown during add/move)
     this.ui.placeHintBg = this.scene.add.rectangle(0, 0, 0, 0, 0x000000, 0.65).setOrigin(0.5,0.5);

@@ -221,6 +221,76 @@ export class VisibilitySystem {
     this._rebuildViewFull();
   }
 
+  // Bulk-remove light/vision sources whose centers are inside a tile rect.
+  // Useful for hard world resets (e.g., fort teardown) where sprites may be
+  // destroyed without running per-object destroy hooks.
+  static clearSourcesInBounds(gx0, gy0, gx1, gy1) {
+    const minx = Math.min(gx0, gx1);
+    const maxx = Math.max(gx0, gx1);
+    const miny = Math.min(gy0, gy1);
+    const maxy = Math.max(gy0, gy1);
+
+    const inside = (s) =>
+      s &&
+      Number.isFinite(s.x) &&
+      Number.isFinite(s.y) &&
+      s.x >= minx &&
+      s.x <= maxx &&
+      s.y >= miny &&
+      s.y <= maxy;
+
+    const removedLightIds = new Set();
+    const removedVisionIds = new Set();
+
+    this.lightSources = (this.lightSources || []).filter((s) => {
+      const hit = inside(s);
+      if (hit) removedLightIds.add(s.id);
+      return !hit;
+    });
+
+    this.visionBubbles = (this.visionBubbles || []).filter((s) => {
+      const hit = inside(s);
+      if (hit) removedVisionIds.add(s.id);
+      return !hit;
+    });
+
+    if (!removedLightIds.size && !removedVisionIds.size) return;
+
+    // Rebuild spatial chunk indexes from kept sources.
+    this._lightChunks.clear();
+    for (const s of this.lightSources) {
+      const gx0l = Math.floor(s.x - s.r), gy0l = Math.floor(s.y - s.r);
+      const gx1l = Math.ceil(s.x + s.r), gy1l = Math.ceil(s.y + s.r);
+      for (const { cx, cy } of this._lightAABBChunks(gx0l, gy0l, gx1l, gy1l)) {
+        const k = this._lightKey(cx, cy);
+        if (!this._lightChunks.has(k)) this._lightChunks.set(k, []);
+        this._lightChunks.get(k).push(s);
+      }
+    }
+
+    this._visionChunks.clear();
+    for (const s of this.visionBubbles) {
+      const gx0v = Math.floor(s.x - s.r), gy0v = Math.floor(s.y - s.r);
+      const gx1v = Math.ceil(s.x + s.r), gy1v = Math.ceil(s.y + s.r);
+      for (const { cx, cy } of this._visionAABBChunks(gx0v, gy0v, gx1v, gy1v)) {
+        const k = this._visionKey(cx, cy);
+        if (!this._visionChunks.has(k)) this._visionChunks.set(k, []);
+        this._visionChunks.get(k).push(s);
+      }
+    }
+
+    // Keep scene-level tracking sets in sync if present.
+    const scene = this.scene;
+    if (scene?.__structureLightIds && removedLightIds.size) {
+      for (const id of removedLightIds) scene.__structureLightIds.delete(id);
+    }
+    if (scene?.__structureVisionIds && removedVisionIds.size) {
+      for (const id of removedVisionIds) scene.__structureVisionIds.delete(id);
+    }
+
+    this._rebuildViewFull();
+  }
+
   // ===== Gameplay hooks =====
 
   // Use this from Player movement: pass NEW grid coords (center of bubble), radius
@@ -312,7 +382,6 @@ export class VisibilitySystem {
         .setOrigin(0, 0)
         .setDepth(UIDEPTH - 3)
         .setScrollFactor(1, 1);
-      this.scene.uiCamera.ignore(this.viewRT);
       this.viewRT.setDisplaySize(tilesW * SQUARESIZE, tilesH * SQUARESIZE);
       if (this.uiCam?.ignore) this.uiCam.ignore(this.viewRT);
 
@@ -587,4 +656,5 @@ export class VisibilitySystem {
     }
   }
 }
+
 

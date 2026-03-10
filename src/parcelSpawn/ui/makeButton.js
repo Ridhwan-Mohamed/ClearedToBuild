@@ -3,7 +3,7 @@
  * Returns a Container with a rounded-rect + centered text.
  *
  * IMPORTANT: scrollFactor MUST be 1 for ALL objects (your camera-split code
- * uses scrollFactor==0 to route objects to uiCamera).
+ * uses scrollFactor==0 to route objects to the overlay scene.
  */
 export function makeButton(scene, cfg) {
   const x = cfg.x ?? 0;

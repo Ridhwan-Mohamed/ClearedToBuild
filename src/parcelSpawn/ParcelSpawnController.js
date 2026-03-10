@@ -36,12 +36,6 @@ export class ParcelSpawnController {
 
     this._buildSlots();
 
-    // If you have a UI camera, it MUST ignore world-space contract UI.
-    if (scene.uiCamera) {
-      scene.uiCamera.ignore(this.root);
-      // also ignore the children GameObjects (mapView camera-split may add them separately)
-      this.root.list.forEach(go => scene.uiCamera.ignore(go));
-    }
   }
 
   _buildSlots() {
@@ -98,11 +92,6 @@ export class ParcelSpawnController {
     slot.resetToGrid();
     slot.setVisible(true);
 
-    // Keep UI camera ignoring it (some camera code rebinds ignores)
-    if (this.scene.uiCamera) {
-      this.scene.uiCamera.ignore(slot.container);
-      slot.container.list.forEach(go => this.scene.uiCamera.ignore(go));
-    }
   }
 
   setVisible(v) {

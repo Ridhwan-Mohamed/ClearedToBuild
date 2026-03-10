@@ -84,6 +84,7 @@ import { StageState } from './parcelController/StageState.js';
 import { loadShipMarketAssets } from './UI/ShipMarket.js';
 import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
 import { respawnNorthFort } from './parcel_system/FortRaidParcel.js';
+import { GameUIScene } from './UI/GameUIScene.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -117,7 +118,7 @@ export class mapView extends Phaser.Scene {
         this.farmConsumeNextClick = false; // eat the UI click that toggled farm mode
         this.farmSelectActive = false;     // true while choosing plot corners
         this.farmSelectPhase = 0;          // 0=inactive, 1=pick start, 2=pick end
-        this.farmHover = null;             // green hover tile for valid start locations
+        this.farmHover = null;             // phase-1 hover outline graphic
         this.farmBanner = null;            // top-center instruction banner (container)
         this.farmBannerParts = null;       // { left, esc, middle, seedCount, seedIcon, right }
         this.farmInstructionText = null;   // top-center instruction banner
@@ -219,11 +220,11 @@ export class mapView extends Phaser.Scene {
         Player.init(this);
         Player.createAnim('oven_idle', 'clayOven', 0, 0, -1, 1);
         Player.createAnim('oven_cooking', 'clayOven', 1, 2, -1, 3);
-        // Bind this scene to MainMenu and build the menu phase in *this* scene
-        // UI camera once (top of create)
-        this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
-        this.uiCamera.setScroll(0, 0).setZoom(1).setBackgroundColor('rgba(0,0,0,0)');
-        this.scale.on('resize', ({ width, height }) => this.uiCamera.setSize(width, height));
+        if (!this.scene.isActive('GameUIScene')) {
+            this.scene.launch('GameUIScene', { worldSceneKey: 'mapView' });
+        }
+        this.uiScene = this.scene.get('GameUIScene');
+        this.uiScene?.bindWorldScene?.(this);
 
         MainMenu.startMenuPhase();
         setupTownBoundsToggle(this);
@@ -337,18 +338,16 @@ export class mapView extends Phaser.Scene {
                 GameMap.placingItem = null;
             }
         });
-        this.clock = {paused: true};
+        this.clock = new Clock(this);
+        this.clock.paused = true;
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
         // Farm mode UX helpers (world hover + UI banner)
-        this.farmHover = this.add.image(0, 0, "selected")
-            .setDisplaySize(SQUARESIZE, SQUARESIZE)
-            .setAlpha(0.5)
+        this.farmHover = this.add.graphics()
             .setVisible(false)
             .setDepth(UIDEPTH);
 
-        if (this.uiCamera) this.uiCamera.ignore(this.farmHover);
 
         this.ensureFarmInstructionUI();
 
@@ -497,7 +496,6 @@ export class mapView extends Phaser.Scene {
                 )
                     .setScrollFactor(0)                // Stick to camera
                     .setDepth(UIDEPTH);
-                this.cameras.main.ignore([selectionCountText, currentText]);
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
@@ -589,13 +587,15 @@ export class mapView extends Phaser.Scene {
 
             const ok = this.isValidFarmTile(gridX, gridY);
             if (this.farmHover) {
-                this.farmHover.setVisible(ok);
-                if (ok) {
-                    this.farmHover.setPosition(
-                        gridX * SQUARESIZE + SQUARESIZE / 2,
-                        gridY * SQUARESIZE + SQUARESIZE / 2
-                    );
-                }
+                this.farmHover.setVisible(true);
+                this.farmHover.clear();
+                this.farmHover.lineStyle(2, ok ? 0x00ff00 : 0xff0000, 1);
+                this.farmHover.strokeRect(
+                    gridX * SQUARESIZE,
+                    gridY * SQUARESIZE,
+                    SQUARESIZE,
+                    SQUARESIZE
+                );
             }
             return;
         }
@@ -610,13 +610,12 @@ export class mapView extends Phaser.Scene {
             const minY = Math.min(this.startCell.y, this.endCell.y);
             const maxY = Math.max(this.startCell.y, this.endCell.y);
 
+            const validSelection = this.isValidFarmSelection(minX, maxX, minY, maxY);
             const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
             const enoughSeeds = (this.seeds >= totalNeeded);
-
-            const cantSpread = GameMap.checkSpreadPosition(minX, minY, maxX, maxY);
-
-            const ok = !cantSpread && enoughSeeds;
-            this.drawSelectionOutline(ok ? "0x00ff00" : "0xff0000");
+            const isStartOnly = (minX === maxX && minY === maxY);
+            const ok = isStartOnly ? validSelection : (validSelection && enoughSeeds);
+            this.drawSelectionOutline(ok ? 0x00ff00 : 0xff0000);
 
             this.setFarmInstructionPhase2(totalNeeded);
             return;
@@ -761,7 +760,6 @@ ensureFarmInstructionUI() {
     ]);
 
     // ignore by camera
-    this.cameras.main.ignore(this.farmInstructionUI);
 
     // keep centered on resize
     this.scale.on("resize", ({ width }) => {
@@ -847,18 +845,37 @@ setFarmInstructionPhase2(totalNeeded) {
 isValidFarmTile(x, y) {
     if (x < 0 || y < 0 || x >= WORLD_DIMENSIONX || y >= WORLD_DIMENSIONY) return false;
 
-    const type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))];
+    const cell = GameMap.grid?.[y]?.[x];
+    if (cell == null) return false;
+
+    const vals = Array.isArray(cell) ? cell : [cell];
+    const names = vals.map((v) => TILE_MAP(v)).filter(Boolean);
+    if (names.includes("water") || names.includes("road")) return false;
+
+    const floorName = TILE_MAP(GameMap.grabDepth(cell, FLOORDEPTH));
+    const type = floorName ? TILE_TYPES[floorName] : null;
 
     // Tillable ground (spread tiles) excluding water/road
     if (type?.spread && type.name !== "water" && type.name !== "road") return true;
 
     // Existing crop tile that doesn't have a seed yet
-    if (type?.name === "crops") {
+    if (names.includes("crops") || type?.name === "crops") {
         const crop = Teams.getCropAt(x, y, 1);
         if (crop && !crop.hasSeed) return true;
     }
 
     return false;
+}
+
+isValidFarmSelection(minX, maxX, minY, maxY) {
+    let validCount = 0;
+    for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+            if (!this.isValidFarmTile(x, y)) return false;
+            validCount++;
+        }
+    }
+    return validCount > 0;
 }
 
 // ---- Farm selection seed accounting helpers ----
@@ -965,8 +982,8 @@ cancelFarmSelection(exitFarmMode = false) {
             const minY = Math.min(this.startCell.y, this.endCell.y);
             const maxY = Math.max(this.startCell.y, this.endCell.y);
 
-            const cantSpread = GameMap.checkSpreadPosition(minX, minY, maxX, maxY);
-            if (cantSpread) return;
+            const validSelection = this.isValidFarmSelection(minX, maxX, minY, maxY);
+            if (!validSelection) return;
 
             const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
             if (!this.checkSufficientSeeds(totalNeeded)) {
@@ -1108,7 +1125,6 @@ cancelFarmSelection(exitFarmMode = false) {
             .setOrigin(0, 0)
             .setScrollFactor(0)
             .setDepth(UIDEPTH - 1);
-        this.cameras.main.ignore(bar);
 
         this.scale.on("resize", ({ width }) => bar.setSize(width, H));
 
@@ -1200,37 +1216,21 @@ cancelFarmSelection(exitFarmMode = false) {
         this.topHud = this.add.container(0, 0, [bar, ...this.topHudElements])
             .setScrollFactor(0)
             .setDepth(UIDEPTH);
-        this.cameras.main.ignore(this.topHud);
+        this.uiScene?._syncWorldUiRefs?.();
     }
 
 
 
-    static refreshUICameraIgnores() {
-        const scene = mapView.scene;
-        if (!scene || !scene.uiCamera) return;
-
-        // UI = scrollFactor 0/0; World = everything else
-        const uiObjs = [];
-        const worldObjs = [];
-
-        for (const go of scene.children.list) {
-            const sfx = ('scrollFactorX' in go) ? go.scrollFactorX : 1;
-            const sfy = ('scrollFactorY' in go) ? go.scrollFactorY : 1;
-            if (sfx === 0 && sfy === 0) uiObjs.push(go);
-            else worldObjs.push(go);
-        }
-
-        // Main camera shows world (ignores UI)
-        scene.cameras.main.ignore(uiObjs);
-
-        // UI camera shows UI (ignores world)
-        scene.uiCamera.ignore(worldObjs);
-    }
+    static refreshUICameraIgnores() {}
 
 
     updateMoney(amountDelta) {
-        const oldAmount = this.money;
         this.money += amountDelta;
+        if (this.uiScene?.onMoneyChanged) {
+            this.uiScene.onMoneyChanged(amountDelta);
+            return;
+        }
+        if (!this.moneyText) return;
         this.moneyText.setText(`$${this.money}`);
     
         // Determine color and ghost prefix
@@ -1269,8 +1269,12 @@ cancelFarmSelection(exitFarmMode = false) {
     }
 
     updateSeeds(amountDelta) {
-        const oldCount = this.seeds;
         this.seeds += amountDelta;
+        if (this.uiScene?.onSeedsChanged) {
+            this.uiScene.onSeedsChanged(amountDelta);
+            return;
+        }
+        if (!this.seedsText) return;
         this.seedsText.setText(`${this.seeds}`);
     
         // color flash
@@ -1308,6 +1312,11 @@ cancelFarmSelection(exitFarmMode = false) {
 
     updateBerry(amountDelta) {
         this.berries += amountDelta;
+        if (this.uiScene?.onBerryChanged) {
+            this.uiScene.onBerryChanged(amountDelta);
+            return;
+        }
+        if (!this.berryText) return;
         this.berryText.setText(`${this.berries}`);
     
         const color = amountDelta > 0 ? '#00ff00' : '#ff3333';
@@ -1456,7 +1465,6 @@ cancelFarmSelection(exitFarmMode = false) {
         .setDisplaySize(SQUARESIZE, SQUARESIZE)
         .setDepth(FLOORDEPTH)
         .setAlpha(0.6);
-        this.uiCamera.ignore(spr)
 
         this.tillPreviewSprites.set(key, spr);
     }
@@ -1522,7 +1530,7 @@ cancelFarmSelection(exitFarmMode = false) {
         this._movementLocked = true;
 
         // Send friendlies out of fort before reward selection.
-        this._sendFortPlayersBackToTown(meta?.bounds);
+        this._sendFortPlayersBackToTown(meta);
 
         // Force zoom-in cinematic framing.
         if (this.zoomMixer) {
@@ -1555,17 +1563,14 @@ cancelFarmSelection(exitFarmMode = false) {
                 this._playFortExplosions(meta, () => {
                     this._showStageCompletedGhost(stageIndex);
 
-                    // Wait for evac to finish (or timeout) BEFORE pausing for rewards.
-                    this._waitForFortEvacuation(meta?.bounds, 4500, () => {
+                    // Wait until all friendly fighters have moved south of the fort bottom edge.
+                    this._waitForFortEvacuation(meta, null, () => {
                         this._openFortRewards(stageIndex, meta);
                     });
                 });
 
-                // fade fort shortly after explosions begin
-                this.time.delayedCall(120, () => {
-                    GameMap.reDraw();
-                    this._fadeOutFortStructures(meta);
-                });
+                // Remove enemy fort grunts right as the explosion sequence starts.
+                this.parcelManager?.clearAllFortGrunts?.();
             }
         });
     }
@@ -1581,8 +1586,12 @@ cancelFarmSelection(exitFarmMode = false) {
             onComplete: () => {
                 this._activeRewardUI = null;
 
-                // Stage transition cleanup: remove any lingering pressure parcels + their raiders.
-                this.parcelManager?.forceClearPressureContracts?.("stage_end_cleanup");
+                // Stage transition cleanup:
+                // - remove only tower-spawned pressure parcels + their raiders
+                // - keep manually started pressure contracts alive (they remain paused during rewards)
+                this.parcelManager?.forceClearPressureContracts?.("stage_end_cleanup", { onlyTowerSpawned: true });
+                // Remove all fort grunts from the previous fort cycle.
+                this.parcelManager?.clearAllFortGrunts?.();
 
                 // Progress stage/season AFTER reward is chosen.
                 StageState.completeFortCycle({ reason: 'fort_reward_collected' }, { stagesPerSeason: 5 });
@@ -1608,7 +1617,8 @@ cancelFarmSelection(exitFarmMode = false) {
         });
     }
 
-    _waitForFortEvacuation(bounds, timeoutMs = 7000, done = null) {
+    _waitForFortEvacuation(metaOrBounds, timeoutMs = 7000, done = null) {
+        const bounds = this._resolveFortEvacBounds(metaOrBounds);
         if (!bounds) {
             done?.();
             return;
@@ -1619,17 +1629,16 @@ cancelFarmSelection(exitFarmMode = false) {
         const tick = () => {
             const elapsed = this.time.now - startedAt;
             // Keep re-issuing return orders while sequence runs.
-            this._sendFortPlayersBackToTown(bounds);
+            this._sendFortPlayersBackToTown(metaOrBounds);
 
-            const allOut = !this._areFortPlayersStillInside(bounds);
+            const allOut = this._areFortFightersBelowBottom(metaOrBounds);
 
             if (allOut) {
                 done?.();
                 return;
             }
 
-            if (elapsed >= timeoutMs) {
-                this._forceEvacuateFortPlayers(bounds);
+            if (timeoutMs != null && elapsed >= timeoutMs) {
                 done?.();
                 return;
             }
@@ -1646,6 +1655,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
         for (const troop of players) {
             if (!troop?.active || !troop.body) continue;
+            if (!this._isFriendlyFighter(troop)) continue;
 
             const gx = Math.floor(troop.x / SQUARESIZE);
             const gy = Math.floor(troop.y / SQUARESIZE);
@@ -1656,22 +1666,55 @@ cancelFarmSelection(exitFarmMode = false) {
         return false;
     }
 
-    _sendFortPlayersBackToTown(bounds) {
+    _sendFortPlayersBackToTown(metaOrBounds) {
+        const bounds = this._resolveFortEvacBounds(metaOrBounds);
         if (!bounds) return;
 
         const team = Teams.teamLists?.['1'];
-        const players = team?.playerList || [];
+        const players = team?.fighterList || [];
 
         for (const troop of players) {
             if (!troop?.active || !troop.body) continue;
+            if (!this._isFriendlyFighter(troop)) continue;
 
-            const gx = Math.floor(troop.x / SQUARESIZE);
             const gy = Math.floor(troop.y / SQUARESIZE);
-            const inside = gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
-            if (!inside) continue;
+            if (gy > bounds.maxy) continue;
 
             Teams.sendTroopToTown(troop);
         }
+    }
+
+    _areFortFightersBelowBottom(metaOrBounds) {
+        const bounds = this._resolveFortEvacBounds(metaOrBounds);
+        if (!bounds) return true;
+        const team = Teams.teamLists?.['1'];
+        const fighters = team?.fighterList || [];
+
+        for (const troop of fighters) {
+            if (!troop?.active || !troop.body) continue;
+            if (!this._isFriendlyFighter(troop)) continue;
+
+            const gy = Math.floor(troop.y / SQUARESIZE);
+            if (gy <= bounds.maxy) return false;
+        }
+        return true;
+    }
+
+    _resolveFortEvacBounds(metaOrBounds) {
+        // Prefer full fort parcel bounds (25x25). Fall back to objective bounds.
+        if (metaOrBounds?.refs?.parcelBounds) return metaOrBounds.refs.parcelBounds;
+        if (metaOrBounds?.parcelBounds) return metaOrBounds.parcelBounds;
+        if (metaOrBounds?.bounds) return metaOrBounds.bounds;
+        if (
+            metaOrBounds &&
+            Number.isFinite(metaOrBounds.minx) &&
+            Number.isFinite(metaOrBounds.miny) &&
+            Number.isFinite(metaOrBounds.maxx) &&
+            Number.isFinite(metaOrBounds.maxy)
+        ) {
+            return metaOrBounds;
+        }
+        return null;
     }
 
     _forceEvacuateFortPlayers(bounds) {
@@ -1685,6 +1728,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
         for (const troop of players) {
             if (!troop?.active || !troop.body) continue;
+            if (!this._isFriendlyFighter(troop)) continue;
 
             const gx = Math.floor(troop.x / SQUARESIZE);
             const gy = Math.floor(troop.y / SQUARESIZE);
@@ -1704,6 +1748,10 @@ cancelFarmSelection(exitFarmMode = false) {
 
             Teams.sendTroopToTown(troop);
         }
+    }
+
+    _isFriendlyFighter(troop) {
+        return !!(troop?.isBrawler || troop?.isBlademaster || troop?.isGunslinger);
     }
 
     _getTowerCenter(meta) {
@@ -1768,6 +1816,10 @@ cancelFarmSelection(exitFarmMode = false) {
 
     _fadeOutFortStructures(meta) {
         const track = meta?.refs?.fortTrack;
+        const bounds = meta?.bounds;
+        if (bounds) {
+            VisibilitySystem.clearSourcesInBounds(bounds.minx, bounds.miny, bounds.maxx, bounds.maxy);
+        }
 
         // Best path: fade ONLY tracked fort sprites
         if (track?.sprites?.length) {
@@ -1808,7 +1860,6 @@ cancelFarmSelection(exitFarmMode = false) {
         .setDepth(99999)
         .setAlpha(0);
 
-        this.cameras.main.ignore(txt);
 
         this.tweens.add({
             targets: txt,
@@ -1833,7 +1884,7 @@ const config = {
     width: window.innerWidth,
     height: window.innerHeight,
     backgroundColor: '#3cb8f1',
-    scene: [mapView, itemTab],
+    scene: [mapView, GameUIScene, itemTab],
     scale: {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH

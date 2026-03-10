@@ -58,7 +58,6 @@ export function openPowerupScreen(scene) {
     scene.time.timeScale = 0;
 
     scene.cameras.main.ignore(uiContainer);  // hide from world camera
-    scene.uiCamera.ignore([]);               // UI cam will see it by default
     uiContainer.setScrollFactor(0); // lock container to camera
 
     // === Background ===
@@ -592,3 +591,4 @@ const STORE = [
         }
     }
 ];
+

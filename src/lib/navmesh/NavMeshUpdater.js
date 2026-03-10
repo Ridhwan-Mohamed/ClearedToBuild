@@ -24,7 +24,15 @@ export class NavMeshUpdater {
     }
 
     _setupToggleKey() {
+        const isTyping = () => {
+            const el = document.activeElement;
+            if (!el) return false;
+            const tag = (el.tagName || "").toUpperCase();
+            return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+        };
+
         this._onToggle = () => {
+            if (isTyping()) return;
             this.debugEnabled = !this.debugEnabled;
             if (this.debugEnabled) this.drawDebug();
             else this.clearDebug();
@@ -103,7 +111,6 @@ export class NavMeshUpdater {
             }
 
         }
-        this.scene.uiCamera.ignore(this.debugGraphics);
     }
 
     clearDebug() {
@@ -397,6 +404,7 @@ export class NavMeshUpdater {
     }
     
 }
+
 
 
 

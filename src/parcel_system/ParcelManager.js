@@ -36,7 +36,7 @@ export class ParcelManager {
 
   startForest(slotId)  { return this._startResource(slotId, "FOREST"); }
   startRock(slotId)    { return this._startResource(slotId, "ROCK"); }
-  startPressure(slotId, difficulty = 1) { return this._startPressure(slotId, difficulty); }
+  startPressure(slotId, difficulty = 1, opts = {}) { return this._startPressure(slotId, difficulty, opts); }
   startFarm(slotId) { return this._startResource(slotId, "FARM"); }
   startMilitia(slotId) {
     if (this.slotToContractId[slotId]) return null;
@@ -130,7 +130,7 @@ export class ParcelManager {
     return id;
   }
 
-  _startPressure(slotId, difficulty) {
+  _startPressure(slotId, difficulty, opts = {}) {
     if (this.slotToContractId[slotId]) return null;
 
     const id = `PRESSURE_${slotId}_${Date.now()}`;
@@ -148,6 +148,8 @@ export class ParcelManager {
 
       parcelManager: this,
       difficulty,
+      pressureSource: opts.source ?? "manual",
+      pressureOwnerTower: opts.ownerTower ?? null,
     });
 
 
@@ -208,10 +210,12 @@ export class ParcelManager {
     if (inst) inst.onSpawnerDestroyed?.(unspawnedCount);
   }
 
-  forceClearPressureContracts(reason = "stage_end_cleanup") {
+  forceClearPressureContracts(reason = "stage_end_cleanup", opts = {}) {
     const entries = [];
     for (const [id, inst] of this.contractsById.entries()) {
-      if (inst?.type === "PRESSURE") entries.push([id, inst]);
+      if (inst?.type !== "PRESSURE") continue;
+      if (opts.onlyTowerSpawned && inst?.pressureSource !== "tower") continue;
+      entries.push([id, inst]);
     }
     if (!entries.length) return 0;
 
@@ -235,6 +239,17 @@ export class ParcelManager {
     }
 
     return entries.length;
+  }
+
+  clearAllFortGrunts() {
+    const troops = (Player.troops || []).slice();
+    let removed = 0;
+    for (const troop of troops) {
+      if (!troop?.active || !troop?.isFortGrunt) continue;
+      try { troop.destroySelf?.(); } catch {}
+      removed++;
+    }
+    return removed;
   }
 
   spawnSpawnerBuilding({ gx, gy, contractId, plannedEnemies, spawnIntervalMs }) {

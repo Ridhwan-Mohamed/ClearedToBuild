@@ -848,8 +848,6 @@ export default class ClayOvenTab {
 
     this.jobPopup = popup;
 
-    scene.cameras.main.ignore([popup, toolbar]);
-
     // float & layout
     this.scene.add.existing(popup);
     popup.setDepth(UIDEPTH + 100).layout();

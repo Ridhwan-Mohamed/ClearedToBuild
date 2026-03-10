@@ -12,6 +12,7 @@ import { Map } from "../map.js";
 import { TILE_TYPES, SQUARESIZE, BLOCKDEPTH } from "../constants.js";
 import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Teams } from "../Teams.js";
+import { VisibilitySystem } from "../UI/VisibilitySystem.js";
 
 export class SpawnerBuilding {
   /**
@@ -58,6 +59,7 @@ export class SpawnerBuilding {
         ).setDepth(BLOCKDEPTH)
     );
     this.team = opts.team ?? 0;   // enemy default
+    this.lightId = VisibilitySystem.addLightSource({ x: gx + 0.5, y: gy + 0.5, r: 5.5, brightness: 1.6 });
     // this.sprite = scene.add.image(worldX, worldY, this.textureKey);
     this.sprite.setInteractive({ useHandCursor: true });
     // keep sprite interactive/visible (no physics needed on it)
@@ -229,6 +231,15 @@ export class SpawnerBuilding {
     this.scene?.parcelManager?.notifySpawnerDestroyed?.(this.contractId, unspawned);
 
     if (this.timer) this.timer.remove(false);
+    if (this.collider) {
+      Map.structureBarrier?.remove(this.collider, true, true);
+      this.collider.destroy();
+      this.collider = null;
+    }
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
     this.sprite?.destroy();
     this.counterText?.destroy();
   }

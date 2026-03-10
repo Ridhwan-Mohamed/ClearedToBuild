@@ -3,6 +3,7 @@ import { Teams } from "../Teams";
 import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { buildingManager } from "../Manager/buildingManager";
+import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 export class RockNode {
   static scene;
@@ -30,6 +31,7 @@ export class RockNode {
 
     this.sprite.ownerNode = this;
     GameMap.addToWorldStatic(this.sprite);
+    this.lightId = VisibilitySystem.addLightSource({ x: gridX + 1.5, y: gridY + 1.5, r: 3.3, brightness: 0.95 });
 
     this.setLevel(level);
     this.setUpHitDetection();
@@ -136,6 +138,10 @@ export class RockNode {
   destroy() {
     if (!this.sprite) return;
     this.stopFlash();
+    if (this.lightId != null) {
+      VisibilitySystem.removeLightById(this.lightId);
+      this.lightId = null;
+    }
     if (this.task?.value === this) this.task.value = null;
     this.task = null;
     removeFromArray(GameMap.worldStones, this);

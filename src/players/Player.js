@@ -27,6 +27,7 @@ import { AudioManager } from "../Manager/AudioManager";
 import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
 import { InterruptController } from "../ai/scheduler/InterruptController";
+import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 
 export class Player {
 
@@ -58,13 +59,13 @@ export class Player {
         this.createAnim('action','playerAction',0,2,-1,10);
         this.createAnim('carryWalk', 'playerCarry', 0, 2)
         this.createAnim('carryIdle', 'playerCarry', 0, 0)
+        this.createAnim('swim', 'playerSwim', 0, 2, -1, 8);
         this.setUpBackToTown()
         PathDebugDrawer.init(scene);
     }
 
-    static addPlayer(x,y,team,spriteSheet='player',walk='walk',idle='idle',action='action', weapon=weapons.hands) {
+    static addPlayer(x,y,team,spriteSheet='player',walk='walk',idle='idle',action='action', weapon=weapons.hands, swim='swim') {
         const newCube = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, spriteSheet);
-        Player.scene.uiCamera.ignore(newCube);
         newCube.setInteractive();
         newCube.id = this.count;
         this.count += 1;
@@ -81,6 +82,7 @@ export class Player {
         newCube.walk = walk;
         newCube.idle = idle;
         newCube.action = action;
+        newCube.swim = swim;
         Teams.movePlayerState(newCube, CONTROL_STATES.TRACK_MODE);
         newCube.weapon = weapon;
         this.characters.add(newCube);
@@ -671,19 +673,28 @@ export class Player {
         const chosen = closestFree || closestBusy;
         if (!chosen) return;
 
+        // Release any currently claimed job through the centralized task interrupt flow.
+        // This keeps TaskBoard/assigned counters consistent with the new system.
+        InterruptController.interruptTroop(chosen, "manual_attack_assignment", CONTROL_STATES.TRACK_MODE);
+
         // 🔒 Mark this as a “hard assignment” target
         chosen.forcedTarget = targetSprite;
-
-        // Kill any job/timer so they don’t sit on reserved tasks
-        if (chosen.task) {
-            if (typeof chosen.task.assigned === "number" && chosen.task.assigned > 0) {
-                chosen.task.assigned -= 1;
+        const playerTeam = Teams.teamLists["1"];
+        if (playerTeam?.fightingList) {
+            const exists = playerTeam.fightingList.some(t => {
+                const tgt = t?.target || t;
+                return tgt === targetSprite;
+            });
+            if (!exists) {
+                playerTeam.fightingList.push({
+                    x: targetSprite.x,
+                    y: targetSprite.y,
+                    body: targetSprite.body,
+                    target: targetSprite,
+                    assigned: 0,
+                    forced: true,
+                });
             }
-            chosen.task = null;
-        }
-        if (chosen.timer) {
-            chosen.timer.remove(false);
-            chosen.timer = null;
         }
 
         chosen.roam = false;
@@ -705,7 +716,7 @@ export class Player {
         let shortestDistance = Infinity;
         let search = !troop.forcedTarget; //always check for optimal enemy
         const regionSystem = troop.body.team === 0 ? Map.enemyRegionSystem : Map.regionSystem;
-        const canStudyTarget = (body) => {
+        const canReachTarget = (body) => {
             if (!body) return false;
             if (!regionSystem?.canReachWorldToWorld) return true;
             return regionSystem.canReachWorldToWorld(troop.x, troop.y, body.x, body.y);
@@ -717,7 +728,7 @@ export class Player {
 
             neighbours.forEach(neighbour => {
                 if (neighbour === troop.body || neighbour.team == troop.body.team || (neighbour.gameObject && !neighbour.gameObject.active) || neighbour.dontTrack) return; // Ignore itself or untrackable neighbors
-                if (!canStudyTarget(neighbour)) return; // Ignore targets in disconnected regions
+                if (!canReachTarget(neighbour)) return;
 
                 // Neighbor position
                 const neighbourPosition = new Phaser.Math.Vector2(neighbour.x, neighbour.y);
@@ -737,7 +748,7 @@ export class Player {
         // Use tile change on SQUARESIZE grid to decide if we need a new path.
         if (troop.track && (troop.track[0] === mostClosest || troop.state === CONTROL_STATES.TRACK_TARGET)) {
             const trackedBody = (troop.track[0] === mostClosest) ? mostClosest : troop.track[0];
-            if (!canStudyTarget(trackedBody)) {
+            if (!canReachTarget(trackedBody)) {
                 troop.track = null;
                 return false;
             }
@@ -762,7 +773,7 @@ export class Player {
         }
         else if (mostClosest) {
             // New target acquired
-            if (!canStudyTarget(mostClosest)) return false;
+            if (!canReachTarget(mostClosest)) return false;
             const go = mostClosest.gameObject;
             if (!go) return false;
 
@@ -1088,12 +1099,211 @@ export class Player {
         InterruptController.interruptTroop(troop, "state_interrupt", targetState);
     }
 
+    static _isFighterUnit(troop) {
+        return !!(troop?.isBrawler || troop?.isBlademaster || troop?.isGunslinger || troop?.isFortGrunt);
+    }
+
+    static _cleanupCombatTicketForTarget(teamNumber, target) {
+        const list = Teams.teamLists?.[`${teamNumber}`]?.fightingList;
+        if (!Array.isArray(list) || !target) return;
+        for (let i = list.length - 1; i >= 0; i--) {
+            const t = list[i];
+            const tgt = t?.target || t;
+            if (!tgt?.active || tgt === target) list.splice(i, 1);
+        }
+    }
+
+    static _clearInvalidForcedTarget(troop) {
+        const target = troop.forcedTarget;
+        if (!target) return false;
+        if (target?.active && target?.body) return false;
+        if (target) this._cleanupCombatTicketForTarget(troop.body.team, target);
+        troop.forcedTarget = null;
+        if (troop.track && troop.state === CONTROL_STATES.TRACK_TARGET) {
+            troop.track = null;
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        }
+        return true;
+    }
+
+    static _isAttackReady(troop, target) {
+        if (!troop?.weapon || !target?.active) return false;
+        const inRange = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y) <= troop.weapon.range;
+        if (!inRange) return false;
+        if (troop.weapon.projectile && !Projectile.hasLineOfSight(troop, target)) return false;
+        return true;
+    }
+
+    static _syncTrackToTarget(troop, target) {
+        let movedTile = true;
+        if (!troop.track || troop.track[0] !== target.body) {
+            troop.track = [target.body, { x: target.x, y: target.y }];
+            movedTile = true;
+        } else {
+            const lastTileX = Math.floor(troop.track[1].x / SQUARESIZE);
+            const lastTileY = Math.floor(troop.track[1].y / SQUARESIZE);
+            const curTileX = Math.floor(target.x / SQUARESIZE);
+            const curTileY = Math.floor(target.y / SQUARESIZE);
+            movedTile = lastTileX !== curTileX || lastTileY !== curTileY;
+            troop.track[1].x = target.x;
+            troop.track[1].y = target.y;
+        }
+        return movedTile;
+    }
+
+    static _computeTargetFootprint(target) {
+        const b = target?.buildingRef;
+        if (b && Number.isFinite(b.x) && Number.isFinite(b.y)) {
+            const lenX = Number(b.tileType?.lenX ?? b.lenX ?? 1);
+            const lenY = Number(b.tileType?.lenY ?? b.lenY ?? 1);
+            return { x: b.x, y: b.y, w: lenX, h: lenY };
+        }
+
+        // Scheduler can pass the building object directly (not the sprite).
+        // Those x/y values are tile coordinates, not world pixels.
+        if (
+            Number.isFinite(target?.x) &&
+            Number.isFinite(target?.y) &&
+            !target?.body &&
+            (
+                Number.isFinite(target?.tileType?.lenX) ||
+                Number.isFinite(target?.lenX) ||
+                typeof target?.onDamaged === "function"
+            )
+        ) {
+            const lenX = Number(target.tileType?.lenX ?? target.lenX ?? 1);
+            const lenY = Number(target.tileType?.lenY ?? target.lenY ?? 1);
+            return { x: target.x, y: target.y, w: lenX, h: lenY };
+        }
+
+        if (target?.tilePos && Number.isFinite(target.tilePos.tileX) && Number.isFinite(target.tilePos.tileY)) {
+            return { x: target.tilePos.tileX, y: target.tilePos.tileY, w: 1, h: 1 };
+        }
+
+        if (Number.isFinite(target?.sx) && Number.isFinite(target?.sy)) {
+            return { x: target.sx, y: target.sy, w: Number(target.lenX ?? 1), h: Number(target.lenY ?? 1) };
+        }
+
+        const tx = Math.floor((target?.x ?? 0) / SQUARESIZE);
+        const ty = Math.floor((target?.y ?? 0) / SQUARESIZE);
+        return { x: tx, y: ty, w: 1, h: 1 };
+    }
+
+    static _ensureFriendlySiegePlanner() {
+        if (!Map.playerSiegePlanner) {
+            Map.playerSiegePlanner = new SiegePlanner({
+                squareSize: SQUARESIZE,
+                enemyNavGrid: Map.navGrid,
+                isBreachableTile: (tx, ty) => {
+                    const cell = Map.grid?.[ty]?.[tx];
+                    if (!cell) return false;
+                    const top = Array.isArray(cell) ? cell[1] : cell;
+                    const name = TILE_MAP(top);
+                    return name === "woodWall" || name === "woodWall_door" || name === "wall" || name === "wall_door";
+                },
+                isHardBlockedTile: () => false,
+                regionSystem: Map.regionSystem
+            });
+        }
+        return Map.playerSiegePlanner;
+    }
+
+    static _planBreachTicketsForTarget(troop, target) {
+        if (!troop?.active || troop.body?.team !== 1 || !this._isFighterUnit(troop)) return false;
+        const now = troop.scene?.time?.now ?? 0;
+        if (troop._nextBreachPlanAt && now < troop._nextBreachPlanAt) return false;
+        troop._nextBreachPlanAt = now + 500;
+
+        const fp = this._computeTargetFootprint(target);
+        const gridH = Map.navGrid?.length ?? 0;
+        const gridW = gridH ? (Map.navGrid[0]?.length ?? 0) : 0;
+        if (!gridW || !gridH) return false;
+
+        const perimeter = SiegePlanner.buildPerimeterTargets(fp.x, fp.y, fp.w, fp.h, gridW, gridH);
+        const planner = this._ensureFriendlySiegePlanner();
+        const breachTiles = planner?.planBreach?.(troop.x, troop.y, perimeter);
+        if (!breachTiles?.length) return false;
+
+        const team = Teams.teamLists["1"];
+        if (!team?.enemyDestroyTileStates) return false;
+        if (!team._breachSeen) team._breachSeen = new Set();
+
+        let added = 0;
+        for (const t of breachTiles) {
+            const cell = Map.grid?.[t.y]?.[t.x];
+            if (cell == null) continue;
+            const top = Array.isArray(cell) ? cell[1] : cell;
+            const typeName = TILE_MAP(top);
+            if (typeName !== "wall" && typeName !== "woodWall" && typeName !== "wall_door" && typeName !== "woodWall_door") continue;
+
+            const key = `${t.x},${t.y}`;
+            if (team._breachSeen.has(key)) continue;
+            team._breachSeen.add(key);
+
+            team.enemyDestroyTileStates.push({
+                x: t.x,
+                y: t.y,
+                duration: 400,
+                assigned: 0,
+                forced: !!troop.forcedTarget,
+                type: TILE_TYPES[typeName],
+            });
+            added++;
+        }
+
+        if (!added) return false;
+        if (!troop.task) {
+            Manager.assignOneTroopToAction(troop, team.enemyDestroyTileStates, CONTROL_STATES.DESTROY_MODE_T);
+        }
+        return true;
+    }
+
+    static _chaseOrBreachTarget(troop, target, shouldRepath = true) {
+        if (!target?.active || !target?.body) return false;
+        if (!shouldRepath && troop.currentPath?.length) return false;
+
+        const path = Player.pathTo(troop, target.x, target.y, false);
+        if (path?.length) {
+            Player.moveTo(troop, path);
+            return true;
+        }
+
+        troop.currentPath = [];
+        troop.body?.setVelocity?.(0, 0);
+        this._planBreachTicketsForTarget(troop, target);
+        return false;
+    }
+
     static updateTracking(troop){
         const fallbackDist = troop.body.team ? 100 : 20;
         const awareness = troop?.awareness ?? troop?.type?.awareness;
         const overlapDist = Number.isFinite(awareness) ? awareness : fallbackDist;
         const neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, overlapDist);
         const hasWeapon = !!troop.weapon;
+
+        const isObjectiveTaskState =
+            troop.state === CONTROL_STATES.DESTROY_MODE ||
+            troop.state === CONTROL_STATES.DESTROY_MODE_T ||
+            troop.state === CONTROL_STATES.SIEGE_MODE ||
+            troop.state === CONTROL_STATES.FIX_BUILDING;
+
+        if (troop.task && isObjectiveTaskState) {
+            const isPlayerFighter = troop.body?.team === 1 && this._isFighterUnit(troop) && hasWeapon;
+            if (!isPlayerFighter) return;
+
+            // Player fighters should defend themselves first, then resume objective work via scheduler.
+            const immediateThreat = this.findClosestEnemyBody(troop, neighbours);
+            if (!immediateThreat) return;
+
+            Player.handleStateIntteruptStart(troop, CONTROL_STATES.TRACK_TARGET);
+            troop.track = [
+                immediateThreat,
+                { x: immediateThreat.x, y: immediateThreat.y }
+            ];
+            troop.roam = false;
+        }
 
         // 🟡 NON-COMBATANTS (no weapon) → FLEE
         if (!hasWeapon) {
@@ -1125,182 +1335,231 @@ export class Player {
             return;
         }
 
-        // 🔵 COMBATANTS (have a real weapon) → chase targets as before
-        // If we were explicitly tracking a target but now *nothing* is in range,
-        // drop the target and go back to generic TRACK_MODE.
-        if (troop.state === CONTROL_STATES.TRACK_TARGET && neighbours.length === 1 && !troop.forcedTarget) {
+        if (this._clearInvalidForcedTarget(troop)) return;
+
+        if (troop.forcedTarget) {
+            const target = troop.forcedTarget;
+            const movedTile = this._syncTrackToTarget(troop, target);
+            troop.roam = false;
+            if (troop.state !== CONTROL_STATES.ATTACK_MODE) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+            }
+
+            if (this._isAttackReady(troop, target)) {
+                troop.currentPath?.splice?.(0);
+                troop.body?.setVelocity?.(0, 0);
+                return;
+            }
+
+            if (troop.isGunslinger) {
+                const kiteDest = this.computeKiteDestination(troop, target, troop.weapon);
+                if (kiteDest) {
+                    const path = Player.pathTo(troop, kiteDest.x, kiteDest.y, false);
+                    if (path?.length) {
+                        Player.moveTo(troop, path);
+                        return;
+                    }
+                }
+            }
+
+            this._chaseOrBreachTarget(troop, target, movedTile || !troop.currentPath?.length);
+            return;
+        }
+
+        const hasTrackedEnemy = this.mostClosestEnemy(troop, neighbours);
+        const trackedGO = troop.track?.[0]?.gameObject;
+        if (!trackedGO?.active) {
             troop.track = null;
-            troop.currentPath.length = 0;
-            troop.body.setVelocity(0, 0);
+            if (troop.state === CONTROL_STATES.TRACK_TARGET) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
+            return;
+        }
+        if (!hasTrackedEnemy && troop.state === CONTROL_STATES.TRACK_TARGET && !troop.track) {
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             return;
         }
 
-        // 🔵 COMBATANTS (have a real weapon)
-        if (hasWeapon) {
-
-            // 1) If we have a forced target and it’s still alive, always chase it
-            if (troop.forcedTarget && troop.forcedTarget.active && troop.forcedTarget.body) {
-                const target = troop.forcedTarget;
-
-                let targetMovedTile = true;
-
-                if (!troop.track || troop.track[0] !== target.body) {
-                    // First time forcing this target
-                    troop.track = [
-                        target.body,
-                        { x: target.x, y: target.y }
-                    ];
-                    Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
-                    targetMovedTile = true;
-                } else {
-                    // Same forced target → only update when it changes grid tile
-                    const lastTileX = Math.floor(troop.track[1].x / SQUARESIZE);
-                    const lastTileY = Math.floor(troop.track[1].y / SQUARESIZE);
-                    const curTileX  = Math.floor(target.x / SQUARESIZE);
-                    const curTileY  = Math.floor(target.y / SQUARESIZE);
-
-                    if (lastTileX === curTileX && lastTileY === curTileY) {
-                        targetMovedTile = false;
-                    } else {
-                        troop.track[1].x = target.x;
-                        troop.track[1].y = target.y;
-                        targetMovedTile = true;
-                    }
-                }
-
-                troop.roam = false;
-
-                // 🔫 gunslinger in-range / LoS check is still fine here…
-
-                // 🔥 Gunslinger: kite instead of closing straight in
-                if (troop.isGunslinger) {
-                    const kiteDest = this.computeKiteDestination(troop, target, troop.weapon);
-                    if (!kiteDest) {
-                        // already at good distance; don't path
-                        return;
-                    }
-
-                    // ✅ Only build a new kite path when target moved tile OR we have no path
-                    if (!targetMovedTile && troop.currentPath && troop.currentPath.length > 0) {
-                        return;
-                    }
-
-                    const path = Player.pathTo(troop, kiteDest.x, kiteDest.y, false);
-                    if (path && path.length) {
-                        Player.moveTo(troop, path);
-                    }
-                    return;
-                }
-
-                // 🔥 Non-gunslingers: only repath when targetMovedTile OR no existing path.
-                if (targetMovedTile || !troop.currentPath || troop.currentPath.length <= 0) {
-                    // (Re)compute a path toward the latest forced-target position
-                    let troopX = Math.floor(troop.x / SQUARESIZE);
-                    let troopY = Math.floor(troop.y / SQUARESIZE);
-
-                    // If we’re standing on a non-walkable tile, try to nudge start to a valid neighbour
-                    if (Map.navGrid[troopY]?.[troopX] === 0) {
-                        const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                        if (newX === -1) {
-                            console.log("No valid start tile nearby for forced target");
-                            troop.currentPath.length = 0;
-                            troop.body.setVelocity(0, 0);
-                            return;
-                        } else {
-                            troopX = newX;
-                            troopY = newY;
-                        }
-                    }
-
-                    const path = Map.navMesh.findPath(
-                        { x: troopX * SQUARESIZE, y: troopY * SQUARESIZE },
-                        { x: troop.track[1].x,   y: troop.track[1].y   }
-                    );
-
-                    if (path && path.length) {
-                        Player.moveTo(troop, path);
-                    } else {
-                        // No path found → stop any existing movement
-                        troop.currentPath.length = 0;
-                        troop.body.setVelocity(0, 0);
-                    }
-                }
-
-                return;
-
-                // ... existing navGrid check + Map.navMesh.findPath to troop.track[1] ...
-            }
-
-            // Target died / disappeared → clear forced flag and fall back to normal auto-combat
-            if (troop.forcedTarget && (!troop.forcedTarget.active || !troop.forcedTarget.body)) {
-                troop.forcedTarget = null;
-            }
-
-            // 2) Normal autonomous targeting (closest enemy)
-            const reTrack = this.mostClosestEnemy(troop, neighbours);
-            if (reTrack && troop.track && troop.track[1]) {
-                troop.roam = false;
-
-                const body = troop.track[0];
-                const go = body?.gameObject;
-                if (go) {
-                    const distToTracked = Phaser.Math.Distance.Between(troop.x, troop.y, go.x, go.y);
-                    const inRangeTracked = distToTracked <= troop.weapon.range;
-                    const hasLoSTracked =
-                        !troop.weapon.projectile ||
-                        Projectile.hasLineOfSight(troop, go);
-
-                    // 🔥 Already in range of the auto-selected target – don't path.
-                    if (inRangeTracked && hasLoSTracked) {
-                        if (troop.currentPath && troop.currentPath.length) {
-                            troop.currentPath.length = 0;
-                        }
-                        troop.body.setVelocity(0, 0);
-                        // followPath will handle ATTACK_MODE
-                        return;
-                    }
-
-                    // 🔫 2) Gunslinger: compute kite destination instead of walking straight in
-                    if (troop.isGunslinger) {
-                        const kiteDest = this.computeKiteDestination(troop, go, troop.weapon);
-                        if (!kiteDest) {
-                            // Either already good distance or can't improve; don't path further.
-                            return;
-                        }
-
-                        const path = Player.pathTo(troop, kiteDest.x, kiteDest.y, false);
-                        if (path && path.length) {
-                            Player.moveTo(troop, path);
-                        }
-                        return;
-                    }
-                }
-
-                // ⬇ only path if not in range
-                let troopX = Math.floor(troop.x / SQUARESIZE);
-                let troopY = Math.floor(troop.y / SQUARESIZE);
-                if (Map.navGrid[troopY]?.[troopX] === 0) {
-                    const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                    if (newX === -1) {
-                        console.log("No valid start tile nearby");
-                        return;
-                    } else {
-                        troopX = newX;
-                        troopY = newY;
-                    }
-                }
-
-                const path = Map.navMesh.findPath(
-                    { x: troopX * SQUARESIZE, y: troopY * SQUARESIZE },
-                    { x: troop.track[1].x,   y: troop.track[1].y   }
-                );
-                if (path && path.length) {
-                    Player.moveTo(troop, path);
-                }
-            }
+        troop.roam = false;
+        if (this._isAttackReady(troop, trackedGO)) {
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
             return;
         }
+
+        if (troop.isGunslinger) {
+            const kiteDest = this.computeKiteDestination(troop, trackedGO, troop.weapon);
+            if (kiteDest) {
+                const path = Player.pathTo(troop, kiteDest.x, kiteDest.y, false);
+                if (path?.length) {
+                    Player.moveTo(troop, path);
+                    return;
+                }
+            }
+        }
+
+        this._chaseOrBreachTarget(troop, trackedGO, hasTrackedEnemy || !troop.currentPath?.length);
+    }
+
+    static _tileTypeAtWorld(x, y) {
+        const gx = Math.floor(x / SQUARESIZE);
+        const gy = Math.floor(y / SQUARESIZE);
+        const row = Map.grid?.[gy];
+        if (!row) return null;
+        const cell = row[gx];
+        if (cell == null) return null;
+        if (Array.isArray(cell)) {
+            const top = cell[1];
+            if (top != null) return TILE_MAP(top);
+            return TILE_MAP(cell[0]);
+        }
+        return TILE_MAP(cell);
+    }
+
+    static _isOnWater(troop) {
+        return this._tileTypeAtWorld(troop.x, troop.y) === "water";
+    }
+
+    static _nearestWalkableWorld(troop, maxRadius = 80) {
+        const gx0 = Math.floor(troop.x / SQUARESIZE);
+        const gy0 = Math.floor(troop.y / SQUARESIZE);
+        const { navGrid } = this._getNavForTroop(troop);
+        if (!navGrid?.length) return null;
+
+        const h = navGrid.length;
+        const w = navGrid[0]?.length || 0;
+        let best = null;
+        let bestD2 = Infinity;
+        const pushIfWalkable = (gx, gy) => {
+            if (gx < 0 || gy < 0 || gx >= w || gy >= h) return;
+            if (navGrid[gy][gx] !== 1) return;
+            const wx = gx * SQUARESIZE + SQUARESIZE / 2;
+            const wy = gy * SQUARESIZE + SQUARESIZE / 2;
+            const dx = wx - troop.x;
+            const dy = wy - troop.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) {
+                bestD2 = d2;
+                best = { x: wx, y: wy };
+            }
+        };
+
+        for (let r = 1; r <= maxRadius; r++) {
+            const minx = gx0 - r;
+            const maxx = gx0 + r;
+            const miny = gy0 - r;
+            const maxy = gy0 + r;
+            for (let gx = minx; gx <= maxx; gx++) {
+                pushIfWalkable(gx, miny);
+                pushIfWalkable(gx, maxy);
+            }
+            for (let gy = miny + 1; gy <= maxy - 1; gy++) {
+                pushIfWalkable(minx, gy);
+                pushIfWalkable(maxx, gy);
+            }
+            if (best) return best;
+        }
+        return null;
+    }
+
+    static _resumeAfterWaterInterrupt(troop, resume) {
+        if (!troop?.active || !troop?.body) return;
+
+        if (resume?.state != null) {
+            Teams.movePlayerState(troop, resume.state);
+        }
+
+        // Prefer original final world goal.
+        if (resume?.finalPos?.x != null && resume?.finalPos?.y != null) {
+            const path = this.pathTo(troop, resume.finalPos.x, resume.finalPos.y, false);
+            if (path?.length) {
+                this.moveTo(troop, path);
+                return;
+            }
+        }
+
+        // Fallbacks by intent.
+        if (troop.state === CONTROL_STATES.BACK_TO_TOWN) {
+            Teams.sendTroopToTown(troop);
+            return;
+        }
+
+        if (troop.forcedTarget?.active) {
+            const path = this.pathTo(troop, troop.forcedTarget.x, troop.forcedTarget.y, false);
+            if (path?.length) this.moveTo(troop, path);
+            return;
+        }
+
+        const tracked = troop.track?.[0]?.gameObject;
+        if (tracked?.active) {
+            const path = this.pathTo(troop, tracked.x, tracked.y, false);
+            if (path?.length) this.moveTo(troop, path);
+            return;
+        }
+
+        if (troop.task && Number.isFinite(troop.task.x) && Number.isFinite(troop.task.y)) {
+            const path = this.pathTo(troop, troop.task.x, troop.task.y, true);
+            if (path?.length) this.moveTo(troop, path);
+        }
+    }
+
+    static _handleWaterReturnSwim(troop) {
+        if (!troop?.active || !troop?.body) return false;
+        if (troop.body.team !== 1) return false;
+
+        const onWater = this._isOnWater(troop);
+        const swimming = troop._returnSwimActive === true;
+        if (!onWater && !swimming) return false;
+
+        if (onWater && !swimming) {
+            troop._returnSwimResume = {
+                state: troop.state,
+                finalPos: troop.finalPos ? { x: troop.finalPos.x, y: troop.finalPos.y } : null,
+            };
+            troop._returnSwimActive = true;
+            troop._returnSwimTarget = this._nearestWalkableWorld(troop);
+            troop.currentPath?.splice?.(0);
+            troop.body.setVelocity(0, 0);
+        }
+
+        if (!troop._returnSwimTarget) {
+            troop._returnSwimTarget = this._nearestWalkableWorld(troop);
+        }
+        const target = troop._returnSwimTarget;
+        if (!target) {
+            this.setAnimState(troop, troop.idle);
+            troop.body.setVelocity(0, 0);
+            return true;
+        }
+
+        const dx = target.x - troop.x;
+        const dy = target.y - troop.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (!onWater) {
+            const resume = troop._returnSwimResume || null;
+            troop._returnSwimActive = false;
+            troop._returnSwimTarget = null;
+            troop._returnSwimResume = null;
+            troop.body.setVelocity(0, 0);
+            this._resumeAfterWaterInterrupt(troop, resume);
+            return true;
+        }
+
+        const speedBase = troop?.type?.speed ?? troop.speed ?? 90;
+        const swimSpeed = Math.max(60, speedBase * 0.85);
+        const inv = dist > 0.001 ? 1 / dist : 0;
+        const vx = dx * inv * swimSpeed;
+        const vy = dy * inv * swimSpeed;
+
+        this.setAnimState(troop, troop.swim || troop.idle);
+        troop.body.setVelocity(vx, vy);
+        if (Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01) {
+            troop.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
+        }
+        return true;
     }
 
     static update(){
@@ -1347,6 +1606,11 @@ export class Player {
 
             // Swimming raiders drive their own velocity, so skip stamina+path
             if (skipTail) return;
+
+            if (this._handleWaterReturnSwim(troop)) {
+                this._updateMiniBars(troop);
+                return;
+            }
 
             StaminaManager.updateTroop(troop);
             if (troop.state != CONTROL_STATES.SLEEP_MODE) {
@@ -1510,8 +1774,6 @@ export class Player {
     while ((troop._miniBarsSegCap || 0) < segCap) {
         const hpBg = mkBg();
         const hpFill = mkFill(hpFillColor);
-        scene.uiCamera.ignore(hpBg);
-        scene.uiCamera.ignore(hpFill);
         troop._hpSegBg.push(hpBg);
         troop._hpSegFill.push(hpFill);
 
@@ -1519,8 +1781,6 @@ export class Player {
         if (!isEnemy) {
         const stBg = mkBg();
         const stFill = mkFill(stFillColor);
-        scene.uiCamera.ignore(stBg);
-        scene.uiCamera.ignore(stFill);
         troop._stSegBg.push(stBg);
         troop._stSegFill.push(stFill);
         }

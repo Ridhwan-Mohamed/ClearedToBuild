@@ -68,7 +68,6 @@ const CHEST_REWARDS = [
 
 function worldify(scene, go) {
   if (!go) return go;
-  scene.uiCamera?.ignore(go);
   return go;
 }
 

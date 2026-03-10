@@ -28,17 +28,9 @@ export class SlotPanel {
 
   _buildFrame() {
     this.frameG = this.scene.add.graphics();
-    const g = this.frameG;
-    g.setScrollFactor(1);
-
-    // Hollow outline (no fill) + subtle inner glass
-    g.lineStyle(3, 0xffffff, 0.35);
-    g.strokeRoundedRect(-this.W/2, -this.H/2, this.W, this.H, 16);
-
-    g.fillStyle(0x0b1020, 0.10);
-    g.fillRoundedRect(-this.W/2 + 4, -this.H/2 + 4, this.W - 8, this.H - 8, 14);
-
-    this.container.add(g);
+    this.frameG.setScrollFactor(1);
+    this.container.add(this.frameG);
+    this._drawFrameTheme(false);
 
     this.header = this.scene.add.text(0, -this.H/2, this._titleForSlot(), {
       fontFamily: "monospace",
@@ -49,23 +41,23 @@ export class SlotPanel {
     this.container.add(this.header);
   }
 
-  _ensurePressureText() {
-    if (this._pressureText) return;
+  _drawFrameTheme(pressureMode) {
+    if (!this.frameG) return;
+    const g = this.frameG;
+    g.clear();
 
-    // Under the header, centered
-    this._pressureText = this.scene.add.text(0, -this.H/2 + 24, "", {
-      fontFamily: "monospace",
-      fontSize: "13px",
-      color: "#ffffff",
-      stroke: "#000000",
-      strokeThickness: 3,
-      align: "center",
-      wordWrap: { width: this.W - 24 }
-    }).setOrigin(0.5, 0);
+    if (pressureMode) {
+      g.lineStyle(3, 0xff4d4d, 0.9);
+      g.strokeRoundedRect(-this.W / 2, -this.H / 2, this.W, this.H, 16);
+      g.fillStyle(0x3a0000, 0.38);
+      g.fillRoundedRect(-this.W / 2 + 4, -this.H / 2 + 4, this.W - 8, this.H - 8, 14);
+      return;
+    }
 
-    this._pressureText.setScrollFactor(1);
-    this._pressureText.setVisible(false);
-    this.container.add(this._pressureText);
+    g.lineStyle(3, 0xffffff, 0.35);
+    g.strokeRoundedRect(-this.W / 2, -this.H / 2, this.W, this.H, 16);
+    g.fillStyle(0x0b1020, 0.10);
+    g.fillRoundedRect(-this.W / 2 + 4, -this.H / 2 + 4, this.W - 8, this.H - 8, 14);
   }
 
   _titleForSlot() {
@@ -193,7 +185,7 @@ export class SlotPanel {
       else if (type === "ROCK") pm.startRock(this.id);
       else if (type === "FARM") pm.startFarm?.(this.id);          // add startFarm below
       else if (type === "MILITIA") pm.startMilitia?.(this.id);    // stub below
-      else if (type === "PRESSURE") pm.startPressure(this.id, difficulty);
+      else if (type === "PRESSURE") pm.startPressure(this.id, difficulty, { source: "manual" });
       else if (type === "MARKET") pm.startMarket(this.id);
       else console.warn("Unknown contract type:", type);
     } catch (e) {
@@ -209,12 +201,20 @@ export class SlotPanel {
   _ensurePressureText() {
     if (this._pressureText) return;
 
-    // Put it near the top of the panel
     this._pressureText = this.scene.add.text(
-      0, -this.H/2 + 18,
+      0, 2,
       "",
-      { fontFamily: "Arial", fontSize: "16px", color: "#ffffff", align: "center" }
-    ).setOrigin(0.5, 0).setScrollFactor(1).setDepth(9999);
+      {
+        fontFamily: "monospace",
+        fontSize: "30px",
+        color: "#ffe9e9",
+        stroke: "#2b0000",
+        strokeThickness: 5,
+        align: "center",
+        wordWrap: { width: this.W - 28 },
+        lineSpacing: 6,
+      }
+    ).setOrigin(0.5, 0.5).setScrollFactor(1).setDepth(9999);
 
     this.container.add(this._pressureText);
     this._pressureText.setVisible(false);
@@ -223,6 +223,20 @@ export class SlotPanel {
   setPressureCountdown({ remainingText, spawners, enemies, enemyType }) {
     this._ensurePressureText();
     this._pressureMode = true;
+    this._drawFrameTheme(true);
+    this.header?.setColor?.("#ffd6d6");
+
+    this.gridObjects?.forEach(o => o.setVisible(false));
+    if (this._page?.container) this._page.container.setVisible(false);
+
+    this._pressureText.setVisible(true);
+    this._pressureText.setText([
+      "🚨 INCOMING RAID 🚨",
+      `${remainingText}`,
+      `🧨 Spawners ${spawners}  👹 Enemies ${enemies}`,
+      `⚔️ ${enemyType} squad in ${this._titleForSlot()}`,
+    ].join("\n"));
+    return;
 
     // Hide normal UI while pressure is active
     this.gridObjects?.forEach(o => o.setVisible(false));
@@ -238,6 +252,19 @@ export class SlotPanel {
   setPressureLive({ spawners, enemies, enemyType }) {
     this._ensurePressureText();
     this._pressureMode = true;
+    this._drawFrameTheme(true);
+    this.header?.setColor?.("#ffd6d6");
+
+    this.gridObjects?.forEach(o => o.setVisible(false));
+    if (this._page?.container) this._page.container.setVisible(false);
+
+    this._pressureText.setVisible(true);
+    this._pressureText.setText([
+      "⚠️ RAID ACTIVE ⚠️",
+      `🧨 Spawners ${spawners}  👹 Enemies ${enemies}`,
+      `⚔️ ${enemyType} assault in ${this._titleForSlot()}`,
+    ].join("\n"));
+    return;
 
     this.gridObjects?.forEach(o => o.setVisible(false));
     if (this._page?.container) this._page.container.setVisible(false);
@@ -251,6 +278,8 @@ export class SlotPanel {
 
   clearPressureState() {
     this._pressureMode = false;
+    this._drawFrameTheme(false);
+    this.header?.setColor?.("#ffffff");
     if (this._pressureText) this._pressureText.setVisible(false);
 
     // Restore normal UI (only if panel is visible)

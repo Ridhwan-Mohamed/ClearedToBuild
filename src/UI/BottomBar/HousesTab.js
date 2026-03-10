@@ -13,20 +13,11 @@ export default class HousesTab {
 
     this.root = this.build();
 
-    scene.cameras.main.ignore(this.root);
-
-    // ALSO ignore all children, so sprites like portraits never render in world cam
-    const kids = this.root.getAllChildren?.() || this.root.list || [];
-    scene.cameras.main.ignore(kids);
-
-
     this._tickEvt = scene.time.addEvent({
       delay: 250,
       loop: true,
       callback: () => this.tick(),
     });
-
-    scene.cameras.main.ignore(this.root);
   }
 
   destroy() {

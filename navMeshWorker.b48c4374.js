@@ -2218,7 +2218,6 @@ function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isMiss = f
         duration: 600,
         onComplete: ()=>ghost.destroy()
     });
-    scene.uiCamera.ignore(ghost);
 }
 const ENEMY_BUILDING_HOVER_UI = {
     // how far above the sprite's TOP the panel sits (bigger = higher)
@@ -2240,11 +2239,6 @@ function createBubbleText({ scene, target, text, textColor = '#ffffff', bgColor 
     // Background auto-sized to text
     const padding = 4;
     const bg = scene.add.rectangle(label.x, label.y, label.width + padding * 2, label.height + padding * 2, Phaser.Display.Color.HexStringToColor(bgColor).color, 1).setOrigin(0.5).setDepth(9999).setScrollFactor(1, 1); // 🔹 world, not UI
-    // Make sure uiCamera does NOT render these
-    if (scene.uiCamera) scene.uiCamera.ignore([
-        label,
-        bg
-    ]);
     const container = {
         label,
         bg,
@@ -2489,6 +2483,10 @@ const StageState = {
     stageIndex: 1,
     seasonIndex: 1,
     STAGES_PER_SEASON: 5,
+    START_OVERRIDE: {
+        seasonIndex: 1,
+        stageIndex: 5
+    },
     // Fort towers that exist in the world (registered by TowerBuilding)
     _fortTowers: new Set(),
     // Fort objective state (per season)
@@ -2522,6 +2520,23 @@ const StageState = {
     },
     advanceStage () {
         this.stageIndex += 1;
+    },
+    applyStartOverride (override = null) {
+        const src = override ?? this.START_OVERRIDE ?? {};
+        const season = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
+        const stage = Math.max(1, Math.min(this.STAGES_PER_SEASON, Math.floor(Number(src.stageIndex ?? 1) || 1)));
+        this.seasonIndex = season;
+        this.stageIndex = stage;
+        // Fresh objective state for forced start points.
+        this._fortTowers.clear();
+        this._fortObjective = {
+            active: false,
+            seasonIndex: this.seasonIndex,
+            requiredCount: 0,
+            destroyedSet: new Set(),
+            completed: false,
+            meta: null
+        };
     },
     advanceSeason (meta = {}) {
         this.seasonIndex += 1;

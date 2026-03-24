@@ -203,7 +203,7 @@ export class Prison {
   // Tint 
   _applyRoleFlagsForTint(icon, typeKey) {
     // ✅ Do NOT touch icon.body (UI Images have no physics body)
-    // Player.applyDefaultTint will tint using role flags first. :contentReference[oaicite:0]{index=0}
+    // Player.applyRoleTint will tint using role flags first.
 
     // wipe flags
     icon.isFarmer = false;
@@ -227,7 +227,7 @@ export class Prison {
 
   _tintPrisonerIcon(icon) {
     this._applyRoleFlagsForTint(icon, this.lockedType);
-    Player.applyDefaultTint(icon); // uses the exact mapping in Player.js :contentReference[oaicite:0]{index=0}
+    Player.applyRoleTint(icon); // uses the exact mapping in Player.js
   }
 
   // ──────────────────────────

@@ -4,6 +4,7 @@ import { Player } from "./Player";
 import { Teams } from "../Teams";
 import { weapons } from "../weapons";
 import { ZoomMixer } from "../UI/ZoomMixer";
+import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
 
 export class FortGrunt {
     static speed = 130;      // near brawler speed
@@ -17,7 +18,7 @@ export class FortGrunt {
             x,
             y,
             teamNumber,
-            "player",
+            "raider_walk_down",
             "walk",
             "idle",
             "action",
@@ -32,10 +33,25 @@ export class FortGrunt {
         grunt.health = FortGrunt.maxHealth;
         grunt.killReward = 50;
         grunt.weapon = weapons.boxingGloves;
-        grunt.setTint(FortGrunt.tint);
         grunt.unitTint = FortGrunt.tint;
         grunt.awareness = FortGrunt.awareness;
         grunt.destroySelf = () => FortGrunt.destroy(grunt);
+        attachDirectionalSix(grunt, {
+            animPrefix: 'fortgrunt',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'raider_walk_down',
+                down_left: 'raider_walk_down_left',
+                down_right: 'raider_walk_down_right',
+                up: 'raider_walk_up',
+                up_left: 'raider_walk_up_left',
+                up_right: 'raider_walk_up_right',
+            }
+        });
         ZoomMixer.createPlayerMoniker(grunt);
 
         return grunt;

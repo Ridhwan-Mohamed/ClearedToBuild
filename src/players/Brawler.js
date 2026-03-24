@@ -8,17 +8,34 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import brawlerWalkDown from 'url:../assets/players/brawler/brawler_walk_down.png';
+import brawlerWalkDownLeft from 'url:../assets/players/brawler/brawler_walk_down_left.png';
+import brawlerWalkDownRight from 'url:../assets/players/brawler/brawler_walk_down_right.png';
+import brawlerWalkUp from 'url:../assets/players/brawler/brawler_walk_up.png';
+import brawlerWalkUpLeft from 'url:../assets/players/brawler/brawler_walk_up_left.png';
+import brawlerWalkUpRight from 'url:../assets/players/brawler/brawler_walk_up_right.png';
 
 export class Brawler {
 
     static speed = 130; // fastest melee unit
     static stamina = 0.025;
 
+    static preload(scene) {
+        scene.load.spritesheet('brawler_walk_down', brawlerWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_walk_down_left', brawlerWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_walk_down_right', brawlerWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_walk_up', brawlerWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_walk_up_left', brawlerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_walk_up_right', brawlerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
             SQUARESIZE * y + SQUARESIZE / 2,
-            'player'
+            'brawler_walk_down',
+            1
         );
 
 
@@ -26,7 +43,6 @@ export class Brawler {
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);
         sprite.setCollideWorldBounds(true);
-        sprite.setTint(0xFFD712); // unique golden tint
         sprite.unitTint = 0xFFD712;
 
         sprite.id = Player.count++;
@@ -44,6 +60,22 @@ export class Brawler {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'brawler',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'brawler_walk_down',
+                down_left: 'brawler_walk_down_left',
+                down_right: 'brawler_walk_down_right',
+                up: 'brawler_walk_up',
+                up_left: 'brawler_walk_up_left',
+                up_right: 'brawler_walk_up_right',
+            }
+        });
 
         sprite.isBrawler = true;
 

@@ -70,7 +70,7 @@ export class ParcelContractInstance {
     const topY = (this.origin.y - 1) * SQUARESIZE;
 
     this.timerText = this.scene.add.text(cx, topY, "", {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "14px",
       color: "#ffffff",
       stroke: "#000000",
@@ -118,6 +118,29 @@ export class ParcelContractInstance {
     }
   }
 
+  _footprintTouchesWater(gx, gy, lenX, lenY, pad = 1) {
+    const minY = gy - pad;
+    const maxY = gy + lenY - 1 + pad;
+    const minX = gx - pad;
+    const maxX = gx + lenX - 1 + pad;
+
+    for (let yy = minY; yy <= maxY; yy++) {
+      for (let xx = minX; xx <= maxX; xx++) {
+        const cell = GameMap.grid?.[yy]?.[xx];
+        if (cell == null) continue;
+
+        if (Array.isArray(cell)) {
+          if (cell.some((val) => TILE_MAP(val) === "water")) return true;
+          continue;
+        }
+
+        if (TILE_MAP(cell) === "water") return true;
+      }
+    }
+
+    return false;
+  }
+
   /** Place trees or rocks after terrain is painted. */
   _spawnResourceNodes(nodeType /* "pine" | "rock" */, count) {
     const triesMax = Math.max(200, count * 30);
@@ -145,6 +168,10 @@ export class ParcelContractInstance {
       const top = Array.isArray(cell) ? cell[cell.length - 1] : cell;
       const topName = TILE_MAP(top);
       if (topName === "water") continue;
+
+      // Keep a one-tile shoreline buffer so 2x2 resource footprints don't
+      // sit directly against pond edges and create awkward shoreline reads.
+      if (this._footprintTouchesWater(gx, gy, tileType.lenX, tileType.lenY, 1)) continue;
 
       // IMPORTANT: reject if ANY tile in the footprint is blocked
       if (GameMap.checkBlockPositionGen(gx, gy, tileType.lenX, tileType.lenY)) continue;
@@ -341,6 +368,9 @@ export class ParcelContractInstance {
     }
 
     this.spawners = [];
+    if (this.scene?.zoomMixer?.mode !== "overview") {
+      this.map.reDraw?.();
+    }
     this.scene.rebuildBothNavMeshes();
     this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
     GameMap._uiIgnoreWorldLayer();

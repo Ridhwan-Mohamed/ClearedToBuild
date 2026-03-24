@@ -168,7 +168,7 @@ function chestTooltip(scene, x, y, chestDef) {
   const title = worldify(scene, scene.add.text(x, y - 30, chestDef.name, {
     fontSize: "12px",
     color: "#ffffff",
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontStyle: "bold",
   }).setOrigin(0.5).setDepth(10021).setVisible(false));
 
@@ -179,7 +179,7 @@ function chestTooltip(scene, x, y, chestDef) {
     const text = worldify(scene, scene.add.text(x - 40, ey, `+${entry.amount} ${entry.label}`, {
       fontSize: "12px",
       color: "#d8d8d8",
-      fontFamily: "monospace"
+      fontFamily: "Bungee"
     }).setOrigin(0, 0.5).setDepth(10021).setVisible(false));
     lines.push(icon, text);
   });
@@ -236,14 +236,14 @@ function createCardPreview(scene, card, x, y) {
   const name = worldify(scene, scene.add.text(x, y, card.name, {
     fontSize: "12px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10021).setVisible(false));
 
   const desc = worldify(scene, scene.add.text(x, y + 45, card.text, {
     fontSize: "12px",
     color: "#cccccc",
     wordWrap: { width: 120 },
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10021).setVisible(false));
 
   const list = [bg, icon, name, desc];
@@ -270,13 +270,13 @@ function openSwapOverlay(scene, incomingCard, onDone) {
   const title = scene.add.text(cam.centerX, 70, "Hand Full - Choose a Card to Replace", {
     fontSize: "18px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setScrollFactor(0);
 
   const subtitle = scene.add.text(cam.centerX, 95, `New: ${incomingCard.name}`, {
     fontSize: "12px",
     color: "#cccccc",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setScrollFactor(0);
 
   overlay.add([shade, title, subtitle]);
@@ -303,7 +303,7 @@ function openSwapOverlay(scene, incomingCard, onDone) {
     const name = scene.add.text(x, y - 70, existing?.name || "(empty?)", {
       fontSize: "12px",
       color: "#ffffff",
-      fontFamily: "monospace"
+      fontFamily: "Bungee"
     }).setOrigin(0.5).setScrollFactor(0);
 
     const desc = scene.add.text(x, y + 25, existing?.text || "", {
@@ -339,7 +339,7 @@ function openSwapOverlay(scene, incomingCard, onDone) {
   const cancelTx = scene.add.text(cam.centerX, cam.height - 80, "Cancel", {
     fontSize: "16px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setScrollFactor(0);
 
   cancelBg.on("pointerdown", () => {
@@ -441,14 +441,14 @@ function buildPlayerReward(scene, meta, ctx, completeReward) {
   const title = worldify(scene, scene.add.text(center.x, y - 110, "PLAYER REWARD", {
     fontSize: "16px",
     color: "#ffffff",
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontStyle: "bold"
   }).setOrigin(0.5).setDepth(10015));
 
   const hint = worldify(scene, scene.add.text(center.x, y - 90, "Click arrows to pick class, then confirm", {
     fontSize: "12px",
     color: "#cccccc",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015));
 
   let index = 0;
@@ -461,19 +461,19 @@ function buildPlayerReward(scene, meta, ctx, completeReward) {
   const left = worldify(scene, scene.add.text(center.x - 72, y, "<", {
     fontSize: "30px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015).setInteractive({ useHandCursor: true }));
 
   const right = worldify(scene, scene.add.text(center.x + 72, y, ">", {
     fontSize: "30px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015).setInteractive({ useHandCursor: true }));
 
   const name = worldify(scene, scene.add.text(center.x, y + 42, PLAYER_REWARDS[index].name, {
     fontSize: "15px",
     color: "#ffffff",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015));
 
   const confirmBg = worldify(scene, scene.add.rectangle(center.x, y + 75, 170, 32, 0x123312, 0.9)
@@ -484,7 +484,7 @@ function buildPlayerReward(scene, meta, ctx, completeReward) {
   const confirmText = worldify(scene, scene.add.text(center.x, y + 75, "Confirm Recruit", {
     fontSize: "14px",
     color: "#e7ffe7",
-    fontFamily: "monospace"
+    fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015));
 
   const refresh = () => {
@@ -563,4 +563,5 @@ export function openFortRewardSelection(scene, { stageIndex, meta, onComplete } 
     }
   };
 }
+
 

@@ -455,7 +455,7 @@ export class DraftStartPreviewController {
 
   _applyPlayerTint(icon, typeKey) {
     // If this icon doesn't have a physics body, we attach a SHIM that:
-    // - exposes .team for Player.applyDefaultTint
+    // - exposes .team for Player.applyRoleTint
     // - exposes .destroy() so any old cleanup code calling body.destroy won't crash
     const needsShim = !icon.body || typeof icon.body.destroy !== "function";
     if (needsShim) {
@@ -487,7 +487,7 @@ export class DraftStartPreviewController {
       case "brawler":     icon.isBrawler = true; break;
     }
 
-    Player.applyDefaultTint(icon);
+    Player.applyRoleTint(icon);
   }
 
   _setSpawnIcons(points) {

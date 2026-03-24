@@ -24,9 +24,17 @@ export class seedManager {
             sprite.task = null;
             return;
         }
-        sprite.play('action')
+        if (sprite.isFarmer && sprite.plantPose) {
+            Player.setPoseLock(sprite, sprite.plantPose);
+        } else {
+            sprite.play('action')
+        }
         sprite.timer = this.scene.time.delayedCall(1000, () => {
-            if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) return;
+            if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) {
+                Player.clearPoseLock(sprite);
+                sprite.timer = null;
+                return;
+            }
             Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
             if (sprite) {
                 this.onSeedingDone(sprite);
@@ -70,6 +78,7 @@ export class seedManager {
         }
 
         sprite.task = null;
+        Player.clearPoseLock(sprite, sprite.idle);
     }
 
     static makeClickable(x, y, block) {

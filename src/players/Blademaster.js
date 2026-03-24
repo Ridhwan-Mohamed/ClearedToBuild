@@ -8,17 +8,34 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import blademasterWalkDown from 'url:../assets/players/blademaster/blademaster_walk_down.png';
+import blademasterWalkDownLeft from 'url:../assets/players/blademaster/blademaster_walk_down_left.png';
+import blademasterWalkDownRight from 'url:../assets/players/blademaster/blademaster_walk_down_right.png';
+import blademasterWalkUp from 'url:../assets/players/blademaster/blademaster_walk_up.png';
+import blademasterWalkUpLeft from 'url:../assets/players/blademaster/blademaster_walk_up_left.png';
+import blademasterWalkUpRight from 'url:../assets/players/blademaster/blademaster_walk_up_right.png';
 
 export class Blademaster {
 
     static speed = 70;      // slower
     static stamina = 0.03;
+
+    static preload(scene) {
+        scene.load.spritesheet('blademaster_walk_down', blademasterWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_walk_down_left', blademasterWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_walk_down_right', blademasterWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_walk_up', blademasterWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_walk_up_left', blademasterWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_walk_up_right', blademasterWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
     
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
             SQUARESIZE * y + SQUARESIZE / 2,
-            'player'
+            'blademaster_walk_down',
+            1
         );
 
 
@@ -26,7 +43,6 @@ export class Blademaster {
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);
         sprite.setCollideWorldBounds(true);
-        sprite.setTint(0xAA33EE); // unique purple tint
         sprite.unitTint = 0xAA33EE;
 
         sprite.id = Player.count++;
@@ -44,6 +60,22 @@ export class Blademaster {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'blademaster',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'blademaster_walk_down',
+                down_left: 'blademaster_walk_down_left',
+                down_right: 'blademaster_walk_down_right',
+                up: 'blademaster_walk_up',
+                up_left: 'blademaster_walk_up_left',
+                up_right: 'blademaster_walk_up_right',
+            }
+        });
 
         sprite.isBlademaster = true;
 

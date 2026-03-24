@@ -38,12 +38,7 @@ export class fightManager{
             if (originalTint !== undefined) {
                 target.setTint(originalTint);
             } else {
-                // Fall back to default tint logic for players
-                if (target.body && typeof Player.applyDefaultTint === "function") {
-                    Player.applyDefaultTint(target);
-                } else {
-                    target.clearTint();
-                }
+                target.clearTint();
             }
         });
 

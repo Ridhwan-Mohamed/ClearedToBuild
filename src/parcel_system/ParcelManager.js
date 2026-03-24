@@ -38,6 +38,26 @@ export class ParcelManager {
   startRock(slotId)    { return this._startResource(slotId, "ROCK"); }
   startPressure(slotId, difficulty = 1, opts = {}) { return this._startPressure(slotId, difficulty, opts); }
   startFarm(slotId) { return this._startResource(slotId, "FARM"); }
+
+  _refreshAfterParcelPaint() {
+    const isOverview = this.scene?.zoomMixer?.mode === "overview";
+    if (!isOverview) {
+      this.map.setDetailedWorldVisible?.(true);
+      this.map.reDraw?.();
+    } else {
+      this.map.deleteAllGridElements?.();
+      this.map.setDetailedWorldVisible?.(false);
+    }
+
+    this.scene.rebuildBothNavMeshes();
+    this.scene.zoomMixer.buildOverviewTextureFromGrid(
+      this.map.grid,
+      SQUARESIZE,
+      (cell) => colorFor(cell)
+    );
+    this.map._uiIgnoreWorldLayer();
+  }
+
   startMilitia(slotId) {
     if (this.slotToContractId[slotId]) return null;
 
@@ -78,15 +98,7 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
 
     inst.spawn();
-
-    this.scene.rebuildBothNavMeshes();
-    this.scene.zoomMixer.buildOverviewTextureFromGrid(
-      this.map.grid,
-      SQUARESIZE,
-      (cell) => colorFor(cell)
-    );
-
-    this.map._uiIgnoreWorldLayer();
+    this._refreshAfterParcelPaint();
 
     // hide slot UI while active
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
@@ -118,9 +130,7 @@ export class ParcelManager {
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
     inst.spawn();
-    this.scene.rebuildBothNavMeshes();
-    this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
-    this.map._uiIgnoreWorldLayer();
+    this._refreshAfterParcelPaint();
 
     // Hide the slot UI while a contract is active (no outline during play)
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
@@ -156,9 +166,7 @@ export class ParcelManager {
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
     inst.spawn();
-    this.scene.rebuildBothNavMeshes();
-    this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
-    this.map._uiIgnoreWorldLayer();
+    this._refreshAfterParcelPaint();
     // Hide the slot UI while a pressure contract is active (no outline during play)
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();

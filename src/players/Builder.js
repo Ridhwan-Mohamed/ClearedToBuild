@@ -10,17 +10,34 @@ import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { StorageBuilding } from '../buildings/Storage.js';
 import { Wall } from '../buildings/Wall.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import builderWalkDown from 'url:../assets/players/builder/builder_walk_down.png';
+import builderWalkDownLeft from 'url:../assets/players/builder/builder_walk_down_left.png';
+import builderWalkDownRight from 'url:../assets/players/builder/builder_walk_down_right.png';
+import builderWalkUp from 'url:../assets/players/builder/builder_walk_up.png';
+import builderWalkUpLeft from 'url:../assets/players/builder/builder_walk_up_left.png';
+import builderWalkUpRight from 'url:../assets/players/builder/builder_walk_up_right.png';
 
 export class Builder {
 
     static speed = 80;
     static stamina = 0.02;
 
+    static preload(scene) {
+        scene.load.spritesheet('builder_walk_down', builderWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_walk_down_left', builderWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_walk_down_right', builderWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_walk_up', builderWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_walk_up_left', builderWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_walk_up_right', builderWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
             SQUARESIZE * y + SQUARESIZE / 2,
-            'player'
+            'builder_walk_down',
+            1
         );
 
 
@@ -29,7 +46,6 @@ export class Builder {
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);
         sprite.setCollideWorldBounds(true);
-        sprite.setTint(0x4433ff); // PURPLE TINT
         sprite.unitTint = 0x4433ff;
         sprite.name = NameGenerator.generate();
 
@@ -48,6 +64,22 @@ export class Builder {
         sprite.action = 'action';
         sprite.swim = 'swim';
         sprite.carry = 'carry';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'builder',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'builder_walk_down',
+                down_left: 'builder_walk_down_left',
+                down_right: 'builder_walk_down_right',
+                up: 'builder_walk_up',
+                up_left: 'builder_walk_up_left',
+                up_right: 'builder_walk_up_right',
+            }
+        });
 
         sprite.isBuilder = true;
 

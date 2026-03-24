@@ -47,7 +47,7 @@ export var WORLD_DIMENSIONY = 100;
 export const UIDEPTH = 10
 export const FLOORDEPTH = 2
 export const BLOCKDEPTH = FLOORDEPTH+1
-export const SQUARESIZE = 16;
+export const SQUARESIZE = 32;
 export const CHUNK_SIZE = 60
 export const EDGE_RATIO = CHUNK_SIZE/8
 // --- TILE_TYPES (full) ---
@@ -56,9 +56,17 @@ export const TILE_TYPES = {
     name: "grass",
     spread: true,
     block: false,
-    complex: false,
+    complex: true,
     grid: 1,
-    depth: FLOORDEPTH
+    interior: 1,
+    sides: { up: 99, down: 100, left: 101, right: 102 },
+    corners: { topLeft: 103, topRight: 104, bottomLeft: 105, bottomRight: 106 },
+    depth: FLOORDEPTH,
+    assets: {
+      interior: { key: 'grass_interior', sheet: false },
+      edge: { key: 'grass_edge_water', sheet: false },
+      corner: { key: 'grass_corner_water', sheet: false }
+    }
   },
 
   wall: {
@@ -104,7 +112,7 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 12,
-    lenX: 4, lenY: 4,
+    lenX: 2, lenY: 2,
     depth: BLOCKDEPTH+2,
     resource: UI_ITEM_TYPES.wood,
     images: ['pine1','pine2','pine3']
@@ -133,12 +141,25 @@ export const TILE_TYPES = {
     island:   15,             // island (cap)
     sides:    { up: 16, down: 17, left: 18, right: 19 },
     corners:  { topLeft: 20, topRight: 21, bottomLeft: 22, bottomRight: 23 },
+    innerCorners: { topLeft: 81, topRight: 82, bottomRight: 83, bottomLeft: 84 },
+    diagJoins: { nwSe: 85, neSw: 86 },
     depth: FLOORDEPTH,
     assets: {
-      interior: { key: 'Dirt',        sheet: false },
-      island:   { key: 'dirt_island', sheet: false },
-      edge:     { key: 'dirt_edge',   sheet: false },
-      corner:   { key: 'dirt_corner', sheet: false }
+      interior: { key: 'dirt_interior', sheet: false },
+      edge: {
+        grass: { key: 'dirt_edge_grass', sheet: false },
+        water: { key: 'dirt_edge_water', sheet: false },
+        shoreGrass: { key: 'dirt_shore_edge_grass', sheet: false }
+      },
+      corner: {
+        grass: { key: 'dirt_corner_grass', sheet: false },
+        water: { key: 'dirt_corner_water', sheet: false }
+      },
+      innerCorner: {
+        grass: { key: 'dirt_inner_corner', sheet: false },
+        water: { key: 'dirt_inner_corner_water', sheet: false }
+      },
+      diagJoin: { key: 'dirt_diag_join', sheet: false }
     }
   },
 
@@ -147,7 +168,7 @@ export const TILE_TYPES = {
     name: "water",
     spriteSheet: true, // interior is animated
     spread: true,
-    block: true,
+    block: false,
     complex: true,
     grid: 24,                 // interior code
     interior: 24,             // interior
@@ -156,10 +177,7 @@ export const TILE_TYPES = {
     corners:  { topLeft: 30, topRight: 31, bottomLeft: 32, bottomRight: 33 },
     depth: BLOCKDEPTH,
     assets: {
-      interior: { key: 'water',        sheet: true,  anim: 'water' },
-      island:   { key: 'shore_island', sheet: true,  anim: 'shore_island' },
-      edge:     { key: 'shore_edge',   sheet: true,  anim: 'shore_edge' },
-      corner:   { key: 'shore_corner', sheet: true,  anim: 'shore_corner' }
+      interior: { key: 'water', sheet: true, anim: 'water' }
     }
   },
 
@@ -172,7 +190,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 34,
     depth: BLOCKDEPTH,
-    lenX: 4, lenY: 4,
+    lenX: 2, lenY: 2,
     cost: { wood: 4, stone: 4 }
   },
 
@@ -185,7 +203,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 35,
     depth: BLOCKDEPTH,
-    lenX: 4, lenY: 4,
+    lenX: 2, lenY: 2,
     cost: { wood: 4, stone: 4 }
   },
 
@@ -212,12 +230,25 @@ export const TILE_TYPES = {
     island:   48,             // island (cap)
     sides:    { up: 49, down: 50, left: 51, right: 52 },
     corners:  { topLeft: 53, topRight: 54, bottomLeft: 55, bottomRight: 56 },
+    innerCorners: { topLeft: 87, topRight: 88, bottomRight: 89, bottomLeft: 90 },
+    diagJoins: { nwSe: 91, neSw: 92 },
     depth: FLOORDEPTH,
     assets: {
       interior: { key: 'road_interior', sheet: false },
-      island:   { key: 'road_island',   sheet: false },
-      edge:     { key: 'road_edge',     sheet: false },
-      corner:   { key: 'road_corner',   sheet: false }
+      edge: {
+        grass: { key: 'road_edge_grass', sheet: false },
+        water: { key: 'road_edge_water', sheet: false },
+        shoreGrass: { key: 'road_shore_edge_grass', sheet: false }
+      },
+      corner: {
+        grass: { key: 'road_corner_grass', sheet: false },
+        water: { key: 'road_corner_water', sheet: false }
+      },
+      innerCorner: {
+        grass: { key: 'road_inner_corner', sheet: false },
+        water: { key: 'road_inner_corner_water', sheet: false }
+      },
+      diagJoin: { key: 'road_diag_join', sheet: false }
     }
   },
 
@@ -270,7 +301,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 41,
     depth: BLOCKDEPTH,
-    lenX: 4, lenY: 4
+    lenX: 1, lenY: 1
   },
 
   clayOven: {
@@ -282,7 +313,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 42,
     depth: BLOCKDEPTH,
-    lenX: 4, lenY: 4,
+    lenX: 2, lenY: 2,
     cost: { stone: 4 }
   },
 
@@ -295,7 +326,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 43,
     depth: BLOCKDEPTH,
-    lenX: 4, lenY: 4,
+    lenX: 2, lenY: 2,
     cost: { wood: 4 }
   },
 
@@ -326,7 +357,7 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 46,
-    lenX: 3, lenY: 3,
+    lenX: 2, lenY: 2,
     depth: BLOCKDEPTH+2,
     resource: UI_ITEM_TYPES.stone,
     images: ['rock1','rock2','rock3']
@@ -400,12 +431,25 @@ export const TILE_TYPES = {
     island:   69,             // island (cap)
     sides:    { up: 70, down: 71, left: 72, right: 73 },
     corners:  { topLeft: 74, topRight: 75, bottomLeft: 76, bottomRight: 77 },
+    innerCorners: { topLeft: 93, topRight: 94, bottomRight: 95, bottomLeft: 96 },
+    diagJoins: { nwSe: 97, neSw: 98 },
     depth: FLOORDEPTH,
     assets: {
-      interior: { key: 'fort_interior', sheet: false },
-      island:   { key: 'fort_island',   sheet: false },
-      edge:     { key: 'fort_edge',     sheet: false },
-      corner:   { key: 'fort_corner',   sheet: false }
+      interior: { key: 'dungeon_interior', sheet: false },
+      edge: {
+        grass: { key: 'dungeon_edge_grass', sheet: false },
+        water: { key: 'dungeon_edge_water', sheet: false },
+        shoreGrass: { key: 'dungeon_shore_edge_grass', sheet: false }
+      },
+      corner: {
+        grass: { key: 'dungeon_corner_grass', sheet: false },
+        water: { key: 'dungeon_corner_water', sheet: false }
+      },
+      innerCorner: {
+        grass: { key: 'dungeon_inner_corner', sheet: false },
+        water: { key: 'dungeon_inner_corner_water', sheet: false }
+      },
+      diagJoin: { key: 'dungeon_diag_join', sheet: false }
     }
   },
   tower :  {
@@ -417,7 +461,7 @@ export const TILE_TYPES = {
     complex: false,
     grid: 78,
     depth: BLOCKDEPTH,
-    lenX: 5, lenY: 5,
+    lenX: 4, lenY: 4,
     stayBlocked: true,
   },
     // ── Fort enemy buildings (64x64 sheets, 2 frames) ──
@@ -430,8 +474,8 @@ export const TILE_TYPES = {
     complex: false,
     grid: 79,
     depth: BLOCKDEPTH,
-    lenX: 4,
-    lenY: 4,
+    lenX: 2,
+    lenY: 2,
     maxHealth: 450,
     stayBlocked: true, 
   },
@@ -445,13 +489,12 @@ export const TILE_TYPES = {
     complex: false,
     grid: 80,
     depth: BLOCKDEPTH,
-    lenX: 4,
-    lenY: 4,
+    lenX: 2,
+    lenY: 2,
     maxHealth: 500,
     stayBlocked: true,
   },
 };
-
 
 export const DRAFT_UI_X_SHIFT = 120;
 
@@ -558,6 +601,32 @@ export const TILE_ARR = [
   'tower',      // 78
   'prison_closed', // 79
   'bank_closed',   // 80
+  'dirt_inner_corner', // 81
+  'dirt_inner_corner', // 82
+  'dirt_inner_corner', // 83
+  'dirt_inner_corner', // 84
+  'dirt_diag_join',    // 85
+  'dirt_diag_join',    // 86
+  'road_inner_corner', // 87
+  'road_inner_corner', // 88
+  'road_inner_corner', // 89
+  'road_inner_corner', // 90
+  'road_diag_join',    // 91
+  'road_diag_join',    // 92
+  'dungeon_inner_corner', // 93
+  'dungeon_inner_corner', // 94
+  'dungeon_inner_corner', // 95
+  'dungeon_inner_corner', // 96
+  'dungeon_diag_join',    // 97
+  'dungeon_diag_join',    // 98
+  'grass_edge',           // 99
+  'grass_edge',           // 100
+  'grass_edge',           // 101
+  'grass_edge',           // 102
+  'grass_corner',         // 103
+  'grass_corner',         // 104
+  'grass_corner',         // 105
+  'grass_corner',         // 106
 ];
 
 // --- TILE_MAP (full) ---
@@ -598,6 +667,10 @@ export function TILE_MAP(val){
   else if (val == 78) return "tower";
   else if (val == 79) return "prison";
   else if (val == 80) return "bank";
+  else if (val >= 81 && val <= 86) return "dirt";
+  else if (val >= 87 && val <= 92) return "road";
+  else if (val >= 93 && val <= 98) return "fort_floor";
+  else if (val >= 99 && val <= 106) return "grass";
 
   return null;
 }
@@ -722,7 +795,7 @@ export function showGhostText(scene, x, y, text, teamNumber, isCrit = false, isM
     const ghost = scene.add.text(x, y, text, {
         fontSize: '16px',
         fill: color,
-        fontFamily: 'monospace',
+        fontFamily: 'Bungee',
         stroke: '#000000',
         strokeThickness: 2
     }).setDepth(1000).setOrigin(0.5);
@@ -763,7 +836,7 @@ export function createBubbleText({
     // Base text (world-space)
     const label = scene.add.text(target.x, target.y - 20, text, {
         fontSize: `${fontSize}px`,
-        fontFamily: 'monospace',
+        fontFamily: 'Bungee',
         color: textColor,
         stroke: '#000000',
         strokeThickness: 2
@@ -947,4 +1020,5 @@ export const RESOURCE_PARCEL = {
   // min distance from parcel edge to place water so you don’t create open-water borders
   WATER_EDGE_BUFFER: 2,
 };
+
 

@@ -148,8 +148,8 @@ export default class StorageTab {
     ensureBlankTexture();
 
     // header: title + coords + HP
-    const title = scene.add.text(0, 0, "Storage", { fontSize: 16, color: "#ffffff", fontFamily: "sans-serif" });
-    const sub = scene.add.text(0, 0, "—", { fontSize: 12, color: "#b0b0b0", fontFamily: "sans-serif" });
+    const title = scene.add.text(0, 0, "Storage", { fontSize: 16, color: "#ffffff", fontFamily: "Bungee" });
+    const sub = scene.add.text(0, 0, "—", { fontSize: 12, color: "#b0b0b0", fontFamily: "Bungee" });
 
     const makeHpBarWithText = (width, height) => {
       const s = scene.rexUI.add.overlapSizer({ width, height });
@@ -159,7 +159,7 @@ export default class StorageTab {
         .setOrigin(0, 0.5);
 
       const txt = scene.add.text(0, 0, 'HP —/—', {
-        fontFamily: 'sans-serif',
+        fontFamily: 'Bungee',
         fontSize: 12,
         color: '#ffffff',
       }).setOrigin(0.5, 0.5);
@@ -209,7 +209,7 @@ export default class StorageTab {
         color: "#ffffff",
         stroke: "#000",
         strokeThickness: 2,
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
       }).setOrigin(1, 1);
 
       s.add(icon,  { key: "icon",  align: "center" });
@@ -246,7 +246,7 @@ export default class StorageTab {
 
     const fixBtn = scene.rexUI.add.label({
       background: scene.rexUI.add.roundRectangle(0, 0, 0, 34, 10, 0x2f7d32),
-      text: scene.add.text(0, 0, "🛠 Fix", { fontFamily: "sans-serif", fontSize: 14, color: "#ffffff" }),
+      text: scene.add.text(0, 0, "🛠 Fix", { fontFamily: "Bungee", fontSize: 14, color: "#ffffff" }),
       space: { left: 12, right: 12, top: 7, bottom: 7 },
     })
       .setMinSize(110, 34)
@@ -374,7 +374,7 @@ export default class StorageTab {
         color: "#ffffff",
         stroke: "#000",
         strokeThickness: 2,
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
       }).setOrigin(1, 1);
       if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
       s.add(im, { key: "im", align: "center" });
@@ -444,7 +444,7 @@ export default class StorageTab {
       const s = this.scene.rexUI.add.overlapSizer({ width: 26, height: 26 });
       const im = this.scene.add.image(0, 0, key).setDisplaySize(22, 22).setOrigin(0.5);
       const tx = this.scene.add.text(0, 0, "", {
-        fontSize: 10, color: "#ffffff", stroke: "#000", strokeThickness: 2, fontFamily: "monospace",
+        fontSize: 10, color: "#ffffff", stroke: "#000", strokeThickness: 2, fontFamily: "Bungee",
       }).setOrigin(1, 1);
       if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
       s.add(im, { key: "im", align: "center" });

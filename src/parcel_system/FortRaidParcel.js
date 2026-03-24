@@ -146,6 +146,7 @@ function placeFortWall(map, gx, gy, typeKey, track) {
   setCellTop(map, gx, gy, TILE_TYPES[typeKey].grid);
 
   const wall = Wall.ensureAt(map.scene, gx, gy, 0); // returns Wall instance :contentReference[oaicite:2]{index=2}
+  map.refreshWallShapesAround?.(gx, gy);
   _trackFortThing(track, wall);
 
   if (map.navGrid?.[gy])      map.navGrid[gy][gx] = 0; // player blocked
@@ -161,6 +162,7 @@ function placeFortDoor(map, gx, gy, doorKey, track) {
   setCellTop(map, gx, gy, TILE_TYPES[doorKey].grid);
 
   const wall = Wall.ensureAt(map.scene, gx, gy, 0);
+  map.refreshWallShapesAround?.(gx, gy);
   _trackFortThing(track, wall);
 
   if (map.navGrid?.[gy])      map.navGrid[gy][gx] = 0; // player blocked
@@ -205,6 +207,7 @@ export function spawnNorthFort({
   const innerX = origin.x + inset;
   const innerY = origin.y + inset;
   map.setGroundRect?.(innerX, innerY, inner, inner, "fort_floor");
+  map.refreshTerrainShapesInRect?.(innerX, innerY, inner, inner, 2);
 
   const stageIndex = Math.max(1, StageState.stageIndex || 1);
   const seasonIndex = Math.max(1, StageState.seasonIndex || 1);
@@ -452,6 +455,7 @@ export function spawnNorthFort({
   }
 
   placeFortDoor(map, doorX, doorY, doorType, fortTrack);
+  map.refreshTerrainShapesInRect?.(origin.x, origin.y, size, size, 2);
 
   const fortRoads = [];
   for (let y = miny + 1; y <= maxy - 1; y++) {
@@ -478,6 +482,7 @@ export function spawnNorthFort({
   }
 
   try {
+    map.reDraw?.();
     scene.rebuildBothNavMeshes?.();
     map._uiIgnoreWorldLayer?.();
   } catch (_) {}
@@ -609,6 +614,14 @@ export function clearNorthFort({ scene, map, meta } = {}) {
       if (map.enemyNavGrid?.[y]) map.enemyNavGrid[y][x] = 1;
     }
   }
+
+  map.refreshTerrainShapesInRect?.(
+    bounds.minx,
+    bounds.miny,
+    bounds.maxx - bounds.minx + 1,
+    bounds.maxy - bounds.miny + 1,
+    2
+  );
 
   scene.rebuildBothNavMeshes?.();
   map._uiIgnoreWorldLayer?.();

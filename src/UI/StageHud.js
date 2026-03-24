@@ -18,7 +18,7 @@ export function ensureStageHud(scene, {
   if (scene._stageHud) return scene._stageHud;
 
   const txt = scene.add.text(x, y, "", {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "16px",
     color: "#ffffff",
     stroke: "#000000",
@@ -47,3 +47,4 @@ export function ensureStageHud(scene, {
   scene._stageHud = { txt, recompute, destroy: () => txt.destroy() };
   return scene._stageHud;
 }
+

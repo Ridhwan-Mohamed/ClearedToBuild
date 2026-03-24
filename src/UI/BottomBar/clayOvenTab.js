@@ -199,7 +199,7 @@ export default class ClayOvenTab {
       const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 5, 0x4caf50, 1).setOrigin(0, 0.5);
 
       const txt = scene.add.text(0, 0, 'HP —/—', {
-        fontFamily: 'sans-serif',
+        fontFamily: 'Bungee',
         fontSize: 12,
         color: '#ffffff',
       }).setOrigin(0.5, 0.5);
@@ -222,8 +222,8 @@ export default class ClayOvenTab {
     };
 
     // header: title + coords + HP
-    const title = scene.add.text(0,0,"Oven", { fontSize: 16, color: "#ffffff", fontFamily: "sans-serif" });
-    const sub = scene.add.text(0,0,"—", { fontSize: 12, color: "#b0b0b0", fontFamily: "sans-serif" });
+    const title = scene.add.text(0,0,"Oven", { fontSize: 16, color: "#ffffff", fontFamily: "Bungee" });
+    const sub = scene.add.text(0,0,"—", { fontSize: 12, color: "#b0b0b0", fontFamily: "Bungee" });
     const ovenHpBar = makeHpBarWithText(240, 14);
 
     // after 'title' create a fuel row
@@ -247,7 +247,7 @@ export default class ClayOvenTab {
 
     const fixBtn = scene.rexUI.add.label({
       background: scene.rexUI.add.roundRectangle(0,0,0,0,10,0x2f7d32),
-      text: scene.add.text(0,0,'🛠 Fix', { fontSize: 14, color: '#ffffff', fontFamily: 'sans-serif' }),
+      text: scene.add.text(0,0,'🛠 Fix', { fontSize: 14, color: '#ffffff', fontFamily: 'Bungee' }),
       space: { left: 12, right: 12, top: 7, bottom: 7 }
     })
       .setMinSize(110, 34)
@@ -302,7 +302,7 @@ export default class ClayOvenTab {
         color: "#ffffff",
         stroke: "#000",
         strokeThickness: 2,
-        fontFamily: "monospace"
+        fontFamily: "Bungee"
       }).setOrigin(1, 1);
 
       c.add(icon, { key: "icon", align: "center" });

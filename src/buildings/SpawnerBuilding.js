@@ -127,7 +127,7 @@ export class SpawnerBuilding {
 
     this._playSpawnFX();
 
-    const style = scene.uiTextStyle ?? { fontFamily: "monospace", fontSize: "14px", color: "#ffffff" };
+    const style = scene.uiTextStyle ?? { fontFamily: "Bungee", fontSize: "14px", color: "#ffffff" };
     this.counterText = scene.add.text(this.sprite.x, this.sprite.y - 26, "", style);
     this.counterText.setOrigin(0.5, 0.5);
     this.counterText.setDepth(60);
@@ -244,3 +244,4 @@ export class SpawnerBuilding {
     this.counterText?.destroy();
   }
 }
+

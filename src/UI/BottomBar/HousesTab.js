@@ -105,7 +105,7 @@ export default class HousesTab {
         .setOrigin(0, 0.5);
 
       const txt = scene.add.text(0, 0, 'HP —/—', {
-        fontFamily: 'sans-serif',
+        fontFamily: 'Bungee',
         fontSize: 12,
         color: '#ffffff',
       }).setOrigin(0.5, 0.5);
@@ -207,7 +207,7 @@ export default class HousesTab {
   makeButton(scene, labelText, onClick, bgColor = 0x2a5bd8, h = 28) {
     const label = scene.rexUI.add.label({
       background: scene.rexUI.add.roundRectangle(0, 0, 0, h, 10, bgColor),
-      text: scene.add.text(0, 0, labelText, { fontFamily: 'sans-serif', fontSize: 13, color: '#ffffff' }),
+      text: scene.add.text(0, 0, labelText, { fontFamily: 'Bungee', fontSize: 13, color: '#ffffff' }),
       space: { left: 10, right: 10, top: 5, bottom: 5 },
     });
 

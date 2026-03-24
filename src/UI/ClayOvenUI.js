@@ -79,7 +79,7 @@ export class ClayOvenUI {
         const status = this.scene.add.text(0, 0, '', {
             fontSize: '12px',
             fill: '#ffffff',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             align: 'center'
         }).setOrigin(0.5).setDepth(UIDEPTH).setScrollFactor(0);
 
@@ -135,7 +135,7 @@ export class ClayOvenUI {
 
         const title = this.scene.add.text(camX, camY - 90, 'Clay Oven', {
             fontSize: '16px',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             fill: '#ffffff'
         }).setOrigin(0.5).setScrollFactor(0);
         container.add(title);
@@ -165,7 +165,7 @@ export class ClayOvenUI {
                 fill: '#ffffff',
                 stroke: '#000000',
                 strokeThickness: 2,
-                fontFamily: 'monospace'
+                fontFamily: 'Bungee'
             }).setOrigin(1, 1).setScrollFactor(0).setVisible(false);
             container.add(cookLabel);
 
@@ -192,7 +192,7 @@ export class ClayOvenUI {
                 fill: '#ffffff',
                 stroke: '#000000',
                 strokeThickness: 2,
-                fontFamily: 'monospace'
+                fontFamily: 'Bungee'
             }).setOrigin(1, 1).setScrollFactor(0).setVisible(false);
             container.add(outLabel);
 
@@ -211,7 +211,7 @@ export class ClayOvenUI {
 
         const fuelText = this.scene.add.text(fuelX, camY - 30, `Fuel: ${oven.fuel}`, {
             fontSize: '12px',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             fill: '#ffffff'
         }).setOrigin(0.5).setScrollFactor(0);
 
@@ -220,7 +220,7 @@ export class ClayOvenUI {
             .setInteractive({ useHandCursor: true });
         const addWoodText = this.scene.add.text(fuelX, camY + 10, 'Add Wood', {
             fontSize: '12px',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             fill: '#000000'
         }).setOrigin(0.5).setScrollFactor(0);
 

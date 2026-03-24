@@ -4,11 +4,57 @@
 
 import { UIDEPTH, SQUARESIZE, showAlert, TILE_TYPES } from "../../constants";
 import { Map as GameMap } from "../../map";
+import { Teams } from "../../Teams";
+import { buildingManager } from "../../Manager/buildingManager";
 
 const RARITY = {
   common: { border: 0x2ecc71, label: "#2ecc71" }, // green
   rare:   { border: 0x4aa3ff, label: "#4aa3ff" }, // blue
 };
+
+function buildIconTexture(scene, iconKey, drawFn) {
+  if (scene.textures.exists(iconKey)) return;
+  const rt = scene.make.renderTexture({ width: 64, height: 64, add: false });
+  rt.clear();
+  drawFn(rt);
+  rt.saveTexture(iconKey);
+  rt.destroy();
+}
+
+function drawCenteredTexture(scene, rt, {
+  key,
+  frame = null,
+  scale = 1,
+  x = 32,
+  y = 32,
+  useSprite = false,
+}) {
+  const obj = useSprite
+    ? scene.make.sprite({ x, y, key, frame, add: false })
+    : scene.make.image({ x, y, key, add: false });
+  obj.setOrigin(0.5);
+  obj.setScale(scale);
+  rt.draw(obj);
+  obj.destroy();
+}
+
+function ensureBuildTabIcons(scene) {
+  buildIconTexture(scene, "icon_storage", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "storage", scale: 1 });
+  });
+
+  buildIconTexture(scene, "icon_clay_oven", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "clayOven", frame: 0, scale: 1, useSprite: true });
+  });
+
+  buildIconTexture(scene, "icon_stone_wall", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "wall_interior", frame: 0, scale: 1.5, useSprite: true });
+  });
+
+  buildIconTexture(scene, "icon_wood_wall", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "woodWall_interior", frame: 0, scale: 1.5, useSprite: true });
+  });
+}
 
 function hasResources(scene, cost) {
   if (!cost) return true;
@@ -71,9 +117,14 @@ function fmtCost(cost) {
 }
 
 function makeIcon(scene, def, w, h) {
-  // If you later load textures with these keys, it will auto-swap to images.
   if (def.iconKey && scene.textures.exists(def.iconKey)) {
-    return scene.add.image(0, 0, def.iconKey).setDisplaySize(w, h);
+    const img = scene.add.image(0, 0, def.iconKey);
+    const tex = scene.textures.get(def.iconKey)?.getSourceImage?.();
+    const srcW = tex?.width || img.width || w;
+    const srcH = tex?.height || img.height || h;
+    const scale = Math.min(w / srcW, h / srcH);
+    img.setScale(scale);
+    return img;
   }
 
   // Placeholder visual + label so you know what to replace.
@@ -81,7 +132,7 @@ function makeIcon(scene, def, w, h) {
   const box = scene.add.rectangle(0, 0, w, h, 0x333333, 1).setStrokeStyle(1, 0x111111);
   const label = scene.add.text(0, 0, def.iconKey ?? "icon_missing", {
     fontSize: "10px",
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     color: "#aaaaaa",
     align: "center",
     wordWrap: { width: w }
@@ -120,6 +171,8 @@ export default class BuildTab {
     this.activeKey = null;
     this.pendingDef = null;
     this._placeClickBound = false;
+
+    ensureBuildTabIcons(scene);
 
     this.view = scene.add.container(0, 0).setDepth(UIDEPTH);
     this.container = this.view; // if you referenced this.container elsewhere
@@ -161,7 +214,7 @@ export default class BuildTab {
     // ----- Header -----
     const title = scene.add.text(centerX, topY + 6, "BUILD", {
       fontSize: "18px",
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       color: "#dddddd",
       fontStyle: "bold",
     }).setOrigin(0.5);
@@ -170,7 +223,7 @@ export default class BuildTab {
       centerX,
       topY + 30,
       "Pick a card -> place on map. Charged on placement.",
-      { fontSize: "12px", fontFamily: "monospace", color: "#aaaaaa", align: "center" }
+      { fontSize: "12px", fontFamily: "Bungee", color: "#aaaaaa", align: "center" }
     ).setOrigin(0.5);
 
     this.view.add([title, hint]);
@@ -240,7 +293,7 @@ export default class BuildTab {
 
       const name = scene.add.text(x, y + 30, def.name, {
         fontSize: "14px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         color: rarity.label,
         fontStyle: "bold",
         align: "center",
@@ -249,7 +302,7 @@ export default class BuildTab {
 
       const desc = scene.add.text(x, y + 55, def.desc ?? "", {
         fontSize: "11px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         color: "#bbbbbb",
         align: "center",
         wordWrap: { width: CARD_W - 16 }
@@ -259,7 +312,7 @@ export default class BuildTab {
       const costObj = getDefCost(def);
       const cost = scene.add.text(x, y + 78, fmtCost(costObj), {
         fontSize: "12px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         color: "#dddddd",
         align: "center",
       }).setOrigin(0.5);
@@ -431,10 +484,32 @@ export default class BuildTab {
         return;
       }
 
+      const isBlockBuild =
+        !!tile.block ||
+        !!tile.stayBlocked ||
+        (tile.lenX ?? 1) > 1 ||
+        (tile.lenY ?? 1) > 1;
+
+      if (isBlockBuild) {
+        spendResources(this.scene, costObj);
+
+        Teams.teamLists["1"].blockBuildingStates.push({
+          type: tile,
+          x: gridX,
+          y: gridY,
+          duration: 100,
+          assigned: 0,
+          prepaid: Object.keys(costObj).length > 0,
+        });
+
+        buildingManager.assignTroopToBuildBlock(1);
+        this._clearSelection(true);
+        showAlert(this.scene, "Construction started!", "#aaffaa");
+        return;
+      }
+
       spendResources(this.scene, costObj);
-
       GameMap.placeItem(gridX * SQUARESIZE, gridY * SQUARESIZE, tile);
-
       this._clearSelection(true);
       showAlert(this.scene, "Built!", "#aaffaa");
     });
@@ -449,8 +524,6 @@ export default class BuildTab {
   onShow() {}
   hide() {}
 }
-
-
 
 
 

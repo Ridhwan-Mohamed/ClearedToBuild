@@ -45,8 +45,16 @@ export class tillManager {
     static beginTilling(sprite) {
         const {x, y} = sprite.task;
 
+        if (sprite.isFarmer && sprite.plantPose) {
+            Player.setPoseLock(sprite, sprite.plantPose);
+        }
+
         sprite.timer = this.scene.time.delayedCall(1000, () => {
-            if (!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) return;
+            if (!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) {
+                Player.clearPoseLock(sprite);
+                sprite.timer = null;
+                return;
+            }
 
             const existingCrop = Teams.getCropAt(x, y, sprite.body.team);
 
@@ -78,6 +86,7 @@ export class tillManager {
             Teams.removeFromStateArray(1, "tileList", sprite.task);
             sprite.task = null;
             sprite.timer = null;
+            Player.clearPoseLock(sprite, sprite.idle);
         });
     }
 

@@ -5,24 +5,22 @@ import gray from 'url:./assets/gray.png'
 import green from 'url:./assets/green.png'
 import leader from 'url:./assets/purple.png'
 import hammer from 'url:./assets/hammer.png'
-import grass from 'url:./assets/grass.png'
-import Water from 'url:./assets/water/water.png'
-import TWater from 'url:./assets/water/TWater.png'
-// import BWater from 'url:./assets/water/BWater.png'
-// import RWater from 'url:./assets/water/RWater.png'
-// import LWater from 'url:./assets/water/LWater.png'
-// import TRCWater from 'url:./assets/water/TRCWater.png'
-// import BRCWater from 'url:./assets/water/BRCWater.png'
-import TLCWater from 'url:./assets/water/TLCWater.png'
-import iWater from 'url:./assets/water/iwater.png'
-// import BLCWater from 'url:./assets/water/BLCWater.png'
 import waterParticle from 'url:./assets/waterParticle.png'
-import crops from 'url:./assets/crops.png'
+import zoomOutWaterTxt1 from 'url:./assets/zoomOutWaterTxt1.png'
+import zoomOutWaterTxt2 from 'url:./assets/zoomOutWaterTxt2.png'
 import { Map as GameMap } from './map.js';
 import { Turret } from './Turret.js';
-import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, CHUNK_SIZE, EDGE_RATIO, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
+import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
+import { Farmer } from './players/Farmer.js';
+import { Builder } from './players/Builder.js';
+import { Forager } from './players/Forager.js';
+import { Fireman } from './players/Fireman.js';
+import { Brawler } from './players/Brawler.js';
+import { Blademaster } from './players/Blademaster.js';
+import { Gunslinger } from './players/Gunslinger.js';
+import { Raider } from './players/Raider.js';
 import { Projectile } from './Projectile.js';
 import player from 'url:./assets/Players/player.png'
 import gun1 from 'url:./assets/Players/gun1.png'
@@ -85,6 +83,9 @@ import { loadShipMarketAssets } from './UI/ShipMarket.js';
 import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
 import { respawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { GameUIScene } from './UI/GameUIScene.js';
+import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
+import { OverviewOceanWaves } from './UI/OverviewOceanWaves.js';
+import { OverviewShoreWaves } from './UI/OverviewShoreWaves.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -151,7 +152,6 @@ export class mapView extends Phaser.Scene {
         this.load.image('selected', green)
         this.load.image('leader', leader)
         this.load.image('hammer', hammer);
-        this.load.image('grass', grass);
         this.load.image('monies', monies);
         this.load.image('seeds', seeds);
         this.load.image('berry', berry);
@@ -163,20 +163,9 @@ export class mapView extends Phaser.Scene {
         this.load.image('playerIcon', playerIcon);
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
         this.load.image('sparkle', waterParticle);
+        this.load.image('zoomOutWaterTxt1', zoomOutWaterTxt1);
+        this.load.image('zoomOutWaterTxt2', zoomOutWaterTxt2);
         this.load.image('tillOverlay', tillOverlay);
-        this.load.spritesheet('water', Water, { frameWidth: 16, frameHeight: 16});
-        // this.load.spritesheet('twater', TWater, { frameWidth: 16, frameHeight: 16}); // Top Water
-        this.load.spritesheet('shore_edge', TWater, { frameWidth: 16, frameHeight: 16 });
-        this.load.spritesheet('shore_corner', TLCWater, { frameWidth: 16, frameHeight: 16 });
-        this.load.spritesheet('shore_island', iWater, { frameWidth: 16, frameHeight: 16 });
-        // this.load.spritesheet('bwater', BWater, { frameWidth: 16, frameHeight: 16}); // Bottom Water
-        // this.load.spritesheet('rwater', RWater, { frameWidth: 16, frameHeight: 16}); // Right Water
-        // this.load.spritesheet('lwater', LWater, { frameWidth: 16, frameHeight: 16}); // Left Water
-        // this.load.spritesheet('trcwater', TRCWater, { frameWidth: 16, frameHeight: 16}); // Top-right corner Water
-        // this.load.spritesheet('brcwater', BRCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-right corner Water
-        // this.load.spritesheet('tlcwater', TLCWater, { frameWidth: 16, frameHeight: 16}); // Top-left corner Water
-        // this.load.spritesheet('blcwater', BLCWater, { frameWidth: 16, frameHeight: 16}); // Bottom-left corner Water
-        this.load.spritesheet('crops', crops, {frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('char', char, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('charHurt', charHurt, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('clayOven', clayOven, { frameWidth: 64, frameHeight: 64});
@@ -186,6 +175,14 @@ export class mapView extends Phaser.Scene {
         this.load.image('mediumBasePine', mediumBasePine);
         this.load.image('mediumMiddlePine', mediumMiddlePine);
         this.load.image('mediumTopPine', mediumTopPine);
+        Farmer.preload(this);
+        Builder.preload(this);
+        Forager.preload(this);
+        Fireman.preload(this);
+        Brawler.preload(this);
+        Blademaster.preload(this);
+        Gunslinger.preload(this);
+        Raider.preload(this);
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
@@ -206,11 +203,104 @@ export class mapView extends Phaser.Scene {
         loadShipMarketAssets(this);
     }
 
+    _enableGlobalTextFont() {
+        if (this._globalTextFontPatched || !this.add?.text) return;
+        const originalAddText = this.add.text.bind(this.add);
+        this.add.text = (x, y, text, style = {}) => {
+            const nextStyle = (style && typeof style === "object") ? { ...style } : {};
+            if (!nextStyle.fontFamily) nextStyle.fontFamily = "Bungee";
+            return originalAddText(x, y, text, nextStyle);
+        };
+        this._globalTextFontPatched = true;
+    }
+
+    _ensureOceanTextures() {
+        if (!this.textures.exists("ocean_gradient")) {
+            const g = this.make.graphics({ x: 0, y: 0, add: false });
+            g.fillGradientStyle(0x1a5d7e, 0x1a5d7e, 0x2f93bc, 0x2f93bc, 1, 1, 1, 1);
+            g.fillRect(0, 0, 4, 256);
+            g.generateTexture("ocean_gradient", 4, 256);
+            g.destroy();
+        }
+
+    }
+
+    _createOceanBackdrop() {
+        this._ensureOceanTextures();
+        const w = this.scale.width;
+        const h = this.scale.height;
+
+        this.oceanBackdropBase = this.add.rectangle(0, 0, w, h, 0x1e6f93, 1)
+            .setOrigin(0)
+            .setScrollFactor(0)
+            .setDepth(-10000);
+
+        this.oceanBackdropGradient = this.add.image(0, 0, "ocean_gradient")
+            .setOrigin(0)
+            .setDisplaySize(w, h)
+            .setAlpha(0.34)
+            .setScrollFactor(0)
+            .setDepth(-9999);
+
+        this.overviewOceanWaves?.destroy?.();
+        this.overviewOceanWaves = new OverviewOceanWaves(this, {
+            depth: UIDEPTH - 2.6
+        });
+
+        this.overviewCloudLayer?.destroy?.();
+        this.overviewCloudLayer = new OverviewCloudLayer(this, {
+            depth: UIDEPTH - 0.4,
+            cloudCount: 10,
+            cellSizePx: 6,
+            cellWorldSize: SQUARESIZE * 2
+        });
+        this.overviewShoreWaves?.destroy?.();
+        this.overviewShoreWaves = new OverviewShoreWaves(this, {
+            depth: UIDEPTH - 1.15,
+            maxOffsetPx: 14,
+            pulseCyclesPerSec: 0.50,
+            rebuildIntervalMs: 900,
+            getGrid: () => this.gridData || GameMap.grid
+        });
+
+        this._setOceanBackdropMode(this.zoomMixer?.mode || "detailed");
+
+        this.scale.on("resize", ({ width, height }) => {
+            this.oceanBackdropBase?.setSize(width, height);
+            this.oceanBackdropGradient?.setDisplaySize(width, height);
+            this.overviewOceanWaves?.resize?.();
+        });
+    }
+
+    _setOceanBackdropMode(mode = "detailed") {
+        const isOverview = mode === "overview";
+        if (this._oceanMode === mode) return;
+        this._oceanMode = mode;
+
+        this.oceanBackdropGradient?.setAlpha(isOverview ? 0.44 : 0.30);
+        this.overviewOceanWaves?.setMode?.(mode);
+        this.overviewCloudLayer?.setMode?.(mode);
+    }
+
+    _updateOceanBackdrop() {
+        this._setOceanBackdropMode(this.zoomMixer?.mode || "detailed");
+        this.overviewOceanWaves?.update?.(this.zoomMixer?.mode || "detailed", this.time?.now || 0);
+        this.overviewCloudLayer?.update?.(this.zoomMixer?.mode || "detailed");
+        this.overviewShoreWaves?.update?.(this.zoomMixer?.mode || "detailed", this.time?.now || 0);
+    }
+
     create() {
+        this._enableGlobalTextFont();
+        this._createOceanBackdrop();
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+            this.overviewOceanWaves?.destroy?.();
+            this.overviewOceanWaves = null;
+            this.overviewCloudLayer?.destroy?.();
+            this.overviewCloudLayer = null;
+            this.overviewShoreWaves?.destroy?.();
+            this.overviewShoreWaves = null;
+        });
         this.createAnim('water')
-        this.createAnim('shore_edge')
-        this.createAnim('shore_corner')
-        this.createAnim('shore_island')
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         this.createAnim('charHurt', -1, 5, 3)
@@ -225,6 +315,7 @@ export class mapView extends Phaser.Scene {
         }
         this.uiScene = this.scene.get('GameUIScene');
         this.uiScene?.bindWorldScene?.(this);
+        this.cameras.main.useBounds = false;
 
         MainMenu.startMenuPhase();
         setupTownBoundsToggle(this);
@@ -421,6 +512,9 @@ export class mapView extends Phaser.Scene {
             }
             else if(GameMap.placingItem && !GameMap.placingItem.blocked){
                 const items = TILE_TYPES[this.registry.get('image')]
+                if (!items) {
+                    return;
+                }
                 let x = Math.floor((pointer.x + cam.scrollX) / SQUARESIZE);
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){GameMap.handleMapClick(x,y,items)}
@@ -537,45 +631,58 @@ export class mapView extends Phaser.Scene {
     handleKeyboardCameraMovement() {
         if (this.stageCompleteLock || this._movementLocked) return;
         const camera = this.cameras.main;
-        const speed = this.keyboardSpeed; // Camera movement speed
-        const { width, height } = camera;
-    
-        // Check keyboard inputs for WASD or arrow keys
-        if (this.keys.up.isDown || this.keys.arrowUp.isDown) {
-            camera.scrollY -= speed; // Move up
-        }
-        if (this.keys.down.isDown || this.keys.arrowDown.isDown) {
-            camera.scrollY += speed; // Move down
-        }
-        if (this.keys.left.isDown || this.keys.arrowLeft.isDown) {
-            camera.scrollX -= speed; // Move left
-        }
-        if (this.keys.right.isDown || this.keys.arrowRight.isDown) {
-            camera.scrollX += speed; // Move right
-        }
-    
-        // Clamp camera position to avoid accessing invalid indices
-        Phaser.Math.Clamp(camera.scrollX, -32, WORLD_DIMENSIONX * SQUARESIZE - width);
-        Phaser.Math.Clamp(camera.scrollY, -32, WORLD_DIMENSIONY * SQUARESIZE - height);
+        const dt = (this.game?.loop?.delta || 16.67) / 850;
 
-        // Calculate the center chunk coordinates of the camera
-        const centerChunkX = Math.floor(camera.scrollX / SQUARESIZE);
-        const centerChunkY = Math.floor(camera.scrollY / SQUARESIZE);
-
-        // Initialize old center if not already set
-        if (!this.oldMapCenter) {
-            this.oldMapCenter = [centerChunkX, centerChunkY];
-        }
-    
-        // Check if the camera has deviated from the old center by a chunk size
-        const deviationX = Math.abs(centerChunkX - this.oldMapCenter[0]);
-        const deviationY = Math.abs(centerChunkY - this.oldMapCenter[1]);
-    
-        if (deviationX > EDGE_RATIO || deviationY > EDGE_RATIO) {
-            this.oldMapCenter = [centerChunkX, centerChunkY]; // Update old center
-            if(this.zoomMixer.mode == 'detailed') GameMap.reDraw(); // Trigger a redraw
+        if (!this._camPanState) {
+            this._camPanState = {
+                vx: 0,
+                vy: 0
+            };
         }
 
+        let inputX = 0;
+        let inputY = 0;
+        if (this.keys.left.isDown || this.keys.arrowLeft.isDown) inputX -= 1;
+        if (this.keys.right.isDown || this.keys.arrowRight.isDown) inputX += 1;
+        if (this.keys.up.isDown || this.keys.arrowUp.isDown) inputY -= 1;
+        if (this.keys.down.isDown || this.keys.arrowDown.isDown) inputY += 1;
+
+        // Normalize diagonal movement so speed is consistent.
+        if (inputX !== 0 && inputY !== 0) {
+            const inv = 1 / Math.sqrt(2);
+            inputX *= inv;
+            inputY *= inv;
+        }
+
+        const accel = 2600;          // px/s^2
+        const maxSpeed = 980;        // px/s
+        const dampingPerSec = 9.5;   // higher = quicker stop
+
+        const st = this._camPanState;
+        if (inputX !== 0 || inputY !== 0) {
+            st.vx += inputX * accel * dt;
+            st.vy += inputY * accel * dt;
+            const mag = Math.hypot(st.vx, st.vy);
+            if (mag > maxSpeed) {
+                const s = maxSpeed / mag;
+                st.vx *= s;
+                st.vy *= s;
+            }
+        } else {
+            const damp = Math.exp(-dampingPerSec * dt);
+            st.vx *= damp;
+            st.vy *= damp;
+            if (Math.abs(st.vx) < 2) st.vx = 0;
+            if (Math.abs(st.vy) < 2) st.vy = 0;
+        }
+
+        let targetX = camera.scrollX + st.vx * dt;
+        let targetY = camera.scrollY + st.vy * dt;
+
+        // Final smoothing pass to reduce micro-jitter.
+        const lerp = 1 - Math.exp(-18 * dt);
+        camera.scrollX = Phaser.Math.Linear(camera.scrollX, targetX, lerp);
+        camera.scrollY = Phaser.Math.Linear(camera.scrollY, targetY, lerp);
     }
     
     onPointerMove(pointer) {
@@ -717,7 +824,7 @@ ensureFarmInstructionUI() {
     // children we reuse
     this.farmInstrLeft = this.add.text(0, 0, "", {
         fontSize: "16px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         fill: "#ffffff",
         stroke: "#000",
         strokeThickness: 3,
@@ -725,7 +832,7 @@ ensureFarmInstructionUI() {
 
     this.farmInstrMid = this.add.text(0, 0, "", {
         fontSize: "16px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         fill: "#ffffff",
         stroke: "#000",
         strokeThickness: 3,
@@ -733,7 +840,7 @@ ensureFarmInstructionUI() {
 
     this.farmInstrSeedCount = this.add.text(0, 0, "", {
         fontSize: "16px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         fill: "#00ff00",
         stroke: "#000",
         strokeThickness: 3,
@@ -745,7 +852,7 @@ ensureFarmInstructionUI() {
 
     this.farmInstrRight = this.add.text(0, 0, "", {
         fontSize: "16px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         fill: "#ff4444", // red for Esc part
         stroke: "#000",
         strokeThickness: 3,
@@ -1139,7 +1246,7 @@ cancelFarmSelection(exitFarmMode = false) {
             this.add.text(x, H / 2, text, {
             fontSize: "14px",
             fill: color,
-            fontFamily: "monospace",
+            fontFamily: "Bungee",
             stroke: "#000",
             strokeThickness: 2,
             }).setOrigin(0, 0.5)
@@ -1361,6 +1468,7 @@ cancelFarmSelection(exitFarmMode = false) {
     }
     
     update() {
+        this._updateOceanBackdrop();
         if(!this.clock?.paused){
             Turret.update();
             this.clock.update();
@@ -1848,7 +1956,7 @@ cancelFarmSelection(exitFarmMode = false) {
             this.scale.height / 2,
             `STAGE ${stageIndex} COMPLETED`,
             {
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             fontSize: '72px',
             color: '#ffffff',
             stroke: '#000000',
@@ -1883,7 +1991,7 @@ const config = {
     dom: { createContainer: true },  // <-- THIS fixes the error
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#3cb8f1',
+    backgroundColor: '#1e6f93',
     scene: [mapView, GameUIScene, itemTab],
     scale: {
         mode: Phaser.Scale.RESIZE,
@@ -1906,6 +2014,7 @@ const config = {
 
 
 new Phaser.Game(config);
+
 
 
 

@@ -44,6 +44,9 @@ export class DraftStartMenu {
 
     // UI refs
     this.ui = {};
+
+    // Bungee is uppercase-only; enforce uppercase + font on draft UI text.
+    this._installDraftTextTheme();
   }
 
   destroy(){
@@ -64,6 +67,34 @@ export class DraftStartMenu {
 
     this.container?.destroy(true);
     this.container = null;
+    this._uninstallDraftTextTheme();
+  }
+
+  _installDraftTextTheme() {
+    if (this._draftTextThemeInstalled) return;
+    const add = this.scene?.add;
+    if (!add?.text) return;
+
+    this._originalAddText = add.text.bind(add);
+    add.text = (x, y, text, style = {}) => {
+      const nextStyle = (style && typeof style === "object") ? { ...style } : {};
+      if (!nextStyle.fontFamily) nextStyle.fontFamily = "Bungee";
+      const themedText =
+        (nextStyle.fontFamily === "Bungee" && typeof text === "string")
+          ? text.toUpperCase()
+          : text;
+      return this._originalAddText(x, y, themedText, nextStyle);
+    };
+    this._draftTextThemeInstalled = true;
+  }
+
+  _uninstallDraftTextTheme() {
+    if (!this._draftTextThemeInstalled) return;
+    if (this.scene?.add && this._originalAddText) {
+      this.scene.add.text = this._originalAddText;
+    }
+    this._originalAddText = null;
+    this._draftTextThemeInstalled = false;
   }
 
   buildUI(){

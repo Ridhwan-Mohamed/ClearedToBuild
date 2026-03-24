@@ -32,12 +32,21 @@ export class VisibilitySystem {
   // --- render state (single view RT) ---
   static viewRect = null;         // {gx0, gy0, tilesW, tilesH}
   static viewRT = null;
+  static overviewMode = false;
 
   // --- UI cam opt-out ---
   static uiCam = null;
   static registerUICamera(cam) {
     this.uiCam = cam;
     if (this.viewRT) cam.ignore(this.viewRT);
+  }
+
+  static setOverviewMode(enabled) {
+    this.overviewMode = !!enabled;
+    if (!this.viewRT) return;
+    this.viewRT
+      .setDepth(this.overviewMode ? (UIDEPTH - 1.1) : (UIDEPTH - 3))
+      .setAlpha(this.overviewMode ? 0.96 : 1);
   }
 
   // --- tunables ---
@@ -380,9 +389,10 @@ export class VisibilitySystem {
       if (this.viewRT) this.viewRT.destroy(true);
       this.viewRT = this.scene.add.renderTexture(0, 0, tilesW, tilesH)
         .setOrigin(0, 0)
-        .setDepth(UIDEPTH - 3)
+        .setDepth(this.overviewMode ? (UIDEPTH - 1.1) : (UIDEPTH - 3))
         .setScrollFactor(1, 1);
       this.viewRT.setDisplaySize(tilesW * SQUARESIZE, tilesH * SQUARESIZE);
+      this.viewRT.setAlpha(this.overviewMode ? 0.96 : 1);
       if (this.uiCam?.ignore) this.uiCam.ignore(this.viewRT);
 
       // resize scratch
@@ -393,6 +403,7 @@ export class VisibilitySystem {
     }
 
     this.viewRT.setPosition(gx0 * SQUARESIZE, gy0 * SQUARESIZE);
+    this.viewRT.setDepth(this.overviewMode ? (UIDEPTH - 1.1) : (UIDEPTH - 3));
     this.viewRT.gx0 = gx0; this.viewRT.gy0 = gy0;
     this.viewRT.tilesW = tilesW; this.viewRT.tilesH = tilesH;
   }

@@ -6,6 +6,86 @@ import { POWERUP_CARDS } from "./Cards/PowerupCards";
 
 export class Teams {
     static teamLists = {};
+
+    static _cropNeedsWater(crop) {
+      return !!(
+        crop &&
+        crop.hasSeed &&
+        !crop.dailyWatered &&
+        crop.growthStage < MAX_CROP_GROWTH_STAGE &&
+        crop.sprite?.active
+      );
+    }
+
+    static _destroyCropWaterIndicator(crop) {
+      if (!crop) return;
+
+      if (crop.waterNeedTween) {
+        crop.waterNeedTween.remove();
+        crop.waterNeedTween = null;
+      }
+
+      if (crop.waterNeedIcon) {
+        Map.removeFromWorldStatic?.(crop.waterNeedIcon);
+        crop.waterNeedIcon = null;
+      }
+    }
+
+    static _positionCropWaterIndicator(crop) {
+      if (!crop?.waterNeedIcon) return;
+
+      crop.waterNeedIcon.setPosition(
+        crop.x * SQUARESIZE + SQUARESIZE * 0.76,
+        crop.y * SQUARESIZE + SQUARESIZE * 0.24
+      );
+    }
+
+    static syncCropWaterIndicator(crop) {
+      if (!crop?.sprite?.scene) {
+        this._destroyCropWaterIndicator(crop);
+        return;
+      }
+
+      if (!this._cropNeedsWater(crop)) {
+        this._destroyCropWaterIndicator(crop);
+        return;
+      }
+
+      const scene = crop.sprite.scene;
+      if (!scene.textures?.exists("waterIcon")) return;
+
+      if (!crop.waterNeedIcon || !crop.waterNeedIcon.active) {
+        const icon = scene.add.image(0, 0, "waterIcon")
+          .setDepth((crop.sprite.depth ?? TILE_TYPES.crops.depth) + 1)
+          .setDisplaySize(12, 12)
+          .setAlpha(0.95);
+
+        Map.addToWorldStatic?.(icon);
+        crop.waterNeedIcon = icon;
+        crop.waterNeedTween = scene.tweens.add({
+          targets: icon,
+          alpha: 0.22,
+          scaleX: 0.88,
+          scaleY: 0.88,
+          duration: 520,
+          ease: "Sine.easeInOut",
+          yoyo: true,
+          repeat: -1,
+        });
+
+        crop.sprite.once?.("destroy", () => this._destroyCropWaterIndicator(crop));
+      }
+
+      crop.waterNeedIcon.setDepth((crop.sprite.depth ?? TILE_TYPES.crops.depth) + 1);
+      this._positionCropWaterIndicator(crop);
+    }
+
+    static syncTeamCropWaterIndicators(teamNumber) {
+      const crops = this.teamLists[teamNumber]?.crops || [];
+      for (const crop of crops) {
+        this.syncCropWaterIndicator(crop);
+      }
+    }
   
     static newTeam(teamNumber) {
       const list = {
@@ -294,7 +374,7 @@ export class Teams {
         for (let crop of cropList) {
             crop.dailyWatered = false;
 
-            if (crop.growthStage < MAX_CROP_GROWTH_STAGE) {
+            if (crop.hasSeed && crop.growthStage < MAX_CROP_GROWTH_STAGE) {
                 wateringList.push({
                     x: crop.x,
                     y: crop.y,
@@ -302,6 +382,8 @@ export class Teams {
                     sprite: crop.sprite
                 });
             }
+
+            Teams.syncCropWaterIndicator(crop);
         }
         Teams.teamLists[teamNumber].wateringList = wateringList;
     }
@@ -317,8 +399,9 @@ export class Teams {
         if (!cropList || !wateringList) return;
 
         for (let crop of cropList) {
-            if (crop.x === x && crop.y === y && crop.growthStage < MAX_CROP_GROWTH_STAGE) {
+            if (crop.x === x && crop.y === y && crop.hasSeed && crop.growthStage < MAX_CROP_GROWTH_STAGE) {
                 crop.dailyWatered = true;
+                Teams.syncCropWaterIndicator(crop);
                 break;
             }
         }
@@ -350,17 +433,28 @@ export class Teams {
         crop.hasSeed = false;
         crop.growthStage = 0;
         crop.sprite.setFrame(0); // show bare dirt
+        Teams.syncCropWaterIndicator(crop);
       }
     }
 
     static setCropForWatering(crop){
-      const wateringList = this.teamLists['1'].wateringList;
-      wateringList.push({
-          x: crop.x,
-          y: crop.y,
-          assigned: 0,
-          sprite: crop.sprite
-      });
+      if (!crop) return;
+
+      const teamNumber = crop.teamNumber ?? '1';
+      const wateringList = this.teamLists[teamNumber]?.wateringList;
+      if (!wateringList) return;
+
+      const alreadyQueued = wateringList.some(task => task.x === crop.x && task.y === crop.y);
+      if (!alreadyQueued && crop.hasSeed && crop.growthStage < MAX_CROP_GROWTH_STAGE) {
+        wateringList.push({
+            x: crop.x,
+            y: crop.y,
+            assigned: 0,
+            sprite: crop.sprite
+        });
+      }
+
+      this.syncCropWaterIndicator(crop);
     } 
 
     static growWateredCrops(teamNumber) {
@@ -382,6 +476,8 @@ export class Teams {
             this.addFarmSpots(crop.sprite, crop.x, crop.y);
           }
         }
+
+        this.syncCropWaterIndicator(crop);
       }
     }
 

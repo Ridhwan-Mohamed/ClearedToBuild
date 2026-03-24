@@ -166,19 +166,19 @@ function createHoverMenu(scene) {
   bg.setStrokeStyle(2, 0xffffff, 0.65);
 
   const title = scene.add.text(0, -18, "Buy", {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "12px",
     color: "#ffffff",
   }).setOrigin(0.5);
 
   const qtyText = scene.add.text(0, 4, "x1", {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "14px",
     color: "#ffffaa",
   }).setOrigin(0.5);
 
   const costText = scene.add.text(0, 22, "$0", {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "12px",
     color: "#aaffaa",
   }).setOrigin(0.5);
@@ -187,7 +187,7 @@ function createHoverMenu(scene) {
     const r = scene.add.rectangle(x, y, w, h, 0x222222, 0.9).setOrigin(0.5);
     r.setStrokeStyle(1, 0xffffff, 0.5);
     const t = scene.add.text(x, y, label, {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "14px",
       color: "#ffffff",
     }).setOrigin(0.5);
@@ -551,3 +551,4 @@ export function spawnMarketShip(scene, {
     }
   };
 }
+

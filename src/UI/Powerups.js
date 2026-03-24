@@ -128,7 +128,7 @@ export function openPowerupScreen(scene) {
         const name = scene.add.text(0, 30, item.name, {
             fontSize: '14px',
             fill: '#ffffff',
-            fontFamily: 'monospace'
+            fontFamily: 'Bungee'
         }).setOrigin(0.5);
 
         bg.setFillStyle(0x8B4513, 0.4); // Brown tint like character cards (saddle brown)
@@ -145,7 +145,7 @@ export function openPowerupScreen(scene) {
                 const label = scene.add.text(offsetX + 10, 50, `${amount}`, {
                     fontSize: '12px',
                     fill: '#ffffaa',
-                    fontFamily: 'monospace'
+                    fontFamily: 'Bungee'
                 }).setOrigin(0, 0.5);
 
                 group.add([icon, label]);
@@ -189,7 +189,7 @@ export function openPowerupScreen(scene) {
         const name = scene.add.text(cardX, cardYOffset, pu.name, {
             fontSize: '12px',
             fill: '#ffffff',
-            fontFamily: 'monospace'
+            fontFamily: 'Bungee'
         }).setOrigin(0.5).setDepth(1);
         const desc = scene.add.text(cardX, cardYOffset + 45, pu.text, {
             fontSize: '12px',
@@ -276,7 +276,7 @@ export function openPowerupScreen(scene) {
         const name = scene.add.text(0, 30, type.charAt(0).toUpperCase() + type.slice(1), {
             fontSize: '14px',
             fill: '#ffffff',
-            fontFamily: 'monospace'
+            fontFamily: 'Bungee'
         }).setOrigin(0.5);
         const cost = scene.add.text(0, 50, `$${PLAYER_COSTS[type]}`, {
             fontSize: '12px',
@@ -404,13 +404,13 @@ function openSwapOverlay(scene, uiContainer, incomingCard, teamNumber = "1", onD
     const title = scene.add.text(cam.centerX, 70, "Hand Full — Choose a Card to Replace", {
         fontSize: "18px",
         fill: "#ffffff",
-        fontFamily: "monospace"
+        fontFamily: "Bungee"
     }).setOrigin(0.5).setScrollFactor(0);
 
     const subtitle = scene.add.text(cam.centerX, 95, `New: ${incomingCard.name}`, {
         fontSize: "12px",
         fill: "#cccccc",
-        fontFamily: "monospace"
+        fontFamily: "Bungee"
     }).setOrigin(0.5).setScrollFactor(0);
 
     overlay.add([shade, title, subtitle]);
@@ -438,7 +438,7 @@ function openSwapOverlay(scene, uiContainer, incomingCard, teamNumber = "1", onD
         const name = scene.add.text(x, y - 70, existing?.name || "(empty?)", {
             fontSize: "12px",
             fill: "#ffffff",
-            fontFamily: "monospace"
+            fontFamily: "Bungee"
         }).setOrigin(0.5).setScrollFactor(0);
 
         const desc = scene.add.text(x, y + 25, existing?.text || "", {
@@ -481,7 +481,7 @@ function openSwapOverlay(scene, uiContainer, incomingCard, teamNumber = "1", onD
     const cancelTx = scene.add.text(cam.centerX, cam.height - 80, "Cancel", {
         fontSize: "16px",
         fill: "#ffffff",
-        fontFamily: "monospace"
+        fontFamily: "Bungee"
     }).setOrigin(0.5).setScrollFactor(0);
 
     cancelBg.on("pointerdown", () => overlay.destroy(true));
@@ -591,4 +591,5 @@ const STORE = [
         }
     }
 ];
+
 

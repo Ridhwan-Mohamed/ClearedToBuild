@@ -151,7 +151,7 @@ export class GameUIScene extends Phaser.Scene {
         .text(x, H / 2, text, {
           fontSize: "14px",
           fill: color,
-          fontFamily: "monospace",
+          fontFamily: "Bungee",
           stroke: "#000",
           strokeThickness: 2,
         })
@@ -233,7 +233,7 @@ export class GameUIScene extends Phaser.Scene {
     const panelX = 12;
 
     this.stageMetaText = this.add.text(panelX, panelY, "", {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "18px",
       color: "#f6f0ff",
       stroke: "#000000",

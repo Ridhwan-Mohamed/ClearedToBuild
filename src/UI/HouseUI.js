@@ -31,7 +31,7 @@ export class HouseUI {
     // === Title ===
     const title = this.scene.add.text(camX, camY - 70, 'House', {
       fontSize: '18px',
-      fontFamily: 'monospace',
+      fontFamily: 'Bungee',
       fill: '#ffffff'
     }).setOrigin(0.5);
     container.add(title);

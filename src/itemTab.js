@@ -5,7 +5,6 @@ import flower from 'url:./assets/flower.png'
 import pine from 'url:./assets/pine.png'
 import rock3 from 'url:./assets/rock3.png'
 import brick from 'url:./assets/wall/brick.png'
-import dirtImg from 'url:./assets/Dirt/dirtImg.png'
 import turretBase from 'url:./assets/turretBase.png'
 import turret from 'url:./assets/turret.png'
 import Wall from 'url:./assets/wall/Wall.png'
@@ -17,29 +16,47 @@ import TRCWall from 'url:./assets/wall/TRCWall.png'
 import BRCWall from 'url:./assets/wall/BRCWall.png'
 import TLCWall from 'url:./assets/wall/TLCWall.png'
 import BLCWall from 'url:./assets/wall/BLCWall.png'
-import Dirt from 'url:./assets/Dirt/Dirt.png'
-import TDirt from 'url:./assets/Dirt/TDirt.png'
-import iDirt from 'url:./assets/Dirt/iDirt.png'
-// import BDirt from 'url:./assets/Dirt/BDirt.png'
-// import RDirt from 'url:./assets/Dirt/RDirt.png'
-// import LDirt from 'url:./assets/Dirt/LDirt.png'
-// import TRCDirt from 'url:./assets/Dirt/TRCDirt.png'
-// import BRCDirt from 'url:./assets/Dirt/BRCDirt.png'
-import TLCDirt from 'url:./assets/Dirt/TLCDirt.png'
-// import BLCDirt from 'url:./assets/Dirt/BLCDirt.png'
-import WaterImg from 'url:./assets/water/waterImg.png'
+import grass_interior from 'url:./assets/terrain/grass/grass_interior.png'
+import grass_overhang_edge from 'url:./assets/terrain/grass/grass_overhang_edge.png'
+import grass_overhang_corner from 'url:./assets/terrain/grass/grass_overhang_corner.png'
+import grass_edge_water from 'url:./assets/terrain/grass/grass_edge_water.png'
+import grass_corner_water from 'url:./assets/terrain/grass/grass_corner_water.png'
+import water_interior from 'url:./assets/terrain/water/water_interior.png'
 import playerImg from 'url:./assets/Players/playerImg.png'
 import playerSwim from 'url:./assets/Players/playerSwim.png'
 import house1 from 'url:./assets/house1.png'
 import house2 from 'url:./assets/house2.png'
 import well from 'url:./assets/well.png'
-import road_interior from 'url:./assets/Roads/road.png'
-import road_edge from 'url:./assets/Roads/road_edge.png'
-import road_corner from 'url:./assets/Roads/road_corner.png'
-import road_island from 'url:./assets/Roads/road_island.png'
+import dirt_interior from 'url:./assets/terrain/dirt/dirt_interior.png'
+import dirt_edge_grass from 'url:./assets/terrain/dirt/dirt_edge_grass.png'
+import dirt_corner_grass from 'url:./assets/terrain/dirt/dirt_corner_grass.png'
+import dirt_edge_water from 'url:./assets/terrain/dirt/dirt_edge_water.png'
+import dirt_shore_edge_grass from 'url:./assets/terrain/dirt/dirt_shore_edge_grass.png'
+import dirt_corner_water from 'url:./assets/terrain/dirt/dirt_corner_water.png'
+import dirt_inner_corner from 'url:./assets/terrain/dirt/dirt_inner_corner.png'
+import dirt_inner_corner_water from 'url:./assets/terrain/dirt/dirt_inner_corner_water.png'
+import dirt_diag_join from 'url:./assets/terrain/dirt/dirt_diag_join.png'
+import road_interior from 'url:./assets/terrain/road/road_interior.png'
+import road_edge_grass from 'url:./assets/terrain/road/road_edge_grass.png'
+import road_corner_grass from 'url:./assets/terrain/road/road_corner_grass.png'
+import road_edge_water from 'url:./assets/terrain/road/road_edge_water.png'
+import road_shore_edge_grass from 'url:./assets/terrain/road/road_shore_edge_grass.png'
+import road_corner_water from 'url:./assets/terrain/road/road_corner_water.png'
+import road_inner_corner from 'url:./assets/terrain/road/road_inner_corner.png'
+import road_inner_corner_water from 'url:./assets/terrain/road/road_inner_corner_water.png'
+import road_diag_join from 'url:./assets/terrain/road/road_diag_join.png'
+import dungeon_interior from 'url:./assets/terrain/dungeon/dungeon_interior.png'
+import dungeon_edge_grass from 'url:./assets/terrain/dungeon/dungeon_edge_grass.png'
+import dungeon_corner_grass from 'url:./assets/terrain/dungeon/dungeon_corner_grass.png'
+import dungeon_edge_water from 'url:./assets/terrain/dungeon/dungeon_edge_water.png'
+import dungeon_shore_edge_grass from 'url:./assets/terrain/dungeon/dungeon_shore_edge_grass.png'
+import dungeon_corner_water from 'url:./assets/terrain/dungeon/dungeon_corner_water.png'
+import dungeon_inner_corner from 'url:./assets/terrain/dungeon/dungeon_inner_corner.png'
+import dungeon_inner_corner_water from 'url:./assets/terrain/dungeon/dungeon_inner_corner_water.png'
+import dungeon_diag_join from 'url:./assets/terrain/dungeon/dungeon_diag_join.png'
 import house1Img from 'url:./assets/house1Img.png'
 import construction from 'url:./assets/construction.png'
-import grassCrop from 'url:./assets/grassCrop.png'
+import cropsSheet from 'url:./assets/terrain/crops/crops.png'
 import grassBerry from 'url:./assets/grassBerry.png'
 import grassRock from 'url:./assets/grassRock.png'
 import grassWood from 'url:./assets/grassWood.png'
@@ -48,10 +65,6 @@ import pine2 from 'url:./assets/pine2.png'
 import pine1 from 'url:./assets/pine1.png'
 import rock2 from 'url:./assets/rock2.png'
 import rock1 from 'url:./assets/rock1.png'
-import fort_interior from 'url:./assets/fortTiles/fort_interior.png'
-import fort_edge from 'url:./assets/fortTiles/fort_edge.png'
-import fort_corner from 'url:./assets/fortTiles/fort_corner.png'
-import fort_island from 'url:./assets/fortTiles/fort_island.png'
 import tower from 'url:./assets/fortTiles/tower.png'
 import tower_destroyed from 'url:./assets/fortTiles/tower_destroyed.png'
 import prison_closed from 'url:./assets/fortTiles/prison_closed.png'
@@ -80,13 +93,13 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('rock1', rock1);
         scene.load.image('image3', flower);
         scene.load.image('image4', brick);
-        scene.load.image('image5', dirtImg);
+        scene.load.image('image5', dirt_interior);
         scene.load.image('pine3', pine);
         scene.load.image('pine2', pine2);
         scene.load.image('pine1', pine1);
         scene.load.image('image7', turretBase)
         scene.load.image('image7a', turret)
-        scene.load.image('image8', WaterImg); //water image
+        scene.load.image('image8', water_interior); //water image
         scene.load.image('image9', playerImg); //water image
         scene.load.spritesheet('playerSwim', playerSwim, { frameWidth: 16, frameHeight: 16 });
         scene.load.image('image10', house1Img);
@@ -99,29 +112,44 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('brcWall', BRCWall); // Bottom-right corner wall
         scene.load.image('tlcWall', TLCWall); // Top-left corner wall
         scene.load.image('blcWall', BLCWall); // Bottom-left corner wall
-        scene.load.image('Dirt', Dirt);
-        scene.load.image('dirt_edge', TDirt); // Top Dirt
-        scene.load.image('dirt_island', iDirt); // Top Dirt
-        // scene.load.image('bDirt', BDirt); // Bottom Dirt
-        // scene.load.image('rDirt', RDirt); // Right Dirt
-        // scene.load.image('lDirt', LDirt); // Left Dirt
-        // scene.load.image('trcDirt', TRCDirt); // Top-right corner Dirt
-        // scene.load.image('brcDirt', BRCDirt); // Bottom-right corner Dirt
-        scene.load.image('dirt_corner', TLCDirt); // Top-left corner Dirt
-        // scene.load.image('blcDirt', BLCDirt); // Bottom-left corner Dirt
+        scene.load.image('grass_interior', grass_interior);
+        scene.load.image('grass_overhang_edge', grass_overhang_edge);
+        scene.load.image('grass_overhang_corner', grass_overhang_corner);
+        scene.load.image('grass_edge_water', grass_edge_water);
+        scene.load.image('grass_corner_water', grass_corner_water);
+        scene.load.image('dirt_interior', dirt_interior);
+        scene.load.image('dirt_edge_grass', dirt_edge_grass);
+        scene.load.image('dirt_corner_grass', dirt_corner_grass);
+        scene.load.image('dirt_edge_water', dirt_edge_water);
+        scene.load.image('dirt_shore_edge_grass', dirt_shore_edge_grass);
+        scene.load.image('dirt_corner_water', dirt_corner_water);
+        scene.load.image('dirt_inner_corner', dirt_inner_corner);
+        scene.load.image('dirt_inner_corner_water', dirt_inner_corner_water);
+        scene.load.image('dirt_diag_join', dirt_diag_join);
         scene.load.image('house1', house1); 
         scene.load.image('house2', house2); 
         scene.load.image('construction', construction);
         scene.load.image('well', well); 
         scene.load.image('road_interior', road_interior); 
-        scene.load.image('road_edge', road_edge); 
-        scene.load.image('road_corner', road_corner); 
-        scene.load.image('road_island', road_island);
-        scene.load.image('fort_interior', fort_interior);
-        scene.load.image('fort_edge', fort_edge);
-        scene.load.image('fort_corner', fort_corner);
-        scene.load.image('fort_island', fort_island);
-        scene.load.image('grassCrop', grassCrop);
+        scene.load.image('road_edge_grass', road_edge_grass); 
+        scene.load.image('road_corner_grass', road_corner_grass); 
+        scene.load.image('road_edge_water', road_edge_water);
+        scene.load.image('road_shore_edge_grass', road_shore_edge_grass);
+        scene.load.image('road_corner_water', road_corner_water);
+        scene.load.image('road_inner_corner', road_inner_corner);
+        scene.load.image('road_inner_corner_water', road_inner_corner_water);
+        scene.load.image('road_diag_join', road_diag_join);
+        scene.load.image('dungeon_interior', dungeon_interior);
+        scene.load.image('dungeon_edge_grass', dungeon_edge_grass);
+        scene.load.image('dungeon_corner_grass', dungeon_corner_grass);
+        scene.load.image('dungeon_edge_water', dungeon_edge_water);
+        scene.load.image('dungeon_shore_edge_grass', dungeon_shore_edge_grass);
+        scene.load.image('dungeon_corner_water', dungeon_corner_water);
+        scene.load.image('dungeon_inner_corner', dungeon_inner_corner);
+        scene.load.image('dungeon_inner_corner_water', dungeon_inner_corner_water);
+        scene.load.image('dungeon_diag_join', dungeon_diag_join);
+        scene.load.spritesheet('water', water_interior, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('crops', cropsSheet, { frameWidth: 32, frameHeight: 32 });
         scene.load.image('grassBerry', grassBerry);
         scene.load.image('grassWood', grassWood);
         scene.load.image('grassRock', grassRock);

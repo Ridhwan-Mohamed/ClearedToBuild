@@ -31,7 +31,7 @@ export class BasePage {
     this.container.add(g);
 
     const title = scene.add.text(0, -innerH/2 + 20, cfg.title ?? "Contract", {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "14px",
       color: "#ffffff"
     }).setOrigin(0.5, 0);
@@ -39,7 +39,7 @@ export class BasePage {
     this.container.add(title);
 
     const body = scene.add.text(-innerW/2 + 12, -innerH/2 + 50, (cfg.lines ?? []).join("\n"), {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "12px",
       color: cfg.bodyColor ?? "#e2e8f0",
       lineSpacing: 6,

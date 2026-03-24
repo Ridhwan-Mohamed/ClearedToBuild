@@ -33,7 +33,7 @@ export class SlotPanel {
     this._drawFrameTheme(false);
 
     this.header = this.scene.add.text(0, -this.H/2, this._titleForSlot(), {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "14px",
       color: "#ffffff"
     }).setOrigin(0.5, 0);
@@ -205,7 +205,7 @@ export class SlotPanel {
       0, 2,
       "",
       {
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         fontSize: "30px",
         color: "#ffe9e9",
         stroke: "#2b0000",

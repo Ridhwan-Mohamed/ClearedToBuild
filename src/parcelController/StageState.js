@@ -7,7 +7,7 @@ export const StageState = {
   STAGES_PER_SEASON: 5,
   START_OVERRIDE: {
     seasonIndex: 1,
-    stageIndex: 5,
+    stageIndex: 1,
   },
 
   // Fort towers that exist in the world (registered by TowerBuilding)

@@ -28,7 +28,7 @@ export class TeamNameInput {
             width:${width}px;
             padding:6px 10px;
             font-size:14px;
-            font-family:monospace;
+            font-family:'Bungee', cursive;
             border-radius:8px;
             border:none;
             box-shadow:none;

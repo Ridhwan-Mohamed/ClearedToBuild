@@ -8,11 +8,27 @@ import { weapons } from "../weapons";
 import { pickRaidApproachForPOI, recalculateDestroyTasksFromPoint } from "../Manager/spawnManager";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner"
 import { ZoomMixer } from "../UI/ZoomMixer";
+import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
+import raiderWalkDown from 'url:../assets/players/raider/raider_walk_down.png';
+import raiderWalkDownLeft from 'url:../assets/players/raider/raider_walk_down_left.png';
+import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_right.png';
+import raiderWalkUp from 'url:../assets/players/raider/raider_walk_up.png';
+import raiderWalkUpLeft from 'url:../assets/players/raider/raider_walk_up_left.png';
+import raiderWalkUpRight from 'url:../assets/players/raider/raider_walk_up_right.png';
 export class Raider {
     // Used by Player.followPath via sprite.type.speed / sprite.type.stamina
     static speed   = 100;  // a bit quick
     static stamina = 0;   // no stamina drain
     static tint   = 0xff0000; // default red tint for enemies (can be overridden per raider if you want)
+
+    static preload(scene) {
+        scene.load.spritesheet('raider_walk_down', raiderWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_walk_down_left', raiderWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_walk_down_right', raiderWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_walk_up', raiderWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_walk_up_left', raiderWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_walk_up_right', raiderWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
     
     constructor(x, y, teamNumber = 0) {
         // Reuse generic cube creation, but then specialize
@@ -20,7 +36,7 @@ export class Raider {
             x,
             y,
             teamNumber,
-            "player", // sprite sheet
+            "raider_walk_down", // sprite sheet
             "walk",
             "idle",
             "action",
@@ -40,6 +56,22 @@ export class Raider {
         raider.stamina    = raider.stamina ?? raider.maxStamina;
         raider.weapon     = weapons.hands;
         raider.destroySelf = () => Raider.destroy(raider); 
+        attachDirectionalSix(raider, {
+            animPrefix: 'raider',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'raider_walk_down',
+                down_left: 'raider_walk_down_left',
+                down_right: 'raider_walk_down_right',
+                up: 'raider_walk_up',
+                up_left: 'raider_walk_up_left',
+                up_right: 'raider_walk_up_right',
+            }
+        });
         ZoomMixer.createPlayerMoniker(raider);
 
         // Enemies (team 0) already default to red tint in Player.applyDefaultTint,

@@ -13,6 +13,13 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { AudioManager } from '../Manager/AudioManager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import firemanWalkDown from 'url:../assets/players/fireman/fireman_walk_down.png';
+import firemanWalkDownLeft from 'url:../assets/players/fireman/fireman_walk_down_left.png';
+import firemanWalkDownRight from 'url:../assets/players/fireman/fireman_walk_down_right.png';
+import firemanWalkUp from 'url:../assets/players/fireman/fireman_walk_up.png';
+import firemanWalkUpLeft from 'url:../assets/players/fireman/fireman_walk_up_left.png';
+import firemanWalkUpRight from 'url:../assets/players/fireman/fireman_walk_up_right.png';
 
 const MAX_CARRY = 1;
 
@@ -21,8 +28,22 @@ export class Fireman {
     static speed = 80;
     static stamina = 0.02;
 
+    static preload(scene) {
+        scene.load.spritesheet('fireman_walk_down', firemanWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_walk_down_left', firemanWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_walk_down_right', firemanWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_walk_up', firemanWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_walk_up_left', firemanWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_walk_up_right', firemanWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
-        const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
+        const sprite = Player.scene.physics.add.sprite(
+            SQUARESIZE * x + SQUARESIZE / 2,
+            SQUARESIZE * y + SQUARESIZE / 2,
+            'fireman_walk_down',
+            1
+        );
         sprite.setInteractive();
         sprite.id = Player.count++;
         sprite.setOrigin(0.5, 0.5);
@@ -34,7 +55,6 @@ export class Fireman {
         sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
-        sprite.setTint(0xff9933); // orange tint
         sprite.unitTint = 0xff9933;
         sprite.type = Fireman;
         sprite.body.pushable = false;
@@ -43,6 +63,22 @@ export class Fireman {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'fireman',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'fireman_walk_down',
+                down_left: 'fireman_walk_down_left',
+                down_right: 'fireman_walk_down_right',
+                up: 'fireman_walk_up',
+                up_left: 'fireman_walk_up_left',
+                up_right: 'fireman_walk_up_right',
+            }
+        });
         sprite.name = NameGenerator.generate();
         sprite.skip = false; //flag for manager task allocation
 

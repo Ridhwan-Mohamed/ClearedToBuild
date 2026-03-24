@@ -137,7 +137,7 @@ export class WallDestroyController {
         this.uiBg = this.scene.add.rectangle(0, 0, 10, 40, 0x220000, 0.75);
         this.uiText = this.scene.add.text(0, 0, "", {
             fontSize: "16px",
-            fontFamily: "monospace",
+            fontFamily: "Bungee",
             color: "#ff6666",
             stroke: "#000",
             strokeThickness: 3,
@@ -145,7 +145,7 @@ export class WallDestroyController {
 
         this.finalBtn = this.scene.add.text(0, 0, "✔ Finalize", {
             fontSize: "14px",
-            fontFamily: "monospace",
+            fontFamily: "Bungee",
             color: "#ffffff",
             backgroundColor: "#220000",
             padding: { left: 8, right: 8, top: 4, bottom: 4 },
@@ -178,7 +178,7 @@ export class WallDestroyController {
 
     this.finalizeText = this.scene.add.text(x, y, '', {
       fontSize: '16px',
-      fontFamily: 'monospace',
+      fontFamily: 'Bungee',
       color: '#ff4444',
       fontStyle: 'bold'
     }).setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH + 51);
@@ -237,3 +237,4 @@ export class WallDestroyController {
         this.stop();
     }
 }
+

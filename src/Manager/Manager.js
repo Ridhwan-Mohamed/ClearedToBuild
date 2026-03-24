@@ -13,6 +13,9 @@ export class Manager {
             const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
             if(!force && !Player.playerAvailible(troop)) continue;
             for(let task of taskList){
+                if (state === CONTROL_STATES.BUILD_MODE_T && !task?.type && task?.buildType) {
+                    task.type = task.buildType;
+                }
                 if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
                     task.type = task?.value?.buildType || task?.value?.type || null;
                     if (!task.type) continue;
@@ -92,6 +95,9 @@ export class Manager {
         const {navMesh, navGrid} = Player._getNavForTroop(troop);
         const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
         for(let task of taskList){
+            if (state === CONTROL_STATES.BUILD_MODE_T && !task?.type && task?.buildType) {
+                task.type = task.buildType;
+            }
             if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
                 task.type = task?.value?.buildType || task?.value?.type || null;
                 if (!task.type) continue;
@@ -172,6 +178,9 @@ export class Manager {
 
     static assignTaskToTroop(troop, task, state){
         const {navMesh, navGrid} = Player._getNavForTroop(troop);
+        if (state === CONTROL_STATES.BUILD_MODE_T && !task?.type && task?.buildType) {
+            task.type = task.buildType;
+        }
         if ((state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) && !task?.type) {
             task.type = task?.value?.buildType || task?.value?.type || null;
             if (!task.type) return false;

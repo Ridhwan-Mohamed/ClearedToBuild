@@ -171,7 +171,7 @@ export default class PlayerTab {
             const label = scene.rexUI.add.label({
                 background: rr(0, 36, 10, 0x2a5bd8),
                 text: scene.add.text(0, 0, labelText, {
-                    fontFamily: 'sans-serif',
+                    fontFamily: 'Bungee',
                     fontSize: 14,
                     color: '#ffffff'
                 }),
@@ -202,7 +202,7 @@ export default class PlayerTab {
             const label = scene.rexUI.add.label({
                 background: rr(0, 36, 10, 0x9c27b0),
                 text: scene.add.text(0, 0, 'Sell', {
-                    fontFamily: 'sans-serif',
+                    fontFamily: 'Bungee',
                     fontSize: 14,
                     color: '#ffffff'
                 }),
@@ -241,7 +241,7 @@ export default class PlayerTab {
         const detailsText = scene.add.text(
             0, 0,
             `Name: ${name}\nType: ${type}\nTeam: ${team}\nWeapon: ${weapon}`,
-            { fontFamily: 'sans-serif', fontSize: 16, color: '#EDEDED' }
+            { fontFamily: 'Bungee', fontSize: 16, color: '#EDEDED' }
         );
 
         header.add(portrait,    0, 'center', 0, false);

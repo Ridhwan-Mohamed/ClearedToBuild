@@ -9,6 +9,47 @@ function randInt(rng, a, b) { // inclusive
 
 function key(x, y) { return `${x},${y}`; }
 
+function hasCell(cells, x, y) {
+  return cells.has(key(x, y));
+}
+
+function fillConcavePondCells(cells, min, max) {
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const toAdd = [];
+
+    for (let yy = min; yy <= max; yy++) {
+      for (let xx = min; xx <= max; xx++) {
+        if (hasCell(cells, xx, yy)) continue;
+
+        const up = hasCell(cells, xx, yy - 1);
+        const right = hasCell(cells, xx + 1, yy);
+        const down = hasCell(cells, xx, yy + 1);
+        const left = hasCell(cells, xx - 1, yy);
+        const waterNeighbors = Number(up) + Number(right) + Number(down) + Number(left);
+        const concaveNotch =
+          (up && right) ||
+          (right && down) ||
+          (down && left) ||
+          (left && up);
+
+        // Fill inward notches and single-tile holes so the shoreline only
+        // needs straight edges and outer corners.
+        if (waterNeighbors >= 3 || concaveNotch) {
+          toAdd.push(key(xx, yy));
+        }
+      }
+    }
+
+    if (toAdd.length) {
+      changed = true;
+      for (const kk of toAdd) cells.add(kk);
+    }
+  }
+}
+
 /**
  * Build a clustered pond using a remembered random-walk + smoothing.
  * Returns a Set of "x,y" local coords.
@@ -56,6 +97,8 @@ function buildPondCells({ size, rng, edgeBuffer = 2, pondTiles = 30 }) {
     }
   }
   for (const kk of toAdd) cells.add(kk);
+
+  fillConcavePondCells(cells, min, max);
 
   return cells;
 }

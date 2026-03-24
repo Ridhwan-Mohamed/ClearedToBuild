@@ -20,7 +20,7 @@ export function makeButton(scene, cfg) {
   bg.setScrollFactor(1);
 
   const t = scene.add.text(0, 0, label, {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "12px",
     color: "#ffffff"
   }).setOrigin(0.5);
@@ -39,3 +39,4 @@ export function makeButton(scene, cfg) {
   c.add([bg, t]);
   return c;
 }
+

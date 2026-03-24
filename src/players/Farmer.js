@@ -12,6 +12,14 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { AudioManager } from '../Manager/AudioManager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import farmerWalkDown from 'url:../assets/players/farmer/farmer_walk_down.png';
+import farmerWalkDownLeft from 'url:../assets/players/farmer/farmer_walk_down_left.png';
+import farmerWalkDownRight from 'url:../assets/players/farmer/farmer_walk_down_right.png';
+import farmerWalkUp from 'url:../assets/players/farmer/farmer_walk_up.png';
+import farmerWalkUpLeft from 'url:../assets/players/farmer/farmer_walk_up_left.png';
+import farmerWalkUpRight from 'url:../assets/players/farmer/farmer_walk_up_right.png';
+import farmerPlant from 'url:../assets/players/farmer/farmer_plant.png';
 
 export class Farmer {
 
@@ -19,34 +27,65 @@ export class Farmer {
     static stamina = 0.02;
     static maxWaterPailCarry = 3;
 
+    static preload(scene) {
+        scene.load.image('farmer_plant', farmerPlant);
+        scene.load.spritesheet('farmer_walk_down', farmerWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_walk_down_left', farmerWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_walk_down_right', farmerWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_walk_up', farmerWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_walk_up_left', farmerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_walk_up_right', farmerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
-        const farmer = Player.scene.physics.add.sprite(SQUARESIZE *x + SQUARESIZE/2, SQUARESIZE*y + SQUARESIZE/2, 'player');
+        const farmer = Player.scene.physics.add.sprite(
+            SQUARESIZE *x + SQUARESIZE/2,
+            SQUARESIZE*y + SQUARESIZE/2,
+            'farmer_walk_down',
+            1
+        );
         farmer.setInteractive();
         farmer.id = this.count;
         Player.count += 1;
         farmer.setOrigin(0.5,0.5);
-        farmer.setDepth(BLOCKDEPTH+1)
+        farmer.setDepth(BLOCKDEPTH+1);
         farmer.roam = false;
-        farmer.currentPath = []
+        farmer.currentPath = [];
         farmer.body.team = teamNumber;
         farmer.health = 60;
         farmer.maxHealth = 60;
         farmer.stamina = 100;
         farmer.maxStamina = 100;
         farmer.type = Farmer;
-        farmer.setTint(0x8B5A2B)
         farmer.unitTint = 0x8B5A2B;
         farmer.body.pushable = false;
         farmer.name = NameGenerator.generate();
-        farmer.animState = 'idle'
+        farmer.animState = 'idle';
         farmer.walk = 'walk';
         farmer.idle = 'idle';
         farmer.action = 'action';
+        farmer.plantPose = 'farmer_plant';
         farmer.swim = 'swim';
         farmer.carrying = null;
         farmer.waterBucket = {count: 0};
         farmer.oldState = null;
         farmer.pendingFarmSpot = null;
+        attachDirectionalSix(farmer, {
+            animPrefix: 'farmer',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'farmer_walk_down',
+                down_left: 'farmer_walk_down_left',
+                down_right: 'farmer_walk_down_right',
+                up: 'farmer_walk_up',
+                up_left: 'farmer_walk_up_left',
+                up_right: 'farmer_walk_up_right',
+            }
+        });
         ZoomMixer.createPlayerMoniker(farmer);
         Teams.movePlayerState(farmer, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(farmer);

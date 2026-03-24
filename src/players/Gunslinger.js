@@ -11,6 +11,13 @@ import { Manager } from '../Manager/Manager.js';
 import { Wall } from '../buildings/Wall.js';
 import { Projectile } from '../Projectile.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import gunslingerWalkDown from 'url:../assets/players/gunslinger/gunslinger_walk_down.png';
+import gunslingerWalkDownLeft from 'url:../assets/players/gunslinger/gunslinger_walk_down_left.png';
+import gunslingerWalkDownRight from 'url:../assets/players/gunslinger/gunslinger_walk_down_right.png';
+import gunslingerWalkUp from 'url:../assets/players/gunslinger/gunslinger_walk_up.png';
+import gunslingerWalkUpLeft from 'url:../assets/players/gunslinger/gunslinger_walk_up_left.png';
+import gunslingerWalkUpRight from 'url:../assets/players/gunslinger/gunslinger_walk_up_right.png';
 
 
 export class Gunslinger {
@@ -18,11 +25,21 @@ export class Gunslinger {
     static speed = 100;
     static stamina = 0.02;
 
+    static preload(scene) {
+        scene.load.spritesheet('gunslinger_walk_down', gunslingerWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_walk_down_left', gunslingerWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_walk_down_right', gunslingerWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_walk_up', gunslingerWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_walk_up_left', gunslingerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_walk_up_right', gunslingerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
         const sprite = Player.scene.physics.add.sprite(
             SQUARESIZE * x + SQUARESIZE / 2,
             SQUARESIZE * y + SQUARESIZE / 2,
-            'gun1'
+            'gunslinger_walk_down',
+            1
         );
         
         sprite.setInteractive();
@@ -30,7 +47,6 @@ export class Gunslinger {
         sprite.setDepth(BLOCKDEPTH + 1);
         sprite.setSize(16, 12).setOffset(8, 20);
         sprite.setCollideWorldBounds(true);
-        sprite.setTint(0x9999ff); // bluish tint
         sprite.unitTint = 0x9999ff;
 
         sprite.id = Player.count++;
@@ -43,11 +59,27 @@ export class Gunslinger {
         sprite.name = NameGenerator.generate();
         sprite.type = Gunslinger;
 
-        sprite.animState = 'gun1Idle';
-        sprite.walk = 'gun1Walk';
-        sprite.idle = 'gun1Idle';
+        sprite.animState = 'idle';
+        sprite.walk = 'walk';
+        sprite.idle = 'idle';
         sprite.action = 'gun1Idle';
         sprite.swim = 'swim';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'gunslinger',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'gunslinger_walk_down',
+                down_left: 'gunslinger_walk_down_left',
+                down_right: 'gunslinger_walk_down_right',
+                up: 'gunslinger_walk_up',
+                up_left: 'gunslinger_walk_up_left',
+                up_right: 'gunslinger_walk_up_right',
+            }
+        });
 
         sprite.isGunslinger = true;
 

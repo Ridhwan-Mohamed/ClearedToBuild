@@ -7,14 +7,35 @@ import { NameGenerator } from './NameGenerator.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import foragerWalkDown from 'url:../assets/players/forager/forager_walk_down.png';
+import foragerWalkDownLeft from 'url:../assets/players/forager/forager_walk_down_left.png';
+import foragerWalkDownRight from 'url:../assets/players/forager/forager_walk_down_right.png';
+import foragerWalkUp from 'url:../assets/players/forager/forager_walk_up.png';
+import foragerWalkUpLeft from 'url:../assets/players/forager/forager_walk_up_left.png';
+import foragerWalkUpRight from 'url:../assets/players/forager/forager_walk_up_right.png';
  
 export class Forager {
 
     static speed = 80;
     static stamina = 0.02;
 
+    static preload(scene) {
+        scene.load.spritesheet('forager_walk_down', foragerWalkDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_walk_down_left', foragerWalkDownLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_walk_down_right', foragerWalkDownRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_walk_up', foragerWalkUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_walk_up_left', foragerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_walk_up_right', foragerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+    }
+
     constructor(x, y, teamNumber) {
-        const sprite = Player.scene.physics.add.sprite(SQUARESIZE * x + SQUARESIZE / 2, SQUARESIZE * y + SQUARESIZE / 2, 'player');
+        const sprite = Player.scene.physics.add.sprite(
+            SQUARESIZE * x + SQUARESIZE / 2,
+            SQUARESIZE * y + SQUARESIZE / 2,
+            'forager_walk_down',
+            1
+        );
         sprite.setInteractive();
         sprite.id = Player.count++;
         sprite.setOrigin(0.5, 0.5);
@@ -26,7 +47,6 @@ export class Forager {
         sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
-        sprite.setTint(0x228B22); // greenish tint for foragers
         sprite.unitTint = 0x228B22;
         sprite.body.pushable = false;
         sprite.animState = 'idle';
@@ -35,6 +55,22 @@ export class Forager {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        attachDirectionalSix(sprite, {
+            animPrefix: 'forager',
+            defaultDirection: 'down',
+            walkStateKey: 'walk',
+            idleStateKey: 'idle',
+            idleFrame: 1,
+            frameRate: 7,
+            directions: {
+                down: 'forager_walk_down',
+                down_left: 'forager_walk_down_left',
+                down_right: 'forager_walk_down_right',
+                up: 'forager_walk_up',
+                up_left: 'forager_walk_up_left',
+                up_right: 'forager_walk_up_right',
+            }
+        });
         sprite.name = NameGenerator.generate();
         sprite.carrying = null;
         ZoomMixer.createPlayerMoniker(sprite);

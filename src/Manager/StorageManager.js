@@ -232,14 +232,10 @@ export class StorageManager {
 
     static addCarriedItem(troop, item) {
         troop.carrying = item;
-        troop.walk = 'carryWalk';
-        troop.idle = 'carryIdle';
     }
 
     static removeCarriedItem(troop) {
         troop.carrying = null;
-        troop.walk = 'walk';
-        troop.idle = 'idle';
     }
 
 }

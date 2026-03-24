@@ -39,6 +39,7 @@ export class buildingManager{
             x: tile.x,
             y: tile.y,
             assigned: 0,
+            type: buildType,
             buildType,
             });
         });
@@ -110,7 +111,7 @@ export class buildingManager{
 
     static beginBuilding(troop){
         const teamNumber = troop.body.team ?? 1;
-        if(!buildingManager.hasRequiredMaterials(troop.task.buildType.price, teamNumber)){return}
+        // if(!buildingManager.hasRequiredMaterials(troop.task.buildType.price, teamNumber)){return}
 
         const x = troop.task.x;
         const y = troop.task.y;
@@ -139,6 +140,7 @@ export class buildingManager{
             Map.placeTile(x,y,troop.task.buildType.name);
             if (buildTypeName === "wall" || buildTypeName === "woodWall") {
                 Wall.ensureAt(this.scene, x, y, teamNumber);
+                Map.refreshWallShapesAround?.(x, y);
             }
         } else {
             Map.handleGridDelete(null, troop.task.buildType, x, y);
@@ -158,15 +160,16 @@ export class buildingManager{
                             PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
                         }
                     }
-                } else {
-                    const playerChange = this.NavMeshUpdater.blockTiles([{ x, y }], true);
-                    if (playerChange && playerChange.removedPolyIds) {
-                        const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, playerChange.removedPolyIds, playerChange.addedPolyIds);
-                        for (const unit of impacted) {
-                            PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
-                        }
-                    }
-                }
+                } 
+                // else {
+                //     const playerChange = this.NavMeshUpdater.blockTiles([{ x, y }], true);
+                //     if (playerChange && playerChange.removedPolyIds) {
+                //         const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, playerChange.removedPolyIds, playerChange.addedPolyIds);
+                //         for (const unit of impacted) {
+                //             PathRepair.repairUnitPath(unit, playerChange.removedPolyIds, Map.navMesh);
+                //         }
+                //     }
+                // }
 
                 if (blocksEnemy) {
                     const enemyChange = this.EnemyNavMeshUpdater.blockTile(x, y);
@@ -192,6 +195,7 @@ export class buildingManager{
             Map.drawGridValue(x,y,1);
             if (isDoor) {
                 Wall.ensureAt(this.scene, x, y, teamNumber);
+                Map.refreshWallShapesAround?.(x, y);
             }
             // IMPORTANT: do NOT call blockTile for doors
         }
@@ -303,6 +307,8 @@ export class buildingManager{
     // --- VISUALS ---
     // Put the actual tile art down. For doors, you want layer-1 to exist so map.js change (above) shows it.
     Map.drawGridValue(x, y, 1);
+    Wall.ensureAt(this.scene, x, y, ownerTeam);
+    Map.refreshWallShapesAround?.(x, y);
 
     // --- REGION / OVERVIEW ---
     this.scene?.zoomMixer?.updateOverviewCell?.(x, y, Map.grid);
@@ -636,14 +642,17 @@ export class buildingManager{
                     console.log("Done building.");
                     const cost = task.type.cost;
                     AudioManager.setConstructionActive(sprite, false);
-                    AudioManager.playSound("sfx_building_complete");
-                    if (cost && !this.hasRequiredMaterials(cost, teamNumber)) {
+                    if (cost && !task.prepaid && !this.hasRequiredMaterials(cost, teamNumber)) {
                         console.log("Not enough resources to build!");
                         sprite.play(sprite.idle);
                         sprite.timer = null;
                         sprite.task = null;
                         return;
                     }
+                    if (cost && !task.prepaid) {
+                        this.consumeRequiredMaterials(cost, teamNumber);
+                    }
+                    AudioManager.playSound("sfx_building_complete");
                     if (task.constructionSprite) {
                         task.constructionSprite.destroy();
                         task.constructionSprite = null;

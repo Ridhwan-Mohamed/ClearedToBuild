@@ -28,6 +28,11 @@ import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
 import { InterruptController } from "../ai/scheduler/InterruptController";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
+import {
+    shouldUseDirectionalFacing,
+    syncDirectionalAnimationState,
+    updateDirectionalAnimationFromVelocity
+} from "./PlayerDirectionalAnimator";
 
 export class Player {
 
@@ -48,6 +53,8 @@ export class Player {
     static MINI_BAR_PAD        = 1;
     static MINI_BAR_MAX_W      = 110;    // clamps on-screen width
     static MINI_BAR_BASE_SEG_W = 4;      // pre-scale width per segment before clamping
+    static CARRY_ICON_OFFSET_Y = 28;
+    static CARRY_ICON_SIZE     = 18;
     
     static init(scene){
         this.scene = scene;
@@ -76,7 +83,7 @@ export class Player {
         newCube.body.team = team;
         team == 1 ? newCube.health = 200 : newCube.health = 100;
         team == 1 ? newCube.speed = 100 : newCube.speed = 50;
-        this.applyDefaultTint(newCube);
+        // this.applyDefaultTint(newCube);
         newCube.body.pushable = false;
         newCube.animState = idle;
         newCube.walk = walk;
@@ -147,6 +154,97 @@ export class Player {
         }
     }
 
+    static _resolveCarryVisual(troop) {
+        const carryEntry = troop?.carrying;
+        if (carryEntry) {
+            const item = carryEntry.item || carryEntry;
+            const count = Number.isFinite(carryEntry.count) ? carryEntry.count : 1;
+            const iconKey = item?.icon;
+            if (iconKey) {
+                return {
+                    iconKey,
+                    count,
+                    showCount: count > 1,
+                };
+            }
+        }
+
+        if (troop?.isFarmer && Number(troop?.waterBucket?.count) > 0) {
+            return {
+                iconKey: UI_ITEM_TYPES.unclean_water.icon,
+                count: troop.waterBucket.count,
+                showCount: true,
+            };
+        }
+
+        return null;
+    }
+
+    static _ensureCarryIndicator(troop) {
+        if (troop._carryIndicator || !this.scene) return troop._carryIndicator;
+
+        const icon = this.scene.add.image(0, 0, UI_ITEM_TYPES.food.icon)
+            .setDisplaySize(this.CARRY_ICON_SIZE, this.CARRY_ICON_SIZE)
+            .setOrigin(0.5);
+
+        const badgeBg = this.scene.add.circle(7, 7, 7, 0x000000, 0.82)
+            .setStrokeStyle(1, 0xffffff, 0.55);
+
+        const countText = this.scene.add.text(7, 7, "1", {
+            fontFamily: "Bungee",
+            fontSize: "10px",
+            color: "#ffffff",
+            stroke: "#000000",
+            strokeThickness: 2
+        }).setOrigin(0.5);
+
+        const container = this.scene.add.container(troop.x, troop.y, [icon, badgeBg, countText])
+            .setDepth((troop.depth ?? (BLOCKDEPTH + 1)) + 3)
+            .setVisible(false);
+
+        container.icon = icon;
+        container.badgeBg = badgeBg;
+        container.countText = countText;
+
+        troop._carryIndicator = container;
+        troop.once?.("destroy", () => {
+            troop._carryIndicator = null;
+            container.destroy();
+        });
+
+        return container;
+    }
+
+    static _updateCarryIndicator(troop) {
+        const indicator = troop?._carryIndicator;
+        if (!troop?.active || !troop?.scene) {
+            indicator?.destroy?.();
+            troop._carryIndicator = null;
+            return;
+        }
+
+        const visual = this._resolveCarryVisual(troop);
+        if (!visual) {
+            indicator?.setVisible(false);
+            return;
+        }
+
+        const container = this._ensureCarryIndicator(troop);
+        const yOffset = (troop.displayHeight || SQUARESIZE) / 2 + this.CARRY_ICON_OFFSET_Y;
+
+        container.setPosition(troop.x, troop.y - yOffset);
+        container.setDepth((troop.depth ?? (BLOCKDEPTH + 1)) + 3);
+        container.icon.setTexture(visual.iconKey);
+        container.setVisible(true);
+
+        container.badgeBg.setVisible(visual.showCount);
+        container.countText.setVisible(visual.showCount);
+
+        if (visual.showCount) {
+            container.countText.setText(`${visual.count}`);
+        }
+    }
+
     static refreshAllFoW(allVisibile=false) {
        for (const t of this.troops) VisibilitySystem.applyFoWToSprite(t, allVisibile);
     }
@@ -190,7 +288,7 @@ export class Player {
                 this.selected.length = 0;
                 this.selected.push(cube);
             } else {
-                Player.applyDefaultTint(cube);                // Revert to original texture
+                cube.clearTint();
                 const index = this.selected.indexOf(cube);
                 if (index > -1) {
                     this.selected.splice(index, 1);
@@ -202,17 +300,11 @@ export class Player {
         // Add a pointerover event listener to change texture on hover
         cube.on('pointerover', (pointer) => {
             Player.setMiniBarHover(cube, true);
-            if (!cube.selected) {
-                cube.setTint(Phaser.Display.Color.GetColor(50, 50, 50));
-            }
         });
 
         // Add a pointerout event listener to revert texture when not hovered
         cube.on('pointerout', (pointer) => {
             Player.setMiniBarHover(cube, false);
-            if (!cube.selected) {
-                Player.applyDefaultTint(cube);
-            }
         });
 
     }
@@ -406,7 +498,21 @@ export class Player {
 
         // 2) If we aren't walking anywhere, just idle.
         if (!sprite.currentPath || sprite.currentPath.length === 0) {
+            if (sprite.poseLock?.textureKey) {
+                sprite.body.setVelocity(0, 0);
+                sprite.rotation = 0;
+                sprite.anims?.stop?.();
+                if (sprite.texture?.key !== sprite.poseLock.textureKey) {
+                    sprite.setTexture(sprite.poseLock.textureKey);
+                }
+                if (Number.isInteger(sprite.poseLock.frame)) {
+                    sprite.setFrame(sprite.poseLock.frame);
+                }
+                PathDebugDrawer.onPathEnd(sprite);
+                return;
+            }
             this.setAnimState(sprite, sprite.idle);
+            updateDirectionalAnimationFromVelocity(sprite, 0, 0, false);
             PathDebugDrawer.onPathEnd(sprite); // optional cleanup
             return;
         }
@@ -463,9 +569,10 @@ export class Player {
             desired.y
         );
         sprite.body.setVelocity(newVelocity.x, newVelocity.y);
+        updateDirectionalAnimationFromVelocity(sprite, newVelocity.x, newVelocity.y, true);
         AudioManager.tryPlayStep(sprite);
         // Rotate the sprite to face the direction of movement
-        if (newVelocity.length() > 0) {
+        if (newVelocity.length() > 0 && !shouldUseDirectionalFacing(sprite)) {
             sprite.rotation = Phaser.Math.Angle.Between(0, 0, newVelocity.x, newVelocity.y); // Calculate angle
         }
         // shift to next point in pathing
@@ -862,9 +969,34 @@ export class Player {
     }
 
     static setAnimState(troop, state){
-        if(troop.animState != state){
-            troop.animState = state
+        const changed = troop.animState != state;
+        troop.animState = state;
+
+        if (syncDirectionalAnimationState(troop, state)) {
+            return;
+        }
+
+        if (changed) {
             troop.play(state)
+        }
+    }
+
+    static setPoseLock(troop, textureKey, frame = null) {
+        if (!troop || !textureKey) return;
+        troop.poseLock = { textureKey, frame };
+        troop.rotation = 0;
+        troop.anims?.stop?.();
+        troop.setTexture(textureKey);
+        if (Number.isInteger(frame)) {
+            troop.setFrame(frame);
+        }
+    }
+
+    static clearPoseLock(troop, fallbackState = null) {
+        if (!troop) return;
+        troop.poseLock = null;
+        if (fallbackState && troop.active) {
+            this.setAnimState(troop, fallbackState);
         }
     }
 
@@ -884,7 +1016,7 @@ export class Player {
                     this.selected.push(troop);
                     troop.setTint(0x000000); // Highlight selected troops
                 } else {
-                    Player.applyDefaultTint(troop); // Clear highlight from non-selected troops
+                    troop.clearTint();
                 }
             });
 
@@ -1566,6 +1698,7 @@ export class Player {
         this.troops.forEach( troop => {
             if (Player.scene.clock.paused) {
                 troop.body.setVelocity(0, 0);
+                this._updateCarryIndicator(troop);
                 return;
             }
 
@@ -1609,6 +1742,7 @@ export class Player {
 
             if (this._handleWaterReturnSwim(troop)) {
                 this._updateMiniBars(troop);
+                this._updateCarryIndicator(troop);
                 return;
             }
 
@@ -1619,6 +1753,7 @@ export class Player {
 
             // 🔥 update world mini HP/ST bars
             this._updateMiniBars(troop);
+            this._updateCarryIndicator(troop);
         });
     }
 
@@ -1691,7 +1826,7 @@ export class Player {
         return false;
     }
 
-    static applyDefaultTint(cube) {
+    static getRoleTint(cube) {
         let tint;
 
         switch (true) {
@@ -1727,7 +1862,14 @@ export class Player {
                 break;
         }
 
-        cube.setTint(tint);
+        return tint;
+    }
+
+    static applyRoleTint(cube) {
+        const tint = this.getRoleTint(cube);
+        if (cube?.setTint && tint != null) {
+            cube.setTint(tint);
+        }
     }
 
 

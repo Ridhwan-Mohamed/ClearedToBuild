@@ -50,13 +50,13 @@ export default class CardsTab {
             const iconText = this.scene.add.text(x, y - 35, "Empty", {
                 fontSize: "12px",
                 fill: "#999999",
-                fontFamily: "monospace"
+                fontFamily: "Bungee"
             }).setOrigin(0.5).setDepth(UIDEPTH + 2);
 
             const name = this.scene.add.text(x, y - 70, "", {
                 fontSize: "12px",
                 fill: "#ffffff",
-                fontFamily: "monospace"
+                fontFamily: "Bungee"
             }).setOrigin(0.5).setDepth(UIDEPTH);
 
             const desc = this.scene.add.text(x, y + 25, "", {

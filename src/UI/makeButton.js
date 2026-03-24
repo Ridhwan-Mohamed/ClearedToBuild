@@ -7,7 +7,7 @@ export function makeButton(scene, { x, y, w, h, label, onClick }) {
   bg.setStrokeStyle(1, 0xffffff, 0.25);
 
   const txt = scene.add.text(0, 0, label, {
-    fontFamily: "monospace",
+    fontFamily: "Bungee",
     fontSize: "12px",
     color: "#ffffff"
   }).setOrigin(0.5);
@@ -21,3 +21,4 @@ export function makeButton(scene, { x, y, w, h, label, onClick }) {
   c.add([bg, txt]);
   return c;
 }
+

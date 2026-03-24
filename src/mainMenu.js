@@ -1,6 +1,6 @@
 import logo from 'url:../public/logo.png'
 import logoMini from 'url:../public/logoMini.png'
-import { DRAFT_UI_X_SHIFT, TILE_MAP, TILE_TYPES, UIDEPTH, colorFor, create2DArray, PARCEL } from './constants';
+import { TILE_MAP, TILE_TYPES, UIDEPTH, colorFor, create2DArray, PARCEL } from './constants';
 import { generateTown, buildingArray, townBounds, townRoads } from './town.js';
 import { Map } from './map.js';
 import { Teams } from './Teams.js';
@@ -31,6 +31,28 @@ export var waterSourcesQuadTree;
 
 export class MainMenu {
     static scene = null;
+
+    static _getDraftCameraPose(scene, overlayScene = scene) {
+        const tex = scene?.textures?.get?.('worldMap');
+        const img = tex?.getSourceImage?.();
+        if (!img) return null;
+
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+        const worldW = srcW * SQUARESIZE;
+        const worldH = srcH * SQUARESIZE;
+        const draftLeftPanelW = 460;
+        const mapViewportCenterX = draftLeftPanelW + ((overlayScene.scale.width - draftLeftPanelW) / 2);
+        const targetZoom = 0.7;
+        const targetCenterX = worldW / 2;
+        const targetCenterY = worldH / 2;
+
+        return {
+            targetZoom,
+            targetScrollX: targetCenterX - (mapViewportCenterX / targetZoom) + 250,
+            targetScrollY: targetCenterY + 60 - ((overlayScene.scale.height * 0.5) / targetZoom),
+        };
+    }
 
     static _upsertTeamTownIcon(teamName = "My Team", placedBuildings = null) {
         const scene = MainMenu.scene;
@@ -101,11 +123,19 @@ export class MainMenu {
         const overlayScene = scene.uiScene || scene;
         const centerX = overlayScene.scale.width / 2;
         const centerY = overlayScene.scale.height / 2;
+        const cam = scene.cameras.main;
+        const draftPose = MainMenu._getDraftCameraPose(scene, overlayScene);
+
+        if (draftPose) {
+            cam.roundPixels = true;
+            cam.setZoom(draftPose.targetZoom);
+            cam.setScroll(draftPose.targetScrollX, draftPose.targetScrollY);
+        }
 
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         const logo = overlayScene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.3', {
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.4', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);
@@ -191,21 +221,21 @@ export class MainMenu {
                 onComplete: () => startButton.destroy()
             });
 
-            // Delay slightly, then build the map/town select UI
-            overlayScene.time.delayedCall(1500, () => {
+            // Transition shortly after click into draft/map-select phase.
+            overlayScene.time.delayedCall(350, () => {
                 menu.destroy();
-                MainMenu.buildMapSelectPhase();
+                MainMenu.buildMapSelectPhase({ fromStartMenu: true });
             });
         });
     }
 
-    static buildMapSelectPhase(){
+    static buildMapSelectPhase(opts = {}){
         const scene = MainMenu.scene;
         const overlayScene = scene.uiScene || scene;
-        const centerX = overlayScene.scale.width / 2;
-        const centerY = overlayScene.scale.height / 2;
+        const draftLeftPanelW = 460;
+        const mapViewportCenterX = draftLeftPanelW + ((overlayScene.scale.width - draftLeftPanelW) / 2);
 
-        const logoMini = overlayScene.add.image(centerX + DRAFT_UI_X_SHIFT, 80, 'logoMini').setOrigin(0.5).setAlpha(0);
+        const logoMini = overlayScene.add.image(mapViewportCenterX, 80, 'logoMini').setOrigin(0.5).setAlpha(0);
         // Keep world-scene ref for existing cleanup code.
         scene.logoMini = logoMini;
         overlayScene.tweens.add({ targets: logoMini, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
@@ -267,6 +297,10 @@ export class MainMenu {
                             if(type.block) Map.navGrid[i][j] = 0;
                         }
                     }
+                }
+                if (type?.name === 'water') {
+                    ctx.clearRect(x, y, 1, 1);
+                    continue;
                 }
                 ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
                 ctx.fillRect(x, y, 1, 1);
@@ -389,18 +423,29 @@ export class MainMenu {
             .setScrollFactor(1)
             .setDepth(UIDEPTH-2)
             .setAlpha(0);
-
+        scene.overviewOceanWaves?.resize?.();
 
         const cam = scene.cameras.main;
         cam.roundPixels = true;
-        // cam.setBounds(0,0, worldW, worldH);
-        cam.setZoom(0.7);
 
-        // Shift the camera center LEFT in world units so the map appears RIGHT on screen
-        const dxWorld = DRAFT_UI_X_SHIFT / cam.zoom;
-        cam.centerOn((worldW / 2) - dxWorld, worldH / 2);
+        const draftPose = MainMenu._getDraftCameraPose(scene, overlayScene);
+        const targetZoom = draftPose?.targetZoom ?? 0.7;
+        const targetScrollX = draftPose?.targetScrollX ?? 0;
+        const targetScrollY = draftPose?.targetScrollY ?? 0;
 
-
+        if (opts?.fromStartMenu) {
+            scene.tweens.add({
+                targets: cam,
+                zoom: targetZoom,
+                scrollX: targetScrollX,
+                scrollY: targetScrollY,
+                duration: 900,
+                ease: 'Cubic.easeInOut'
+            });
+        } else {
+            cam.setZoom(targetZoom);
+            cam.setScroll(targetScrollX, targetScrollY);
+        }
 
         // mainMenu.js, right after cam.setZoom(0.5);
         scene.zoomMixer = new ZoomMixer();
@@ -422,6 +467,11 @@ export class MainMenu {
         for (let y = b.miny; y <= b.maxy; y++) {
             for (let x = b.minx; x <= b.maxx; x++) {
             const val = Array.isArray(scene.gridData[y][x]) ? scene.gridData[y][x][1] : scene.gridData[y][x];
+            const type = TILE_TYPES[TILE_MAP(val)];
+            if (type?.name === 'water') {
+                ctx.clearRect(x, y, 1, 1);
+                continue;
+            }
             const c = colorForCell(val);
             ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
             ctx.fillRect(x, y, 1, 1);
@@ -508,6 +558,11 @@ export class MainMenu {
                     const val = Array.isArray(scene.gridData[y][x])
                         ? scene.gridData[y][x][1]
                         : scene.gridData[y][x];
+                    const type = TILE_TYPES[TILE_MAP(val)];
+                    if (type?.name === 'water') {
+                        ctx.clearRect(x, y, 1, 1);
+                        continue;
+                    }
                     const c = colorForCell(val);
                     ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
                     ctx.fillRect(x, y, 1, 1);
@@ -867,6 +922,7 @@ export class MainMenu {
             });
             // Keep the minimap/overview synced after painting
             scene.zoomMixer?.buildOverviewTextureFromGrid?.(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+            scene.overviewOceanWaves?.resize?.();
             Map._uiIgnoreWorldLayer?.();
 
             // Fade out everything in menu + loading UI
@@ -887,8 +943,10 @@ export class MainMenu {
                     if (b) {
                         const cx = (b.minx + b.maxx) / 2 * SQUARESIZE;
                         const cy = (b.miny + b.maxy) / 2 * SQUARESIZE;
-                        Map.reDraw()
                         const cam = scene.cameras.main;
+                        scene.zoomMixer.targetZoom = 1.0;
+                        scene.zoomMixer.anchorWorld = { x: cx, y: cy };
+                        scene.zoomMixer.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
                         scene.tweens.add({
                             targets: cam,
                             scrollX: cx - cam.width / 2,
@@ -901,8 +959,9 @@ export class MainMenu {
                             }
                         });
 
+                    } else {
+                        scene.zoomMixer.swapMode('detailed');
                     }
-                    scene.zoomMixer.swapMode('detailed');
                     scene.zoomMixer.hookWheel();
                     scene.zoomMixer.hookKeys();
                     worker.terminate();

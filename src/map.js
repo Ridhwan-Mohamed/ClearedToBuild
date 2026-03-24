@@ -1,4 +1,4 @@
-import { CHUNK_SIZE, SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, showAlert } from "./constants";
+import { SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, showAlert } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./Turret";
 import { Player } from "./players/Player";
@@ -52,6 +52,7 @@ export class Map{
     static blocks = [];
     static cropDict = {};  // add at top of map.js
     static waterBlocks = [];
+    static renderCache = [];
     static cameraBounds;
     static worldPines = [];
     static worldStones = [];
@@ -98,6 +99,7 @@ export class Map{
             // Non-complex: leave as-is
             }
         }
+        this._rebuildRenderCache();
     }
 
     static MapFromImage(canvas, image){
@@ -427,6 +429,53 @@ export class Map{
         return this._chooseLayerIndexForExistingCell(cell, depth, preferTypeName);
     }
 
+    static _reorientComplexCellAt(x, y) {
+        const cell = this.grid?.[y]?.[x];
+        if (cell == null) return;
+
+        if (Array.isArray(cell)) {
+            const baseName = TILE_MAP(cell[0]);
+            const topName = TILE_MAP(cell[1]);
+            if (baseName && TILE_TYPES[baseName]?.complex) this.determineTileType(x, y, baseName, 0, 0);
+            if (topName && TILE_TYPES[topName]?.complex) this.determineTileType(x, y, topName, 1, 0);
+            return;
+        }
+
+        const name = TILE_MAP(cell);
+        if (name && TILE_TYPES[name]?.complex) this.determineTileType(x, y, name, -1, 0);
+    }
+
+    static _refreshTerrainShapesAround(x, y) {
+        for (let gy = y - 1; gy <= y + 1; gy++) {
+            for (let gx = x - 1; gx <= x + 1; gx++) {
+                if (!this.grid?.[gy] || this.grid[gy][gx] == null) continue;
+                this._reorientComplexCellAt(gx, gy);
+            }
+        }
+        this._refreshRenderCacheAround(x, y);
+    }
+
+    static refreshTerrainShapesInRect(x0, y0, w, h, pad = 1) {
+        const minY = Math.max(0, y0 - pad);
+        const maxY = Math.min(this.grid.length - 1, y0 + h - 1 + pad);
+        const minX = Math.max(0, x0 - pad);
+        const maxX = Math.min(this.grid[0].length - 1, x0 + w - 1 + pad);
+
+        for (let gy = minY; gy <= maxY; gy++) {
+            for (let gx = minX; gx <= maxX; gx++) {
+                if (!this.grid?.[gy] || this.grid[gy][gx] == null) continue;
+                this._reorientComplexCellAt(gx, gy);
+            }
+        }
+
+        for (let gy = minY; gy <= maxY; gy++) {
+            for (let gx = minX; gx <= maxX; gx++) {
+                if (!this.grid?.[gy] || this.grid[gy][gx] == null) continue;
+                this._refreshRenderCacheAt(gx, gy);
+            }
+        }
+    }
+
     static placeTile(x, y, tileType, index = -1) {
         // 1) Write current cell (let determineTileType auto-pair if needed)
         this.determineTileType(x, y, tileType, index);
@@ -455,6 +504,7 @@ export class Map{
         upd(x, y + 1); // down
         upd(x - 1, y); // left
         upd(x + 1, y); // right
+        this._refreshRenderCacheAround(x, y);
     }
 
 
@@ -621,37 +671,28 @@ export class Map{
 
         // remove any prior world-layer children created last redraw
         if (this.worldLayer) this.worldLayer.removeAll(true);
-    
-        const camera = this.scene.cameras.main;
-    
-        // Calculate top-left and bottom-right grid indices to draw
-        const topLeftX = Math.floor(camera.scrollX / SQUARESIZE);
-        const topLeftY = Math.floor(camera.scrollY / SQUARESIZE);
-        
-        const bottomRightX = Math.max(topLeftX + CHUNK_SIZE, topLeftX + Math.floor(window.innerWidth/SQUARESIZE))
-        const bottomRightY = topLeftY + CHUNK_SIZE
+
+        // Full-world redraw (no camera chunk windowing).
+        const topLeftX = 0;
+        const topLeftY = 0;
+        const bottomRightX = width;
+        const bottomRightY = height;
 
         PineTree.rebuildVisibleForGridRange(topLeftX, topLeftY, bottomRightX, bottomRightY);
         VisibilitySystem.setViewRect(topLeftX, topLeftY, bottomRightX-topLeftX, bottomRightY-topLeftY);
         VisibilitySystem._rebuildViewFull();
 
         this.cameraBounds = new Phaser.Geom.Rectangle(
-            topLeftX * SQUARESIZE,
-            topLeftY * SQUARESIZE,
-            bottomRightX * SQUARESIZE,
-            bottomRightY * SQUARESIZE
+            0,
+            0,
+            width * SQUARESIZE,
+            height * SQUARESIZE
         );
-        // Loop through only the visible chunk
+
+        // Draw the full world grid.
         for (let y = topLeftY; y < bottomRightY; y++) {
             for (let x = topLeftX; x < bottomRightX; x++) {
-                if (y < 0 || x < 0 || y >= height || x >= width) {
-                    // Draw water tiles for out-of-bounds
-                    let barrierBlock = this.scene.add.sprite(x * SQUARESIZE + SQUARESIZE/2, y * SQUARESIZE + SQUARESIZE/2, 'water');
-                    this._worldAdd(barrierBlock); 
-                    barrierBlock.play('water').setDepth(FLOORDEPTH)
-                    this.waterBlocks.push(barrierBlock)
-                }
-                else if(this.grid[y][x] == TILE_TYPES.crops.grid){
+                if(this.grid[y][x] == TILE_TYPES.crops.grid){
                     this.handleCrops(x,y);
                 } else if (Array.isArray(this.grid[y][x])) {
                     const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
@@ -709,16 +750,308 @@ export class Map{
         if (val === def.corners?.bottomRight) return { shape: 'corner', angle: 180 };
         if (val === def.corners?.bottomLeft)  return { shape: 'corner', angle: 270 };
 
+        if (val === def.innerCorners?.topLeft)     return { shape: 'innerCorner', angle: 0   };
+        if (val === def.innerCorners?.topRight)    return { shape: 'innerCorner', angle: 90  };
+        if (val === def.innerCorners?.bottomRight) return { shape: 'innerCorner', angle: 180 };
+        if (val === def.innerCorners?.bottomLeft)  return { shape: 'innerCorner', angle: 270 };
+
+        if (val === def.diagJoins?.nwSe) return { shape: 'diagJoin', angle: 0 };
+        if (val === def.diagJoins?.neSw) return { shape: 'diagJoin', angle: 90 };
+
         return { shape: 'interior', angle: 0 };
     }
 
-    static _spawnSpec(cx, cy, depth, spec, angle = 0) {
+    static _spawnSpec(cx, cy, depth, spec, angle = 0, flipX = false, flipY = false) {
         const node = spec.sheet
             ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth).play(spec.anim || spec.key)
             : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
         this._worldAdd(node); 
         if (angle) node.setAngle(angle);
+        if (flipX || flipY) node.setFlip(flipX, flipY);
         return node;
+    }
+
+    static _ensureRenderCache() {
+        const h = this.grid?.length || 0;
+        const w = h ? (this.grid[0]?.length || 0) : 0;
+        if (this.renderCache.length === h && (!h || this.renderCache[0]?.length === w)) return;
+        this.renderCache = Array.from({ length: h }, () => Array.from({ length: w }, () => [null, null]));
+    }
+
+    static _makeRenderEntry(spec, angle = 0, flipX = false, flipY = false) {
+        return spec ? { spec, angle, flipX, flipY } : null;
+    }
+
+    static _buildTerrainRenderEntries(x, y, val) {
+        const name = TILE_MAP(val);
+        if (!name) return null;
+        const def = TILE_TYPES[name];
+        if (!def) return null;
+
+        if (!(name === 'grass' || name === 'dirt' || name === 'road' || name === 'fort_floor' || name === 'water')) return null;
+
+        const { shape, angle } = this._shapeAndAngle(def, val);
+        const a = def.assets;
+        if (name === 'water' || shape === 'interior' || shape === 'island') {
+            return [this._makeRenderEntry(a.interior, 0)];
+        }
+        if (shape === 'innerCorner') {
+            const innerKind = this._innerCornerTransitionKind(x, y, angle);
+            if (innerKind === 'water' && a.innerCorner?.water) {
+                return [this._makeRenderEntry(a.innerCorner.water, this._innerCornerWaterAngle(angle))];
+            }
+            const innerSpec = a.innerCorner?.grass || a.innerCorner || a.interior;
+            return [this._makeRenderEntry(innerSpec, angle)];
+        }
+        if (shape === 'diagJoin') return [this._makeRenderEntry(a.diagJoin || a.interior, angle)];
+
+        if (name === 'grass') {
+            const spec = shape === 'edge' ? (a.edge || a.interior) : (a.corner || a.interior);
+            return [this._makeRenderEntry(spec, angle)];
+        }
+
+        const contact = this._terrainTransitionKind(x, y, shape, angle);
+        if (contact === 'water' && a.edge?.shoreGrass) {
+            const waterSideAngle = this._singleWaterSideAngle(x, y);
+            const shoreTransform = waterSideAngle != null ? this._shoreGrassEdgeTransform(x, y, waterSideAngle) : null;
+            if (shoreTransform) {
+                return [this._makeRenderEntry(
+                    a.edge.shoreGrass,
+                    shoreTransform.angle,
+                    shoreTransform.flipX,
+                    shoreTransform.flipY
+                )];
+            }
+        }
+        const spec = shape === 'edge'
+            ? (a.edge?.[contact] || a.edge?.grass || a.interior)
+            : (a.corner?.[contact] || a.corner?.grass || a.interior);
+        return [this._makeRenderEntry(spec, angle)];
+    }
+
+    static _refreshRenderCacheAt(x, y) {
+        if (!this.grid?.[y] || this.grid[y][x] == null) return;
+        this._ensureRenderCache();
+        const cell = this.grid[y][x];
+        const slot = [null, null];
+        if (Array.isArray(cell)) {
+            slot[0] = this._buildTerrainRenderEntries(x, y, cell[0]);
+            slot[1] = this._buildTerrainRenderEntries(x, y, cell[1]);
+        } else {
+            const def = TILE_TYPES[TILE_MAP(cell)];
+            const idx = def?.depth === BLOCKDEPTH ? 1 : 0;
+            slot[idx] = this._buildTerrainRenderEntries(x, y, cell);
+        }
+        this.renderCache[y][x] = slot;
+    }
+
+    static _refreshRenderCacheAround(x, y) {
+        for (let gy = y - 1; gy <= y + 1; gy++) {
+            for (let gx = x - 1; gx <= x + 1; gx++) {
+                if (!this.grid?.[gy] || this.grid[gy][gx] == null) continue;
+                this._refreshRenderCacheAt(gx, gy);
+            }
+        }
+    }
+
+    static _rebuildRenderCache() {
+        this._ensureRenderCache();
+        for (let y = 0; y < this.grid.length; y++) {
+            for (let x = 0; x < this.grid[0].length; x++) {
+                this._refreshRenderCacheAt(x, y);
+            }
+        }
+    }
+
+    static _terrainNameAt(x, y) {
+        const cell = this.grid[y]?.[x];
+        if (cell == null) return null;
+        if (!Array.isArray(cell)) return TILE_MAP(cell);
+        const top = TILE_MAP(cell[1]);
+        const base = TILE_MAP(cell[0]);
+        const topDef = TILE_TYPES[top];
+        if (topDef?.depth === FLOORDEPTH) return top;
+        return base;
+    }
+
+    static _contactTypeAt(x, y) {
+        const name = this._terrainNameAt(x, y);
+        if (name === 'water') return 'water';
+        return 'grass';
+    }
+
+    static _edgeDelta(angle) {
+        if (angle === 0) return [0, -1];
+        if (angle === 90) return [1, 0];
+        if (angle === 180) return [0, 1];
+        return [-1, 0];
+    }
+
+    static _cornerDeltas(angle) {
+        if (angle === 0) return [[0, -1], [-1, 0], [-1, -1]];
+        if (angle === 90) return [[0, -1], [1, 0], [1, -1]];
+        if (angle === 180) return [[0, 1], [1, 0], [1, 1]];
+        return [[0, 1], [-1, 0], [-1, 1]];
+    }
+
+    static _terrainTransitionKind(x, y, shape, angle) {
+        const sample = shape === 'corner' ? this._cornerDeltas(angle) : [this._edgeDelta(angle)];
+        let sawGrass = false;
+        for (const [dx, dy] of sample) {
+            const contact = this._contactTypeAt(x + dx, y + dy);
+            if (contact === 'water') return 'water';
+            if (contact === 'grass') sawGrass = true;
+        }
+        return sawGrass ? 'grass' : 'grass';
+    }
+
+    static _innerCornerTransitionKind(x, y, angle) {
+        let dx = -1, dy = -1;
+        if (angle === 90) { dx = 1; dy = -1; }
+        else if (angle === 180) { dx = 1; dy = 1; }
+        else if (angle === 270) { dx = -1; dy = 1; }
+        return this._terrainNameAt(x + dx, y + dy) === 'water' ? 'water' : 'grass';
+    }
+
+    static _innerCornerWaterAngle(angle) {
+        return (angle + 270) % 360;
+    }
+
+    static _shoreGrassEdgeTransform(x, y, waterSideAngle) {
+        const at = (dx, dy) => this._terrainNameAt(x + dx, y + dy);
+        let grassSideAngle = null;
+
+        if (waterSideAngle === 0) {
+            if (at(1, 0) === 'grass') grassSideAngle = 90;
+            else if (at(-1, 0) === 'grass') grassSideAngle = 270;
+        } else if (waterSideAngle === 90) {
+            if (at(0, 1) === 'grass') grassSideAngle = 180;
+            else if (at(0, -1) === 'grass') grassSideAngle = 0;
+        } else if (waterSideAngle === 180) {
+            if (at(-1, 0) === 'grass') grassSideAngle = 270;
+            else if (at(1, 0) === 'grass') grassSideAngle = 90;
+        } else {
+            if (at(0, -1) === 'grass') grassSideAngle = 0;
+            else if (at(0, 1) === 'grass') grassSideAngle = 180;
+        }
+
+        if (grassSideAngle == null) return null;
+
+        // Source art default:
+        // - water on the right
+        // - grass on the bottom
+        // - studied terrain on the left
+        const angle = (waterSideAngle - 90 + 360) % 360;
+        const clockwiseJoin = grassSideAngle === (waterSideAngle + 90) % 360;
+        const counterClockwiseJoin = grassSideAngle === (waterSideAngle + 270) % 360;
+
+        if (clockwiseJoin) return { angle, flipX: false, flipY: false };
+        if (counterClockwiseJoin) return { angle, flipX: false, flipY: true };
+        return null;
+    }
+
+    static _singleWaterSideAngle(x, y) {
+        const at = (dx, dy) => this._terrainNameAt(x + dx, y + dy);
+        const hits = [];
+        if (at(0, -1) === 'water') hits.push(0);
+        if (at(1, 0) === 'water') hits.push(90);
+        if (at(0, 1) === 'water') hits.push(180);
+        if (at(-1, 0) === 'water') hits.push(270);
+        return hits.length === 1 ? hits[0] : null;
+    }
+
+    static _spawnGrassOverlays(x, y, depth) {
+        const def = TILE_TYPES.grass;
+        const overhang = def.assets?.overhang || {};
+        const water = def.assets?.water || {};
+        const cx = x * SQUARESIZE + SQUARESIZE / 2;
+        const cy = y * SQUARESIZE + SQUARESIZE / 2;
+        const overlays = [];
+        const lowerTypes = new Set(['dirt', 'road', 'fort_floor']);
+        const at = (dx, dy) => this._terrainNameAt(x + dx, y + dy);
+        const pickEdge = (kind) => kind === 'water' ? water.edge : overhang.edge;
+        const pickCorner = (kind) => kind === 'water' ? water.corner : overhang.corner;
+        const sides = [
+            { angle: 0, dx: 0, dy: -1 },
+            { angle: 90, dx: 1, dy: 0 },
+            { angle: 180, dx: 0, dy: 1 },
+            { angle: 270, dx: -1, dy: 0 }
+        ];
+
+        for (const side of sides) {
+            const neighbor = at(side.dx, side.dy);
+            if (neighbor === 'water') overlays.push(this._addOverlayAt(cx, cy, depth, pickEdge('water'), side.angle));
+            else if (lowerTypes.has(neighbor)) overlays.push(this._addOverlayAt(cx, cy, depth, pickEdge('overhang'), side.angle));
+        }
+
+        const corners = [
+            { angle: 0, a: [0, -1], b: [-1, 0], d: [-1, -1] },
+            { angle: 90, a: [0, -1], b: [1, 0], d: [1, -1] },
+            { angle: 180, a: [0, 1], b: [1, 0], d: [1, 1] },
+            { angle: 270, a: [0, 1], b: [-1, 0], d: [-1, 1] }
+        ];
+
+        for (const corner of corners) {
+            const neighbors = [at(...corner.a), at(...corner.b), at(...corner.d)];
+            const waterTouches = neighbors.filter((name) => name === 'water').length;
+            const lowerTouches = neighbors.filter((name) => lowerTypes.has(name)).length;
+            if (waterTouches >= 2 || neighbors[2] === 'water') {
+                overlays.push(this._addOverlayAt(cx, cy, depth, pickCorner('water'), corner.angle));
+            } else if (lowerTouches >= 2 || lowerTypes.has(neighbors[2])) {
+                overlays.push(this._addOverlayAt(cx, cy, depth, pickCorner('overhang'), corner.angle));
+            }
+        }
+
+        return overlays.filter(Boolean);
+    }
+
+    static _spawnInnerCornerOverlays(x, y, typeName, depth, spec) {
+        if (!spec) return [];
+        const cx = x * SQUARESIZE + SQUARESIZE / 2;
+        const cy = y * SQUARESIZE + SQUARESIZE / 2;
+        const n = this._hasTypeAt(x, y - 1, typeName);
+        const s = this._hasTypeAt(x, y + 1, typeName);
+        const w = this._hasTypeAt(x - 1, y, typeName);
+        const e = this._hasTypeAt(x + 1, y, typeName);
+        const nw = this._hasTypeAt(x - 1, y - 1, typeName);
+        const ne = this._hasTypeAt(x + 1, y - 1, typeName);
+        const sw = this._hasTypeAt(x - 1, y + 1, typeName);
+        const se = this._hasTypeAt(x + 1, y + 1, typeName);
+        const overlays = [];
+
+        if (n && w && !nw) overlays.push(this._addOverlayAt(cx, cy, depth, spec, 0));
+        if (n && e && !ne) overlays.push(this._addOverlayAt(cx, cy, depth, spec, 90));
+        if (s && e && !se) overlays.push(this._addOverlayAt(cx, cy, depth, spec, 180));
+        if (s && w && !sw) overlays.push(this._addOverlayAt(cx, cy, depth, spec, 270));
+
+        return overlays.filter(Boolean);
+    }
+
+    static _spawnDiagJoinOverlay(x, y, typeName, depth, spec) {
+        if (!spec) return [];
+        const n = this._hasTypeAt(x, y - 1, typeName);
+        const s = this._hasTypeAt(x, y + 1, typeName);
+        const w = this._hasTypeAt(x - 1, y, typeName);
+        const e = this._hasTypeAt(x + 1, y, typeName);
+        const nw = this._hasTypeAt(x - 1, y - 1, typeName);
+        const ne = this._hasTypeAt(x + 1, y - 1, typeName);
+        const sw = this._hasTypeAt(x - 1, y + 1, typeName);
+        const se = this._hasTypeAt(x + 1, y + 1, typeName);
+
+        if (!(n && s && w && e)) return [];
+
+        let angle = null;
+        // Canonical source orientation:
+        // R R x
+        // R R R
+        // x R R
+        if (nw && se && !ne && !sw) angle = 0;
+        else if (ne && sw && !nw && !se) angle = 90;
+        else return [];
+
+        const cx = x * SQUARESIZE + SQUARESIZE / 2;
+        const cy = y * SQUARESIZE + SQUARESIZE / 2;
+        return [this._addOverlayAt(cx, cy, depth, spec, angle)].filter(Boolean);
     }
 
 
@@ -789,21 +1122,31 @@ export class Map{
             return null; // IMPORTANT: do not store/draw as normal grid element
         }
 
-        const drawOne = (val) => {
+        const drawOne = (val, layerIndex = 0) => {
             const name = TILE_MAP(val);
             const def  = TILE_TYPES[name];
             const cx = x * SQUARESIZE + SQUARESIZE / 2;
             const cy = y * SQUARESIZE + SQUARESIZE / 2;
             let node;
+            const cachedEntries = this.renderCache?.[y]?.[x]?.[layerIndex];
 
-            if (def.assets && def.complex) {
-                const { shape, angle } = Map._shapeAndAngle(def, val);
-                const a = def.assets;
-                if (shape === 'interior') node = this._spawnSpec(cx, cy, def.depth, a.interior);
-                else if (shape === 'island') node = this._spawnSpec(cx, cy, def.depth, a.island);
-                else if (shape === 'edge') node = this._spawnSpec(cx, cy, def.depth, a.edge, angle);
-                else node = this._spawnSpec(cx, cy, def.depth, a.corner, angle);
-                if(def.name == "wall" || def.name == "woodWall") {
+            if (cachedEntries?.length) {
+                const nodes = cachedEntries.map(({ spec, angle = 0, flipX = false, flipY = false }) => this._spawnSpec(cx, cy, def.depth, spec, angle, flipX, flipY));
+                node = nodes.length === 1 ? nodes[0] : nodes;
+            } else if (def.assets) {
+                const assetEntries = this._buildTerrainRenderEntries(x, y, val);
+                if (assetEntries?.length) {
+                    const nodes = assetEntries.map(({ spec, angle = 0, flipX = false, flipY = false }) => this._spawnSpec(cx, cy, def.depth, spec, angle, flipX, flipY));
+                    node = nodes.length === 1 ? nodes[0] : nodes;
+                } else if(def.name == "wall" || def.name == "woodWall") {
+                    const { shape, angle } = Map._shapeAndAngle(def, val);
+                    const a = def.assets;
+                    const spec = shape === 'edge'
+                        ? (a.edge || a.interior)
+                        : shape === 'corner'
+                            ? (a.corner || a.interior)
+                            : a.interior;
+                    node = this._spawnSpec(cx, cy, def.depth, spec, angle);
                     WallPlacementController.bindStructureLightAndVision(node, cx, cy, {
                         r: 6,
                         boost: 0.12,
@@ -850,8 +1193,9 @@ export class Map{
 
             // Basic rotation logic preserved
             if (def.block) {
-                node.setDisplaySize(SQUARESIZE, SQUARESIZE);
-                this.barrier.add(node);
+                const barrierNode = Array.isArray(node) ? node[0] : node;
+                barrierNode.setDisplaySize(SQUARESIZE, SQUARESIZE);
+                this.barrier.add(barrierNode);
             }
 
             // ✅ handle interactable seed-type logic here
@@ -865,19 +1209,19 @@ export class Map{
 
         // --- draw layers
         if (index === 0) {
-            const n = drawOne(baseVal);
+            const n = drawOne(baseVal, 0);
             this._storeAt(x, y, 0, n);
             return;
         }
         if (index === 1 && paired) {
-            const n = drawOne(topVal);
+            const n = drawOne(topVal, 1);
             this._storeAt(x, y, 1, n);
             return;
         }
 
-        const floorNode = drawOne(baseVal);
+        const floorNode = drawOne(baseVal, 0);
         if (paired) {
-            const topNode = drawOne(topVal);
+            const topNode = drawOne(topVal, 1);
             this._storeAt(x, y, 0, floorNode);
             this._storeAt(x, y, 1, topNode);
         } else {
@@ -974,19 +1318,19 @@ static setGroundTile(gx, gy, tileType) {
   if (!def) return;
   if (!this.grid?.[gy] || this.grid[gy][gx] == null) return;
 
-  // 1) Actually WRITE the grid value, using the same placement logic as the rest of the game.
-  if (def.complex) {
-    // placeTile will update this cell + potentially adjust neighbor tile VALUES
+  // Ground terrain should stay scalar. Only building/block placements create [floor, block].
+  if (tileType === "water") {
+    this.grid[gy][gx] = def.interior;
+    this._refreshTerrainShapesAround(gx, gy);
+  } else if (def.complex) {
     this.placeTile(gx, gy, tileType);
+    this._refreshTerrainShapesAround(gx, gy);
   } else {
-    // simple tiles must still update the grid, not just draw
-    // (checkAndPlace exists in Map and is used elsewhere for writing grid cells)
     const depth = (def.depth != null) ? def.depth : FLOORDEPTH;
     this.checkAndPlace(gx, gy, def.grid, depth);
+    this._refreshTerrainShapesAround(gx, gy);
   }
 
-
-  // 3) Nav grids: only the current cell's passability changes here
   const blocks = (tileType === "water" || tileType === "wall" || tileType === "woodWall");
   this.navGrid[gy][gx] = blocks ? 0 : 1;
   this.enemyNavGrid[gy][gx] = blocks ? 0 : 1;
@@ -1021,20 +1365,23 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         if (type.name === "crops") {
             const key = `${x},${y}`;
             Map.cropDict[key] = block;
-            Teams.teamLists['1'].crops.push({
+            const cropState = {
                 sprite: block,
                 x: x,
                 y: y,
+                teamNumber: '1',
                 dailyWatered: false,
                 growthStage: 0,
                 hasSeed: true
-            });
+            };
+            Teams.teamLists['1'].crops.push(cropState);
             Teams.teamLists['1'].wateringList.push({
                 x: x,
                 y: y,
                 assigned: 0,
                 sprite: block
             });
+            Teams.syncCropWaterIndicator?.(cropState);
             // track this crop separately
             const idx = y * WORLD_DIMENSIONX + x;
             const slot = this.blocks[idx];
@@ -1109,6 +1456,75 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         return matches(TILE_MAP(c));
     }
 
+    static _isWallStructureName(name) {
+        return (
+            name === "wall" ||
+            name === "woodWall" ||
+            name === "wall_door" ||
+            name === "woodWall_door"
+        );
+    }
+
+    static _wallStructureInfoAt(gx, gy) {
+        const cell = this.grid?.[gy]?.[gx];
+        if (cell == null) return null;
+
+        if (Array.isArray(cell)) {
+            const topName = TILE_MAP(cell[1]);
+            if (this._isWallStructureName(topName)) {
+                return { name: topName, value: cell[1], index: 1 };
+            }
+
+            const baseName = TILE_MAP(cell[0]);
+            if (this._isWallStructureName(baseName)) {
+                return { name: baseName, value: cell[0], index: 0 };
+            }
+
+            return null;
+        }
+
+        const name = TILE_MAP(cell);
+        if (!this._isWallStructureName(name)) return null;
+        return { name, value: cell, index: -1 };
+    }
+
+    static _wallTeamAt(gx, gy) {
+        return Wall.getAt(gx, gy)?.team ?? null;
+    }
+
+    static _hasSameTeamWallAt(gx, gy, teamNumber) {
+        const info = this._wallStructureInfoAt(gx, gy);
+        if (!info) return false;
+
+        const neighborTeam = this._wallTeamAt(gx, gy);
+        if (teamNumber == null || neighborTeam == null) return false;
+        return neighborTeam === teamNumber;
+    }
+
+    static refreshWallShapesAround(x, y, pad = 1) {
+        const minY = Math.max(0, y - pad);
+        const maxY = Math.min(this.grid.length - 1, y + pad);
+        const minX = Math.max(0, x - pad);
+        const maxX = Math.min(this.grid[0].length - 1, x + pad);
+
+        for (let gy = minY; gy <= maxY; gy++) {
+            for (let gx = minX; gx <= maxX; gx++) {
+                const info = this._wallStructureInfoAt(gx, gy);
+                if (!info) continue;
+                if (info.name === "wall" || info.name === "woodWall") {
+                    this.determineTileType(gx, gy, info.name, info.index, 0);
+                }
+            }
+        }
+
+        for (let gy = minY; gy <= maxY; gy++) {
+            for (let gx = minX; gx <= maxX; gx++) {
+                if (!this._wallStructureInfoAt(gx, gy)) continue;
+                this.drawGridValue(gx, gy);
+            }
+        }
+    }
+
     static determineTileType(x, y, tileType, index = -1, draw = 1) {
         const def = TILE_TYPES[tileType];
 
@@ -1117,83 +1533,71 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             return;
         }
 
-        // inside determineTileType(...)
-        const   write = (val, pairUnderForced) => {
-            // if (index > -1) {
-            //     this.grid[y][x][index] = val;
-            //     if (draw) this.drawGridValue(x,y,index);
-            //     return val;
-            // }
+        const write = (val) => {
+            const cell = this.grid[y]?.[x];
 
-            // Auto-pair only when needed (non-interior complex tiles)
-            let pairUnder = pairUnderForced;
-            if (pairUnder === undefined && def.complex && val !== def.interior) {
-                // figure out shape+angle from the numeric code we just chose
-                const { shape, angle } = Map._shapeAndAngle(def, val);
-
-                // NESW delta by angle
-                const dNESW = a => (a===0 ? [0,-1] : a===90 ? [1,0] : a===180 ? [0,1] : [-1,0]);
-                // diagonal delta by angle (0=TL, 90=TR, 180=BR, 270=BL)
-                const dDiag = a => (a===0 ? [-1,-1] : a===90 ? [1,-1] : a===180 ? [1,1] : [-1,1]);
-
-                // neighbor booleans (you already computed depth above)
-                const A = this._hasTypeAt(x, y-1, tileType); // above
-                const B = this._hasTypeAt(x, y+1, tileType); // below
-                const L = this._hasTypeAt(x-1, y, tileType); // left
-                const R = this._hasTypeAt(x+1, y, tileType); // right
-
-                // pick neighbor cell to sample based on the decided shape/orientation
-                let nx = x, ny = y;
-                if (shape === 'edge') {
-                    const [dx,dy] = dNESW(angle); nx += dx; ny += dy;
-                } else if (shape === 'corner') {
-                    const isRightVariant = (angle === 90 || angle === 180); // TR or BR
-                    nx += isRightVariant ? 1 : -1; // move horizontally only
-                    // ny unchanged
-                } else if (shape === 'island') {
-                    // opposite of the sole attachment
-                    if      (A) ny += 1;
-                    else if (R) nx -= 1;
-                    else if (B) ny -= 1;
-                    else if (L) nx += 1;
-                }
-                // ...
-                const neigh = this.grid[ny]?.[nx];
-                const neighVal = this._pickFloorValFromCell(neigh);
-                const neighName = TILE_MAP(neighVal);
-                const neighDef  = neighName ? TILE_TYPES[neighName] : null;
-
-                pairUnder = (neighDef && neighDef.depth === FLOORDEPTH)
-                ? (neighDef.interior ?? neighDef.grid)
-                : TILE_TYPES.grass.grid;
-            }
-            if(this.grid[y][x] && pairUnder && !Array.isArray(this.grid[y][x]) && def.block){
-                this.grid[y][x] = [this.grid[y][x], val];
-                if (draw) this.drawGridValue(x,y,1);
+            if (Array.isArray(cell)) {
+                const targetIndex = index > -1 ? index : (def.block ? 1 : 0);
+                this.grid[y][x][targetIndex] = val;
+                if (draw) this.drawGridValue(x, y);
                 return val;
             }
-            if(this.grid[y][x] && pairUnder && Array.isArray(this.grid[y][x]) && def.block){
-                this._destroyNode(this.blocks[y*WORLD_DIMENSIONX+x]);
-                this.grid[y][x] = [pairUnder
-                    , val];
-                if (draw) this.drawGridValue(x,y);
+
+            if (cell != null && def.block) {
+                this.grid[y][x] = [cell, val];
+                if (draw) this.drawGridValue(x, y, 1);
                 return val;
             }
-            this.grid[y][x] = (pairUnder != null) ? [pairUnder, val] : val;
-            if (draw) this.drawGridValue(x,y);
+
+            this.grid[y][x] = val;
+            if (draw) this.drawGridValue(x, y);
             return val;
         };
 
-        // bounds guard for water
-        if (def.name === "water" && (x < 1 || y < 1 || x > this.grid[0].length-2 || y > this.grid.length-2)) {
+        if (def.name === "water") {
             return write(def.interior);
         }
 
-        const A = this._hasTypeAt(x, y-1, tileType); // above
-        const B = this._hasTypeAt(x, y+1, tileType); // below
-        const L = this._hasTypeAt(x-1, y, tileType); // left
-        const R = this._hasTypeAt(x+1, y, tileType); // right
+        if (def.name === "grass") {
+            const isWaterAt = (gx, gy) => this._terrainNameAt(gx, gy) === "water";
+            const A = isWaterAt(x, y - 1);
+            const B = isWaterAt(x, y + 1);
+            const L = isWaterAt(x - 1, y);
+            const R = isWaterAt(x + 1, y);
+            const NW = isWaterAt(x - 1, y - 1);
+            const NE = isWaterAt(x + 1, y - 1);
+            const SW = isWaterAt(x - 1, y + 1);
+            const SE = isWaterAt(x + 1, y + 1);
+
+            if (A && L && (NW || (!R && !B))) return write(def.corners.topLeft);
+            if (A && R && (NE || (!L && !B))) return write(def.corners.topRight);
+            if (B && L && (SW || (!R && !A))) return write(def.corners.bottomLeft);
+            if (B && R && (SE || (!L && !A))) return write(def.corners.bottomRight);
+
+            if (A) return write(def.sides.up);
+            if (R) return write(def.sides.right);
+            if (B) return write(def.sides.down);
+            if (L) return write(def.sides.left);
+            return write(def.interior);
+        }
+
+        const isWallType = def.name === "wall" || def.name === "woodWall";
+        const wallTeam = isWallType ? this._wallTeamAt(x, y) : null;
+        const hasNeighbor = (gx, gy) =>
+            (isWallType && wallTeam != null)
+                ? this._hasSameTeamWallAt(gx, gy, wallTeam)
+                : this._hasTypeAt(gx, gy, tileType);
+
+        const A = hasNeighbor(x, y-1); // above
+        const B = hasNeighbor(x, y+1); // below
+        const L = hasNeighbor(x-1, y); // left
+        const R = hasNeighbor(x+1, y); // right
+        const NW = hasNeighbor(x-1, y-1);
+        const NE = hasNeighbor(x+1, y-1);
+        const SW = hasNeighbor(x-1, y+1);
+        const SE = hasNeighbor(x+1, y+1);
         const cnt = (A?1:0) + (B?1:0) + (L?1:0) + (R?1:0);
+        const supportsExtendedShapes = (tileType === 'dirt' || tileType === 'road' || tileType === 'fort_floor');
 
         // 0 neighbors → interior
         if (cnt === 0 && (def.name != "wall" && def.name != "woodWall")) return write(def.interior);
@@ -1232,7 +1636,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         }
 
 
-        // 2 neighbors: orthogonal → corner; opposite → interior run
+        // 2 neighbors: orthogonal → outer corner; opposite → interior run
         if (A && L && !R && !B) return write(def.corners.bottomRight);
         if (A && R && !L && !B) return write(def.corners.bottomLeft);
         if (B && L && !R && !A) return write(def.corners.topRight);
@@ -1246,6 +1650,15 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         if (!B && L && R && A) return write(def.sides.down);
         if (!L && A && B && R) return write(def.sides.left);
 
+        if (supportsExtendedShapes && A && B && L && R) {
+            if (NW && SE && !NE && !SW) return write(def.diagJoins?.nwSe ?? def.interior);
+            if (NE && SW && !NW && !SE) return write(def.diagJoins?.neSw ?? def.interior);
+            if (!NW) return write(def.innerCorners?.topLeft ?? def.interior);
+            if (!NE) return write(def.innerCorners?.topRight ?? def.interior);
+            if (!SE) return write(def.innerCorners?.bottomRight ?? def.interior);
+            if (!SW) return write(def.innerCorners?.bottomLeft ?? def.interior);
+        }
+
         // 4 neighbors → interior
         return write(def.interior);
     }
@@ -1254,27 +1667,23 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     static addSpreadArr(x, y, newItem, index){
         if(newItem.block){Map.navGrid[y][x] = 0; Map.enemyNavGrid[y][x] = 0;}
         if(Array.isArray(this.grid[y][x])){
-            if(newItem.name == 'grass'){
-                this.grid[y][x][index] = newItem.grid
-                return this.drawGridValue(x,y,index)
-            }
-            this.grid[y][x][index] = newItem.grid
-            return this.placeTile(x,y,newItem.name,index)
+            const targetIndex = index > -1 ? index : (newItem.depth === FLOORDEPTH ? 0 : 1);
+            this.grid[y][x][targetIndex] = newItem.grid
+            this._refreshRenderCacheAround(x, y);
+            return newItem.complex ? this.placeTile(x,y,newItem.name,targetIndex) : this.drawGridValue(x,y,targetIndex)
         }
         let oldItem = TILE_TYPES[TILE_MAP(this.grid[y][x])]
-        if(newItem.depth < oldItem.depth && newItem.complex){
-            this.grid[y][x] = [newItem.grid, oldItem.grid]
-            return this.placeTile(x,y,newItem.name,0)
-        }
-        else if(newItem.depth > oldItem.depth && newItem.complex){
+        if(oldItem && newItem.block && !oldItem.block){
             this.grid[y][x] = [oldItem.grid, newItem.grid]
-            return this.placeTile(x,y,newItem.name,1)
+            this._refreshRenderCacheAround(x, y);
+            return newItem.complex ? this.placeTile(x,y,newItem.name,1) : this.drawGridValue(x,y,1)
         }
         else if(newItem.complex){
             this.grid[y][x] = newItem.grid;
+            this._refreshRenderCacheAround(x, y);
             this.placeTile(x,y,newItem.name)
         }
-        else {this.grid[y][x] = newItem.grid; this.drawGridValue(x,y)}
+        else {this.grid[y][x] = newItem.grid; this._refreshRenderCacheAround(x, y); this.drawGridValue(x,y)}
     }
 
     static grabIndex(arr,index){
@@ -1294,15 +1703,18 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     static checkAndPlace(x, y, val, depth){
         if(Array.isArray(this.grid[y][x])){
             depth == FLOORDEPTH? this.grid[y][x][0] = val: this.grid[y][x][1] = val
+            this._refreshRenderCacheAround(x, y);
             return;
         }
         const oldItem = TILE_TYPES[TILE_MAP(this.grid[y][x])]
         const newItem = TILE_TYPES[TILE_MAP(val)]
-        if(oldItem && newItem.depth != oldItem.depth){
+        if(oldItem && newItem.block && !oldItem.block){
             newItem.depth == FLOORDEPTH? this.grid[y][x] = [newItem.grid, oldItem.grid]: this.grid[y][x] = [oldItem.grid, newItem.grid] 
+            this._refreshRenderCacheAround(x, y);
             return
         }
         this.grid[y][x] = val
+        this._refreshRenderCacheAround(x, y);
     }
 
     static sample(x, y){
@@ -1327,7 +1739,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     static addValToIndex(x,y,val){
         const oldItem = TILE_TYPES[TILE_MAP(this.grid[y][x])]
         const newItem = TILE_TYPES[TILE_MAP(val)]
-        if(oldItem && newItem.depth != oldItem.depth){
+        if(oldItem && newItem.block && !oldItem.block){
             newItem.depth == FLOORDEPTH? this.grid[y][x] = [newItem.grid, oldItem.grid]: this.grid[y][x] = [oldItem.grid, newItem.grid] 
             return
         }
@@ -1529,6 +1941,12 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
 
     static _uiIgnoreWorldLayer() {
         return;
+    }
+
+    static setDetailedWorldVisible(visible = true) {
+        this.worldLayer?.setVisible?.(visible);
+        this.worldStaticLayer?.setVisible?.(visible);
+        this.graphics?.setVisible?.(visible);
     }
 
     static getPixelRGBA(x, y) {

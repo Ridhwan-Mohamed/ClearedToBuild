@@ -21,7 +21,7 @@ export class StorageUI {
         const text = this.scene.add.text(0, 0, `${storage.totalStored}/16`, {
             fontSize: '12px',
             fill: '#ffffff',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             align: 'center'
         }).setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH);
 
@@ -80,7 +80,7 @@ export class StorageUI {
         // === Title ===
         const title = this.scene.add.text(camX, camY - 90, 'Storage', {
             fontSize: '16px',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             fill: '#ffffff'
         }).setOrigin(0.5).setScrollFactor(0);
         // === Close Button ===
@@ -99,7 +99,7 @@ export class StorageUI {
         const itemLabel = this.scene.add.text(camX, camY - 70, '', {
             fontSize: '12px',
             fill: '#ffffcc',
-            fontFamily: 'monospace',
+            fontFamily: 'Bungee',
             align: 'right'
         }).setOrigin(1, 0).setScrollFactor(0).setDepth(UIDEPTH + 2);
         container.add(itemLabel);
@@ -132,7 +132,7 @@ export class StorageUI {
                 item?.amount > 1 ? `x${item.amount}` : '', {
                 fontSize: '10px',
                 fill: '#ffffff',
-                fontFamily: 'monospace',
+                fontFamily: 'Bungee',
                 stroke: '#000',
                 strokeThickness: 2
             }).setOrigin(1).setScrollFactor(0).setDepth(UIDEPTH + 2);
@@ -177,4 +177,5 @@ export class StorageUI {
     }
 
 }
+
 

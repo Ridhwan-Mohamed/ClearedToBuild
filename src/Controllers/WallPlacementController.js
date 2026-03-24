@@ -123,21 +123,21 @@ _initDoorPhysicsOnce() {
     this.previewSprites = [];
 
     this._ensureUI();
-    this._setPhase1Text();
+    this._setPhase1Text(true, 0);
     this._updateFinalizeEnabled(false);
   }
 
   static preload(scene){
     // Preload any assets needed for wall preview ghosts
     this.scene = scene;
-    scene.load.spritesheet('wall_interior', wall_interior, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('wall_edge', wall_edge, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('wall_corner', wall_corner, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('wall_door', stone_door, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('woodWall_interior', woodWall_interior, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('woodWall_edge', woodWall_edge, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('woodWall_corner', woodWall_corner, { frameWidth: 16, frameHeight: 16 });
-    scene.load.spritesheet('woodWall_door', wood_door, { frameWidth: 16, frameHeight: 16 });
+    scene.load.spritesheet('wall_interior', wall_interior, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('wall_edge', wall_edge, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('wall_corner', wall_corner, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('wall_door', stone_door, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('woodWall_interior', woodWall_interior, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('woodWall_edge', woodWall_edge, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('woodWall_corner', woodWall_corner, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
+    scene.load.spritesheet('woodWall_door', wood_door, { frameWidth: SQUARESIZE, frameHeight: SQUARESIZE });
   }
 
   stop() {
@@ -168,7 +168,7 @@ _initDoorPhysicsOnce() {
         this.segmentStart = null;
         this.phase = 0;
         this.previewCells = [];
-        this._setPhase1Text(true);
+        this._setPhase1Text(true, this._queuedCount());
         this._redrawGhost(true);
         return;
     }
@@ -193,8 +193,8 @@ _initDoorPhysicsOnce() {
           this.orderedBuildTiles = this.orderedBuildTiles.filter(t => !kill.has(`${t.x},${t.y}`));
         }
 
-        this._updateFinalizeEnabled(this.committedCells.length > 0);
-        this._setPhase1Text(true);
+        this._updateFinalizeEnabled(this._queuedCount() > 0);
+        this._setPhase1Text(true, this._queuedCount());
         this._redrawGhost(true);
         return;
     }
@@ -212,7 +212,7 @@ _initDoorPhysicsOnce() {
     // Phase 0: hover a single potential START tile
     if (this.phase === 0) {
         const ok = this._canPlaceCell(g.x, g.y);
-        this._setPhase1Text(ok);
+        this._setPhase1Text(ok, this._queuedCount());
         this.previewCells = [{ x: g.x, y: g.y }];
         this._redrawGhost(ok);
         return;
@@ -223,7 +223,7 @@ _initDoorPhysicsOnce() {
     if (!seg) {
         // show invalid preview (single tile or nothing)
         this.previewCells = [];
-        this._setPhase2Text(false, this._totalCostCount(this.committedCells, []));
+        this._setPhase2Text(false, this._queuedCount([]));
         this._redrawGhost(false);
         return;
     }
@@ -231,7 +231,7 @@ _initDoorPhysicsOnce() {
     const ok = longEnough && this._canPlaceCells(seg, true);
     const midIdx = Math.floor(seg.length / 2);  // works for 3+ length
     this.previewCells = seg;
-    this._setPhase2Text(ok, this._totalCostCount(this.committedCells, seg));
+    this._setPhase2Text(ok, this._queuedCount(seg));
     this._redrawGhost(ok);
 }
 
@@ -241,6 +241,14 @@ _initDoorPhysicsOnce() {
     if (this.consumeNextClick) {
         this.consumeNextClick = false;
         return;
+    }
+
+    if (this.finalBtn?.visible) {
+      const bounds = this.finalBtn.getBounds?.();
+      if (bounds && Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) {
+        this.finalize();
+        return;
+      }
     }
 
     const g = this._pointerToGrid(pointer);
@@ -254,8 +262,8 @@ _initDoorPhysicsOnce() {
         this.phase = 1;
 
         // show phase 2 prompt; preview will update on move
-        this._setPhase2Text(true, this._totalCostCount(this.committedCells, []));
-        this._updateFinalizeEnabled(this.committedCells.length > 0);
+        this._setPhase2Text(true, this._queuedCount([]));
+        this._updateFinalizeEnabled(this._queuedCount() > 0);
         return;
     }
 
@@ -313,8 +321,8 @@ for (let i = 0; i < seg.length; i++) {
     this.phase = 0;
     this.previewCells = [];
 
-    this._updateFinalizeEnabled(this.committedCells.length > 0);
-    this._setPhase1Text(true);     // back to “Click to start…”
+    this._updateFinalizeEnabled(this._queuedCount() > 0);
+    this._setPhase1Text(true, this._queuedCount());
     this._redrawGhost(true);
     }
 
@@ -332,9 +340,8 @@ finalize() {
     ordered.push(t);
   }
 
-  // ✅ enqueue mixed build types in one pass
-  buildingManager.createBuildTileStateArray(ordered, "1"); // no buildTypeName arg
-  buildingManager.assingTroopsToBuildTile("1");
+  // Enqueue mixed build types and let the builder scheduler delegate them.
+  buildingManager.createBuildTileStateArray(ordered, "1");
   this.stop();
 }
 
@@ -448,6 +455,17 @@ finalize() {
     return set.size;
   }
 
+  _queuedCount(preview = []) {
+    const set = new Set();
+    for (const t of this.orderedBuildTiles || []) set.add(`${t.x},${t.y}`);
+    for (const c of preview || []) set.add(`${c.x},${c.y}`);
+    return set.size;
+  }
+
+  _wallLabel() {
+    return this.wallTypeName === "woodWall" ? "Wood Walls" : "Stone Walls";
+  }
+
   _ensureUI() {
     if (!this.ui) {
         const y = 60; // ✅ below top bar (farm uses y=40)
@@ -464,7 +482,7 @@ finalize() {
 
         this.uiText = this.scene.add.text(0, 0, "", {
         fontSize: "16px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         color: "#ffffff",
         stroke: "#000",
         strokeThickness: 3,
@@ -473,7 +491,7 @@ finalize() {
         // keep finalize as a separate button to the right of the banner (still under top bar)
         this.finalBtn = this.scene.add.text(0, 0, "✔ Finalize", {
         fontSize: "14px",
-        fontFamily: "monospace",
+        fontFamily: "Bungee",
         color: "#ffffff",
         backgroundColor: "#222222",
         padding: { left: 8, right: 8, top: 4, bottom: 4 },
@@ -542,6 +560,85 @@ finalize() {
   }
 
 // WallPlacementController.js
+  _ensureUI() {
+    if (!this.ui) {
+      const y = 60;
+      const x = this.scene.scale.width / 2;
+
+      this.ui = this.scene.add.container(x, y)
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH + 10)
+        .setVisible(true);
+
+      this.uiBg = this.scene.add.rectangle(0, 0, 10, 26, 0x222222, 0.75)
+        .setOrigin(0.5, 0.5);
+
+      this.uiText = this.scene.add.text(0, 0, "", {
+        fontSize: "16px",
+        fontFamily: "Bungee",
+        color: "#ffffff",
+        stroke: "#000",
+        strokeThickness: 3,
+      }).setOrigin(0.5, 0.5);
+
+      this.finalBtn = this.scene.add.text(0, 0, "✔", {
+        fontSize: "14px",
+        fontFamily: "Bungee",
+        color: "#ffffff",
+        backgroundColor: "#222222",
+        padding: { left: 14, right: 14, top: 6, bottom: 6 },
+      }).setOrigin(0.5, 0.5);
+
+      this.finalBtn.on("pointerdown", () => this.finalize());
+      this.ui.add([this.uiBg, this.uiText, this.finalBtn]);
+
+      this.scene.scale.on("resize", ({ width }) => {
+        this.ui.setX(width / 2);
+        this._layoutUI();
+      });
+    }
+
+    this.ui.setVisible(true);
+    this._layoutUI();
+  }
+
+  _layoutUI() {
+    if (!this.ui || !this.uiText || !this.uiBg || !this.finalBtn) return;
+
+    const padX = 18;
+    const padY = 10;
+    const spacingY = 10;
+    const w = this.uiText.width + padX * 2;
+    const h = this.uiText.height + padY;
+
+    this.uiBg.setSize(w, Math.max(26, h));
+    this.uiBg.setPosition(0, 0);
+    this.uiText.setPosition(0, 0);
+
+    const btnY = this.uiBg.height / 2 + spacingY + this.finalBtn.height / 2;
+    this.finalBtn.setPosition(0, btnY);
+  }
+
+  _updateFinalizeEnabled(enabled) {
+    if (!this.finalBtn) return;
+    this.finalBtn.setVisible(enabled);
+    this.finalBtn.disableInteractive();
+    if (enabled) this.finalBtn.setInteractive({ useHandCursor: true });
+  }
+
+  _setPhase1Text(valid = true, count = this._queuedCount()) {
+    const action = count > 0 ? "click to start next segment" : "click to start placement";
+    this.uiText.setText(`Placing ${this._wallLabel()} | ${count} queued | ${action} | esc to cancel`);
+    this.uiText.setColor(valid ? "#66ff66" : "#ff6666");
+    this._layoutUI();
+  }
+
+  _setPhase2Text(valid = true, count = this._queuedCount(this.previewCells)) {
+    this.uiText.setText(`Placing ${this._wallLabel()} | ${count} queued | click to end segment | esc to undo`);
+    this.uiText.setColor(valid ? "#66ff66" : "#ff6666");
+    this._layoutUI();
+  }
+
 _redrawGhost(isValid = true) {
   const def = TILE_TYPES[this.wallTypeName];
 
@@ -760,6 +857,33 @@ static _removeStructureSourcesOn(node) {
   }
 }
 
+static doorAngleForCell(_gridIgnored, x, y, doorTypeName) {
+  const wallTypeName =
+    (doorTypeName === "woodWall_door") ? "woodWall" : "wall";
+  const ownerTeam = GameMap._wallTeamAt?.(x, y);
+
+  const hasSolid = (nx, ny) => {
+    if (ownerTeam != null && GameMap._hasSameTeamWallAt?.(nx, ny, ownerTeam)) {
+      return true;
+    }
+
+    return (
+      GameMap._hasTypeAt(nx, ny, wallTypeName) ||
+      GameMap._hasTypeAt(nx, ny, doorTypeName)
+    );
+  };
+
+  const up    = hasSolid(x, y - 1);
+  const down  = hasSolid(x, y + 1);
+  const left  = hasSolid(x - 1, y);
+  const right = hasSolid(x + 1, y);
+
+  if (up && down) return 90;
+  if (left && right) return 0;
+  if (up || down) return 90;
+  return 0;
+}
+
 /**
  * Adds BOTH a light + vision bubble for any player-built structure sprite.
  * Call with noRepaint=true, and let Map/doBuildings do the single rebuild.
@@ -820,3 +944,4 @@ static clearAllStructureSources(scene) {
 }
 
 }
+

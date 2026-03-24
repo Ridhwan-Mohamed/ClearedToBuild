@@ -4,6 +4,8 @@
 import { colorFor, UIDEPTH } from "../constants";
 import { Map } from "../map";
 import { Player } from "../players/Player";
+import { paintOverviewTexture } from "./OverviewStylePainter";
+import { VisibilitySystem } from "./VisibilitySystem";
 
 export class ZoomMixer {
   /** assign once from your scene: ZoomMixer.scene = this */
@@ -56,6 +58,7 @@ export class ZoomMixer {
 
     const worldW = gridWidth  * squareSize;
     const worldH = gridHeight * squareSize;
+    const shouldShowNow = this.mode === "overview";
 
     if (this.overviewImage) this.overviewImage.destroy();
     this.overviewImage = scene.add.image(0, 0, texKey)
@@ -63,8 +66,8 @@ export class ZoomMixer {
       .setDisplaySize(worldW, worldH)
       .setScrollFactor(1)
       .setDepth(UIDEPTH - 2)
-      .setAlpha(0)
-      .setVisible(false);
+      .setAlpha(shouldShowNow ? 1 : 0)
+      .setVisible(shouldShowNow);
 
     // Make sure UI camera doesn't render the overlay
   }
@@ -74,21 +77,14 @@ export class ZoomMixer {
     const scene = ZoomMixer.scene;
     const h = grid.length;
     const w = grid[0].length;
+    const shouldShowNow = this.mode === "overview";
 
     // (Re)create canvas texture 1:1 with tiles
     if (scene.textures.exists(this.texKey)) scene.textures.remove(this.texKey);
     const tex = scene.textures.createCanvas(this.texKey, w, h);
     const ctx = tex.getContext();
 
-    // Paint 1 pixel per tile (fast)
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const cell = grid[y][x];
-        const c = colorForType(cell);
-        ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
-        ctx.fillRect(x, y, 1, 1);
-      }
-    }
+    paintOverviewTexture(ctx, grid, colorForType);
     tex.refresh();
     tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
 
@@ -102,8 +98,8 @@ export class ZoomMixer {
       .setDisplaySize(worldW, worldH)
       .setScrollFactor(1)
       .setDepth(UIDEPTH - 2)       // put this under your gameplay layers
-      .setAlpha(0)
-      .setVisible(false);
+      .setAlpha(shouldShowNow ? 1 : 0)
+      .setVisible(shouldShowNow);
 
     // Make sure UI camera doesn't render the overlay
   }
@@ -127,14 +123,16 @@ export class ZoomMixer {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // If you need the cell value, use the passed grid (or Map.grid)
-      const val = grid
-          ? (Array.isArray(grid[gridY][gridX]) ? grid[gridY][gridX][1] : grid[gridY][gridX])
-          : null;
+      const useGrid = grid || Map.grid;
+      if (!useGrid) return;
 
-      const color = colorFor(val);
-      ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
-      ctx.fillRect(gridX, gridY, lenx, leny);
+      // Expand by 1 so shoreline/rim shading remains coherent around changed cells.
+      paintOverviewTexture(ctx, useGrid, (cell) => colorFor(Array.isArray(cell) ? cell[1] : cell), {
+        minX: gridX - 1,
+        minY: gridY - 1,
+        maxX: gridX + lenx,
+        maxY: gridY + leny,
+      });
       
       tex.refresh();
       tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
@@ -187,8 +185,10 @@ export class ZoomMixer {
 
     if (mode === 'overview') {
       scene.keyboardSpeed = 30;
+      Map.setDetailedWorldVisible?.(false);
       Map.deleteAllGridElements();
       scene.parcelSpawnUI.setVisible(false);
+      VisibilitySystem.setOverviewMode(true);
 
       this.overviewImage.setVisible(true);
       scene.tweens.add({ targets: this.overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
@@ -203,7 +203,9 @@ export class ZoomMixer {
     } else {
       scene.keyboardSpeed = 10;
       scene.parcelSpawnUI.setVisible(true);
+      Map.setDetailedWorldVisible?.(true);
       Map.reDraw();
+      VisibilitySystem.setOverviewMode(false);
       scene.tweens.add({
         targets: this.overviewImage,
         alpha: 0,
@@ -321,12 +323,20 @@ export class ZoomMixer {
     icon.setDescription = (text) => {
       label.setText(text ?? "");
     };
+    icon.destroyWithLabel = () => {
+      if (label?.active) label.destroy();
+      if (icon?.active) icon.destroy();
+    };
+    icon.once('destroy', () => {
+      if (label?.active) label.destroy();
+    });
 
     ZoomMixer.mapIconContainer.add([icon, label]);
     return icon;
   }
 
   static createPlayerMoniker(troop) {
+    const scene = ZoomMixer.scene;
     const color = troop.body.team === 1 ? 0x00ff00 : 0xff0000; // example team colors
     const icon = ZoomMixer.createZoomInvariantIcon(
       'playerIcon',
@@ -344,14 +354,34 @@ export class ZoomMixer {
       Player.showDetailsTab(troop);
     });
 
+    const cleanup = () => {
+      scene.events.off('update', onUpdate);
+      if (troop._overviewMonikerCleanup === cleanup) {
+        troop._overviewMonikerCleanup = null;
+      }
+      icon.destroyWithLabel?.();
+    };
+
     // Keep following troop in world space
-    ZoomMixer.scene.events.on('update', () => {
+    const onUpdate = () => {
+        if (!troop?.active) {
+            cleanup();
+            return;
+        }
         if (icon.followingHouse) {
-            // do nothing, its position is pinned by StaminaManager
-        } else {
+            return;
+        }
+        if (icon?.active) {
             icon.setPosition(troop.x, troop.y);
         }
+    };
+    scene.events.on('update', onUpdate);
+    icon.once('destroy', () => {
+        scene.events.off('update', onUpdate);
     });
+    troop._overviewMonikerCleanup?.();
+    troop._overviewMonikerCleanup = cleanup;
+    troop.once?.('destroy', cleanup);
 
 
     return icon;
@@ -476,7 +506,7 @@ export function createZoomButtons(scene, opts = {}) {
       .setInteractive({ useHandCursor: true }); // ✅ bg is the interactive target
 
     const txt = scene.add.text(0, 0, label, {
-      fontFamily: 'Arial',
+      fontFamily: 'Bungee',
       fontSize: '18px',
       color: '#ffffff',
     }).setOrigin(0.5);
@@ -532,4 +562,5 @@ export function createZoomButtons(scene, opts = {}) {
 
   return ui;
 }
+
 

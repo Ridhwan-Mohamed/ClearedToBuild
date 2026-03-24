@@ -30,7 +30,7 @@ export class PressurePage {
     this.container.add(g);
 
     const title = scene.add.text(0, -innerH/2 + 20, "⚔️ Pressure Contract", {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "14px",
       color: "#ffffff"
     }).setOrigin(0.5, 0);
@@ -42,7 +42,7 @@ export class PressurePage {
       "• harder = more money (later)",
       "• failure = money loss (later)",
     ].join("\n"), {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "12px",
       color: "#fee2e2",
       lineSpacing: 6,
@@ -58,7 +58,7 @@ export class PressurePage {
     this.container.add([d1,d2,d3]);
 
     this.selected = scene.add.text(0, yBtns + 36, "Selected: none", {
-      fontFamily: "monospace",
+      fontFamily: "Bungee",
       fontSize: "12px",
       color: "#ffffff"
     }).setOrigin(0.5,0.5);

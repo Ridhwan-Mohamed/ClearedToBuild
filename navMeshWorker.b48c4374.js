@@ -2054,8 +2054,8 @@ const TILE_TYPES = {
         complex: false,
         grid: 78,
         depth: BLOCKDEPTH,
-        lenX: 4,
-        lenY: 4,
+        lenX: 3,
+        lenY: 3,
         stayBlocked: true
     },
     // ── Fort enemy buildings (64x64 sheets, 2 frames) ──

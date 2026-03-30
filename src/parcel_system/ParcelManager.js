@@ -249,6 +249,46 @@ export class ParcelManager {
     return entries.length;
   }
 
+  stopTowerPressureForStageEnd() {
+    const entries = [];
+    for (const [, inst] of this.contractsById.entries()) {
+      if (inst?.type !== "PRESSURE") continue;
+      if (inst?.pressureSource !== "tower") continue;
+      entries.push(inst);
+    }
+    if (!entries.length) return 0;
+
+    const pressureIds = new Set(entries.map((inst) => inst.id));
+
+    // Freeze tower-spawned pressure so stage-end cinematics/rewards cannot
+    // keep emitting new raiders while the contracts are waiting to be removed.
+    for (const inst of entries) {
+      for (const spawner of inst.spawners || []) {
+        const building = spawner?.building;
+        if (!building) continue;
+        if (building.timer) {
+          building.timer.remove(false);
+          building.timer = null;
+        }
+      }
+    }
+
+    // Remove any currently alive raiders from those tower-pressure parcels
+    // without crediting kills or mutating contract progress.
+    const troops = (Player.troops || []).slice();
+    let removed = 0;
+    for (const troop of troops) {
+      if (!troop?.active || !troop?.isRaider) continue;
+      if (!pressureIds.has(troop.contractId)) continue;
+      try {
+        troop.destroySelf?.({ silentStageCleanup: true });
+        removed++;
+      } catch {}
+    }
+
+    return removed;
+  }
+
   clearAllFortGrunts() {
     const troops = (Player.troops || []).slice();
     let removed = 0;

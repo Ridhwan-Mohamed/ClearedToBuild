@@ -3,6 +3,7 @@
 import { Teams } from '../../Teams';
 import { StaminaManager } from '../../Manager/staminaManager.js';
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, showAlert } from '../../constants';
+import { buildingManager } from '../../Manager/buildingManager.js';
 
 export default class HousesTab {
   constructor(scene, teamNumber = 1) {
@@ -142,21 +143,7 @@ export default class HousesTab {
     const fixBtn = this.makeButton(scene, '🛠 Fix', () => {
       const b = this.selected; // house
       if (!b) return;
-
-      const maxHp = (b.maxHealth ?? 100);
-      const hp    = (b.health ?? b.hp ?? 0);
-      if (hp >= maxHp) {showAlert(scene, "Building is Already in condition", '#00ff00'); return}
-
-      const team = Teams.teamLists[this.team];
-      if (!team.buildingFixTasks) team.buildingFixTasks = [];
-
-      Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
-        x: b.gridX ?? b.x,
-        y: b.gridY ?? b.y,
-        type: b.buildType ?? b.type ?? TILE_TYPES.house1,
-        value: b,
-        assigned: 0,
-      });
+      buildingManager.requestBuildingFix(b, this.team, []);
     }, 0x2f7d32, 28);
 
     const panel = scene.rexUI.add.sizer({
@@ -404,7 +391,7 @@ export default class HousesTab {
     this.select(house);
 
     // optional: center camera on the clicked house
-    const cam = this.scene.cameras.main;
+    const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     const spr = house.sprite;
     if (cam && spr?.getBounds) {
       const b = spr.getBounds();

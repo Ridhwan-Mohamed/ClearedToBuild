@@ -326,8 +326,6 @@ export default class PlayerTab {
 
         panel.add(header,     0, 'left', 0, true);
         panel.add(barsCol,    0, 'left', 0, true);
-        // push buttons clearly below the bars, don't let them expand
-        panel.add(buttonsRow, 0, 'center', { top: 16 }, false);
 
         // ---------- return with setters ----------
         return {
@@ -339,7 +337,7 @@ export default class PlayerTab {
             },
             setSTValues(cur, max) {
                 stBar.setValues(cur ?? 0, max ?? 0);
-                stVal.setText(`${cur ?? 0}/${max ?? 0}`);
+                stVal.setText(`${Math.round(cur ?? 0)}/${Math.round(max ?? 0)}`);
             },
             // (optional) keep these if you still use pct anywhere
             setHP(pct) { hpBar.setValues((pct ?? 0) * ui.BAR_SEG_UNIT, ui.BAR_SEG_UNIT); },
@@ -356,35 +354,9 @@ export default class PlayerTab {
                     portrait.setVisible(false);
                 }
             },
-            setPrices({ seed = seedPrice, sleep = sleepPrice } = {}) {
-                const sleepPriceLabel =
-                    sleepBtn.getChildren?.()[0] || sleepBtn.getElement?.('text');
-                if (sleep !== null && sleepPriceLabel?.setText) {
-                    sleepPriceLabel.setText(`(${sleep})`);
-                }
-            },
-            setSleepButton(labelText, onClick) {
-                const children = sleepBtn.getChildren ? sleepBtn.getChildren() : [];
-                if (!children.length) return;
-
-                // last child is the actual button label (rexUI Label)
-                const btnLabel = children[children.length - 1];
-                const textObj = btnLabel.getElement
-                    ? btnLabel.getElement('text')
-                    : null;
-
-                if (textObj?.setText) {
-                    textObj.setText(labelText);
-                }
-
-                btnLabel.removeAllListeners?.('pointerup');
-                btnLabel.setInteractive({ useHandCursor: true })
-                    .on('pointerup', () => onClick?.());
-            },
-            // 🔥 called from paintDetails/clearDetails
-            setButtonsLayout(flags) {
-                updateButtonsLayout(flags);
-            }
+            setPrices() {},
+            setSleepButton() {},
+            setButtonsLayout() {},
         };
     }
 
@@ -523,9 +495,12 @@ export default class PlayerTab {
             return;
             }
         } else {
-            // Ensure detail card is up to date for the existing selection
-            this.paintDetails(this.selected);
+            this.select(this.selected);
         }
+    }
+
+    onHide() {
+        Player.setMiniBarSelectedFromTab?.(null);
     }
 
     createRow(sprite) {
@@ -593,20 +568,30 @@ export default class PlayerTab {
         return c;
         }
 
-        const hp = makeMiniSegBar(90, 6, 0xff4d4d, this);
-        const st = makeMiniSegBar(90, 6, 0x4dd2ff, this);
+        const hp = makeMiniSegBar(76, 6, 0xff4d4d, this);
+        const st = makeMiniSegBar(76, 6, 0x4dd2ff, this);
 
         const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
             .add(hp, 0, 'left', 0, false)
             .add(st, 0, 'left', 0, false);
 
+        const barsFrame = scene.rexUI.add.sizer({
+            orientation: 'y',
+            space: { left: 6, right: 6, top: 4, bottom: 4 },
+        })
+            .addBackground(
+                scene.rexUI.add.roundRectangle(0, 0, 0, 0, 4, 0x000000, 0)
+                    .setStrokeStyle(1, 0xffffff, 0.9)
+            )
+            .add(bars, 0, 'center', 0, false);
+
         const row = scene.rexUI.add.sizer({
             orientation: 'x',
-            space: { left: 8, right: 8, top: 6, bottom: 6, item: 10 },
+            space: { left: 8, right: 20, top: 6, bottom: 6, item: 8 },
         })
             .addBackground(bg)
             .add(name, { proportion: 1, expand: false })
-            .add(bars, { proportion: 0, expand: false });
+            .add(barsFrame, { proportion: 0, expand: false, padding: { left: 6, right: 10 } });
         
         // 🔥 stretch full width
         const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
@@ -706,6 +691,8 @@ export default class PlayerTab {
     }
 
     clearDetails() {
+        this.selected = null;
+        Player.setMiniBarSelectedFromTab?.(null);
         this.detailCard.setUnit({
             name: '—',
             type: '—',

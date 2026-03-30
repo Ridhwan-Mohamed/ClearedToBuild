@@ -5,7 +5,7 @@ import { buildingManager } from "./buildingManager";
 
 export class StaminaManager {
     static scene;
-    static staminaIncreaseAmnt = 0.02
+    static staminaIncreaseAmnt = 0.01
 
     static updateTroop(troop) {
         // If stamina is empty → go home

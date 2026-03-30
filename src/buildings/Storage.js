@@ -5,6 +5,7 @@ import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { StorageUI } from '../UI/StorageUI.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
+import { buildingManager } from '../Manager/buildingManager.js';
 
 export class StorageBuilding {
     static scene;
@@ -88,6 +89,7 @@ export class StorageBuilding {
             StorageUI.hideMinor(this)
         });
         this.sprite.on('pointerdown', () => {
+            if (buildingManager.handleBuildingClickForBuilders(this, null, this.teamNumber)) return;
             StorageBuilding.scene.openDetailPage('storage', tab => tab.selectFromWorld(this));
         });
     }

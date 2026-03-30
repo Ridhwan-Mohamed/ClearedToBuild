@@ -94,6 +94,12 @@ export class ParcelSpawnController {
 
   }
 
+  setMode(mode) {
+    for (const slot of this.slots.values()) {
+      slot.setMode?.(mode);
+    }
+  }
+
   setVisible(v) {
     this.root.setVisible(v);
   }

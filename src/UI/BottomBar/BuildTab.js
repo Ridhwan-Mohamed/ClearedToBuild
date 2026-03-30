@@ -6,11 +6,93 @@ import { UIDEPTH, SQUARESIZE, showAlert, TILE_TYPES } from "../../constants";
 import { Map as GameMap } from "../../map";
 import { Teams } from "../../Teams";
 import { buildingManager } from "../../Manager/buildingManager";
+import { House } from "../../buildings/House";
+import { townRoads } from "../../town";
+import { Farmer } from "../../players/Farmer";
+import { Builder } from "../../players/Builder";
+import { Forager } from "../../players/Forager";
+import { Fireman } from "../../players/Fireman";
+import { Brawler } from "../../players/Brawler";
+import { Blademaster } from "../../players/Blademaster";
+import { Gunslinger } from "../../players/Gunslinger";
 
 const RARITY = {
   common: { border: 0x2ecc71, label: "#2ecc71" }, // green
   rare:   { border: 0x4aa3ff, label: "#4aa3ff" }, // blue
+  epic:   { border: 0xd86bff, label: "#d86bff" }, // pink-purple
 };
+
+const UNIT_STORE = [
+  {
+    key: "farmer",
+    name: "Farmer",
+    desc: "Plants, waters, and tends crops.",
+    cost: { money: 100 },
+    iconKey: "icon_farmer_store",
+    previewTexture: "farmer_walk_down",
+    unitClass: Farmer,
+  },
+  {
+    key: "builder",
+    name: "Builder",
+    desc: "Constructs and repairs your structures.",
+    cost: { money: 100 },
+    iconKey: "icon_builder_store",
+    previewTexture: "builder_walk_down",
+    unitClass: Builder,
+  },
+  {
+    key: "forager",
+    name: "Forager",
+    desc: "Harvests crops and gathers seeds.",
+    cost: { money: 100 },
+    iconKey: "icon_forager_store",
+    previewTexture: "forager_walk_down",
+    unitClass: Forager,
+  },
+  {
+    key: "fireman",
+    name: "Fireman",
+    desc: "Runs ovens and keeps water flowing.",
+    cost: { money: 100 },
+    iconKey: "icon_fireman_store",
+    previewTexture: "fireman_walk_down",
+    unitClass: Fireman,
+  },
+  {
+    key: "brawler",
+    name: "Brawler",
+    desc: "Fast melee bruiser for close fights.",
+    cost: { money: 75 },
+    iconKey: "icon_brawler_store",
+    previewTexture: "brawler_walk_down",
+    unitClass: Brawler,
+  },
+  {
+    key: "blademaster",
+    name: "Blademaster",
+    desc: "Elite sword fighter with heavy hits.",
+    cost: { money: 250 },
+    iconKey: "icon_blademaster_store",
+    previewTexture: "blademaster_walk_down",
+    unitClass: Blademaster,
+  },
+  {
+    key: "gunslinger",
+    name: "Gunslinger",
+    desc: "Ranged fighter with high recruit cost.",
+    cost: { money: 500 },
+    iconKey: "icon_gunslinger_store",
+    previewTexture: "gunslinger_walk_down",
+    unitClass: Gunslinger,
+  },
+];
+
+function getUnitRarity(price) {
+  if (price >= 400) return "epic";
+  if (price >= 200) return "rare";
+  return "common";
+}
 
 function buildIconTexture(scene, iconKey, drawFn) {
   if (scene.textures.exists(iconKey)) return;
@@ -53,6 +135,18 @@ function ensureBuildTabIcons(scene) {
 
   buildIconTexture(scene, "icon_wood_wall", (rt) => {
     drawCenteredTexture(scene, rt, { key: "woodWall_interior", frame: 0, scale: 1.5, useSprite: true });
+  });
+
+  UNIT_STORE.forEach((unit) => {
+    buildIconTexture(scene, unit.iconKey, (rt) => {
+      drawCenteredTexture(scene, rt, {
+        key: unit.previewTexture,
+        frame: 1,
+        scale: 2,
+        y: 36,
+        useSprite: true,
+      });
+    });
   });
 }
 
@@ -107,10 +201,12 @@ function spendResources(scene, cost) {
 
 function fmtCost(cost) {
   if (!cost) return "";
+  if (Object.keys(cost).length === 1 && cost.money) return `$${cost.money}`;
   const parts = [];
   for (const [k, v] of Object.entries(cost)) {
     if (!v) continue;
-    if (k === "clean_water") parts.push(`water:${v}`);
+    if (k === "money") parts.push(`$${v}`);
+    else if (k === "clean_water") parts.push(`water:${v}`);
     else parts.push(`${k}:${v}`);
   }
   return parts.join("  ");
@@ -157,6 +253,7 @@ function normalizeTileCost(tile) {
 }
 
 function getDefCost(def) {
+  if (def?.isUnit) return def.cost ?? {};
   // walls: use wallTypeName; buildings: tileTypeName
   const tileKey = def.isWall ? def.wallTypeName : def.tileTypeName;
   return normalizeTileCost(TILE_TYPES[tileKey]);
@@ -171,6 +268,7 @@ export default class BuildTab {
     this.activeKey = null;
     this.pendingDef = null;
     this._placeClickBound = false;
+    this.mode = "buildings";
 
     ensureBuildTabIcons(scene);
 
@@ -181,6 +279,7 @@ export default class BuildTab {
     scene.buildTab = this;
 
     this._buildDefs = this._makeBuildDefs();
+    this._unitDefs = this._makeUnitDefs();
     this._cardRefs = [];
 
     this._makeUI();
@@ -200,6 +299,24 @@ export default class BuildTab {
     ];
   }
 
+  _makeUnitDefs() {
+    return UNIT_STORE.map((unit) => ({
+      key: unit.key,
+      name: unit.name,
+      desc: unit.desc,
+      rarity: getUnitRarity(Number(unit.cost?.money ?? 0)),
+      iconKey: unit.iconKey,
+      unitClass: unit.unitClass,
+      recruitType: unit.key,
+      cost: unit.cost,
+      isUnit: true,
+    }));
+  }
+
+  _getCurrentDefs() {
+    return this.mode === "units" ? this._unitDefs : this._buildDefs;
+  }
+
   _makeUI() {
     const scene = this.scene;
 
@@ -209,40 +326,47 @@ export default class BuildTab {
 
     // Local coordinate system: 0,0 is center of the page area (CardsTab-style)
     const centerX = 0;
-    const topY = -132;
+    const topY = -126;
 
-    // ----- Header -----
-    const title = scene.add.text(centerX, topY + 6, "BUILD", {
-      fontSize: "18px",
+    const toggleY = topY + 18;
+    const buildToggleBg = scene.add.rectangle(centerX - 70, toggleY, 112, 28, this.mode === "buildings" ? 0x8d3a69 : 0x2d2d2d, 0.95)
+      .setStrokeStyle(2, this.mode === "buildings" ? 0xff92c9 : 0x666666)
+      .setInteractive({ useHandCursor: true });
+    const buildToggleText = scene.add.text(centerX - 70, toggleY, "Buildings", {
+      fontSize: "12px",
       fontFamily: "Bungee",
-      color: "#dddddd",
-      fontStyle: "bold",
+      color: this.mode === "buildings" ? "#ffe7f4" : "#bbbbbb",
     }).setOrigin(0.5);
 
-    const hint = scene.add.text(
-      centerX,
-      topY + 30,
-      "Pick a card -> place on map. Charged on placement.",
-      { fontSize: "12px", fontFamily: "Bungee", color: "#aaaaaa", align: "center" }
-    ).setOrigin(0.5);
+    const unitToggleBg = scene.add.rectangle(centerX + 70, toggleY, 112, 28, this.mode === "units" ? 0x8d3a69 : 0x2d2d2d, 0.95)
+      .setStrokeStyle(2, this.mode === "units" ? 0xff92c9 : 0x666666)
+      .setInteractive({ useHandCursor: true });
+    const unitToggleText = scene.add.text(centerX + 70, toggleY, "Units", {
+      fontSize: "12px",
+      fontFamily: "Bungee",
+      color: this.mode === "units" ? "#ffe7f4" : "#bbbbbb",
+    }).setOrigin(0.5);
 
-    this.view.add([title, hint]);
+    buildToggleBg.on("pointerdown", () => this._setMode("buildings"));
+    buildToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("buildings"));
+    unitToggleBg.on("pointerdown", () => this._setMode("units"));
+    unitToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("units"));
+
+    this.view.add([buildToggleBg, buildToggleText, unitToggleBg, unitToggleText]);
 
     // ----- Card layout constants -----
     const CARD_W = 140;
-    const CARD_H = 170;
-    const ICON_W = 96;
-    const ICON_H = 70;
+    const CARD_H = 154;
+    const ICON_W = 92;
+    const ICON_H = 62;
 
     const gap = 24;
 
     // ----- Scroller viewport (masked) -----
     // width: leave margin so it looks like CardsTab and doesn't touch edges
     const viewportW = scene.scale.width - 140;
-    const viewportH = CARD_H + 40; // includes a bit of padding above/below cards
-
-    // Lower the whole scroller so the header is readable
-    const viewportY = topY + 50; // <= tweak this to lower/raise scroller
+    const viewportH = CARD_H + 12;
+    const viewportY = topY + 38;
     const viewportX = centerX;
 
     // Hit area (dragging works anywhere in the viewport)
@@ -275,9 +399,9 @@ export default class BuildTab {
     let xCursor = 0;
 
     // card center Y inside viewport
-    const cardCenterY = 18 + CARD_H / 2;
+    const cardCenterY = 8 + CARD_H / 2;
 
-    this._buildDefs.forEach((def) => {
+    this._getCurrentDefs().forEach((def) => {
       const rarity = RARITY[def.rarity] ?? RARITY.common;
 
       const x = xCursor + CARD_W / 2;
@@ -289,9 +413,9 @@ export default class BuildTab {
 
       const icon = makeIcon(scene, def, ICON_W, ICON_H);
       icon.x = x;
-      icon.y = y - 32;
+      icon.y = y - 34;
 
-      const name = scene.add.text(x, y + 30, def.name, {
+      const name = scene.add.text(x, y + 20, def.name, {
         fontSize: "14px",
         fontFamily: "Bungee",
         color: rarity.label,
@@ -300,8 +424,8 @@ export default class BuildTab {
         wordWrap: { width: CARD_W - 16 }
       }).setOrigin(0.5);
 
-      const desc = scene.add.text(x, y + 55, def.desc ?? "", {
-        fontSize: "11px",
+      const desc = scene.add.text(x, y + 44, def.desc ?? "", {
+        fontSize: "10px",
         fontFamily: "Bungee",
         color: "#bbbbbb",
         align: "center",
@@ -310,7 +434,7 @@ export default class BuildTab {
 
       // ✅ Cost from TILE_TYPES via your helper
       const costObj = getDefCost(def);
-      const cost = scene.add.text(x, y + 78, fmtCost(costObj), {
+      const cost = scene.add.text(x, y + 68, fmtCost(costObj), {
         fontSize: "12px",
         fontFamily: "Bungee",
         color: "#dddddd",
@@ -357,27 +481,30 @@ export default class BuildTab {
 
   _enableCardScrolling(viewportHit) {
     const scene = this.scene;
-
-    let dragging = false;
-    let dragStartX = 0;
-    let scrollStart = 0;
+    this._cardsDragging = false;
+    this._cardsDragStartX = 0;
+    this._cardsScrollStart = 0;
 
     viewportHit.on("pointerdown", (p) => {
-      dragging = true;
-      dragStartX = p.x;
-      scrollStart = this._cardsScrollX || 0;
+      this._cardsDragging = true;
+      this._cardsDragStartX = p.x;
+      this._cardsScrollStart = this._cardsScrollX || 0;
     });
 
-    scene.input.on("pointerup", () => { dragging = false; });
+    if (this._cardsScrollHooksBound) return;
+    this._cardsScrollHooksBound = true;
+
+    scene.input.on("pointerup", () => { this._cardsDragging = false; });
 
     scene.input.on("pointermove", (p) => {
-      if (!dragging) return;
-      const dx = p.x - dragStartX;
-      this._cardsScrollX = scrollStart + dx;
+      if (!this._cardsDragging) return;
+      const dx = p.x - this._cardsDragStartX;
+      this._cardsScrollX = this._cardsScrollStart + dx;
       this._clampCardsScroll();
     });
 
-    // mouse wheel (optional but nice)
+    // Mouse wheel / trackpad scroll:
+    // translate whichever axis the device gives us into horizontal card motion.
     scene.input.on("wheel", (pointer, gameObjects, dx, dy) => {
       // only if mouse is over the viewport area
       const { left, top, w, h } = this._cardsViewport || {};
@@ -391,15 +518,57 @@ export default class BuildTab {
 
       if (!over) return;
 
-      this._cardsScrollX -= dy * 0.6; // dy positive = wheel down
+      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      if (Math.abs(dominantDelta) < 0.1) return;
+
+      this._cardsScrollX -= dominantDelta * 0.8;
       this._clampCardsScroll();
     });
   }
 
+  _setMode(mode) {
+    if (this.mode === mode) return;
+    this._clearSelection(true);
+    this.mode = mode;
+    this._makeUI();
+  }
+
+  _recruitUnit(def) {
+    const team = "1";
+    const costObj = def.cost ?? {};
+
+    if (!hasResources(this.scene, costObj)) {
+      showAlert(this.scene, "Not enough money", "#ff5555");
+      return;
+    }
+
+    if (!House.availableHouse(team)) {
+      showAlert(this.scene, "Not enough housing", "#ff5555");
+      return;
+    }
+
+    const roads = townRoads[team] || [];
+    if (!roads.length) {
+      showAlert(this.scene, "No town road to spawn from", "#ff5555");
+      return;
+    }
+
+    const spawnTile = Phaser.Utils.Array.GetRandom(roads);
+    const player = new def.unitClass(spawnTile[0], spawnTile[1], 1);
+    House.assignPlayerToHouse(player, team);
+    spendResources(this.scene, costObj);
+    showAlert(this.scene, `${def.name} recruited!`, "#ffb4dd");
+  }
+
   _select(key) {
     const scene = this.scene;
-    const def = this._buildDefs.find(d => d.key === key);
+    const def = this._getCurrentDefs().find(d => d.key === key);
     if (!def) return;
+
+    if (def.isUnit) {
+      this._recruitUnit(def);
+      return;
+    }
 
     if (this.activeKey === key) {
       this._clearSelection(true);
@@ -524,13 +693,3 @@ export default class BuildTab {
   onShow() {}
   hide() {}
 }
-
-
-
-
-
-
-
-
-
-

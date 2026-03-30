@@ -127,7 +127,7 @@ export class Projectile {
         
             // 🔴 Apply on-hit effects to the victim (flash, timer cancel, knockback team 0)
             const attacker = projectile.player || null;
-            fightManager.applyHitReaction(target, attacker);
+            fightManager.applyHitReaction(target, attacker, projectile.weapon);
 
             target.health = Math.max(0, target.health - result.damage);
 

@@ -318,7 +318,6 @@ function closePowerupScreen(scene, container) {
     scene.clock.resume();
     scene.clock.powerupScreenShown = false;
     scene.time.timeScale = 1;
-    DailyNeedsTracker.consumeResources();
 
     if (pendingStoreItem) {
         const item = pendingStoreItem;

@@ -2,6 +2,7 @@
 import { showAlert, TILE_TYPES, UIDEPTH } from "../../constants";
 import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
+import { buildingManager } from "../../Manager/buildingManager.js";
 
 
 export default class ClayOvenTab {
@@ -256,21 +257,7 @@ export default class ClayOvenTab {
     fixBtn.on('pointerup', () => {
       const b = this.selected; // oven
       if (!b) return;
-
-      const maxHp = (b.maxHealth ?? 100);
-      const hp    = (b.health ?? b.hp ?? 0);
-      if (hp >= maxHp) {showAlert(scene, "Building is Already in condition", '#00ff00'); return}
-
-      const team = Teams.teamLists[this.team];
-      if (!team.buildingFixTasks) team.buildingFixTasks = [];
-
-      Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
-        x: b.gridX ?? b.x,
-        y: b.gridY ?? b.y,
-        type: b.buildType ?? TILE_TYPES.clayOven,
-        value: b,
-        assigned: 0,
-      });
+      buildingManager.requestBuildingFix(b, this.team, []);
     });
 
     // Make them share row width (prevents stacking in narrow panels)
@@ -671,7 +658,7 @@ export default class ClayOvenTab {
 
   centerCameraOnOven(oven) {
     if (!oven?.sprite) return;
-    const cam = this.scene.cameras.main;
+    const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     cam.centerOn(oven.sprite.x, oven.sprite.y);
   }
 
@@ -1036,7 +1023,7 @@ export default class ClayOvenTab {
 
   centerCameraOnOven(oven) {
     if (!oven?.sprite) return;
-    const cam = this.scene.cameras.main;
+    const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     cam.centerOn(oven.sprite.x, oven.sprite.y);
   }
 

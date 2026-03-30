@@ -15,9 +15,10 @@ import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_r
 import raiderWalkUp from 'url:../assets/players/raider/raider_walk_up.png';
 import raiderWalkUpLeft from 'url:../assets/players/raider/raider_walk_up_left.png';
 import raiderWalkUpRight from 'url:../assets/players/raider/raider_walk_up_right.png';
+import handsFx from 'url:../assets/Players/hands.png';
 export class Raider {
     // Used by Player.followPath via sprite.type.speed / sprite.type.stamina
-    static speed   = 100;  // a bit quick
+    static speed   = 80;  // a bit quick
     static stamina = 0;   // no stamina drain
     static tint   = 0xff0000; // default red tint for enemies (can be overridden per raider if you want)
 
@@ -28,6 +29,7 @@ export class Raider {
         scene.load.spritesheet('raider_walk_up', raiderWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('raider_walk_up_left', raiderWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('raider_walk_up_right', raiderWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.image('raider_hands_fx', handsFx);
     }
     
     constructor(x, y, teamNumber = 0) {
@@ -55,7 +57,8 @@ export class Raider {
         raider.maxStamina = raider.maxStamina ?? 100;
         raider.stamina    = raider.stamina ?? raider.maxStamina;
         raider.weapon     = weapons.hands;
-        raider.destroySelf = () => Raider.destroy(raider); 
+        raider.meleeFxKey = 'raider_hands_fx';
+        raider.destroySelf = (opts = {}) => Raider.destroy(raider, opts); 
         attachDirectionalSix(raider, {
             animPrefix: 'raider',
             defaultDirection: 'down',
@@ -486,15 +489,20 @@ export class Raider {
         return Math.abs(cx - tx) + Math.abs(cy - ty) === 1;
     }
 
-    static destroy(troop) {
+    static destroy(troop, opts = {}) {
         if (!troop || !troop.body) return;
         const scene = troop.scene;
+        const silentStageCleanup = !!opts.silentStageCleanup;
 
         Player._destroyMiniBars(troop)
-        troop.spawner?.notifyEnemyDied?.();
+        if (!silentStageCleanup) {
+            troop.spawner?.notifyEnemyDied?.();
+        }
 
         // ✅ count kill toward the parcel contract (updates ⚔ text + completion)
-        scene?.parcelManager?.notifyRaiderKilled?.(troop.contractId);
+        if (!silentStageCleanup) {
+            scene?.parcelManager?.notifyRaiderKilled?.(troop.contractId);
+        }
 
         const team = Teams.teamLists["0"];
         if (team) {

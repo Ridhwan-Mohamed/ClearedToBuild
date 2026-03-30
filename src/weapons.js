@@ -11,7 +11,9 @@ export const weapons = {
     duration: 700,
     range: 16,
     projectile: false,
-    attackSfxKey: "sfx_hand_punch"
+    attackSfxKey: "sfx_hand_punch",
+    moveSlowMultiplier: 0.65,
+    moveSlowDurationMs: 500,
   },
 
   boxingGloves: {
@@ -23,7 +25,9 @@ export const weapons = {
     duration: 700,
     range: 18,
     projectile: false,
-    attackSfxKey: "sfx_boxing_punch"
+    attackSfxKey: "sfx_boxing_punch",
+    moveSlowMultiplier: 0.58,
+    moveSlowDurationMs: 750,
   },
 
   sword: {
@@ -35,7 +39,9 @@ export const weapons = {
     duration: 1000,
     range: 22,
     projectile: false,
-    attackSfxKey: "sfx_sword_hit"
+    attackSfxKey: "sfx_sword_hit",
+    moveSlowMultiplier: 0.62,
+    moveSlowDurationMs: 850,
   },
 
   pistol: {
@@ -48,7 +54,9 @@ export const weapons = {
     range: 200,
     projectile: true,
     speed: 300,
-    attackSfxKey: "sfx_gun_shot"
+    attackSfxKey: "sfx_gun_shot",
+    moveSlowMultiplier: 0.72,
+    moveSlowDurationMs: 650,
   }
 };
 

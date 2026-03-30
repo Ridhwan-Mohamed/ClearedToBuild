@@ -4,7 +4,8 @@ import { DailyNeedsTracker } from "./DailyNeedsTracker";
 import { Clock } from "../Controllers/Clock";
 import { CreateBottomBar } from "./BottomBar/BottomBar";
 import { StageState } from "../parcelController/StageState";
-import { Teams } from "../Teams";
+import { ContractHud } from "./ContractHud.js";
+import { SelectionCommandBar } from "./SelectionCommandBar.js";
 
 export class GameUIScene extends Phaser.Scene {
   constructor() {
@@ -105,6 +106,8 @@ export class GameUIScene extends Phaser.Scene {
 
     this._buildTopHud();
     this._buildStageMetaHud();
+    this._buildContractHud();
+    this._buildSelectionCommandBar();
     CreateBottomBar(this);
     this._hudBuilt = true;
 
@@ -252,25 +255,9 @@ export class GameUIScene extends Phaser.Scene {
       const seasonLabel = `${seasonIcon} Season ${season}`;
       const stageLabel = isBoss ? `\uD83D\uDC79 BOSS` : `\u2694\uFE0F Stage ${stage}/4`;
 
-      const obj = StageState?._fortObjective;
-      const towersRequired = Math.max(0, Number(obj?.requiredCount || 0));
-      const towersDestroyed = Math.max(0, Number(obj?.destroyedSet?.size || 0));
-
-      const totalFortEnemies = Math.max(0, Number(obj?.meta?.requiredFortEnemyCount || 0));
-      const aliveFortEnemies = (Teams.teamLists?.["0"]?.fighterList || []).filter(
-        (t) => t?.active && t?.isFortGrunt
-      ).length;
-      const fortDestroyed = Math.max(
-        0,
-        totalFortEnemies > 0 ? (totalFortEnemies - aliveFortEnemies) : 0
-      );
-
       const line1 = seasonLabel;
       const line2 = stageLabel;
-      const line3 = `\uD83C\uDFF0 Towers ${towersDestroyed}/${towersRequired}`;
-      const line4 = `\uD83D\uDC80 Fort enemies ${fortDestroyed}/${totalFortEnemies}`;
-
-      this.stageMetaText.setText(`${line1}\n${line2}\n${line3}\n${line4}`);
+      this.stageMetaText.setText(`${line1}\n${line2}`);
       this.stageMetaText.setColor(isBoss ? "#ff4d4d" : "#f6f0ff");
     };
 
@@ -287,6 +274,16 @@ export class GameUIScene extends Phaser.Scene {
     this.scale.on("resize", () => {
       this.stageMetaText?.setPosition(panelX, panelY);
     });
+  }
+
+  _buildContractHud() {
+    if (this.contractHud) return;
+    this.contractHud = new ContractHud(this);
+  }
+
+  _buildSelectionCommandBar() {
+    if (this.selectionCommandBar) return;
+    this.selectionCommandBar = new SelectionCommandBar(this);
   }
   _ghostAt(targetText, content, color) {
     if (!targetText) return;
@@ -331,5 +328,12 @@ export class GameUIScene extends Phaser.Scene {
     this.berryText.setFill(color);
     this._ghostAt(this.berryText, amountDelta > 0 ? `+${amountDelta}` : `${amountDelta}`, color);
     this.time.delayedCall(600, () => this.berryText?.setFill("#ffffff"));
+  }
+
+  update() {
+    // The UI scene should never pan with world interactions.
+    this.cameras.main?.setScroll?.(0, 0);
+    this.contractHud?.update?.();
+    this.selectionCommandBar?.update?.();
   }
 }

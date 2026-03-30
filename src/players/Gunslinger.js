@@ -12,6 +12,7 @@ import { Wall } from '../buildings/Wall.js';
 import { Projectile } from '../Projectile.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import { OrderRunner } from '../orders/OrderRunner.js';
 import gunslingerWalkDown from 'url:../assets/players/gunslinger/gunslinger_walk_down.png';
 import gunslingerWalkDownLeft from 'url:../assets/players/gunslinger/gunslinger_walk_down_left.png';
 import gunslingerWalkDownRight from 'url:../assets/players/gunslinger/gunslinger_walk_down_right.png';
@@ -22,8 +23,8 @@ import gunslingerWalkUpRight from 'url:../assets/players/gunslinger/gunslinger_w
 
 export class Gunslinger {
 
-    static speed = 100;
-    static stamina = 0.02;
+    static speed = 90;
+    static stamina = 0.01;
 
     static preload(scene) {
         scene.load.spritesheet('gunslinger_walk_down', gunslingerWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -176,6 +177,7 @@ export class Gunslinger {
     }
 
     static update(troop) {
+        if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
 
         // ✅ If we are destroying, keep validating range+LOS.

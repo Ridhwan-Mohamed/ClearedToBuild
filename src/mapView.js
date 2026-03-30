@@ -86,6 +86,7 @@ import { GameUIScene } from './UI/GameUIScene.js';
 import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
 import { OverviewOceanWaves } from './UI/OverviewOceanWaves.js';
 import { OverviewShoreWaves } from './UI/OverviewShoreWaves.js';
+import { OrderRunner } from './orders/OrderRunner.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -139,6 +140,20 @@ export class mapView extends Phaser.Scene {
         this.tillPreviewSprites = new Map(); // key = "x,y" → sprite
         this.tillPulseTween = null;
         this.guardPlacement = { active: false, troop: null };
+        this._trackpadDoubleClickWindowMs = 520;
+        this._trackpadDoubleClickRadiusPx = 44;
+        this._lastPrimaryPointerDownAt = -Infinity;
+        this._lastPrimaryPointerDownX = 0;
+        this._lastPrimaryPointerDownY = 0;
+        this._lastPrimaryPointerUpAt = -Infinity;
+        this._lastPrimaryPointerUpX = 0;
+        this._lastPrimaryPointerUpY = 0;
+        this._trackpadTapDragActive = false;
+        this._trackpadTapDragMoved = false;
+        this._trackpadTapDragIdleMs = 220;
+        this._trackpadTapDragTimer = null;
+        this._trackpadSelectStartWorld = null;
+        this._trackpadSelectEndWorld = null;
     }
 
     preload() {
@@ -469,7 +484,17 @@ export class mapView extends Phaser.Scene {
 
             let cam = this.cameras.main;
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
+            const clickedInteractiveWorldObject = this.input.manager
+                .hitTest(pointer, this.children.list, cam)
+                .some((obj) => obj?.input?.enabled);
             if(this.clock.paused) return;
+            if (this._trackpadTapDragActive && pointer.button === 0) {
+                if (this._trackpadTapDragMoved) {
+                    this._finalizeTrackpadTapDrag();
+                    return;
+                }
+                this._cancelTrackpadTapDrag();
+            }
             // ✅ WALL MODE CONSUMES INPUT
             if (this.wallPlacer?.active && pointer.button === 0) {
                 this.wallPlacer.onClick(pointer);
@@ -544,6 +569,116 @@ export class mapView extends Phaser.Scene {
                     Turret.placeItem(items)
                 }
             }
+            else if (
+                pointer.button === 0 &&
+                OrderRunner.hasPendingGatherPlacement() &&
+                Player.selected.length > 0 &&
+                !this.gridPlace &&
+                !this.harvestMode &&
+                !this.seedGridMode &&
+                !this.farmMode &&
+                !this.isBrushMode &&
+                (this.breakItems?.text ?? "") != 'Place'
+            ) {
+                if (clickedInteractiveWorldObject) {
+                    return;
+                }
+                const placed = OrderRunner.issuePendingGatherPlacement(Player.selected, pointer.worldX, pointer.worldY);
+                if (placed) return;
+            }
+            else if (
+                pointer.button === 0 &&
+                !clickedInteractiveWorldObject &&
+                Player.selected.length === 0 &&
+                this._canUseTrackpadDrag() &&
+                this._isDoublePrimaryPointerDown(pointer)
+            ) {
+                this._armTrackpadTapDrag(pointer);
+                return;
+            }
+            else if (
+                pointer.button === 2 &&
+                !clickedInteractiveWorldObject &&
+                Player.selected.length > 0 &&
+                !this.gridPlace &&
+                !this.harvestMode &&
+                !this.seedGridMode &&
+                !this.farmMode &&
+                !this.isBrushMode &&
+                (this.breakItems?.text ?? "") != 'Place'
+            ){
+                let x = pointer.worldX;
+                let y = pointer.worldY;
+
+                let posX = Math.floor(x / SQUARESIZE);
+                let posY = Math.floor(y / SQUARESIZE);
+
+                if (currentText) {
+                    currentText.destroy();
+                }
+                if (selectionCountText) {
+                    selectionCountText.destroy();
+                }
+
+                currentText = this.add.text(
+                    this.cameras.main.width - 150,
+                    50,
+                    `(${posX}, ${posY})`,
+                    { fontSize: '14px', fill: '#ffffff' }
+                )
+                .setScrollFactor(0)
+                .setDepth(UIDEPTH);
+
+                selectionCountText = this.add.text(
+                    this.cameras.main.width - 150,
+                    65,
+                    `Selected: ${Player.selected.length}\nnavGird: ${GameMap.navGrid[posY][posX]}\ngrid: ${GameMap.grid[posY][posX]}`,
+                    { fontSize: '14px', fill: '#ffffff' }
+                )
+                    .setScrollFactor(0)
+                    .setDepth(UIDEPTH);
+
+                const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
+                let issuedMoveOrder = false;
+                OrderRunner.cancelOrders(Player.selected);
+                Player.selected.forEach((troop, index) => {
+                    if(!troop.active){Player.selected.splice(index, 1); return;}
+                    Teams.movePlayerState(troop, CONTROL_STATES.USER_MODE)
+                    let troopX = Math.floor(troop.body.x / SQUARESIZE);
+                    let troopY = Math.floor(troop.body.y / SQUARESIZE);
+                    const spot = formationSpots[index];
+                    if (!spot) return;
+                    let [targetX, targetY] = spot;
+                    const variance = 4;
+                    targetX += Phaser.Math.RND.between(-variance, variance);
+                    targetY += Phaser.Math.RND.between(-variance, variance);
+                    if(GameMap.navGrid[troopY][troopX] == 0){
+                        let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
+                        if (newX === -1) {
+                            console.log("No valid start tile nearby");
+                            return;
+                        } else {
+                            console.log("New valid tile:", newX, newY);
+                            troopX = newX
+                            troopY = newY
+                        }
+                    }
+                    else if(GameMap.navGrid[posY][posX] == 0){
+                        console.log("end pos is at blocked grid");
+                        return;
+                    }
+                    troop.roam = false;
+                    const moved = Player.moveTo(
+                        troop,
+                        GameMap.navMesh.findPath(
+                            { x: troopX * SQUARESIZE, y: troopY * SQUARESIZE },
+                            { x: targetX + SQUARESIZE / 2, y: targetY + SQUARESIZE / 2 }
+                        )
+                    );
+                    issuedMoveOrder = issuedMoveOrder || !!moved;
+                });
+                if (issuedMoveOrder && Player.selected.length) Player.clearSelection();
+            }
             else if((this.gridPlace || this.selectMode) && pointer.button == 2){
                 const gridX = Math.floor(pointer.worldX / SQUARESIZE);
                 const gridY = Math.floor(pointer.worldY / SQUARESIZE);
@@ -556,7 +691,25 @@ export class mapView extends Phaser.Scene {
                 this.isBrushActive = true;  
                 this.brushTiles = [];
             }
-            else if ((this.breakItems?.text ?? "") != 'Place'){
+            else if (
+                pointer.button === 0 &&
+                !clickedInteractiveWorldObject &&
+                Player.selected.length > 0 &&
+                !this.gridPlace &&
+                !this.harvestMode &&
+                !this.seedGridMode &&
+                !this.farmMode &&
+                !this.isBrushMode &&
+                (this.breakItems?.text ?? "") != 'Place'
+            ){
+                Player.clearSelection();
+            }
+            else if (
+                pointer.button === 0 &&
+                !clickedInteractiveWorldObject &&
+                Player.selected.length === 0 &&
+                (this.breakItems?.text ?? "") != 'Place'
+            ){
                 let x = pointer.worldX;
                 let y = pointer.worldY;
 
@@ -591,6 +744,8 @@ export class mapView extends Phaser.Scene {
                     .setScrollFactor(0)                // Stick to camera
                     .setDepth(UIDEPTH);
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
+                let issuedMoveOrder = false;
+                OrderRunner.cancelOrders(Player.selected);
                 Player.selected.forEach((troop, index) => {
                     if(!troop.active){Player.selected.splice(index, 1); return;}
                     Teams.movePlayerState(troop, CONTROL_STATES.USER_MODE)
@@ -619,12 +774,20 @@ export class mapView extends Phaser.Scene {
                         return;
                     }
                     troop.roam = false;
-                    Player.moveTo(troop, GameMap.navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: targetX+SQUARESIZE/2, y: targetY+SQUARESIZE/2 }));
+                    const moved = Player.moveTo(
+                        troop,
+                        GameMap.navMesh.findPath(
+                            { x: troopX * SQUARESIZE, y: troopY * SQUARESIZE },
+                            { x: targetX + SQUARESIZE / 2, y: targetY + SQUARESIZE / 2 }
+                        )
+                    );
+                    issuedMoveOrder = issuedMoveOrder || !!moved;
                 });
+                if (issuedMoveOrder && Player.selected.length) Player.clearSelection();
             }
         });
         this.input.on('pointermove', (pointer) => this.onPointerMove(pointer, SQUARESIZE));
-        this.input.on('pointerup', () => this.onPointerUp());
+        this.input.on('pointerup', (pointer) => this.onPointerUp(pointer));
 
     }
 
@@ -744,6 +907,29 @@ export class mapView extends Phaser.Scene {
                     SQUARESIZE
                 ).setDepth(UIDEPTH);
             }
+            if (this._trackpadTapDragActive) {
+                this._trackpadTapDragMoved = true;
+                this._refreshTrackpadTapDragTimer();
+            }
+        }
+        else if (this._trackpadTapDragActive && this._trackpadSelectStartWorld) {
+            this._trackpadSelectEndWorld = { x: pointer.worldX, y: pointer.worldY };
+            this._drawWorldSelectionOutline(0x00ff00);
+            this._trackpadTapDragMoved = true;
+            this._refreshTrackpadTapDragTimer();
+        }
+        else if (this._trackpadTapDragActive && this.startCell) {
+            const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+            const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+
+            this.endCell = { x: gridX, y: gridY };
+            if(GameMap.checkSpreadPosition(this.startCell.x,this.startCell.y,this.endCell.x, this.endCell.y)){
+                this.drawSelectionOutline("0xff0000");
+            } else{
+                this.drawSelectionOutline("0x00ff00");
+            }
+            this._trackpadTapDragMoved = true;
+            this._refreshTrackpadTapDragTimer();
         }
         else if (this.startCell) {
             const gridX = Math.floor(pointer.worldX / SQUARESIZE);
@@ -760,7 +946,16 @@ export class mapView extends Phaser.Scene {
         }
     }
 
-    onPointerUp() {
+    onPointerUp(pointer) {
+        if (
+            this._trackpadTapDragActive &&
+            pointer?.button === 0 &&
+            !pointer?._skipTrackpadTapArm
+        ) {
+            this._rememberPrimaryPointerUp(pointer);
+            return;
+        }
+        this._rememberPrimaryPointerUp(pointer);
         this.graphics.clear();
         // Farm mode uses click-to-pick; don't let pointerup clear our selection state.
         if (this.farmSelectActive) return;
@@ -797,6 +992,9 @@ export class mapView extends Phaser.Scene {
             this.brushTiles = [];
             buildingManager.assingTroopsToBuildTile(1);
         }
+        else if (this._trackpadSelectStartWorld && this._trackpadSelectEndWorld) {
+            Player.handlePlayerSelectWorldRect(this._trackpadSelectStartWorld, this._trackpadSelectEndWorld);
+        }
         else if(!this.gridPlace){ // player select
             Player.handlePlayerSelect();
         }
@@ -806,6 +1004,160 @@ export class mapView extends Phaser.Scene {
         }
         this.startCell = null;
         this.endCell = null;
+        this._clearTrackpadWorldSelection();
+        this.pointerMoving = false;
+        this._clearTrackpadTapDragTimer();
+        this._trackpadTapDragActive = false;
+        this._trackpadTapDragMoved = false;
+    }
+
+    _canUseTrackpadDrag() {
+        return !!(
+            this.gridPlace ||
+            this.selectMode ||
+            this.harvestMode ||
+            this.seedGridMode ||
+            this.isBrushMode
+        );
+    }
+
+    _isDoublePrimaryPointerDown(pointer) {
+        if (pointer.button !== 0) return false;
+
+        const now = this.time?.now ?? performance.now();
+        const radiusSq = this._trackpadDoubleClickRadiusPx * this._trackpadDoubleClickRadiusPx;
+        const upDx = pointer.x - this._lastPrimaryPointerUpX;
+        const upDy = pointer.y - this._lastPrimaryPointerUpY;
+        const downDx = pointer.x - this._lastPrimaryPointerDownX;
+        const downDy = pointer.y - this._lastPrimaryPointerDownY;
+        const matchesPrevUp =
+            this._lastPrimaryPointerUpAt > 0 &&
+            (now - this._lastPrimaryPointerUpAt) <= this._trackpadDoubleClickWindowMs &&
+            ((upDx * upDx + upDy * upDy) <= radiusSq);
+        const matchesPrevDown =
+            this._lastPrimaryPointerDownAt > 0 &&
+            (now - this._lastPrimaryPointerDownAt) <= this._trackpadDoubleClickWindowMs &&
+            ((downDx * downDx + downDy * downDy) <= radiusSq);
+        const isDouble = matchesPrevUp || matchesPrevDown;
+
+        this._lastPrimaryPointerDownAt = now;
+        this._lastPrimaryPointerDownX = pointer.x;
+        this._lastPrimaryPointerDownY = pointer.y;
+
+        if (isDouble) {
+            this._lastPrimaryPointerDownAt = -Infinity;
+            this._lastPrimaryPointerUpAt = -Infinity;
+        }
+
+        return isDouble;
+    }
+
+    _rememberPrimaryPointerUp(pointer) {
+        if (pointer?.button !== 0) return;
+        const now = this.time?.now ?? performance.now();
+        this._lastPrimaryPointerUpAt = now;
+        this._lastPrimaryPointerUpX = pointer.x;
+        this._lastPrimaryPointerUpY = pointer.y;
+    }
+
+    _isTrackpadWorldSelectionMode() {
+        return !!(
+            this.selectMode &&
+            !this.gridPlace &&
+            !this.harvestMode &&
+            !this.seedGridMode &&
+            !this.farmMode &&
+            !this.isBrushMode
+        );
+    }
+
+    _drawWorldSelectionOutline(color = 0x00ff00) {
+        if (!this._trackpadSelectStartWorld || !this._trackpadSelectEndWorld) return;
+
+        const minX = Math.min(this._trackpadSelectStartWorld.x, this._trackpadSelectEndWorld.x);
+        const maxX = Math.max(this._trackpadSelectStartWorld.x, this._trackpadSelectEndWorld.x);
+        const minY = Math.min(this._trackpadSelectStartWorld.y, this._trackpadSelectEndWorld.y);
+        const maxY = Math.max(this._trackpadSelectStartWorld.y, this._trackpadSelectEndWorld.y);
+
+        this.graphics.clear();
+        this.graphics.lineStyle(2, color, 1);
+        this.graphics.setDepth(UIDEPTH);
+        this.graphics.strokeRect(minX, minY, Math.max(1, maxX - minX), Math.max(1, maxY - minY));
+    }
+
+    _clearTrackpadWorldSelection() {
+        this._trackpadSelectStartWorld = null;
+        this._trackpadSelectEndWorld = null;
+    }
+
+    _beginTrackpadDrag(pointer) {
+        if (this.isBrushMode) {
+            this.isBrushActive = true;
+            this.brushTiles = [];
+            return;
+        }
+
+        this.pointerMoving = true;
+        if (this._isTrackpadWorldSelectionMode()) {
+            this._trackpadSelectStartWorld = { x: pointer.worldX, y: pointer.worldY };
+            this._trackpadSelectEndWorld = { x: pointer.worldX, y: pointer.worldY };
+            this.startCell = null;
+            this.endCell = null;
+            return;
+        }
+
+        const gridX = Math.floor(pointer.worldX / SQUARESIZE);
+        const gridY = Math.floor(pointer.worldY / SQUARESIZE);
+        this.startCell = { x: gridX, y: gridY };
+        this.endCell = { x: gridX, y: gridY };
+    }
+
+    _armTrackpadTapDrag(pointer) {
+        this._trackpadTapDragActive = true;
+        this._trackpadTapDragMoved = false;
+        this._beginTrackpadDrag(pointer);
+        this._refreshTrackpadTapDragTimer();
+    }
+
+    _clearTrackpadTapDragTimer() {
+        if (this._trackpadTapDragTimer) {
+            this._trackpadTapDragTimer.remove(false);
+            this._trackpadTapDragTimer = null;
+        }
+    }
+
+    _refreshTrackpadTapDragTimer() {
+        this._clearTrackpadTapDragTimer();
+        this._trackpadTapDragTimer = this.time.delayedCall(this._trackpadTapDragIdleMs, () => {
+            if (!this._trackpadTapDragActive) return;
+            if (this._trackpadTapDragMoved) {
+                this._finalizeTrackpadTapDrag();
+            } else {
+                this._cancelTrackpadTapDrag();
+            }
+        });
+    }
+
+    _cancelTrackpadTapDrag() {
+        this._clearTrackpadTapDragTimer();
+        this._trackpadTapDragActive = false;
+        this._trackpadTapDragMoved = false;
+        this.pointerMoving = false;
+        if (this.isBrushMode) {
+            this.isBrushActive = false;
+            this.brushTiles = [];
+            this.brushGraphics?.clear?.();
+        }
+        this.graphics?.clear?.();
+        this.startCell = null;
+        this.endCell = null;
+        this._clearTrackpadWorldSelection();
+    }
+
+    _finalizeTrackpadTapDrag() {
+        if (!this._trackpadTapDragActive) return;
+        this._clearTrackpadTapDragTimer();
+        this.onPointerUp({ button: 0, _skipTrackpadTapArm: true });
     }
 
     // === Farm mode: laptop-friendly 2-click plot selection ===
@@ -1636,6 +1988,10 @@ cancelFarmSelection(exitFarmMode = false) {
 
         // lock camera/inputs immediately, but keep simulation running for troop evacuation
         this._movementLocked = true;
+
+        // Stop tower-spawned pressure parcels from continuing to spawn/attack
+        // during the stage-end cinematic and reward flow.
+        this.parcelManager?.stopTowerPressureForStageEnd?.();
 
         // Send friendlies out of fort before reward selection.
         this._sendFortPlayersBackToTown(meta);

@@ -187,7 +187,8 @@ export class ZoomMixer {
       scene.keyboardSpeed = 30;
       Map.setDetailedWorldVisible?.(false);
       Map.deleteAllGridElements();
-      scene.parcelSpawnUI.setVisible(false);
+      scene.parcelSpawnUI?.setMode?.("overview");
+      scene.parcelSpawnUI?.setVisible(true);
       VisibilitySystem.setOverviewMode(true);
 
       this.overviewImage.setVisible(true);
@@ -202,7 +203,8 @@ export class ZoomMixer {
       this.mode = 'overview';
     } else {
       scene.keyboardSpeed = 10;
-      scene.parcelSpawnUI.setVisible(true);
+      scene.parcelSpawnUI?.setMode?.("detailed");
+      scene.parcelSpawnUI?.setVisible(true);
       Map.setDetailedWorldVisible?.(true);
       Map.reDraw();
       VisibilitySystem.setOverviewMode(false);
@@ -350,8 +352,7 @@ export class ZoomMixer {
 
     // On click: select troop, open details window
     icon.on('pointerdown', () => {
-      Player.selected = [troop];
-      Player.showDetailsTab(troop);
+      Player.selectSingleTroop?.(troop, { openDetails: false });
     });
 
     const cleanup = () => {

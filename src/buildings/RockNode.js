@@ -4,6 +4,7 @@ import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { buildingManager } from "../Manager/buildingManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { OrderRunner } from "../orders/OrderRunner";
 
 export class RockNode {
   static scene;
@@ -17,6 +18,8 @@ export class RockNode {
     const scene = RockNode.scene;
     this.gridX = gridX;
     this.gridY = gridY;
+    this.resourceTileType = TILE_TYPES.rock;
+    this.resourceKind = "stone";
     this.health = 3;
     this.task = null;
     this._lastClickTime = 0;
@@ -58,11 +61,11 @@ export class RockNode {
     this.sprite.on("pointerdown", () => {
       const team = Teams.teamLists["1"];
       if (!team) return;
+      const selection = OrderRunner.getSelectionProfile();
 
       const now = RockNode.scene.time.now;
       if (this._lastClickTime && now - this._lastClickTime < 300) {
-        this.stopFlash();
-        blockResourceManager.cancelBlockResourceTask(1, this.task || this);
+        blockResourceManager.cancelManualClickTasksForNode(1, this);
         return;
       }
       this._lastClickTime = now;
@@ -72,30 +75,15 @@ export class RockNode {
         return;
       }
 
-      this.startFlash();
-
-      const teamList = team.blockResourceList;
-      const foragerQueue = team.foragerQueue;
-
-      if (!this.task) {
-        const task = {
-          x: this.gridX,
-          y: this.gridY,
-          type: TILE_TYPES.rock,
-          resource: TILE_TYPES.rock.resource,
-          value: this,
-          assigned: 0,
-          remaining: this.health,
-          forageType: "block",
-        };
-        this.task = task;
-        foragerQueue.push(task);
-      } else {
-        const stillInList = teamList.includes(this.task);
-        if (!stillInList) teamList.push(this.task);
+      if (selection.allForagers && OrderRunner.hasPendingGatherPlacement()) {
+        OrderRunner.issuePendingGatherPlacement(selection.troops, this.sprite.x, this.sprite.y);
+        return;
       }
 
-      blockResourceManager.assingTroopsToGetBlockResources(1);
+      blockResourceManager.queueManualClickTask(this, {
+        teamNumber: 1,
+        eligibleTroopIds: selection.allForagers ? selection.troops.map(troop => troop.id) : null,
+      });
     });
   }
 

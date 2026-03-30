@@ -74,7 +74,10 @@ export class ClayOven {
             this.updateHealthBar?.();
             ClayOvenUI.hideMinor(this)
         });
-        this.sprite.on('pointerdown', () => ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this)));
+        this.sprite.on('pointerdown', () => {
+            if (buildingManager.handleBuildingClickForBuilders(this, null, this.teamNumber)) return;
+            ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this));
+        });
 
         ClayOven.scene.events.emit('oven:added', this);
     }

@@ -26,7 +26,7 @@ const MAX_CARRY = 1;
 export class Fireman {
 
     static speed = 80;
-    static stamina = 0.02;
+    static stamina = 0.005;
 
     static preload(scene) {
         scene.load.spritesheet('fireman_walk_down', firemanWalkDown, { frameWidth: 32, frameHeight: 32 });

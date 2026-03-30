@@ -5,6 +5,7 @@ import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { buildingManager } from "../Manager/buildingManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { OrderRunner } from "../orders/OrderRunner";
 
 export class PineTree {
   static scene;
@@ -24,6 +25,8 @@ export class PineTree {
     this.level = level;
     this.gridX = gridX;
     this.gridY = gridY;
+    this.resourceTileType = TILE_TYPES.pine;
+    this.resourceKind = "wood";
 
     // center of 3x3 footprint (matches old non-spread placement)
     const cx = (gridX + 1.5) * SQUARESIZE;
@@ -194,52 +197,30 @@ export class PineTree {
       const scene = PineTree.scene;
       const team = Teams.teamLists['1'];
       if (!team) return;
+      const selection = OrderRunner.getSelectionProfile();
 
       // --- double click detect ---
       const now = scene.time.now;
       if (this._lastClickTime && (now - this._lastClickTime) < 300) {
-        // DOUBLE CLICK: cancel harvest job + stop flash + remove from queues
-        this.stopFlash();
-        blockResourceManager.cancelBlockResourceTask(1, this.task || this);
-
-        // if you want double click to instantly remove the tree object too:
-        if (this.queuedOutline) { this.queuedOutline.destroy(); this.queuedOutline = null; }
-        this.destroy();
+        blockResourceManager.cancelManualClickTasksForNode(1, this);
         return;
       }
       this._lastClickTime = now;
-
-      // --- SINGLE CLICK: normal queue behaviour ---
-      const teamList = team.blockResourceList;
-      const foragerQueue = team.foragerQueue;
 
       if (!buildingManager.isBlockAccessible(this.gridX, this.gridY, TILE_TYPES.pine)) {
         showAlert(scene, "Can't reach that tree");
         return;
       }
 
-      // start flashing as soon as it becomes “active/queued”
-      this.startFlash();
-
-
-      if (!this.task) {
-        const task = {
-          x: this.gridX,
-          y: this.gridY,
-          type: TILE_TYPES.pine,
-          resource: TILE_TYPES.pine.resource,  // same as before
-          value: this,                         // << layered pine instance
-          assigned: 0,
-          remaining: this.health,
-          forageType: 'block'
-        };
-        this.task = task;
-        foragerQueue.push(task);
-      } else {
-        // ensure still in block list
-        const stillInList = teamList.includes(this.task);
-        if (!stillInList) teamList.push(this.task);
+      if (selection.allForagers && OrderRunner.hasPendingGatherPlacement()) {
+        OrderRunner.issuePendingGatherPlacement(selection.troops, this.container.x, this.container.y);
+        return;
       }
+
+      blockResourceManager.queueManualClickTask(this, {
+        teamNumber: 1,
+        eligibleTroopIds: selection.allForagers ? selection.troops.map(troop => troop.id) : null,
+      });
     });
 
   }

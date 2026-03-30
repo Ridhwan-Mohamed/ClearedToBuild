@@ -1,7 +1,7 @@
 import { Player } from "../players/Player"
 import { Teams } from "../Teams"
 import { Map } from "../map"
-import { BLOCKDEPTH, colorFor, CONTROL_STATES, removeFromArray, showGhostText, SQUARESIZE, TILE_MAP, TILE_TYPES, UIDEPTH } from "../constants"
+import { BLOCKDEPTH, colorFor, CONTROL_STATES, removeFromArray, showAlert, showGhostText, SQUARESIZE, TILE_MAP, TILE_TYPES, UIDEPTH } from "../constants"
 import { Manager } from "./Manager"
 import { buildingArray } from "../town"
 import { ClayOven } from "../buildings/ClayOven"
@@ -19,6 +19,7 @@ import { Brawler } from "../players/Brawler"
 import { Blademaster } from "../players/Blademaster"
 import { Gunslinger } from "../players/Gunslinger"
 import { Projectile } from "../Projectile"
+import { Scheduler } from "../ai/scheduler/Scheduler"
 
 export class buildingManager{
 
@@ -35,14 +36,229 @@ export class buildingManager{
             const typeName = tile.buildTypeName ?? buildTypeName ?? "wall";
             const buildType = TILE_TYPES[typeName] ?? TILE_TYPES.wall;
 
-            team.buildingTileStates.push({
+            const task = {
             x: tile.x,
             y: tile.y,
             assigned: 0,
             type: buildType,
             buildType,
-            });
+            queueKey: "buildingTileStates",
+            };
+            team.buildingTileStates.push(task);
+            this.ensureQueuedTileBuildGhost(task, teamNumber);
         });
+    }
+
+    static getSelectedBuilders(teamNumber = 1) {
+        const normalizedTeam = Number(teamNumber);
+        return Player.selected
+            .filter(troop => troop?.active && troop.isBuilder && troop.body?.team === normalizedTeam);
+    }
+
+    static _taskCenterWorld(task) {
+        if (task?.value?.sprite?.getBounds) {
+            const bounds = task.value.sprite.getBounds();
+            return {
+                x: bounds.centerX,
+                y: bounds.centerY,
+            };
+        }
+        const lenX = task?.type?.lenX ?? task?.buildType?.lenX ?? 1;
+        const lenY = task?.type?.lenY ?? task?.buildType?.lenY ?? 1;
+        return {
+            x: (task.x + lenX / 2) * SQUARESIZE,
+            y: (task.y + lenY / 2) * SQUARESIZE,
+        };
+    }
+
+    static _sortedBuildersForTask(builders, task) {
+        const center = this._taskCenterWorld(task);
+        return [...builders].sort((a, b) =>
+            Phaser.Math.Distance.Between(a.x, a.y, center.x, center.y) -
+            Phaser.Math.Distance.Between(b.x, b.y, center.x, center.y)
+        );
+    }
+
+    static _releaseBuildersOnTask(task, keepIds = new Set()) {
+        if (!task) return;
+        const teamNumber = task?.value?.teamNumber ?? task?.value?.team ?? 1;
+        const team = Teams.teamLists[teamNumber];
+        const builders = team?.builderList || [];
+
+        for (const troop of builders) {
+            if (!troop?.active || troop.task !== task) continue;
+            if (keepIds.has(troop.id)) continue;
+            Player.handleStateIntteruptStart(troop, CONTROL_STATES.TRACK_MODE);
+            troop.play?.(troop.idle);
+            Scheduler.stepUnit(troop);
+        }
+    }
+
+    static assignSelectedBuildersToTask(task, state, selectedBuilders = this.getSelectedBuilders()) {
+        if (!task || !selectedBuilders.length) return false;
+        const keepIds = new Set(selectedBuilders.map(troop => troop.id));
+        this._releaseBuildersOnTask(task, keepIds);
+
+        let assigned = false;
+        for (const troop of this._sortedBuildersForTask(selectedBuilders, task)) {
+            if (!troop?.active) continue;
+            if (troop.task === task) return true;
+            Player.handleStateIntteruptStart(troop, CONTROL_STATES.TRACK_MODE);
+            if (Manager.assignTaskToTroop(troop, task, state)) {
+                assigned = true;
+                if (Manager.tooManyAssigned(task, state)) break;
+            }
+        }
+        return assigned;
+    }
+
+    static ensureFixTask(building, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        if (!building) return null;
+        const team = Teams.teamLists[teamNumber];
+        if (!team) return null;
+        if (!Array.isArray(team.buildingFixTasks)) team.buildingFixTasks = [];
+
+        let task = team.buildingFixTasks.find(existing =>
+            existing?.value === building ||
+            (existing?.x === (building.gridX ?? building.x) &&
+             existing?.y === (building.gridY ?? building.y))
+        );
+
+        if (!task) {
+            task = {
+                x: building.gridX ?? building.x,
+                y: building.gridY ?? building.y,
+                type: building.buildType ?? building.type ?? TILE_TYPES.house1,
+                value: building,
+                assigned: 0,
+                queueKey: "buildingFixTasks",
+            };
+            team.buildingFixTasks.push(task);
+        }
+
+        this.ensureFixTaskVisual(task);
+        return task;
+    }
+
+    static requestBuildingFix(building, teamNumber = 1, selectedBuilders = this.getSelectedBuilders(teamNumber)) {
+        teamNumber = Number(teamNumber);
+        if (!building) return { ok: false, reason: "missing" };
+        const maxHp = (building.maxHealth ?? 100);
+        const hp = (building.health ?? building.hp ?? 0);
+        if (hp >= maxHp) {
+            showAlert(this.scene, "No repair needed", "#a7f3d0");
+            return { ok: false, reason: "full" };
+        }
+
+        const task = this.ensureFixTask(building, teamNumber);
+        if (!task) return { ok: false, reason: "task" };
+
+        if (selectedBuilders.length) {
+            const assigned = this.assignSelectedBuildersToTask(task, CONTROL_STATES.FIX_BUILDING, selectedBuilders);
+            return { ok: assigned, reason: assigned ? "assigned" : "unreachable", task };
+        }
+
+        return { ok: true, reason: "queued", task };
+    }
+
+    static handleBuildingClickForBuilders(building, openFallback, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        const selectedBuilders = this.getSelectedBuilders(teamNumber);
+        if (!selectedBuilders.length) {
+            openFallback?.();
+            return false;
+        }
+
+        this.requestBuildingFix(building, teamNumber, selectedBuilders);
+        return true;
+    }
+
+    static ensureQueuedTileBuildGhost(task, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        if (!task || task.constructionSprite || !this.scene?.add) return task?.constructionSprite ?? null;
+
+        const sprite = this.scene.add.image(
+            task.x * SQUARESIZE + SQUARESIZE / 2,
+            task.y * SQUARESIZE + SQUARESIZE / 2,
+            "construction"
+        )
+            .setDisplaySize(SQUARESIZE, SQUARESIZE)
+            .setDepth(BLOCKDEPTH + 0.15)
+            .setAlpha(0.68)
+            .setInteractive({ useHandCursor: true });
+
+        task.constructionSprite = sprite;
+        task.queueKey = task.queueKey ?? "buildingTileStates";
+        task._hovering = false;
+
+        sprite.on("pointerover", () => {
+            task._hovering = true;
+            sprite.setAlpha(0.85);
+        });
+
+        sprite.on("pointerout", () => {
+            task._hovering = false;
+            sprite.setAlpha(0.68);
+        });
+
+        sprite.on("pointerdown", () => {
+            const selectedBuilders = this.getSelectedBuilders(teamNumber);
+            if (selectedBuilders.length) {
+                this.assignSelectedBuildersToTask(task, CONTROL_STATES.BUILD_MODE_T, selectedBuilders);
+                return;
+            }
+            this.cancelQueuedTileBuild(task, teamNumber);
+        });
+
+        return sprite;
+    }
+
+    static clearQueuedTileBuildGhost(task) {
+        if (!task) return;
+        task.constructionSprite?.destroy?.();
+        task.constructionSprite = null;
+    }
+
+    static cancelQueuedTileBuild(task, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        if (!task) return false;
+        this._releaseBuildersOnTask(task);
+        Teams.removeFromStateArray(teamNumber, task.queueKey ?? "buildingTileStates", task);
+        this.clearQueuedTileBuildGhost(task);
+        return true;
+    }
+
+    static ensureFixTaskVisual(task) {
+        if (!task?.value?.sprite?.active || !this.scene?.add) return null;
+        if (task.fixIndicator?.active) return task.fixIndicator;
+
+        const bounds = task.value.sprite.getBounds();
+        const icon = this.scene.add.image(bounds.centerX, bounds.centerY, "hammer")
+            .setDepth((task.value.sprite.depth ?? BLOCKDEPTH) + 2)
+            .setDisplaySize(18, 18)
+            .setAlpha(0.95);
+
+        task.fixIndicator = icon;
+        task.fixIndicatorTween = this.scene.tweens.add({
+            targets: icon,
+            angle: { from: -22, to: 22 },
+            duration: 280,
+            yoyo: true,
+            repeat: -1,
+            ease: "Sine.easeInOut",
+        });
+
+        task.value.sprite.once?.("destroy", () => this.clearFixTaskVisual(task));
+        return icon;
+    }
+
+    static clearFixTaskVisual(task) {
+        if (!task) return;
+        task.fixIndicatorTween?.remove?.();
+        task.fixIndicatorTween = null;
+        task.fixIndicator?.destroy?.();
+        task.fixIndicator = null;
     }
 
     static createDestroyTileStateArray(tiles, teamNumber) {
@@ -209,6 +425,7 @@ export class buildingManager{
         Map.enemyRegionSystem?.ensureUpToDate?.(); // forces recompute once (your current RegionSystem supports this)
 
         AudioManager.playSound("sfx_building_complete", { volume: 0.2 });
+        this.clearQueuedTileBuildGhost(troop.task);
         Teams.removeFromStateArray(teamNumber, "buildingTileStates", troop.task);
         troop.task = null;
         Manager.assignOneTroopToAction(troop, Teams.teamLists[teamNumber].buildingTileStates, CONTROL_STATES.BUILD_MODE_T);
@@ -449,7 +666,21 @@ export class buildingManager{
         return null; // ❌ No valid path found
     }
 
-    static findApproachAnyPerimeter(x, y, type, troop, tStartX = null, tStartY = null) {
+    static _assignedPerimeterDestKeys(task, troop) {
+        if (!task || !troop) return new Set();
+
+        const used = new Set();
+        for (const other of Player.troops) {
+            if (!other || other === troop || !other.active) continue;
+            if (other.body?.team !== troop.body?.team) continue;
+            if (other.task !== task) continue;
+            if (!Number.isFinite(other.destX) || !Number.isFinite(other.destY)) continue;
+            used.add(`${other.destX},${other.destY}`);
+        }
+        return used;
+    }
+
+    static findApproachAnyPerimeter(x, y, type, troop, tStartX = null, tStartY = null, task = null) {
         const candidates = [];
         const startX = x;
         const startY = y;
@@ -505,10 +736,15 @@ export class buildingManager{
             tStartY = tStartY * SQUARESIZE + SQUARESIZE / 2;
         }
 
-        // 3) Closest perimeter tile that actually has a path
+        // 3) Prefer open perimeter tiles already not claimed by other troops on the same task.
         candidates.sort((a, b) => a.dist - b.dist);
+        const occupied = this._assignedPerimeterDestKeys(task, troop);
+        const ordered = [
+            ...candidates.filter(c => !occupied.has(`${c.tx},${c.ty}`)),
+            ...candidates.filter(c => occupied.has(`${c.tx},${c.ty}`)),
+        ];
 
-        for (const c of candidates) {
+        for (const c of ordered) {
             const path = navMesh.findPath(
             { x: tStartX, y: tStartY },
             { x: c.tx * SQUARESIZE + SQUARESIZE / 2, y: c.ty * SQUARESIZE + SQUARESIZE / 2 }
@@ -591,6 +827,12 @@ export class buildingManager{
                 task._hovering = false;
                 scene.constructionHoverBg.setVisible(false);
                 scene.constructionHoverText.setVisible(false);
+            });
+
+            task.constructionSprite.on("pointerdown", () => {
+                const selectedBuilders = this.getSelectedBuilders(sprite.body.team);
+                if (!selectedBuilders.length) return;
+                this.assignSelectedBuildersToTask(task, CONTROL_STATES.BUILD_MODE_B, selectedBuilders);
             });
         }
 
@@ -1144,6 +1386,7 @@ export class buildingManager{
         const task = sprite.task;
 
         if (!task || !task.value) {
+            this.clearFixTaskVisual(task);
             sprite.task = null;
             sprite.timer = null;
             sprite.play(sprite.idle);
@@ -1156,6 +1399,7 @@ export class buildingManager{
 
         if ((b[hpKey] ?? 0) >= maxHp) {
             // already fixed
+            this.clearFixTaskVisual(task);
             Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", task);
             sprite.task = null;
             sprite.timer = null;
@@ -1170,6 +1414,7 @@ export class buildingManager{
 
             // building might have been destroyed mid-task
             if (!sprite.task || !sprite.task.value) {
+                this.clearFixTaskVisual(sprite.task);
                 sprite.task = null;
                 sprite.timer = null;
                 sprite.play(sprite.idle);
@@ -1205,6 +1450,7 @@ export class buildingManager{
 
             // finished?
             if (building[key] >= maxHealth) {
+                this.clearFixTaskVisual(sprite.task);
                 Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", sprite.task);
                 sprite.task = null;
 

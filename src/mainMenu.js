@@ -135,7 +135,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         const logo = overlayScene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.4', {
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.5', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);

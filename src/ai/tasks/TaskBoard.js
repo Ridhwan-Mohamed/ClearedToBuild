@@ -38,6 +38,18 @@ export class TaskBoard {
                 const task = arr[i];
                 if (!task) continue;
                 if (task.canceled) continue;
+                if (map.kind === "forage" && task.directOrderId) continue;
+                if (map.kind === "forage" && task.forageType === "block") {
+                    const node = task.value;
+                    const nodeActive = !!(
+                        node &&
+                        node.active !== false &&
+                        node.sprite?.active !== false &&
+                        node.container?.active !== false
+                    );
+                    if (!nodeActive) continue;
+                    if (Math.max(0, Number(node.health ?? task.remaining ?? 0)) <= 0) continue;
+                }
 
                 if (map.kind === "enemy_unit") {
                     const go = task?.gameObject || task?.target || task;
@@ -106,6 +118,9 @@ export class TaskBoard {
     }
 
     static _deriveMaxAssigned(task, fallback) {
+        if (typeof task.workerCapacity === "number" && task.workerCapacity > 0) {
+            return task.workerCapacity;
+        }
         if (typeof task.amount === "number" && task.amount > 0) return task.amount;
         if (typeof task.remaining === "number") return Math.max(1, task.remaining);
         return fallback;

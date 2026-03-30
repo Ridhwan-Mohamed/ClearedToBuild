@@ -2,6 +2,7 @@
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
 import { TILE_TYPES, showAlert } from '../../constants'
+import { buildingManager } from '../../Manager/buildingManager.js';
 
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
@@ -255,21 +256,7 @@ export default class StorageTab {
     fixBtn.on('pointerup', () => {
       const b = this.selected; // storage
       if (!b) return;
-
-      const maxHp = (b.maxHealth ?? 100);
-      const hp    = (b.health ?? b.hp ?? 0);
-      if (hp >= maxHp) {showAlert(scene, "Building is Already in condition", '#00ff00'); return}
-
-      const team = Teams.teamLists[this.team];
-      if (!team.buildingFixTasks) team.buildingFixTasks = [];
-
-      Teams.addToStateArrayIfNotExists(this.team, "buildingFixTasks", {
-        x: b.gridX ?? b.x,
-        y: b.gridY ?? b.y,
-        type: b.buildType ?? b.type ?? TILE_TYPES.storage,
-        value: b,
-        assigned: 0,
-      });
+      buildingManager.requestBuildingFix(b, this.team, []);
     });
 
     const headerRow = scene.rexUI.add.sizer({
@@ -317,9 +304,9 @@ export default class StorageTab {
 
     // If nothing selected (or old selection is gone), pick the first storage
     if (!this.selected || !storages.includes(this.selected)) {
-      if (storages[0] && typeof this.selectFromCard === 'function') {
-        // Use existing selection logic so rows highlight correctly
-        this.selectFromCard(storages[0]);
+      if (storages[0]) {
+        // Opening the tab should not pan cameras; just select the first storage.
+        this.selectStorage(storages[0]);
       } else {
         this.selected = null;
         if (this.detail?.setStorage) this.detail.setStorage(null);
@@ -472,7 +459,7 @@ export default class StorageTab {
 
   centerCameraOnStorage(storage) {
     if (!storage?.sprite) return;
-    const cam = this.scene.cameras.main;
+    const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     cam.centerOn(storage.sprite.x, storage.sprite.y);
   }
 

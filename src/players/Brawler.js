@@ -9,17 +9,19 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import { OrderRunner } from '../orders/OrderRunner.js';
 import brawlerWalkDown from 'url:../assets/players/brawler/brawler_walk_down.png';
 import brawlerWalkDownLeft from 'url:../assets/players/brawler/brawler_walk_down_left.png';
 import brawlerWalkDownRight from 'url:../assets/players/brawler/brawler_walk_down_right.png';
 import brawlerWalkUp from 'url:../assets/players/brawler/brawler_walk_up.png';
 import brawlerWalkUpLeft from 'url:../assets/players/brawler/brawler_walk_up_left.png';
 import brawlerWalkUpRight from 'url:../assets/players/brawler/brawler_walk_up_right.png';
+import boxingGloveFx from 'url:../assets/Players/boxing_glove.png';
 
 export class Brawler {
 
     static speed = 130; // fastest melee unit
-    static stamina = 0.025;
+    static stamina = 0.01;
 
     static preload(scene) {
         scene.load.spritesheet('brawler_walk_down', brawlerWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -28,6 +30,7 @@ export class Brawler {
         scene.load.spritesheet('brawler_walk_up', brawlerWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('brawler_walk_up_left', brawlerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('brawler_walk_up_right', brawlerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.image('brawler_boxing_glove_fx', boxingGloveFx);
     }
 
     constructor(x, y, teamNumber) {
@@ -78,6 +81,7 @@ export class Brawler {
         });
 
         sprite.isBrawler = true;
+        sprite.meleeFxKey = 'brawler_boxing_glove_fx';
 
         sprite.weapon = weapons.boxingGloves;
 
@@ -94,6 +98,7 @@ export class Brawler {
     }
 
     static update(troop) {
+        if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
         if (Scheduler.stepUnit(troop)) return;

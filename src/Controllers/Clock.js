@@ -4,6 +4,7 @@ import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Player } from "../players/Player";
 import { recalculateDestroyTasksFromPoint, spawnSeaRaider } from "../Manager/spawnManager";
 import { AudioManager } from "../Manager/AudioManager";
+import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
@@ -107,16 +108,17 @@ export class Clock {
         else if (this.isNight()) {
             // keep your later-per-hour spawning disabled for now (or remove)
         }
-        else if (this.isDayStart() && !this.powerupScreenShown) {
+        else if (this.isDayStart() /*&& !this.powerupScreenShown*/) {
             AudioManager.setIsNight(false);
             this.powerupScreenShown = true;
+            DailyNeedsTracker.consumeResources();
             Teams.growWateredCrops(1);
             Teams.resetDailyWatering(1);
-            // Daily popup pause is opt-in; default flow keeps gameplay running.
-            if (this.scene?.enableDailyPowerupPopup) {
-                openPowerupScreen(this.scene);
-                this.pause();
-            }
+            // // Daily popup pause is opt-in; default flow keeps gameplay running.
+            // if (this.scene?.enableDailyPowerupPopup) {
+            //     openPowerupScreen(this.scene);
+            //     this.pause();
+            // }
         } else {
             this.lastSend = null;
         }

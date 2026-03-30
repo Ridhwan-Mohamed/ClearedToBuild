@@ -13,7 +13,12 @@ export class RolePolicy {
         return tickets.filter(t =>
             t &&
             t.roleMask?.includes(this.roleName) &&
-            allowed.has(t.kind)
+            allowed.has(t.kind) &&
+            (
+                !Array.isArray(t.payload?.eligibleTroopIds) ||
+                t.payload.eligibleTroopIds.length === 0 ||
+                t.payload.eligibleTroopIds.includes(troop.id)
+            )
         );
     }
 

@@ -9,17 +9,19 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import { OrderRunner } from '../orders/OrderRunner.js';
 import blademasterWalkDown from 'url:../assets/players/blademaster/blademaster_walk_down.png';
 import blademasterWalkDownLeft from 'url:../assets/players/blademaster/blademaster_walk_down_left.png';
 import blademasterWalkDownRight from 'url:../assets/players/blademaster/blademaster_walk_down_right.png';
 import blademasterWalkUp from 'url:../assets/players/blademaster/blademaster_walk_up.png';
 import blademasterWalkUpLeft from 'url:../assets/players/blademaster/blademaster_walk_up_left.png';
 import blademasterWalkUpRight from 'url:../assets/players/blademaster/blademaster_walk_up_right.png';
+import blademasterSlash from 'url:../assets/players/blademaster/blademaster_slash.png';
 
 export class Blademaster {
 
-    static speed = 70;      // slower
-    static stamina = 0.03;
+    static speed = 100;      // slower
+    static stamina = 0.01;
 
     static preload(scene) {
         scene.load.spritesheet('blademaster_walk_down', blademasterWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -28,6 +30,7 @@ export class Blademaster {
         scene.load.spritesheet('blademaster_walk_up', blademasterWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('blademaster_walk_up_left', blademasterWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('blademaster_walk_up_right', blademasterWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_slash', blademasterSlash, { frameWidth: 50, frameHeight: 50 });
     }
     
     constructor(x, y, teamNumber) {
@@ -60,6 +63,7 @@ export class Blademaster {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        sprite.slashFxKey = 'blademaster_slash';
         attachDirectionalSix(sprite, {
             animPrefix: 'blademaster',
             defaultDirection: 'down',
@@ -82,6 +86,10 @@ export class Blademaster {
         // Melee sword: bigger damage + short range
         sprite.weapon = weapons.sword;
 
+        if (!Player.scene.anims.exists('blademaster_slash_fx')) {
+            Player.createAnim('blademaster_slash_fx', 'blademaster_slash', 0, 4, 0, 14);
+        }
+
         ZoomMixer.createPlayerMoniker(sprite);
         Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         Player.characters.add(sprite);
@@ -95,6 +103,7 @@ export class Blademaster {
     }
 
     static update(troop) {
+        if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
         if (Scheduler.stepUnit(troop)) return;

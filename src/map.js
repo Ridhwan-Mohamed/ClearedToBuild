@@ -19,6 +19,7 @@ import { WallPlacementController } from "./Controllers/WallPlacementController";
 import { Wall } from "./buildings/Wall";
 import { UI_ITEM_TYPES } from "./UI/UIConstants";
 import { TowerBuilding } from "./buildings/Tower";
+import { OrderRunner } from "./orders/OrderRunner";
 
 const colors = {
     green: { r: 14, g: 209, b: 69 },
@@ -1828,60 +1829,44 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             itemToPlace.sy = posY + Math.floor(item.lenY)
             itemToPlace.lenX = item.lenX
             itemToPlace.lenY = item.lenY
+            itemToPlace.gridX = posX
+            itemToPlace.gridY = posY
             if(item == TILE_TYPES.spawn) spawnPoints.push([posX, posY, itemToPlace])
             if(index>-1) buildingArray[index][3] = itemToPlace;
             if (item.name === 'pine') {
                 itemToPlace.resourceType = item.name;
+                itemToPlace.resourceTileType = item;
+                itemToPlace.resourceKind = "wood";
                 itemToPlace.health = 3;
 
                 itemToPlace.on('pointerdown', () => {
                     const sceneNow = this.scene.time.now;
+                    const selection = OrderRunner.getSelectionProfile();
 
                     // DOUBLE CLICK: cancel this resource job and stop foragers
                     if (itemToPlace._lastClickTime && (sceneNow - itemToPlace._lastClickTime) < 300) {
-                        itemToPlace.stopFlash();
-                        blockResourceManager.cancelBlockResourceTask(1, itemToPlace.task || itemToPlace);
+                        blockResourceManager.cancelManualClickTasksForNode(1, itemToPlace);
 
                         // remove from resource arrays so it isn’t targeted again
-                        if (item.name === 'pine') {
-                            Map.worldPines = Map.worldPines.filter(v => v !== itemToPlace);
-                        }
                         return;
                     }
                     itemToPlace._lastClickTime = sceneNow;
-
-                    // SINGLE CLICK: start flashing when active/queued
-                    itemToPlace.startFlash();
-
-                    const teamList = Teams.teamLists['1'].blockResourceList;
-                    const foragerQueue = Teams.teamLists['1'].foragerQueue;
 
                     // ✅ accessibility gate for legacy sprites (pine/rock)
                     if (!buildingManager.isBlockAccessible(posX, posY, item)) {
                         showAlert(this.scene, "Can't reach that resource");
                         return;
                     }
-                    if (!itemToPlace.task) {
-                        const task = {
-                            x: posX,
-                            y: posY,
-                            type: item,
-                            resource: item.resource,
-                            value: itemToPlace,
-                            assigned: 0,
-                            remaining: itemToPlace.health,
-                            forageType: 'block'
-                        };
-                        itemToPlace.task = task;
-                        foragerQueue.push(task);
-                    } else {
-                        // Ensure the task is still in the blockResourceList
-                        const stillInList = teamList.includes(itemToPlace.task);
-                        if (!stillInList) {
-                            teamList.push(itemToPlace.task);
-                        }
+
+                    if (selection.allForagers && OrderRunner.hasPendingGatherPlacement()) {
+                        OrderRunner.issuePendingGatherPlacement(selection.troops, itemToPlace.x, itemToPlace.y);
+                        return;
                     }
-                    blockResourceManager.assingTroopsToGetBlockResources(1);
+
+                    blockResourceManager.queueManualClickTask(itemToPlace, {
+                        teamNumber: 1,
+                        eligibleTroopIds: selection.allForagers ? selection.troops.map(troop => troop.id) : null,
+                    });
                 });
                 if (item.name === 'pine') Map.worldPines.push(itemToPlace);
                 this._worldAdd(itemToPlace);

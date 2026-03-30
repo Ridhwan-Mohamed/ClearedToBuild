@@ -6,6 +6,14 @@ import { Teams } from "../Teams";
 export class Manager {
     static scene;
 
+    static _troopEligibleForTask(troop, task, state) {
+        if (!troop || !task) return false;
+        if (Array.isArray(task.eligibleTroopIds) && task.eligibleTroopIds.length) {
+            return task.eligibleTroopIds.includes(troop.id);
+        }
+        return true;
+    }
+
     static assignTroopsToAction(troopList, taskList, state, force = false){
         if (taskList.length <= 0) return;
         for(let troop of troopList){
@@ -22,6 +30,7 @@ export class Manager {
                 }
                 if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
                 else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
+                if (!this._troopEligibleForTask(troop, task, state)) continue;
                 if(this.buildType(state)){
                     if(this.tooManyAssigned(task, state)) continue;
                     if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
@@ -29,15 +38,15 @@ export class Manager {
                     if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                         approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                     }else if(this.blockType(state)){
-                        // DESTROY should path to ANY perimeter tile
-                        if (state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) {
-                            approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop);
-                            if (!approachTile) continue;
-                            troop.path = approachTile.path;
-                            troop.destX = approachTile.tx;
-                            troop.destY = approachTile.ty;
+                        if (
+                            state === CONTROL_STATES.DESTROY_MODE ||
+                            state === CONTROL_STATES.FIX_BUILDING ||
+                            state === CONTROL_STATES.GET_BLOCK_RESOURCE
+                        ) {
+                            approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
+                        } else {
+                            approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                         }
-                        else approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                     }
                     if(approachTile){
                         troop.roam = false;
@@ -46,6 +55,8 @@ export class Manager {
                         if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type
                         troop.task = task;
                         troop.task.assigned += 1;
+                        troop.destX = approachTile.tx;
+                        troop.destY = approachTile.ty;
                         this._setTaskMeta(troop, task, state, arrayKey);
                         Player.moveTo(troop, approachTile.path)
                         break;
@@ -104,6 +115,7 @@ export class Manager {
             }
             if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
             else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
+            if (!this._troopEligibleForTask(troop, task, state)) continue;
             if(this.buildType(state)){
                 if(this.tooManyAssigned(task, state)) continue;
                 if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
@@ -111,14 +123,15 @@ export class Manager {
                 if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                     approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                 }else if(this.blockType(state)){
-                    if (state === CONTROL_STATES.DESTROY_MODE || state === CONTROL_STATES.FIX_BUILDING) {
-                        approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop);
-                        if (!approachTile) return;
-                        troop.path = approachTile.path;
-                        troop.destX = approachTile.tx;
-                        troop.destY = approachTile.ty;
+                    if (
+                        state === CONTROL_STATES.DESTROY_MODE ||
+                        state === CONTROL_STATES.FIX_BUILDING ||
+                        state === CONTROL_STATES.GET_BLOCK_RESOURCE
+                    ) {
+                        approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
+                    } else {
+                        approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                     }
-                    else approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
                 }
                 if(approachTile){
                     troop.roam = false;
@@ -126,6 +139,8 @@ export class Manager {
                     if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                     troop.task = task;
                     troop.task.assigned += 1;
+                    troop.destX = approachTile.tx;
+                    troop.destY = approachTile.ty;
                     this._setTaskMeta(troop, task, state, arrayKey);
                     Player.moveTo(troop, approachTile.path)
                     return true;
@@ -187,6 +202,7 @@ export class Manager {
         }
         if(task.forageType == 'seed') state = CONTROL_STATES.SEED_MODE
         else if(task.forageType == 'block') state = CONTROL_STATES.GET_BLOCK_RESOURCE
+        if (!this._troopEligibleForTask(troop, task, state)) return false;
         if(this.buildType(state)){
             if(this.tooManyAssigned(task, state)) return;
             if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) return; 
@@ -194,7 +210,15 @@ export class Manager {
             if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
                 approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
             }else if(this.blockType(state)){
-                approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                if (
+                    state === CONTROL_STATES.DESTROY_MODE ||
+                    state === CONTROL_STATES.FIX_BUILDING ||
+                    state === CONTROL_STATES.GET_BLOCK_RESOURCE
+                ) {
+                    approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
+                } else {
+                    approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                }
             }
             if(approachTile){
                 troop.roam = false;
@@ -202,6 +226,8 @@ export class Manager {
                 if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                 troop.task = task;
                 troop.task.assigned += 1;
+                troop.destX = approachTile.tx;
+                troop.destY = approachTile.ty;
                 this._setTaskMeta(troop, task, state, null);
                 Player.moveTo(troop, approachTile.path)
                 return true;
@@ -296,7 +322,14 @@ export class Manager {
             return task.assigned >= task.amount;
         }
 
-        if(state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE || state == CONTROL_STATES.GET_BLOCK_RESOURCE){
+        if (state == CONTROL_STATES.GET_BLOCK_RESOURCE) {
+            const capacity = typeof task.workerCapacity === "number"
+                ? Math.max(1, task.workerCapacity)
+                : Math.max(1, task.remaining ?? 1);
+            return task.assigned >= capacity;
+        }
+
+        if(state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE){
             return task.remaining <= task.assigned;
         }
 

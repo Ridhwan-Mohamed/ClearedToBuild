@@ -135,6 +135,37 @@ export class TowerPressureController {
     };
   }
 
+  getSlotPressureInfo(slotId) {
+    if (!slotId) return null;
+    const tower = this._slotLocks.get(slotId);
+    if (!tower) return null;
+
+    const st = this._towerState?.get?.(tower);
+    if (!st) return null;
+
+    const now = this.scene?.time?.now ?? 0;
+    const remainingMs = Math.max(0, (st.countdownEndsAt ?? 0) - now);
+    const hasActiveRaid = !!(slotId && this.scene?.parcelManager?.slotToContractId?.[slotId]);
+    const difficulty = this._difficultyForCurrentStage();
+    const spawners = difficulty;
+    const enemies = spawners * (PRESSURE.baseEnemiesPerSpawner ?? 3);
+
+    let phase = "arming";
+    if (hasActiveRaid) phase = "raid_live";
+    else if (remainingMs > 0) phase = "countdown";
+    else if (st.waitingForContractToEnd) phase = "waiting_slot";
+
+    return {
+      slotId,
+      phase,
+      remainingMs,
+      remainingText: fmtMMSS(remainingMs),
+      difficulty,
+      spawners,
+      enemies,
+    };
+  }
+
   // ─────────────────────────────────────────────────────────────
 
   _cancelTimers(st) {

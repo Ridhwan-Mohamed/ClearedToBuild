@@ -154,13 +154,13 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('grassWood', grassWood);
         scene.load.image('grassRock', grassRock);
         scene.load.image('storage', storage);
-        scene.load.spritesheet('tower', tower, { frameWidth: 80, frameHeight: 80});
-        scene.load.spritesheet('tower_destroyed', tower_destroyed, { frameWidth: 80, frameHeight: 80 });
+        scene.load.spritesheet('tower', tower, { frameWidth: 96, frameHeight: 96 });
+        scene.load.spritesheet('tower_destroyed', tower_destroyed, { frameWidth: 96, frameHeight: 96 });
         scene.load.spritesheet('prison_closed', prison_closed, { frameWidth: 64, frameHeight: 64 });
         scene.load.spritesheet('prison_opened', prison_opened, { frameWidth: 64, frameHeight: 64 });
         scene.load.spritesheet('bank_closed', bank_closed, { frameWidth: 64, frameHeight: 64 });
         scene.load.spritesheet('bank_opened', bank_opened, { frameWidth: 64, frameHeight: 64 });
-        scene.load.spritesheet('explosions', explosions, { frameWidth: 77, frameHeight: 74 });
+        scene.load.spritesheet('explosions', explosions, { frameWidth: 80, frameHeight: 74 });
         scene.load.image('reward_mini_card', rewardMiniCard);
         scene.load.spritesheet('reward_treasure_chest', rewardTreasureChest, { frameWidth: 100, frameHeight: 80 });
     }
@@ -202,7 +202,6 @@ export class itemTab extends Phaser.Scene {
                 stroke: '#000000',
                 strokeThickness: 2
             }).setOrigin(0, 0.5);
-
 
             // Add selection behavior
             image.on('pointerdown', () => {
@@ -247,8 +246,6 @@ export class itemTab extends Phaser.Scene {
             })
         main.depth = UIDEPTH;
     }
-
-
 
     static itemValues(value){
         switch (value) {

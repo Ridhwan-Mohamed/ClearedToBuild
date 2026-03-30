@@ -21,7 +21,7 @@ import builderWalkUpRight from 'url:../assets/players/builder/builder_walk_up_ri
 export class Builder {
 
     static speed = 80;
-    static stamina = 0.02;
+    static stamina = 0.01;
 
     static preload(scene) {
         scene.load.spritesheet('builder_walk_down', builderWalkDown, { frameWidth: 32, frameHeight: 32 });

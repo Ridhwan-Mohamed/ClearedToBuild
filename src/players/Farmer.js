@@ -24,7 +24,7 @@ import farmerPlant from 'url:../assets/players/farmer/farmer_plant.png';
 export class Farmer {
 
     static speed = 80;
-    static stamina = 0.02;
+    static stamina = 0.005;
     static maxWaterPailCarry = 3;
 
     static preload(scene) {

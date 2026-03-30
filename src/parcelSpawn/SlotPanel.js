@@ -21,9 +21,18 @@ export class SlotPanel {
     this._page = null;
     this._pressureMode = false;
     this._pressureText = null;
+    this._overviewStatusPrimary = null;
+    this._overviewStatusSecondary = null;
+    this._overviewCards = [];
+    this._overviewPressureCards = [];
+    this._overviewPressureObjects = [];
+    this._overviewMenu = "GRID"; // GRID | PRESSURE
+    this.mode = "detailed";
 
     this._buildFrame();
     this._buildGrid();
+    this._buildOverviewGrid();
+    this.setMode("detailed");
   }
 
   _buildFrame() {
@@ -111,6 +120,268 @@ export class SlotPanel {
     }
   }
 
+  _getOverviewDefs() {
+    return [
+      { type: "FOREST", emoji: "🌲", cost: () => calcContractCost(this.scene, "FOREST") },
+      { type: "ROCK", emoji: "🪨", cost: () => calcContractCost(this.scene, "ROCK") },
+      { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => calcContractCost(this.scene, "PRESSURE", 1) },
+      { type: "MARKET", emoji: "🏪", cost: () => 40 },
+      { type: "FARM", emoji: "🌾", cost: () => calcContractCost(this.scene, "FARM") },
+      { type: "MILITIA", emoji: "🛡", cost: () => calcContractCost(this.scene, "MILITIA") },
+    ];
+  }
+
+  _buildOverviewGrid() {
+    const pad = 10;
+    const innerW = this.W - pad * 2;
+    const innerH = this.H - pad * 2;
+    const cellW = Math.floor(innerW / 2) - 10;
+    const cellH = Math.floor((innerH - 16) / 3) - 6;
+    const startY = -innerH / 2 + cellH / 2 + 4;
+    const defs = this._getOverviewDefs();
+
+    this.overviewGridObjects = [];
+    this._overviewCards = [];
+
+    for (let i = 0; i < defs.length; i++) {
+      const row = Math.floor(i / 2);
+      const col = i % 2;
+      const x = -innerW / 2 + cellW / 2 + col * (cellW + 12);
+      const y = startY + row * (cellH + 10);
+      const def = defs[i];
+
+      const bg = this.scene.add.rectangle(x, y, cellW, cellH, 0xffffff, 0.08)
+        .setStrokeStyle(2, 0xffffff, 0.28)
+        .setScrollFactor(1)
+        .setInteractive({ useHandCursor: true });
+
+      const emoji = this.scene.add.text(x, y - 26, def.emoji, {
+        fontSize: "84px",
+        stroke: "#001018",
+        strokeThickness: 8,
+      }).setOrigin(0.5).setScrollFactor(1);
+
+      const cost = this.scene.add.text(x, y + 46, "", {
+        fontFamily: "Bungee",
+        fontSize: "32px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 8,
+        align: "center",
+      }).setOrigin(0.5).setScrollFactor(1);
+
+      const payload = def.type === "PRESSURE"
+        ? { type: "PRESSURE", difficulty: def.difficulty ?? 1 }
+        : (def.type === "MARKET" ? { type: "MARKET", cost: 40 } : { type: def.type });
+
+      bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
+      bg.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
+      bg.on("pointerdown", () => bg.setFillStyle(0xffffff, 0.22));
+      bg.on("pointerup", () => {
+        bg.setFillStyle(0xffffff, 0.16);
+        if (this.mode !== "overview" || this._pressureMode) return;
+        if (def.type === "PRESSURE") {
+          this._openOverviewPressureMenu();
+          return;
+        }
+        this.commit(payload);
+      });
+
+      this.container.add([bg, emoji, cost]);
+      this.overviewGridObjects.push(bg, emoji, cost);
+      this._overviewCards.push({ def, costText: cost });
+    }
+
+    this._overviewStatusPrimary = this.scene.add.text(0, -48, "", {
+      fontFamily: "Bungee",
+      fontSize: "100px",
+      color: "#ffffff",
+      stroke: "#001018",
+      strokeThickness: 12,
+      align: "center",
+    }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+
+    this._overviewStatusSecondary = this.scene.add.text(0, 112, "", {
+      fontFamily: "Bungee",
+      fontSize: "36px",
+      color: "#d6f5ff",
+      stroke: "#001018",
+      strokeThickness: 10,
+      align: "center",
+      lineSpacing: 12,
+      wordWrap: { width: this.W - 36 },
+    }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+
+    this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary]);
+    this._buildOverviewPressureMenu(cellW, cellH, innerW, innerH);
+    this._refreshOverviewGridCosts();
+    this._refreshOverviewPressureCosts();
+  }
+
+  _refreshOverviewGridCosts() {
+    for (const card of this._overviewCards) {
+      if (card.def.type === "PRESSURE") {
+        card.costText.setText("PICK\nLEVEL");
+        continue;
+      }
+      const amount = Number(card.def.cost?.() ?? 0);
+      const extra = card.def.type === "PRESSURE" ? "1" : "";
+      card.costText.setText(`${extra ? `D${extra}\n` : ""}$${amount}`);
+    }
+  }
+
+  _buildOverviewPressureMenu(cellW, cellH, innerW, innerH) {
+    const skull = "\u{1F480}";
+    const closeEmoji = "\u274C";
+    const gap = 12;
+    const pressureCardW = Math.floor((innerW - gap) / 2);
+    const pressureCardH = Math.floor((innerH - gap) / 2);
+    const leftX = -(pressureCardW / 2) - (gap / 2);
+    const rightX = (pressureCardW / 2) + (gap / 2);
+    const topY = -(pressureCardH / 2) - (gap / 2);
+    const bottomY = (pressureCardH / 2) + (gap / 2);
+    const defs = [
+      { difficulty: 1, emoji: skull, x: leftX, y: topY },
+      { difficulty: 2, emoji: skull.repeat(2), x: rightX, y: topY },
+      { difficulty: 3, emoji: skull.repeat(3), x: leftX, y: bottomY },
+      { close: true, emoji: closeEmoji, x: rightX, y: bottomY },
+    ];
+
+    this._overviewPressureCards = [];
+    this._overviewPressureObjects = [];
+
+    for (const def of defs) {
+      const bg = this.scene.add.rectangle(def.x, def.y, pressureCardW, pressureCardH, 0xffffff, 0.08)
+        .setStrokeStyle(2, 0xffffff, 0.28)
+        .setScrollFactor(1)
+        .setInteractive({ useHandCursor: true })
+        .setVisible(false);
+
+      const emoji = this.scene.add.text(def.x, def.y - (def.close ? 0 : 12), def.emoji, {
+        fontSize: def.close ? "64px" : def.difficulty === 3 ? "52px" : "62px",
+        color: def.close ? "#ff6b6b" : "#ffffff",
+        stroke: def.close ? "#3a0000" : "#001018",
+        strokeThickness: 8,
+      }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+
+      const cost = this.scene.add.text(def.x, def.y + 32, "", {
+        fontFamily: "Bungee",
+        fontSize: "24px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 7,
+        align: "center",
+      }).setOrigin(0.5).setScrollFactor(1).setVisible(!def.close);
+
+      bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
+      bg.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
+      bg.on("pointerdown", () => bg.setFillStyle(0xffffff, 0.22));
+      bg.on("pointerup", () => {
+        bg.setFillStyle(0xffffff, 0.16);
+        if (this.mode !== "overview" || this._pressureMode || this._overviewMenu !== "PRESSURE") return;
+        if (def.close) {
+          this._closeOverviewPressureMenu();
+          return;
+        }
+        this.commit({ type: "PRESSURE", difficulty: def.difficulty });
+      });
+
+      this.container.add([bg, emoji, cost]);
+      this._overviewPressureObjects.push(bg, emoji, cost);
+      if (!def.close) this._overviewPressureCards.push({ def, costText: cost });
+    }
+  }
+
+  _refreshOverviewPressureCosts() {
+    for (const card of this._overviewPressureCards) {
+      if (!card?.costText || card.def?.close) continue;
+      const amount = Number(calcContractCost(this.scene, "PRESSURE", card.def.difficulty) ?? 0);
+      card.costText.setText(`$${amount}`);
+    }
+  }
+
+  _openOverviewPressureMenu() {
+    this._overviewMenu = "PRESSURE";
+    this._hideOverviewStatus();
+    this._refreshOverviewPressureCosts();
+    this._syncOverviewVisibility();
+  }
+
+  _closeOverviewPressureMenu() {
+    this._overviewMenu = "GRID";
+    this._hideOverviewStatus();
+    this._syncOverviewVisibility();
+  }
+
+  _syncOverviewVisibility() {
+    const showGrid = this.mode === "overview" && !this._pressureMode && this._overviewMenu !== "PRESSURE";
+    const showPressureMenu = this.mode === "overview" && !this._pressureMode && this._overviewMenu === "PRESSURE";
+
+    this.overviewGridObjects?.forEach(o => o.setVisible(showGrid));
+    this._overviewPressureObjects?.forEach(o => o.setVisible(showPressureMenu));
+  }
+
+  _showOverviewStatus(primary, secondary) {
+    this._overviewStatusPrimary?.setText(primary ?? "");
+    this._overviewStatusSecondary?.setText(secondary ?? "");
+    this._overviewStatusPrimary?.setVisible(true);
+    this._overviewStatusSecondary?.setVisible(true);
+    this.overviewGridObjects?.forEach(o => o.setVisible(false));
+    this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+  }
+
+  _hideOverviewStatus() {
+    this._overviewStatusPrimary?.setVisible(false);
+    this._overviewStatusSecondary?.setVisible(false);
+  }
+
+  setMode(mode) {
+    this.mode = mode === "overview" ? "overview" : "detailed";
+    const isOverview = this.mode === "overview";
+    if (!isOverview) this._overviewMenu = "GRID";
+
+    this.header?.setVisible(!isOverview);
+    this._refreshOverviewGridCosts();
+    this._refreshOverviewPressureCosts();
+
+    if (!isOverview && this._state === "PAGE") {
+      this._clearPage();
+      this._state = "GRID";
+    }
+
+    if (this._pressureMode) {
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
+
+      if (isOverview) {
+        this._pressureText?.setVisible(false);
+        this._overviewStatusPrimary?.setVisible(true);
+        this._overviewStatusSecondary?.setVisible(true);
+        this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      } else {
+        this._hideOverviewStatus();
+        this.overviewGridObjects?.forEach(o => o.setVisible(false));
+        this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+        this._pressureText?.setVisible(true);
+      }
+      return;
+    }
+
+    this._pressureText?.setVisible(false);
+    this._hideOverviewStatus();
+
+    if (isOverview) {
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
+      this._syncOverviewVisibility();
+    } else {
+      this.overviewGridObjects?.forEach(o => o.setVisible(false));
+      this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
+    }
+  }
+
   open(type) {
     this._clearPage();
 
@@ -140,7 +411,12 @@ export class SlotPanel {
   back() {
     this._clearPage();
     // When pressure overlay is active, keep grid hidden.
-    this.gridObjects.forEach(o => o.setVisible(!this._pressureMode));
+    if (this.mode === "overview") {
+      this.gridObjects.forEach(o => o.setVisible(false));
+      this._syncOverviewVisibility();
+    } else {
+      this.gridObjects.forEach(o => o.setVisible(!this._pressureMode));
+    }
     this._state = "GRID";
   }
 
@@ -166,6 +442,7 @@ export class SlotPanel {
       return;
     }
     if (this._pressureMode) return;
+    this._closeOverviewPressureMenu();
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
@@ -223,12 +500,25 @@ export class SlotPanel {
   setPressureCountdown({ remainingText, spawners, enemies, enemyType }) {
     this._ensurePressureText();
     this._pressureMode = true;
+    this._overviewMenu = "GRID";
     this._drawFrameTheme(true);
     this.header?.setColor?.("#ffd6d6");
 
     this.gridObjects?.forEach(o => o.setVisible(false));
+    this.overviewGridObjects?.forEach(o => o.setVisible(false));
+    this._overviewPressureObjects?.forEach(o => o.setVisible(false));
     if (this._page?.container) this._page.container.setVisible(false);
 
+    if (this.mode === "overview") {
+      this._pressureText.setVisible(false);
+      this._showOverviewStatus(
+        remainingText,
+        `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}\n👹 ${enemies} RAIDER${enemies === 1 ? "" : "S"}`
+      );
+      return;
+    }
+
+    this._hideOverviewStatus();
     this._pressureText.setVisible(true);
     this._pressureText.setText([
       "🚨 INCOMING RAID 🚨",
@@ -252,12 +542,25 @@ export class SlotPanel {
   setPressureLive({ spawners, enemies, enemyType }) {
     this._ensurePressureText();
     this._pressureMode = true;
+    this._overviewMenu = "GRID";
     this._drawFrameTheme(true);
     this.header?.setColor?.("#ffd6d6");
 
     this.gridObjects?.forEach(o => o.setVisible(false));
+    this.overviewGridObjects?.forEach(o => o.setVisible(false));
+    this._overviewPressureObjects?.forEach(o => o.setVisible(false));
     if (this._page?.container) this._page.container.setVisible(false);
 
+    if (this.mode === "overview") {
+      this._pressureText.setVisible(false);
+      this._showOverviewStatus(
+        "LIVE",
+        `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}\n👹 ${enemies} RAIDER${enemies === 1 ? "" : "S"}`
+      );
+      return;
+    }
+
+    this._hideOverviewStatus();
     this._pressureText.setVisible(true);
     this._pressureText.setText([
       "⚠️ RAID ACTIVE ⚠️",
@@ -281,14 +584,27 @@ export class SlotPanel {
     this._drawFrameTheme(false);
     this.header?.setColor?.("#ffffff");
     if (this._pressureText) this._pressureText.setVisible(false);
+    this._hideOverviewStatus();
 
     // Restore normal UI (only if panel is visible)
-    this.gridObjects?.forEach(o => o.setVisible(true));
-    if (this._page?.container) this._page.container.setVisible(true);
+    if (this.mode === "overview") {
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
+      this._syncOverviewVisibility();
+    } else {
+      this.overviewGridObjects?.forEach(o => o.setVisible(false));
+      this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this.gridObjects?.forEach(o => o.setVisible(true));
+      if (this._page?.container) this._page.container.setVisible(true);
+    }
   }
 
   setVisible(v) {
     const was = this.container.visible;
+    if (v) {
+      this._refreshOverviewGridCosts();
+      this._refreshOverviewPressureCosts();
+    }
     this.container.setVisible(v);
 
     if (v && !was) {
@@ -307,6 +623,11 @@ export class SlotPanel {
       this.header,
       this.frameG,
       ...(this.gridObjects ?? []),
+      ...(this.overviewGridObjects ?? []),
+      ...(this._overviewPressureObjects ?? []),
+      this._overviewStatusPrimary,
+      this._overviewStatusSecondary,
+      this._pressureText,
     ].filter(Boolean);
 
     // fade buttons + header + frame
@@ -333,6 +654,11 @@ export class SlotPanel {
         this.header?.setAlpha(1);
         this.frameG?.setAlpha(1);
         this.gridObjects?.forEach(o => o.setAlpha?.(1));
+        this.overviewGridObjects?.forEach(o => o.setAlpha?.(1));
+        this._overviewPressureObjects?.forEach(o => o.setAlpha?.(1));
+        this._overviewStatusPrimary?.setAlpha?.(1);
+        this._overviewStatusSecondary?.setAlpha?.(1);
+        this._pressureText?.setAlpha?.(1);
         onDone?.();
       },
     });
@@ -349,6 +675,11 @@ export class SlotPanel {
     this.header?.setAlpha(0);
     this.frameG?.setAlpha(0);
     this.gridObjects?.forEach(o => o.setAlpha?.(0));
+    this.overviewGridObjects?.forEach(o => o.setAlpha?.(0));
+    this._overviewPressureObjects?.forEach(o => o.setAlpha?.(0));
+    this._overviewStatusPrimary?.setAlpha?.(0);
+    this._overviewStatusSecondary?.setAlpha?.(0);
+    this._pressureText?.setAlpha?.(0);
 
     // scale open
     this.scene.tweens.add({
@@ -365,6 +696,11 @@ export class SlotPanel {
       this.header,
       this.frameG,
       ...(this.gridObjects ?? []),
+      ...(this.overviewGridObjects ?? []),
+      ...(this._overviewPressureObjects ?? []),
+      this._overviewStatusPrimary,
+      this._overviewStatusSecondary,
+      this._pressureText,
     ].filter(Boolean);
 
     this.scene.tweens.add({

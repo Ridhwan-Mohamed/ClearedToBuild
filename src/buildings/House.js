@@ -2,6 +2,7 @@ import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../c
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { buildingManager } from "../Manager/buildingManager";
 
 export class House {
 
@@ -33,6 +34,8 @@ export class House {
                 .setInteractive()
                 .on('pointerdown', () => {
                     const scene = this.scene;
+                    const handled = buildingManager.handleBuildingClickForBuilders(this, null, this.team);
+                    if (handled) return;
 
                     // Prefer BottomBar tab flow (like ovens/storage)
                     if (scene?.openDetailPage) {
@@ -145,7 +148,7 @@ export class House {
     }
 
     centerOnHouse(house) {
-        const cam = this.scene.cameras.main;
+        const cam = this.scene?.uiScene?.worldScene?.cameras?.main || this.scene.cameras.main;
         if (!cam || !house?.sprite) return;
 
         const b = house.sprite.getBounds();

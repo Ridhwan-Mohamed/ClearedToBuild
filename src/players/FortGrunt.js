@@ -7,8 +7,7 @@ import { ZoomMixer } from "../UI/ZoomMixer";
 import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
 
 export class FortGrunt {
-    static speed = 130;      // near brawler speed
-    static stamina = 0.025;  // near brawler stamina drain
+    static speed = 110;      // near brawler speed
     static awareness = 100;  // tracking radius in Player.updateTracking
     static maxHealth = 130;  // tougher than raider(100)
     static tint = 0x8b0000;  // darker red than default enemy tint
@@ -32,7 +31,8 @@ export class FortGrunt {
         grunt.maxHealth = FortGrunt.maxHealth;
         grunt.health = FortGrunt.maxHealth;
         grunt.killReward = 50;
-        grunt.weapon = weapons.boxingGloves;
+        grunt.weapon = weapons.hands;
+        grunt.meleeFxKey = 'raider_hands_fx';
         grunt.unitTint = FortGrunt.tint;
         grunt.awareness = FortGrunt.awareness;
         grunt.destroySelf = () => FortGrunt.destroy(grunt);

@@ -13,7 +13,7 @@ const COLOR_OVENS     = 0xff0000;  // Red
 const COLOR_STORAGE   = 0x8B4513;  // Brown
 const COLOR_CARDS     = 0xFFD700;  // gold for cards
 const COLOR_BROWNISH  = 0x2d251e;  // brown for house
-const COLOR_BUILD     = 0x002952;  // grey for build tab
+const COLOR_BUILD     = 0xc84c8f;  // pink for store/build tab
 
 // after EXPANDED/COLLAPSED:
 const COLLAPSED = 32;     // how much of the bar stays visible when hidden
@@ -47,6 +47,9 @@ export function CreateBottomBar(scene) {
     pages,
     currentPage: 'functions',
     expanded: START_OPEN,
+    expandedY: EXPANDED_Y,
+    collapsedY: COLLAPSED_Y,
+    openProgress: START_OPEN ? 1 : 0,
   };
 
   // ensure setBottomBar updates scene.uiBottomBar.expanded too
@@ -57,10 +60,21 @@ export function CreateBottomBar(scene) {
       y: open ? EXPANDED_Y : COLLAPSED_Y,
       duration: 200,
       ease: 'Cubic.easeOut',
+      onUpdate: () => {
+        const travel = COLLAPSED_Y - EXPANDED_Y;
+        const progress = travel <= 0 ? (open ? 1 : 0) : Phaser.Math.Clamp((COLLAPSED_Y - ui.y) / travel, 0, 1);
+        scene.uiBottomBar.openProgress = progress;
+      },
       onComplete: () => {
         expanded = open;
         scene.uiBottomBar.expanded = open;   // ✅ keep in sync
+        scene.uiBottomBar.openProgress = open ? 1 : 0;
         tween = null;
+
+        if (scene.uiBottomBar.currentPage === 'players') {
+          if (open) scene.playerTab?.onShow?.();
+          else scene.playerTab?.onHide?.();
+        }
 
         const t = toggleBtn.getElement?.('text') || toggleBtn.text;
         if (t) t.setText(expanded ? '▼' : '▲');
@@ -77,6 +91,7 @@ export function CreateBottomBar(scene) {
   scene.openDetailPage = function(pageKey, callback) {
     const bar = scene.uiBottomBar;
     if (!bar) return;
+    scene.cameras.main?.setScroll?.(0, 0);
 
     // 1) swap page
     bar.pages.swapPage(pageKey);
@@ -96,6 +111,10 @@ export function CreateBottomBar(scene) {
       (pageKey === 'houses')  ? scene.housesTab :
       null;
 
+    if (pageKey !== 'players') {
+      scene.playerTab?.onHide?.();
+    }
+
     // 5) show hook
     tab?.onShow?.();
 
@@ -112,13 +131,17 @@ export function CreateBottomBar(scene) {
   tabs.on('button.click', (btn) => {
     const key = btn?.name;
     if (!key) return;
+    scene.cameras.main?.setScroll?.(0, 0);
 
     pages.swapPage(key);
     scene.uiBottomBar.currentPage = key;
 
     if (!expanded) setBottomBar(true);
 
-    if (key !== 'players') scene.playerTab?.hidePortrait?.();
+    if (key !== 'players') {
+      scene.playerTab?.hidePortrait?.();
+      scene.playerTab?.onHide?.();
+    }
     if (key !== 'ovens')   scene.clayTab?.hide?.();
     if (key !== 'storage') scene.storageTab?.hide?.();
     if (key !== 'houses')  scene.housesTab?.hide?.();
@@ -174,7 +197,7 @@ var CreateButtons = function (scene) {
     space: { left : 0 },
     buttons: [
       CreateLabel(scene, 'Functions', COLOR_FUNCTIONS, TAB_W).setName('functions'),
-      CreateLabel(scene, 'Build', COLOR_BUILD, TAB_W).setName('build'),
+      CreateLabel(scene, 'Store', COLOR_BUILD, TAB_W).setName('build'),
       CreateLabel(scene, 'Players',   COLOR_PLAYERS,   TAB_W).setName('players'),
       CreateLabel(scene, 'Clay Ovens',COLOR_OVENS,     TAB_W).setName('ovens'),
       CreateLabel(scene, 'Storage',   COLOR_STORAGE,   TAB_W).setName('storage'),

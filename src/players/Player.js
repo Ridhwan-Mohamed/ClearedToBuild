@@ -55,6 +55,7 @@ export class Player {
     static MINI_BAR_BASE_SEG_W = 4;      // pre-scale width per segment before clamping
     static CARRY_ICON_OFFSET_Y = 28;
     static CARRY_ICON_SIZE     = 18;
+    static HIGHLIGHT_RING_OFFSET_Y = 10;
     
     static init(scene){
         this.scene = scene;
@@ -108,6 +109,7 @@ export class Player {
 
         // kill mini bars first
         this._destroyMiniBars(player)
+        this._destroySelectionIndicator(player)
 
         this.characters.remove(player);
         const index = Player.troops.indexOf(player);
@@ -245,6 +247,80 @@ export class Player {
         }
     }
 
+    static _ensureSelectionIndicator(troop) {
+        if (troop._selectionIndicator || !this.scene || !troop) return troop._selectionIndicator;
+
+        const ring = this.scene.add.ellipse(troop.x, troop.y, 24, 12, 0xffffff, 0.10)
+            .setStrokeStyle(2, 0xffffff, 0.7)
+            .setDepth((troop.depth ?? (BLOCKDEPTH + 1)) - 0.5)
+            .setVisible(false);
+
+        troop._selectionIndicator = ring;
+        troop.once?.("destroy", () => {
+            if (troop._selectionIndicator === ring) troop._selectionIndicator = null;
+            ring.destroy();
+        });
+
+        return ring;
+    }
+
+    static _destroySelectionIndicator(troop) {
+        troop?._selectionIndicator?.destroy?.();
+        if (troop) troop._selectionIndicator = null;
+    }
+
+    static _updateSelectionIndicator(troop) {
+        const ring = troop?._selectionIndicator;
+        if (!troop?.active || !troop?.scene) {
+            ring?.destroy?.();
+            if (troop) troop._selectionIndicator = null;
+            return;
+        }
+
+        const selectedLike = !!troop.selected || !!troop._miniBarSelectedFromTab;
+        const hovered = !!troop._miniBarHover;
+        const shouldShow = selectedLike || hovered;
+
+        if (!shouldShow || troop.visible === false || troop.alpha === 0) {
+            ring?.setVisible(false);
+            return;
+        }
+
+        const indicator = this._ensureSelectionIndicator(troop);
+        const isEnemy = troop.body?.team === 0;
+        const baseW = Math.max(18, Math.min(34, (troop.displayWidth || SQUARESIZE) * 0.72));
+        const baseH = Math.max(8, Math.min(16, baseW * 0.44));
+        const pulse = selectedLike ? (1 + 0.06 * Math.sin((this.scene.time.now || 0) / 120)) : 1;
+        const fillColor = selectedLike ? (isEnemy ? 0x7f1d1d : 0x0284c7) : 0xffffff;
+        const strokeColor = selectedLike ? (isEnemy ? 0xffc4c4 : 0xcffafe) : 0xffffff;
+
+        indicator.setPosition(
+            troop.x,
+            troop.y + Math.max(this.HIGHLIGHT_RING_OFFSET_Y, (troop.displayHeight || SQUARESIZE) * 0.34)
+        );
+        indicator.setDepth((troop.depth ?? (BLOCKDEPTH + 1)) - 0.5);
+        indicator.setFillStyle(fillColor, selectedLike ? 0.18 : 0.08);
+        indicator.setStrokeStyle(selectedLike ? 2 : 1.5, strokeColor, selectedLike ? 0.95 : 0.75);
+        indicator.setDisplaySize(baseW * pulse, baseH * pulse);
+        indicator.setVisible(true);
+    }
+
+    static _setTroopSelected(troop, selected) {
+        if (!troop?.active) return;
+        troop.selected = !!selected;
+        this._updateSelectionIndicator(troop);
+    }
+
+    static selectSingleTroop(troop, { openDetails = false } = {}) {
+        if (!troop?.active) return;
+        this.clearSelection();
+        this._setTroopSelected(troop, true);
+        this.selected.push(troop);
+        if (openDetails) {
+            this.scene?.openDetailPage?.('players', tab => tab.select(troop));
+        }
+    }
+
     static refreshAllFoW(allVisibile=false) {
        for (const t of this.troops) VisibilitySystem.applyFoWToSprite(t, allVisibile);
     }
@@ -282,19 +358,12 @@ export class Player {
                 // Optional: don't select enemies when you click them
                 // return;
             }
-            cube.selected = !cube.selected; // Toggle the selected state
-            if (cube.selected) {
-                cube.setTint(Phaser.Display.Color.GetColor(50, 50, 50)); // Change to alternate texture
-                this.selected.length = 0;
+            const wasSelected = !!cube.selected;
+            this.clearSelection();
+            if (!wasSelected) {
+                this._setTroopSelected(cube, true);
                 this.selected.push(cube);
-            } else {
-                cube.clearTint();
-                const index = this.selected.indexOf(cube);
-                if (index > -1) {
-                    this.selected.splice(index, 1);
-                }
             }
-            Player.scene.openDetailPage('players', tab => tab.select(cube));
         });
     
         // Add a pointerover event listener to change texture on hover
@@ -471,22 +540,16 @@ export class Player {
         // go straight into ATTACK_MODE – even if there is no path.
         if (
             (sprite.state === CONTROL_STATES.TRACK_MODE ||
-            sprite.state === CONTROL_STATES.TRACK_TARGET) &&
-            sprite.weapon &&
-            sprite.track &&
-            sprite.track[0] &&
-            sprite.track[0].gameObject
+            sprite.state === CONTROL_STATES.TRACK_TARGET ||
+            sprite.state === CONTROL_STATES.ATTACK_MODE) &&
+            sprite.weapon
         ) {
-            const targetGO = sprite.track[0].gameObject;
+            const attackTarget =
+                (sprite.forcedTarget?.active && sprite.forcedTarget) ||
+                sprite.track?.[0]?.gameObject ||
+                null;
 
-            const inRange =
-                Phaser.Math.Distance.Between(sprite.x, sprite.y, targetGO.x, targetGO.y) <
-                sprite.weapon.range;
-
-            // Only gunslinger needs LoS gating (projectile weapon behavior)
-            const hasLoS = !sprite.isGunslinger || Projectile.hasLineOfSight(sprite, targetGO);
-
-            if (inRange && hasLoS) {
+            if (attackTarget && this._isAttackReady(sprite, attackTarget)) {
                 sprite.body.setVelocity(0, 0);
                 if (sprite.currentPath && sprite.currentPath.length) sprite.currentPath.length = 0;
                 Teams.movePlayerState(sprite, CONTROL_STATES.ATTACK_MODE);
@@ -555,6 +618,7 @@ export class Player {
                 sprite.stamina = Math.max(0, stamina - drain);
             }
         }
+        currentSpeed *= this.getMovementSlowFactor(sprite);
 
         if(sprite.body.team == 1){
             this._updateVisibilityForTroop(sprite);
@@ -1000,6 +1064,14 @@ export class Player {
         }
     }
 
+    static clearSelection() {
+        this.selected.forEach((troop) => {
+            if (!troop?.active) return;
+            this._setTroopSelected(troop, false);
+        });
+        this.selected = [];
+    }
+
     static handlePlayerSelect(){
         if (this.scene.startCell) {
             const minX = Math.min(this.scene.startCell.x, this.scene.endCell.x)*SQUARESIZE;
@@ -1008,19 +1080,45 @@ export class Player {
             const maxY = Math.max(this.scene.startCell.y, this.scene.endCell.y)*SQUARESIZE;
             const selectionRect = new Phaser.Geom.Rectangle(minX, minY, maxX-minX, maxY-minY);
 
-            // Clear the selection box
-            this.selected = [];
+            this.clearSelection();
 
             this.troops.forEach(troop => {
                 if (Phaser.Geom.Rectangle.Contains(selectionRect, troop.x, troop.y)) {
                     this.selected.push(troop);
-                    troop.setTint(0x000000); // Highlight selected troops
+                    this._setTroopSelected(troop, true);
                 } else {
-                    troop.clearTint();
+                    this._setTroopSelected(troop, false);
                 }
             });
 
         }
+    }
+
+    static handlePlayerSelectWorldRect(start, end) {
+        if (!start || !end) return;
+
+        const minX = Math.min(start.x, end.x);
+        const maxX = Math.max(start.x, end.x);
+        const minY = Math.min(start.y, end.y);
+        const maxY = Math.max(start.y, end.y);
+        const selectionRect = new Phaser.Geom.Rectangle(
+            minX,
+            minY,
+            Math.max(1, maxX - minX),
+            Math.max(1, maxY - minY)
+        );
+
+        this.clearSelection();
+
+        this.troops.forEach((troop) => {
+            if (!troop?.active) return;
+            if (Phaser.Geom.Rectangle.Contains(selectionRect, troop.x, troop.y)) {
+                this.selected.push(troop);
+                this._setTroopSelected(troop, true);
+            } else {
+                this._setTroopSelected(troop, false);
+            }
+        });
     }
 
     static _getNavForTroop(troop) {
@@ -1163,11 +1261,15 @@ export class Player {
                 // --- guard mode radius check ---
                 const cx = Math.floor(troop.guardCenter.x / SQUARESIZE);
                 const cy = Math.floor(troop.guardCenter.y / SQUARESIZE);
+                const radiusTiles = Math.max(
+                    1,
+                    Math.round((troop.guardRadius ?? (SQUARESIZE * 3)) / SQUARESIZE)
+                );
 
                 const dx = gx - cx;
                 const dy = gy - cy;
 
-                if (dx*dx + dy*dy <= 3*3) {   // radius 3 in tiles
+                if (dx * dx + dy * dy <= radiusTiles * radiusTiles) {
                     tileOK = true;
                 }
             } else {
@@ -1274,11 +1376,32 @@ export class Player {
             troop.track = [target.body, { x: target.x, y: target.y }];
             movedTile = true;
         } else {
-            const lastTileX = Math.floor(troop.track[1].x / SQUARESIZE);
-            const lastTileY = Math.floor(troop.track[1].y / SQUARESIZE);
+            const regionSystem = troop.body?.team === 0 ? Map.enemyRegionSystem : Map.regionSystem;
+            const lastWorldX = troop.track[1].x;
+            const lastWorldY = troop.track[1].y;
+            const lastTileX = Math.floor(lastWorldX / SQUARESIZE);
+            const lastTileY = Math.floor(lastWorldY / SQUARESIZE);
             const curTileX = Math.floor(target.x / SQUARESIZE);
             const curTileY = Math.floor(target.y / SQUARESIZE);
             movedTile = lastTileX !== curTileX || lastTileY !== curTileY;
+
+            if (movedTile && regionSystem?.getRegionIdForWorldPoint) {
+                const troopRegion = regionSystem.getRegionIdForWorldPoint(troop.x, troop.y);
+                const lastTargetRegion = regionSystem.getRegionIdForWorldPoint(lastWorldX, lastWorldY);
+                const currentTargetRegion = regionSystem.getRegionIdForWorldPoint(target.x, target.y);
+
+                const targetStillInSameLockedRegion =
+                    troopRegion !== -1 &&
+                    lastTargetRegion !== -1 &&
+                    currentTargetRegion !== -1 &&
+                    troopRegion !== currentTargetRegion &&
+                    lastTargetRegion === currentTargetRegion;
+
+                if (targetStillInSameLockedRegion) {
+                    movedTile = false;
+                }
+            }
+
             troop.track[1].x = target.x;
             troop.track[1].y = target.y;
         }
@@ -1681,7 +1804,7 @@ export class Player {
         }
 
         const speedBase = troop?.type?.speed ?? troop.speed ?? 90;
-        const swimSpeed = Math.max(60, speedBase * 0.85);
+        const swimSpeed = Math.max(60, speedBase * 0.85 * this.getMovementSlowFactor(troop));
         const inv = dist > 0.001 ? 1 / dist : 0;
         const vx = dx * inv * swimSpeed;
         const vy = dy * inv * swimSpeed;
@@ -1694,10 +1817,26 @@ export class Player {
         return true;
     }
 
+    static getMovementSlowFactor(troop) {
+        if (!troop?.active) return 1;
+        const multiplier = Number(troop.moveSlowMultiplier);
+        const until = Number(troop.moveSlowUntil);
+        const now = this.scene?.time?.now ?? troop.scene?.time?.now ?? 0;
+
+        if (!(multiplier > 0 && multiplier < 1) || !(until > now)) {
+            troop.moveSlowMultiplier = 1;
+            troop.moveSlowUntil = 0;
+            return 1;
+        }
+
+        return multiplier;
+    }
+
     static update(){
         this.troops.forEach( troop => {
             if (Player.scene.clock.paused) {
                 troop.body.setVelocity(0, 0);
+                this._updateSelectionIndicator(troop);
                 this._updateCarryIndicator(troop);
                 return;
             }
@@ -1742,6 +1881,7 @@ export class Player {
 
             if (this._handleWaterReturnSwim(troop)) {
                 this._updateMiniBars(troop);
+                this._updateSelectionIndicator(troop);
                 this._updateCarryIndicator(troop);
                 return;
             }
@@ -1753,6 +1893,7 @@ export class Player {
 
             // 🔥 update world mini HP/ST bars
             this._updateMiniBars(troop);
+            this._updateSelectionIndicator(troop);
             this._updateCarryIndicator(troop);
         });
     }
@@ -1814,6 +1955,9 @@ export class Player {
     }
 
     static playerAvailible(troop){
+        if (troop?.currentOrder?.status === "active") {
+            return false;
+        }
         if(troop.state == CONTROL_STATES.USER_MODE || troop.state == CONTROL_STATES.R_FARM_MODE 
             || troop.state == CONTROL_STATES.BACK_TO_TOWN
             || (troop.state == CONTROL_STATES.TRACK_MODE && (!troop.track || !troop.track.gameObject))){
@@ -2008,11 +2152,14 @@ export class Player {
 
     const scene = this.scene;
 
-    const now = scene.time.now || 0;
-    const fromHit   = troop._miniBarLastHit && (now - troop._miniBarLastHit < this.MINI_BAR_HIT_MS);
+    const fromSelection = !!troop.selected;
     const fromHover = !!troop._miniBarHover;
-    const fromTab   = !!troop._miniBarSelectedFromTab;
-    const shouldShow = fromHit || fromHover || fromTab;
+    const fromTab = !!(
+        troop._miniBarSelectedFromTab &&
+        scene.uiBottomBar?.expanded &&
+        scene.uiBottomBar?.currentPage === "players"
+    );
+    const shouldShow = fromSelection || fromHover || fromTab;
 
     if (!shouldShow) {
         if (troop._miniBarsInit) {
@@ -2096,6 +2243,7 @@ export class Player {
     static setMiniBarHover(troop, on) {
         if (!troop) return;
         troop._miniBarHover = !!on;
+        this._updateSelectionIndicator(troop);
     }
 
     // called by fightManager when target gets hit
@@ -2109,6 +2257,7 @@ export class Player {
         if (!this.troops) return;
         this.troops.forEach(t => {
             t._miniBarSelectedFromTab = (t === selectedTroop);
+            this._updateSelectionIndicator(t);
         });
     }
 

@@ -8,17 +8,22 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
+import { OrderRunner } from '../orders/OrderRunner.js';
 import foragerWalkDown from 'url:../assets/players/forager/forager_walk_down.png';
 import foragerWalkDownLeft from 'url:../assets/players/forager/forager_walk_down_left.png';
 import foragerWalkDownRight from 'url:../assets/players/forager/forager_walk_down_right.png';
 import foragerWalkUp from 'url:../assets/players/forager/forager_walk_up.png';
 import foragerWalkUpLeft from 'url:../assets/players/forager/forager_walk_up_left.png';
 import foragerWalkUpRight from 'url:../assets/players/forager/forager_walk_up_right.png';
+import stoneAxe from 'url:../assets/players/forager/stone_axe.png';
+import stonePickaxe from 'url:../assets/players/forager/stone_pickaxe.png';
+import goldAxe from 'url:../assets/players/forager/gold_axe.png';
+import goldPickaxe from 'url:../assets/players/forager/gold_pickaxe.png';
  
 export class Forager {
 
-    static speed = 80;
-    static stamina = 0.02;
+    static speed = 120;
+    static stamina = 0.001;
 
     static preload(scene) {
         scene.load.spritesheet('forager_walk_down', foragerWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -27,6 +32,10 @@ export class Forager {
         scene.load.spritesheet('forager_walk_up', foragerWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('forager_walk_up_left', foragerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('forager_walk_up_right', foragerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.image('forager_stone_axe', stoneAxe);
+        scene.load.image('forager_stone_pickaxe', stonePickaxe);
+        scene.load.image('forager_gold_axe', goldAxe);
+        scene.load.image('forager_gold_pickaxe', goldPickaxe);
     }
 
     constructor(x, y, teamNumber) {
@@ -79,6 +88,16 @@ export class Forager {
         Player.troops.push(sprite);
         Player.configureCubeInteractivity(sprite);
         sprite.isForager = true;
+        sprite.gatherSwingFxKeys = {
+            wood: {
+                normal: 'forager_stone_axe',
+                boosted: 'forager_gold_axe',
+            },
+            rock: {
+                normal: 'forager_stone_pickaxe',
+                boosted: 'forager_gold_pickaxe',
+            }
+        };
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].foragerList.push(sprite);
         sprite.destroySelf = () => Forager.destroy(sprite);
@@ -100,6 +119,7 @@ export class Forager {
         }
 
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
+        if (OrderRunner.stepUnit(forager)) return;
         if (forager.task) return;
 
         if (Scheduler.stepUnit(forager)) return;
@@ -113,6 +133,8 @@ export class Forager {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
         if (!team?.foragerList) return;
+
+        OrderRunner.handleTroopDestroyed(troop);
 
         Player._destroyMiniBars(troop)
 
@@ -134,6 +156,14 @@ export class Forager {
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
+        }
+        if (troop.gatherSwingTween) {
+            troop.gatherSwingTween.remove();
+            troop.gatherSwingTween = null;
+        }
+        if (troop.gatherSwingFx) {
+            troop.gatherSwingFx.destroy();
+            troop.gatherSwingFx = null;
         }
 
         // Remove FoW bubble

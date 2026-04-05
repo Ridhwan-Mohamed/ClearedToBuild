@@ -1452,6 +1452,12 @@ const TILE_TYPES = {
             corner: {
                 key: 'grass_corner_water',
                 sheet: false
+            },
+            innerCorner: {
+                water: {
+                    key: 'grass_inner_corner_water',
+                    sheet: false
+                }
             }
         }
     },
@@ -1538,10 +1544,26 @@ const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 13,
-        lenX: 3,
-        lenY: 3,
-        price: 20000,
+        lenX: 1,
+        lenY: 1,
+        price: 200,
         depth: BLOCKDEPTH
+    },
+    catapult: {
+        name: "catapult",
+        value: [
+            "catapult_base",
+            "catapult_top"
+        ],
+        spread: false,
+        block: true,
+        complex: false,
+        grid: 107,
+        lenX: 2,
+        lenY: 2,
+        price: 350,
+        depth: BLOCKDEPTH,
+        maxHealth: 420
     },
     // ── Dirt (complex, numbered + island; draw uses assets, not TILE_ARR) ──
     dirt: {
@@ -2228,7 +2250,11 @@ const TILE_ARR = [
     'grass_corner',
     'grass_corner',
     'grass_corner',
-    'grass_corner'
+    'grass_corner',
+    [
+        'catapult_base',
+        'catapult_top'
+    ]
 ];
 function TILE_MAP(val) {
     if (val == 1) return "grass";
@@ -2263,6 +2289,7 @@ function TILE_MAP(val) {
     else if (val >= 87 && val <= 92) return "road";
     else if (val >= 93 && val <= 98) return "fort_floor";
     else if (val >= 99 && val <= 106) return "grass";
+    else if (val == 107) return "catapult";
     return null;
 }
 function gridPos(x, y) {
@@ -2331,6 +2358,7 @@ const gridColors = {
     storage: 0x7d4900,
     pine: 0x006400,
     rock: 0x5a682b,
+    catapult: 0x8b5b2b,
     crops: 0xFCF55F,
     fort_floor: 0x777777
 };
@@ -2671,6 +2699,11 @@ const StageState = {
     advanceStage () {
         this.stageIndex += 1;
     },
+    isBossStage (stageIndex = this.stageIndex, opts = {}) {
+        const stagesPerSeason = Math.max(1, Number(opts.stagesPerSeason ?? this.STAGES_PER_SEASON) || 5);
+        const stage = Math.max(1, Number(stageIndex ?? this.stageIndex) || 1);
+        return stage >= stagesPerSeason;
+    },
     applyStartOverride (override = null) {
         const src = override ?? this.START_OVERRIDE ?? {};
         const season = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
@@ -2712,7 +2745,9 @@ const StageState = {
     // Call AFTER reward selection to move to next stage/season and reset fort objective state.
     completeFortCycle (meta = {}, opts = {}) {
         const stagesPerSeason = Math.max(1, Number(opts.stagesPerSeason ?? this.STAGES_PER_SEASON) || 5);
-        if (this.stageIndex >= stagesPerSeason) this.advanceSeason({
+        if (this.isBossStage(this.stageIndex, {
+            stagesPerSeason
+        })) this.advanceSeason({
             reason: "fort_defeated",
             ...meta
         });

@@ -3,6 +3,11 @@ import { Map } from "../map";
 import { Teams } from "../Teams";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { buildingManager } from "../Manager/buildingManager";
+import {
+    applyPortraitKeyToSprite,
+    DEFAULT_PLAYER_PORTRAIT_KEY,
+    getPlayerPortraitKey,
+} from "../players/playerPortraits";
 
 export class House {
 
@@ -114,13 +119,13 @@ export class House {
         this.uiContainer.add(this.iconBg);
 
         this.uiIcons = this.occupants.map((p, i) => {
-            const icon = this.scene.add.image(
+            const icon = this.scene.add.sprite(
                 this.sprite.x + 16 + i * 28,
                 this.sprite.y - 14,
-                'char'
-            ).setDepth(10).setScale(0.4);
+                DEFAULT_PLAYER_PORTRAIT_KEY
+            ).setDepth(10);
+            applyPortraitKeyToSprite(this.scene, icon, getPlayerPortraitKey(p), 18);
             this.uiContainer.add(icon);
-            icon.setTint(p.tint);
             return icon;
         });
 

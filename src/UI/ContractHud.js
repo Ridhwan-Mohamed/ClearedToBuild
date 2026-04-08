@@ -1,8 +1,9 @@
-import { UIDEPTH, calcContractCost, estimatePressureContract } from "../constants.js";
+import { UIDEPTH, estimatePressureContract } from "../constants.js";
 import { PRESSURE } from "../parcel_system/ParcelConfig.js";
 import { StageState } from "../parcelController/StageState.js";
 import { Teams } from "../Teams.js";
 import { makeButton } from "../parcelSpawn/ui/makeButton.js";
+import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
 
 const SLOT_ORDER = ["N", "E", "S", "W"];
 const SLOT_LABELS = {
@@ -11,6 +12,8 @@ const SLOT_LABELS = {
   E: "EAST",
   W: "WEST",
 };
+const FORT_ICON = "\u265B";
+const FORT_TOWER_ICON = "\u265C";
 
 const CONTRACT_DEFS = {
   FOREST: {
@@ -21,7 +24,7 @@ const CONTRACT_DEFS = {
       "Spawns a forest parcel.",
       "Timer-based resource run.",
       "",
-      `Cost: $${calcContractCost(scene, "FOREST")}`,
+      `Permit Cost: ${formatPermitCostText(getContractPermitCost("FOREST"))}`,
     ],
   },
   ROCK: {
@@ -32,7 +35,7 @@ const CONTRACT_DEFS = {
       "Spawns a rock parcel.",
       "Timer-based resource run.",
       "",
-      `Cost: $${calcContractCost(scene, "ROCK")}`,
+      `Permit Cost: ${formatPermitCostText(getContractPermitCost("ROCK"))}`,
     ],
   },
   PRESSURE: {
@@ -48,7 +51,7 @@ const CONTRACT_DEFS = {
       "Temporary traveling market.",
       "Ship docks at the parcel.",
       "",
-      "Cost: $40",
+      `Permit Cost: ${formatPermitCostText(getContractPermitCost("MARKET"))}`,
     ],
   },
   FARM: {
@@ -59,7 +62,7 @@ const CONTRACT_DEFS = {
       "Fertile land parcel.",
       "More crop space off-island.",
       "",
-      `Cost: $${calcContractCost(scene, "FARM")}`,
+      `Permit Cost: ${formatPermitCostText(getContractPermitCost("FARM"))}`,
     ],
   },
   MILITIA: {
@@ -70,7 +73,7 @@ const CONTRACT_DEFS = {
       "Hire temporary fighters.",
       "Extra bodies for a short run.",
       "",
-      `Cost: $${calcContractCost(scene, "MILITIA")}`,
+      `Permit Cost: ${formatPermitCostText(getContractPermitCost("MILITIA"))}`,
     ],
   },
 };
@@ -98,26 +101,38 @@ export class ContractHud {
     this.squares = new Map();
     this.popupObjects = [];
     this.popupState = null;
+    this._popupTween = null;
+    this._clusterTween = null;
+    this._hudVisible = false;
 
     this._buildSquares();
     this._buildPopup();
     this._layout();
     this._refreshSquares();
+    this._hudVisible = this.world?.zoomMixer?.mode !== "overview";
+    this.root.setVisible(this._hudVisible);
+    if (this._hudVisible) this._playSquareClusterIntro();
 
     this._onResize = () => this._layout();
     this.scene.scale.on("resize", this._onResize);
   }
 
   destroy() {
+    this._stopPopupTween();
+    this._stopClusterTween();
+    this.squares.forEach((_, slotId) => this._stopSquareTween(slotId));
     this.scene.scale.off("resize", this._onResize);
     this.root?.destroy(true);
   }
 
   update() {
     const isDetailed = this.world?.zoomMixer?.mode !== "overview";
-    this.root.setVisible(isDetailed);
+    if (isDetailed !== this._hudVisible) {
+      this._hudVisible = isDetailed;
+      if (isDetailed) this._showHudCluster();
+      else this._hideHudCluster();
+    }
     if (!isDetailed) {
-      this.popup?.setVisible(false);
       return;
     }
 
@@ -125,9 +140,145 @@ export class ContractHud {
     this._refreshPopup();
   }
 
+  _getWorldNowMs() {
+    return Number(this.world?.getSimulationNow?.() ?? this.world?.simNowMs ?? 0);
+  }
+
+  _getNorthFortArrival() {
+    return this.world?.getNorthFortArrivalInfo?.() ?? null;
+  }
+
+  _stopPopupTween() {
+    if (this.popup) this.scene.tweens.killTweensOf(this.popup);
+    this._popupTween = null;
+  }
+
+  _stopSquareTween(slotId) {
+    const slot = this.squares.get(slotId);
+    if (!slot?.group) return;
+    this.scene.tweens.killTweensOf(slot.group);
+  }
+
+  _stopClusterTween() {
+    const groups = SLOT_ORDER.map((slotId) => this.squares.get(slotId)?.group).filter(Boolean);
+    if (groups.length) this.scene.tweens.killTweensOf(groups);
+    this._clusterTween = null;
+  }
+
+  _showHudCluster() {
+    this.root.setVisible(true);
+    this._playSquareClusterIntro();
+  }
+
+  _hideHudCluster() {
+    this.closePopup(false);
+    this._stopClusterTween();
+    const groups = SLOT_ORDER.map((slotId) => this.squares.get(slotId)?.group).filter(Boolean);
+    if (!groups.length) {
+      this.root.setVisible(false);
+      return;
+    }
+
+    let completed = 0;
+    groups.forEach((group, index) => {
+      this.scene.tweens.add({
+        targets: group,
+        scaleX: 0.74,
+        scaleY: 0.74,
+        alpha: 0,
+        duration: 120,
+        delay: index * 24,
+        ease: "Back.easeIn",
+        onComplete: () => {
+          completed += 1;
+          if (completed < groups.length) return;
+          groups.forEach((entry) => {
+            entry.setScale(1);
+            entry.setAlpha(1);
+          });
+          this.root.setVisible(false);
+          this._clusterTween = null;
+        },
+      });
+    });
+  }
+
+  _playSquareClusterIntro() {
+    this._stopClusterTween();
+    this.root.setVisible(true);
+    SLOT_ORDER.forEach((slotId, index) => {
+      const slot = this.squares.get(slotId);
+      if (!slot?.group) return;
+      slot.group.setScale(0.72);
+      slot.group.setAlpha(0);
+      this.scene.tweens.add({
+        targets: slot.group,
+        scaleX: 1,
+        scaleY: 1,
+        alpha: 1,
+        duration: 220,
+        delay: index * 45,
+        ease: "Back.easeOut",
+      });
+    });
+  }
+
+  _animateSquare(slotId, mode = "open") {
+    const slot = this.squares.get(slotId);
+    if (!slot?.group) return;
+
+    const config = mode === "buy"
+      ? { scale: 1.18, alpha: 1, duration: 150, hold: 50, ease: "Back.easeOut" }
+      : mode === "close"
+        ? { scale: 0.82, alpha: 0.74, duration: 110, hold: 10, ease: "Quad.easeInOut" }
+        : { scale: 1.12, alpha: 1, duration: 130, hold: 24, ease: "Back.easeOut" };
+
+    this._stopSquareTween(slotId);
+    this.scene.tweens.add({
+      targets: slot.group,
+      scaleX: config.scale,
+      scaleY: config.scale,
+      alpha: config.alpha,
+      duration: config.duration,
+      hold: config.hold,
+      yoyo: true,
+      ease: config.ease,
+      onComplete: () => {
+        slot.group.setScale(1);
+        slot.group.setAlpha(1);
+      },
+    });
+  }
+
+  _getPopupAnchorSlotId(state = this.popupState) {
+    if (!state) return null;
+    return state.slotId ?? null;
+  }
+
+  _animatePopupOpen(slotId = null) {
+    this._stopPopupTween();
+    this.popup.setVisible(true);
+    this.popup.setScale(0.88);
+    this.popup.setAlpha(0);
+    if (slotId) this._animateSquare(slotId, "open");
+    this._popupTween = this.scene.tweens.add({
+      targets: this.popup,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: 1,
+      duration: 180,
+      ease: "Back.easeOut",
+      onComplete: () => {
+        this._popupTween = null;
+      },
+    });
+  }
+
   _buildSquares() {
     for (const slotId of SLOT_ORDER) {
       const group = this.scene.add.container(0, 0);
+      const defaultIconText = "+";
+      const defaultTimerText = "BUY";
       const label = this.scene.add.text(0, 0, SLOT_LABELS[slotId], {
         fontFamily: "Bungee",
         fontSize: "16px",
@@ -141,7 +292,7 @@ export class ContractHud {
 
       const zone = this.scene.add.zone(0, 34, 56, 56).setInteractive({ useHandCursor: true });
 
-      const icon = this.scene.add.text(0, 34, slotId === "N" ? "👑" : "+", {
+      const icon = this.scene.add.text(0, 34, "+", {
         fontFamily: "Bungee",
         fontSize: "24px",
         color: "#ffffff",
@@ -150,7 +301,7 @@ export class ContractHud {
         align: "center",
       }).setOrigin(0.5);
 
-      const timer = this.scene.add.text(0, 72, slotId === "N" ? "👑" : "BUY", {
+      const timer = this.scene.add.text(0, 72, "BUY", {
         fontFamily: "Bungee",
         fontSize: "12px",
         color: "#ffffff",
@@ -189,6 +340,8 @@ export class ContractHud {
       group.add([frame, label, icon, timer, zone]);
       this.root.add(group);
       this.squares.set(slotId, { group, label, frame, icon, timer, zone, hovered: false, pressed: false });
+      icon.setText(defaultIconText);
+      timer.setText(defaultTimerText);
     }
   }
 
@@ -297,17 +450,6 @@ export class ContractHud {
   }
 
   _getSlotStatus(slotId) {
-    if (slotId === "N") {
-      return {
-        kind: "fort",
-        iconText: "👑",
-        timerText: "",
-        fillColor: 0x4c1d95,
-        strokeColor: 0xfbbf24,
-        iconSize: 24,
-      };
-    }
-
     const active = this._getActiveContract(slotId);
     if (active) {
       if (active.type === "PRESSURE") {
@@ -323,7 +465,7 @@ export class ContractHud {
       }
 
       const def = CONTRACT_DEFS[active.type] || CONTRACT_DEFS.FOREST;
-      const remainingMs = Math.max(0, Number(active.expireAt || 0) - (this.scene.time?.now || 0));
+      const remainingMs = Math.max(0, Number(active.expireAt || 0) - this._getWorldNowMs());
       return {
         kind: "active",
         iconText: def.emoji,
@@ -371,6 +513,15 @@ export class ContractHud {
   }
 
   _getFortSummaryLines() {
+    const arrival = this._getNorthFortArrival();
+    if (arrival) {
+      return [
+        `Arrival: Day ${arrival.arrivalDay}`,
+        `${arrival.statusText}`,
+        `Season ${arrival.seasonIndex}  Stage ${arrival.stageIndex}`,
+      ];
+    }
+
     const obj = StageState?._fortObjective;
     const towersRequired = Math.max(0, Number(obj?.requiredCount || 0));
     const towersDestroyed = Math.max(0, Number(obj?.destroyedSet?.size || 0));
@@ -389,16 +540,72 @@ export class ContractHud {
     ];
   }
 
-  _onSquareClicked(slotId) {
-    if (slotId === "N") {
-      if (this.popupState?.kind === "fort") {
-        this.closePopup();
-      } else {
-        this._openFortPopup();
-      }
-      return;
+  _getFortPopupConfig() {
+    const arrival = this._getNorthFortArrival();
+    if (arrival) {
+      return {
+        theme: {
+          bgColor: 0x4c1d95,
+          bgAlpha: 0.34,
+          strokeColor: 0xf0abfc,
+          titleColor: "#fff5cf",
+          bodyColor: "#f6ecff",
+        },
+        title: `${FORT_TOWER_ICON} North Fort Incoming`,
+        body: [
+          `Arrival: Day ${arrival.arrivalDay}`,
+          `${arrival.statusText}`,
+          `Season ${arrival.seasonIndex}`,
+          `Stage ${arrival.stageIndex}`,
+        ].join("\n"),
+      };
     }
 
+    return {
+      theme: {
+        bgColor: 0x4c1d95,
+        bgAlpha: 0.34,
+        strokeColor: 0xfbbf24,
+        titleColor: "#fff5cf",
+        bodyColor: "#f6ecff",
+      },
+      title: `${FORT_ICON} North Fort`,
+      body: this._getFortSummaryLines().join("\n"),
+    };
+
+    if (false && arrival) {
+      return {
+        theme: {
+          bgColor: 0x4c1d95,
+          bgAlpha: 0.34,
+          strokeColor: 0xf0abfc,
+          titleColor: "#fff5cf",
+          bodyColor: "#f6ecff",
+        },
+        title: "♜ North Fort Incoming",
+        body: [
+          `Arrival: Day ${arrival.arrivalDay}`,
+          `${arrival.statusText}`,
+          `Season ${arrival.seasonIndex}`,
+          `Stage ${arrival.stageIndex}`,
+        ].join("\n"),
+      };
+    }
+
+    return {
+      theme: {
+        bgColor: 0x4c1d95,
+        bgAlpha: 0.34,
+        strokeColor: 0xfbbf24,
+        titleColor: "#fff5cf",
+        bodyColor: "#f6ecff",
+      },
+      title: "♛ North Fort",
+      body: this._getFortSummaryLines().join("\n"),
+    };
+  }
+
+  _onSquareClicked(slotId) {
     if (this.popupState?.slotId === slotId) {
       this.closePopup();
       return;
@@ -414,20 +621,25 @@ export class ContractHud {
   }
 
   _openFortPopup() {
+    const animatePopup = !this.popup.visible;
     this.popupState = { kind: "fort" };
     this._positionPopupFor("N");
-    this.popup.setVisible(true);
     this._renderPopup();
+    if (animatePopup) this._animatePopupOpen("N");
+    else this._animateSquare("N", "open");
   }
 
   _openChooser(slotId) {
+    const animatePopup = !this.popup.visible;
     this.popupState = { kind: "slot", slotId, view: "chooser" };
     this._positionPopupFor(slotId);
-    this.popup.setVisible(true);
     this._renderPopup();
+    if (animatePopup) this._animatePopupOpen(slotId);
+    else this._animateSquare(slotId, "open");
   }
 
   _openDetail(slotId, type) {
+    const animatePopup = !this.popup.visible;
     this.popupState = {
       kind: "slot",
       slotId,
@@ -436,28 +648,59 @@ export class ContractHud {
       difficulty: 1,
     };
     this._positionPopupFor(slotId);
-    this.popup.setVisible(true);
     this._renderPopup();
+    if (animatePopup) this._animatePopupOpen(slotId);
+    else this._animateSquare(slotId, "open");
   }
 
   _openSummary(slotId) {
+    const animatePopup = !this.popup.visible;
     this.popupState = { kind: "slot", slotId, view: this._getSlotStatus(slotId).kind };
     this._positionPopupFor(slotId);
-    this.popup.setVisible(true);
     this._renderPopup();
+    if (animatePopup) this._animatePopupOpen(slotId);
+    else this._animateSquare(slotId, "open");
   }
 
-  closePopup() {
-    this.popupState = null;
-    this.popup.setVisible(false);
-    this._clearPopupButtons();
+  closePopup(animated = true, squareMode = "close", forceSlotId = null) {
+    const closingState = this.popupState;
+    const slotId = forceSlotId ?? this._getPopupAnchorSlotId(closingState);
+    const finish = () => {
+      this.popupState = null;
+      this.popup.setVisible(false);
+      this.popup.setScale(1);
+      this.popup.setAlpha(1);
+      this._clearPopupButtons();
+      this._popupTween = null;
+    };
+
+    if (!animated || !this.popup.visible) {
+      finish();
+      return;
+    }
+
+    this._stopPopupTween();
+    if (slotId) this._animateSquare(slotId, squareMode);
+    this._popupTween = this.scene.tweens.add({
+      targets: this.popup,
+      scaleX: 0.88,
+      scaleY: 0.88,
+      alpha: 0,
+      duration: 120,
+      ease: "Quad.easeIn",
+      onComplete: finish,
+    });
   }
 
   _refreshPopup() {
     if (!this.popup.visible || !this.popupState) return;
 
     if (this.popupState.kind === "fort") {
-      this.popupBody.setText(this._getFortSummaryLines().join("\n"));
+      const fortPopup = this._getFortPopupConfig();
+      this._setPopupTheme(fortPopup.theme);
+      this.popupTitle.setText(fortPopup.title);
+      this.popupBody.setPosition(18, 52);
+      this.popupBody.setText(fortPopup.body);
       return;
     }
 
@@ -538,7 +781,7 @@ export class ContractHud {
         titleColor: "#ffffff",
         bodyColor: "#eef7ff",
       });
-      const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - (this.scene.time?.now || 0));
+      const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - this._getWorldNowMs());
       this.popupTitle.setText(`${def.emoji} ${slotLabel} ${def.title}`);
       this.popupBody.setPosition(18, 52);
       this.popupBody.setText([
@@ -559,6 +802,16 @@ export class ContractHud {
     this._clearPopupButtons();
 
     if (this.popupState.kind === "fort") {
+      const fortPopup = this._getFortPopupConfig();
+      this._setPopupTheme(fortPopup.theme);
+      this.popupTitle.setText(fortPopup.title);
+      this.popupBody.setPosition(18, 52);
+      this.popupBody.setText(fortPopup.body);
+      this._addPopupButtons([
+        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() },
+      ]);
+      return;
+
       this._setPopupTheme({
         bgColor: 0x4c1d95,
         bgAlpha: 0.34,
@@ -596,15 +849,13 @@ export class ContractHud {
         const col = index % 2;
         const x = 74 + col * 132;
         const y = 108 + row * 40;
-        const cost = type === "MARKET"
-          ? 40
-          : calcContractCost(this.world ?? this.scene, type, 1);
+        const cost = getContractPermitCost(type, 1);
         buttons.push({
           x,
           y,
           w: 120,
           h: 34,
-          label: `${def.emoji} ${def.title.replace(" Contract", "")}\n$${cost}`,
+          label: `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)}`,
           onClick: () => this._openDetail(slotId, type),
         });
       });
@@ -629,7 +880,8 @@ export class ContractHud {
         this.popupBody.setPosition(18, 52);
         this.popupBody.setText([
           `Difficulty: ${"💀".repeat(diff)}`,
-          `Cost: $${est.cost}`,
+          `Permit Cost: ${formatPermitCostText(getContractPermitCost("PRESSURE", diff))}`,
+          `Max payout: $${est.gross}`,
           `Spawners: ${diff}`,
           `Raiders: ${diff * (PRESSURE.baseEnemiesPerSpawner ?? 3)}`,
         ].join("\n"));
@@ -712,7 +964,7 @@ export class ContractHud {
         titleColor: "#ffffff",
         bodyColor: "#eef7ff",
       });
-      const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - (this.scene.time?.now || 0));
+      const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - this._getWorldNowMs());
       this.popupTitle.setText(`${def.emoji} ${slotLabel} ${def.title}`);
       this.popupBody.setPosition(18, 52);
       this.popupBody.setText([
@@ -750,11 +1002,11 @@ export class ContractHud {
     const difficulty = payload.difficulty ?? 1;
     const cost = payload.cost != null
       ? payload.cost
-      : calcContractCost(this.world ?? this.scene, type, difficulty);
+      : getContractPermitCost(type, difficulty);
 
     if (cost > 0) {
-      if (!this.scene.checkSufficientFunds(cost)) return;
-      this.scene.updateMoney(-cost);
+      if (!this.scene.checkSufficientPermits(cost)) return;
+      this.scene.updatePermits(-cost);
     }
 
     let started = null;
@@ -770,10 +1022,12 @@ export class ContractHud {
     }
 
     if (!started) {
-      if (cost > 0) this.scene.updateMoney(+cost);
+      if (cost > 0) this.scene.updatePermits(+cost);
       return;
     }
 
-    this.closePopup();
+    pm.markContractPermitCost?.(started, cost);
+
+    this.closePopup(true, "buy", slotId);
   }
 }

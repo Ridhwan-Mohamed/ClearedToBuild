@@ -9,8 +9,9 @@ import waterParticle from 'url:./assets/waterParticle.png'
 import zoomOutWaterTxt1 from 'url:./assets/zoomOutWaterTxt1.png'
 import zoomOutWaterTxt2 from 'url:./assets/zoomOutWaterTxt2.png'
 import { Map as GameMap } from './map.js';
-import { Turret } from './Turret.js';
-import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, showAlert } from './constants';
+import { Turret } from './buildings/Turret.js';
+import { Catapult } from './buildings/Catapult.js';
+import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, PARCEL, showAlert, colorFor } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Farmer } from './players/Farmer.js';
@@ -35,7 +36,6 @@ import seeds from 'url:./assets/seeds.png'
 import { fightManager } from './Manager/fightManager.js';
 import { seedManager } from './Manager/seedManager.js';
 import char from 'url:./assets/char.png'
-import charHurt from 'url:./assets/charHurt.png'
 import berry from 'url:./assets/berry.png'
 import spawn from 'url:./assets/hole.png'
 import { recalculateDestroyTasksFromPoint } from './Manager/spawnManager.js';
@@ -81,12 +81,15 @@ import { TowerPressureController } from './parcel_system/TowerPressureController
 import { StageState } from './parcelController/StageState.js';
 import { loadShipMarketAssets } from './UI/ShipMarket.js';
 import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
-import { respawnNorthFort } from './parcel_system/FortRaidParcel.js';
+import { clearNorthFort, spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { GameUIScene } from './UI/GameUIScene.js';
 import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
 import { OverviewOceanWaves } from './UI/OverviewOceanWaves.js';
 import { OverviewShoreWaves } from './UI/OverviewShoreWaves.js';
 import { OrderRunner } from './orders/OrderRunner.js';
+import { getStagePermitReward } from './permitSystem.js';
+import { getBossUnlockReward, openBossUnlockRewardPresentation } from './parcel_system/BossUnlockRewardSystem.js';
+import { createPlayerPortraitAnimations, preloadPlayerPortraits } from './players/playerPortraits.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -97,6 +100,7 @@ export class mapView extends Phaser.Scene {
         mapView.scene = this;
         GameMap.scene = this;
         Turret.scene = this;
+        Catapult.scene = this;
         tillManager.scene = this;
         buildingManager.scene = this;
         blockResourceManager.scene = this;
@@ -132,12 +136,14 @@ export class mapView extends Phaser.Scene {
         this.woodAmnt = 4;
         this.stoneAmnt = 4;
         this.berries = 0;
+        this.permits = 0;
         this.berryMode = false;
         this.seedGridMode = false;
         this.selectingEnemies = false;
         this.enemySelectStart = null;
         this.enemySelectionRect = null;
         this.tillPreviewSprites = new Map(); // key = "x,y" → sprite
+        this.farmSelectionPreviewSprites = new Map();
         this.tillPulseTween = null;
         this.guardPlacement = { active: false, troop: null };
         this._trackpadDoubleClickWindowMs = 520;
@@ -154,6 +160,713 @@ export class mapView extends Phaser.Scene {
         this._trackpadTapDragTimer = null;
         this._trackpadSelectStartWorld = null;
         this._trackpadSelectEndWorld = null;
+        this._selectionDragZone = null;
+        this._selectionDragDistanceThreshold = 6;
+        this._selectionDragPending = false;
+        this._selectionDragActive = false;
+        this._selectionDragPointerId = null;
+        this._selectionDragStartScreenX = 0;
+        this._selectionDragStartScreenY = 0;
+        this._debugCurrentText = null;
+        this._debugSelectionCountText = null;
+        this.selectedSimSpeed = 1;
+        this.simNowMs = 0;
+        this._simulationSpeedReady = false;
+        this._simulationPauseReasons = new Set();
+        this._appliedSimulationSpeed = 0;
+        this._appliedEngineSimSpeed = 1;
+        this._northFortMainIslandOrigin = null;
+        this._northFortArrival = {
+            pending: false,
+            delayDays: 0,
+            createdOnDay: 1,
+            arrivalDay: 1,
+            reason: null,
+            seasonIndex: 1,
+            stageIndex: 1,
+        };
+        this._northFortArrivalMarker = null;
+        this._activeFort = null;
+        this._activeNightHorde = null;
+        this._hordeRewardInProgress = false;
+        this._townTowerLossInProgress = false;
+        this._gameOverOverlay = null;
+        this._townTowerStats = { built: 0, destroyed: 0 };
+    }
+
+    setSimulationSpeed(multiplier) {
+        const allowed = new Set([1, 2, 4]);
+        const next = Number(multiplier);
+        const normalized = allowed.has(next) ? next : 1;
+        if (this.selectedSimSpeed === normalized) {
+            return this.applySimulationSpeed();
+        }
+
+        this.selectedSimSpeed = normalized;
+        this.events.emit("sim-speed:changed", normalized);
+        return this.applySimulationSpeed();
+    }
+
+    getSimulationSpeed() {
+        return this.selectedSimSpeed || 1;
+    }
+
+    getSimulationNow() {
+        return Number(this.simNowMs || 0);
+    }
+
+    getAppliedSimulationSpeed() {
+        return Number(this._appliedSimulationSpeed ?? this.getEffectiveSimulationSpeed());
+    }
+
+    isSimulationPaused() {
+        return !!(this.clock?.paused || this._simulationPauseReasons?.size);
+    }
+
+    getEffectiveSimulationSpeed() {
+        if (!this._simulationSpeedReady) return 0;
+        return this.isSimulationPaused() ? 0 : this.getSimulationSpeed();
+    }
+
+    setSimulationPause(reason, paused = true) {
+        const key = String(reason || "external");
+        if (paused) this._simulationPauseReasons.add(key);
+        else this._simulationPauseReasons.delete(key);
+        return this.applySimulationSpeed();
+    }
+
+    setSimulationSpeedReady(ready = true) {
+        this._simulationSpeedReady = !!ready;
+        return this.applySimulationSpeed(true);
+    }
+
+    applySimulationSpeed(force = false) {
+        const selected = this.getSimulationSpeed();
+        const effective = this.getEffectiveSimulationSpeed();
+        const engineSpeed = this._simulationSpeedReady ? effective : 1;
+
+        if (!force && this._appliedSimulationSpeed === effective && this._appliedEngineSimSpeed === engineSpeed) {
+            return effective;
+        }
+
+        if (this.time) {
+            this.time.timeScale = engineSpeed;
+        }
+        if (this.tweens) {
+            this.tweens.timeScale = engineSpeed;
+        }
+
+        const physicsWorld = this.physics?.world;
+        if (physicsWorld) {
+            if (engineSpeed > 0) {
+                physicsWorld.resume?.();
+                physicsWorld.timeScale = 1 / engineSpeed;
+            } else {
+                physicsWorld.timeScale = 1;
+                physicsWorld.pause?.();
+            }
+        }
+
+        if (this.anims) {
+            this.anims.globalTimeScale = engineSpeed > 0 ? engineSpeed : 0;
+        }
+
+        this._appliedEngineSimSpeed = engineSpeed;
+        this._appliedSimulationSpeed = effective;
+        this.events.emit("sim-speed:applied", { selected, effective, engineSpeed });
+        return effective;
+    }
+
+    _refreshOverviewFromGrid() {
+        this.zoomMixer?.buildOverviewTextureFromGrid?.(GameMap.grid, SQUARESIZE, (cell) => colorFor(cell));
+        GameMap._uiIgnoreWorldLayer?.();
+    }
+
+    getCurrentHordeIndex() {
+        return Math.max(1, Number(StageState.stageIndex || 1));
+    }
+
+    _getMainIslandBounds() {
+        const origin = this.parcelManager?.mainIslandOrigin ?? PARCEL.MAIN_ORIGIN;
+        const minx = Number(origin?.x ?? PARCEL.MAIN_ORIGIN.x);
+        const miny = Number(origin?.y ?? PARCEL.MAIN_ORIGIN.y);
+        return {
+            minx,
+            miny,
+            maxx: minx + PARCEL.SIZE - 1,
+            maxy: miny + PARCEL.SIZE - 1,
+        };
+    }
+
+    _getMainIslandCenterWorld() {
+        const bounds = this._getMainIslandBounds();
+        return {
+            x: ((bounds.minx + bounds.maxx + 1) * 0.5) * SQUARESIZE,
+            y: ((bounds.miny + bounds.maxy + 1) * 0.5) * SQUARESIZE,
+        };
+    }
+
+    _getNightHordePlan(hordeIndex = this.getCurrentHordeIndex()) {
+        const laneCount = Math.min(3, 1 + Math.floor(Math.max(0, hordeIndex - 1) / 2));
+        const baseDifficulty = Math.min(3, 1 + Math.floor(Math.max(0, hordeIndex - 1) / 3));
+        const slotIds = Phaser.Utils.Array.Shuffle(["W", "E", "S"].slice()).slice(0, laneCount);
+        return { hordeIndex, laneCount, baseDifficulty, slotIds };
+    }
+
+    handleNightStart() {
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        if (this._activeNightHorde?.startedOnDay === this.clock?.day) return;
+        this.startNightlyHorde();
+    }
+
+    handleDayStart() {
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        this.grantTownTowerDawnIncome();
+        this.finishNightlyHordeAtDawn();
+    }
+
+    grantTownTowerDawnIncome() {
+        const payout = TowerBuilding.grantDawnIncome(this, 1);
+        if (!payout) return null;
+
+        showAlert(
+            this,
+            `Town Towers: +$${payout.money} and +${payout.permits} permit${payout.permits === 1 ? "" : "s"}`,
+            "#a7f3d0"
+        );
+        return payout;
+    }
+
+    handleTownCoreLost(tower) {
+        if (this._townTowerLossInProgress) return;
+        this._townTowerLossInProgress = true;
+        this._movementLocked = true;
+        this.stageCompleteLock = true;
+        if (this.clock) this.clock.paused = true;
+        this.applySimulationSpeed(true);
+
+        AudioManager.playSound?.('sfx_end_stage_explosions');
+        this.cameras.main.shake(900, 0.012);
+        this._playTownTowerCollapseSequence(tower, () => {
+            this._showGameOverOverlay();
+        });
+    }
+
+    _playTownTowerCollapseSequence(tower, onDone) {
+        const sprite = tower?.sprite;
+        if (!sprite?.active) {
+            onDone?.();
+            return;
+        }
+
+        const spots = [];
+        for (let i = 0; i < 5; i++) {
+            spots.push({
+                x: sprite.x + Phaser.Math.Between(-28, 28),
+                y: sprite.y + Phaser.Math.Between(-28, 28),
+                delay: i * 90,
+            });
+        }
+
+        let finished = 0;
+        const total = spots.length;
+        spots.forEach((spot) => {
+            this.time.delayedCall(spot.delay, () => {
+                const fx = this.add.sprite(spot.x, spot.y, 'explosions')
+                    .setDepth(10050)
+                    .setScrollFactor(1);
+                fx.play('explosions');
+                fx.once('animationcomplete', () => {
+                    fx.destroy();
+                    finished += 1;
+                    if (finished >= total) onDone?.();
+                });
+            });
+        });
+    }
+
+    _getRunSummaryLines() {
+        const team = Teams.teamLists?.["1"] || {};
+        const hordesCleared = Math.max(0, this.getCurrentHordeIndex() - 1);
+        const dayReached = Math.max(1, Number(this.clock?.day || 1));
+        const livingPlayers = (team.playerList || []).filter((player) => player?.active).length;
+        const cardsHeld = (team.cardHand || []).length;
+        const stats = this._townTowerStats || { built: 0, destroyed: 0 };
+
+        return [
+            `Hordes Survived: ${hordesCleared}`,
+            `Day Reached: ${dayReached}`,
+            `Town Towers Built: ${stats.built}`,
+            `Town Towers Lost: ${stats.destroyed}`,
+            `Crew Alive: ${livingPlayers}`,
+            `Cards Held: ${cardsHeld}`,
+            `Money Banked: $${Math.max(0, Math.floor(this.money || 0))}`,
+        ];
+    }
+
+    _showGameOverOverlay() {
+        if (this._gameOverOverlay?.active) return;
+
+        const cam = this.cameras.main;
+        const overlay = this.add.container(0, 0).setDepth(20000).setScrollFactor(0);
+        const shade = this.add.rectangle(0, 0, cam.width, cam.height, 0x030712, 0.78)
+            .setOrigin(0)
+            .setScrollFactor(0)
+            .setInteractive({ useHandCursor: true });
+        const panel = this.add.rectangle(cam.centerX, cam.centerY, Math.min(620, cam.width - 100), 320, 0x0f172a, 0.94)
+            .setStrokeStyle(3, 0xf87171, 0.4)
+            .setScrollFactor(0);
+        const title = this.add.text(cam.centerX, cam.centerY - 118, "Town Lost", {
+            fontFamily: "Bungee",
+            fontSize: "34px",
+            color: "#fff5f5",
+            stroke: "#300808",
+            strokeThickness: 6,
+        }).setOrigin(0.5).setScrollFactor(0);
+        const subtitle = this.add.text(cam.centerX, cam.centerY - 82, "Your last Town Tower collapsed.", {
+            fontFamily: "Bungee",
+            fontSize: "13px",
+            color: "#fecaca",
+            align: "center",
+        }).setOrigin(0.5).setScrollFactor(0);
+        const summary = this.add.text(cam.centerX, cam.centerY - 16, this._getRunSummaryLines().join("\n"), {
+            fontFamily: "Bungee",
+            fontSize: "14px",
+            color: "#e5eef6",
+            align: "center",
+            lineSpacing: 8,
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const buttonBg = this.add.rectangle(cam.centerX, cam.centerY + 112, 230, 50, 0x4ade80, 0.98)
+            .setStrokeStyle(2, 0xffffff, 0.22)
+            .setScrollFactor(0)
+            .setInteractive({ useHandCursor: true });
+        const buttonText = this.add.text(cam.centerX, cam.centerY + 112, "Back To Main Menu", {
+            fontFamily: "Bungee",
+            fontSize: "16px",
+            color: "#0f172a",
+            stroke: "#ffffff",
+            strokeThickness: 2,
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const reload = () => window.location.reload();
+        buttonBg.on("pointerover", () => buttonBg.setFillStyle(0x86efac, 1));
+        buttonBg.on("pointerout", () => buttonBg.setFillStyle(0x4ade80, 0.98));
+        buttonBg.on("pointerdown", reload);
+        buttonText.setInteractive({ useHandCursor: true }).on("pointerdown", reload);
+
+        overlay.add([shade, panel, title, subtitle, summary, buttonBg, buttonText]);
+        overlay.setAlpha(0);
+        this.tweens.add({
+            targets: overlay,
+            alpha: 1,
+            duration: 260,
+            ease: "Quad.easeOut",
+        });
+        this._gameOverOverlay = overlay;
+    }
+
+    startNightlyHorde() {
+        if (!this.parcelManager || this._hordeRewardInProgress) return;
+
+        const plan = this._getNightHordePlan();
+        this.parcelManager.forceClearContracts?.("nightfall_cleanup");
+
+        const contractIds = [];
+        const laneDetails = [];
+
+        plan.slotIds.forEach((slotId, idx) => {
+            const difficulty = Math.min(3, plan.baseDifficulty + ((idx === plan.slotIds.length - 1 && plan.hordeIndex >= 4) ? 1 : 0));
+            const contractId = this.parcelManager.startPressure(slotId, difficulty, { source: "night_horde" });
+            if (!contractId) return;
+            contractIds.push(contractId);
+            laneDetails.push({ slotId, difficulty });
+        });
+
+        if (!contractIds.length) return;
+
+        this._activeNightHorde = {
+            hordeIndex: plan.hordeIndex,
+            startedOnDay: Math.max(1, Number(this.clock?.day || 1)),
+            contractIds,
+            laneDetails,
+        };
+
+        showAlert(
+            this,
+            `Horde ${plan.hordeIndex} incoming: ${laneDetails.length} lane${laneDetails.length === 1 ? "" : "s"}`,
+            "#fecaca"
+        );
+    }
+
+    finishNightlyHordeAtDawn() {
+        const active = this._activeNightHorde;
+        if (!active) return;
+
+        this.parcelManager?.forceClearContracts?.("night_horde_end", { source: "night_horde" });
+        this._activeNightHorde = null;
+        this.startHordeRewardSequence(active.hordeIndex);
+    }
+
+    startHordeRewardSequence(hordeIndex) {
+        if (this._hordeRewardInProgress) return;
+        this._hordeRewardInProgress = true;
+
+        const cam = this.cameras.main;
+        const center = this._getMainIslandCenterWorld();
+        const bounds = this._getMainIslandBounds();
+
+        this.zoomMixer?.setZoomOutLocked?.(true);
+        this._movementLocked = true;
+
+        if (this.zoomMixer) {
+            this.zoomMixer.targetZoom = 1;
+            this.zoomMixer.smoothCenterZoomTo(1, 220);
+        }
+
+        const openRewards = () => {
+            this.clock.paused = true;
+            this.applySimulationSpeed(true);
+            this._activeRewardUI?.destroy?.();
+            this._activeRewardUI = openFortRewardSelection(this, {
+                stageIndex: hordeIndex,
+                meta: { bounds },
+                onComplete: () => {
+                    this._activeRewardUI = null;
+                    StageState.advanceHorde({ reason: "night_horde_survived", hordeIndex });
+                    this._movementLocked = false;
+                    this.clock.paused = false;
+                    this.applySimulationSpeed(true);
+                    this.zoomMixer?.setZoomOutLocked?.(false);
+                    this._hordeRewardInProgress = false;
+                    this._stageHud?.recompute?.();
+                    this.events.emit("stage:changed");
+                    showAlert(this, `Horde ${hordeIndex} survived`, "#a7f3d0");
+                }
+            });
+        };
+
+        this.tweens.add({
+            targets: cam,
+            scrollX: center.x - cam.width / 2,
+            scrollY: center.y - cam.height / 2,
+            duration: 260,
+            ease: "Quad.easeInOut",
+            onComplete: openRewards,
+        });
+    }
+
+    getNorthFortArrivalInfo() {
+        const state = this._northFortArrival;
+        if (!state?.pending) return null;
+
+        const currentDay = Math.max(1, Number(this.clock?.day ?? state.createdOnDay ?? 1));
+        const arrivalDay = Math.max(currentDay, Number(state.arrivalDay ?? currentDay));
+        const daysRemaining = Math.max(0, arrivalDay - currentDay);
+        const seasonIndex = Math.max(1, Number(state.seasonIndex ?? StageState.seasonIndex ?? 1));
+        const stageIndex = Math.max(1, Number(state.stageIndex ?? StageState.stageIndex ?? 1));
+
+        return {
+            pending: true,
+            delayDays: Math.max(0, Number(state.delayDays ?? 0)),
+            createdOnDay: Math.max(1, Number(state.createdOnDay ?? currentDay)),
+            arrivalDay,
+            daysRemaining,
+            reason: state.reason ?? "scheduled",
+            seasonIndex,
+            stageIndex,
+            timerText: `DAY ${arrivalDay}`,
+            statusText: daysRemaining === 0
+                ? "Arrives today"
+                : `${daysRemaining} day${daysRemaining === 1 ? "" : "s"} left`,
+            metaText: `Season ${seasonIndex}  Stage ${stageIndex}`,
+        };
+    }
+
+    _getNorthFortArrivalAnchor() {
+        const baseOrigin = this._northFortMainIslandOrigin
+            ?? this.parcelManager?.mainIslandOrigin
+            ?? PARCEL.MAIN_ORIGIN;
+        const fortOrigin = {
+            x: Number(baseOrigin?.x ?? PARCEL.MAIN_ORIGIN.x),
+            y: Number(baseOrigin?.y ?? PARCEL.MAIN_ORIGIN.y) - PARCEL.SIZE,
+        };
+
+        return {
+            x: (fortOrigin.x + PARCEL.SIZE * 0.5) * SQUARESIZE,
+            y: (fortOrigin.y + PARCEL.SIZE * 0.5) * SQUARESIZE,
+        };
+    }
+
+    _ensureNorthFortArrivalMarker() {
+        if (this._northFortArrivalMarker?.root?.active) return this._northFortArrivalMarker;
+
+        const root = this.add.container(0, 0).setDepth(UIDEPTH - 0.35);
+        const plate = this.add.graphics();
+        const badge = this.add.circle(0, -132, 34, 0x4c1d95, 0.96)
+            .setStrokeStyle(3, 0xfbbf24, 0.88);
+        const tower = this.add.text(0, -59, "♜", {
+            fontFamily: "Bungee",
+            fontSize: "28px",
+            color: "#fff5cf",
+            stroke: "#190b2f",
+            strokeThickness: 4,
+        }).setOrigin(0.5);
+        const crown = this.add.text(16, -74, "♛", {
+            fontFamily: "Bungee",
+            fontSize: "16px",
+            color: "#fbbf24",
+            stroke: "#190b2f",
+            strokeThickness: 3,
+        }).setOrigin(0.5);
+        const title = this.add.text(0, -18, "NORTH FORT", {
+            fontFamily: "Bungee",
+            fontSize: "14px",
+            color: "#f6ecff",
+            stroke: "#14071f",
+            strokeThickness: 4,
+            align: "center",
+        }).setOrigin(0.5);
+        const timer = this.add.text(0, 5, "DAY 1", {
+            fontFamily: "Bungee",
+            fontSize: "18px",
+            color: "#fff5cf",
+            stroke: "#14071f",
+            strokeThickness: 4,
+            align: "center",
+        }).setOrigin(0.5);
+        const meta = this.add.text(0, 24, "", {
+            fontFamily: "Bungee",
+            fontSize: "11px",
+            color: "#ead9ff",
+            stroke: "#14071f",
+            strokeThickness: 3,
+            align: "center",
+        }).setOrigin(0.5, 0);
+
+        tower.setPosition(0, -133);
+        tower.setFontSize("42px");
+        tower.setText("♜");
+        crown.setPosition(24, -154);
+        crown.setFontSize("20px");
+        crown.setText("♛");
+        title.setPosition(0, -84);
+        tower.setText("\u265C");
+        crown.setText("\u265B");
+        title.setFontSize("30px");
+        title.setStroke("#14071f", 6);
+        title.setText("NORTH FORT INCOMING");
+        timer.setPosition(0, -4);
+        timer.setFontSize("76px");
+        timer.setStroke("#14071f", 8);
+        meta.setPosition(0, 128);
+        meta.setFontSize("16px");
+        meta.setAlign("center");
+        meta.setLineSpacing(8);
+        meta.setWordWrapWidth(PARCEL.SIZE * SQUARESIZE - 72);
+
+        const detailStatus = this.add.text(0, 74, "3 DAYS LEFT", {
+            fontFamily: "Bungee",
+            fontSize: "28px",
+            color: "#f5d0fe",
+            stroke: "#14071f",
+            strokeThickness: 6,
+            align: "center",
+        }).setOrigin(0.5);
+        const overviewPrimary = this.add.text(0, -34, "DAY 1", {
+            fontFamily: "Bungee",
+            fontSize: "96px",
+            color: "#fff5cf",
+            stroke: "#14071f",
+            strokeThickness: 12,
+            align: "center",
+        }).setOrigin(0.5);
+        const overviewSecondary = this.add.text(0, 102, "NORTH FORT\n3 DAYS LEFT", {
+            fontFamily: "Bungee",
+            fontSize: "32px",
+            color: "#f5d0fe",
+            stroke: "#14071f",
+            strokeThickness: 8,
+            align: "center",
+            lineSpacing: 10,
+            wordWrap: { width: PARCEL.SIZE * SQUARESIZE - 72 },
+        }).setOrigin(0.5);
+
+        root.add([plate, badge, tower, crown, title, timer, detailStatus, meta, overviewPrimary, overviewSecondary]);
+        root.setAlpha(0);
+        root.setScale(0.9);
+
+        const pulse = this.tweens.add({
+            targets: [badge, tower, timer, overviewPrimary],
+            alpha: { from: 1, to: 0.82 },
+            duration: 900,
+            yoyo: true,
+            repeat: -1,
+            ease: "Sine.easeInOut",
+        });
+        const appear = this.tweens.add({
+            targets: root,
+            alpha: 1,
+            scaleX: 1,
+            scaleY: 1,
+            duration: 220,
+            ease: "Back.easeOut",
+        });
+
+        this._northFortArrivalMarker = {
+            root,
+            plate,
+            badge,
+            tower,
+            crown,
+            title,
+            timer,
+            detailStatus,
+            meta,
+            overviewPrimary,
+            overviewSecondary,
+            pulse,
+            appear,
+        };
+        return this._northFortArrivalMarker;
+    }
+
+    _destroyNorthFortArrivalMarker() {
+        const marker = this._northFortArrivalMarker;
+        if (!marker) return;
+
+        marker.appear?.remove?.();
+        marker.pulse?.remove?.();
+        marker.root?.destroy?.(true);
+        this._northFortArrivalMarker = null;
+    }
+
+    _refreshNorthFortArrivalMarker() {
+        const info = this.getNorthFortArrivalInfo();
+        if (!info) {
+            this._destroyNorthFortArrivalMarker();
+            return;
+        }
+
+        const marker = this._ensureNorthFortArrivalMarker();
+        const anchor = this._getNorthFortArrivalAnchor();
+        const isOverview = this.zoomMixer?.mode === "overview";
+        const panelW = PARCEL.SIZE * SQUARESIZE - 24;
+        const panelH = PARCEL.SIZE * SQUARESIZE - 24;
+
+        marker.plate.clear();
+        marker.plate.fillStyle(0x2b0f42, isOverview ? 0.46 : 0.28);
+        marker.plate.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
+        marker.plate.lineStyle(isOverview ? 6 : 5, 0xf0abfc, isOverview ? 0.86 : 0.74);
+        marker.plate.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
+        marker.plate.lineStyle(2, 0xfbbf24, isOverview ? 0.36 : 0.26);
+        marker.plate.strokeRoundedRect(-(panelW / 2) + 16, -(panelH / 2) + 16, panelW - 32, panelH - 32, 20);
+
+        marker.root.setPosition(anchor.x, anchor.y);
+        marker.root.setScale(1);
+        marker.root.setAlpha(1);
+        marker.badge.setVisible(!isOverview);
+        marker.tower.setVisible(!isOverview);
+        marker.crown.setVisible(!isOverview);
+        marker.title.setVisible(!isOverview);
+        marker.timer.setText(info.timerText);
+        marker.timer.setVisible(!isOverview);
+        marker.detailStatus.setVisible(!isOverview);
+        marker.meta.setVisible(!isOverview);
+        marker.overviewPrimary.setVisible(isOverview);
+        marker.overviewSecondary.setVisible(isOverview);
+        marker.title.setText("NORTH FORT INCOMING");
+        marker.detailStatus.setText(String(info.statusText || "").toUpperCase());
+        marker.meta.setText(`${info.metaText}\nCROWN FORT GATHERING IN THE NORTH`);
+        marker.overviewPrimary.setText(info.timerText);
+        marker.overviewSecondary.setText(`NORTH FORT\n${String(info.statusText || "").toUpperCase()}`);
+    }
+
+    _resetNorthFortArrivalState() {
+        this._northFortArrival = {
+            pending: false,
+            delayDays: 0,
+            createdOnDay: Math.max(1, Number(this.clock?.day ?? 1)),
+            arrivalDay: Math.max(1, Number(this.clock?.day ?? 1)),
+            reason: null,
+            seasonIndex: Math.max(1, Number(StageState.seasonIndex || 1)),
+            stageIndex: Math.max(1, Number(StageState.stageIndex || 1)),
+        };
+    }
+
+    _spawnPendingNorthFort(reason = "scheduled") {
+        const pendingInfo = this.getNorthFortArrivalInfo();
+        const mainIslandOrigin = this._northFortMainIslandOrigin
+            ?? this.parcelManager?.mainIslandOrigin
+            ?? PARCEL.MAIN_ORIGIN;
+
+        this._resetNorthFortArrivalState();
+        this._destroyNorthFortArrivalMarker();
+
+        this._activeFort = spawnNorthFort({
+            scene: this,
+            map: GameMap,
+            mainIslandOrigin,
+        });
+        this._refreshOverviewFromGrid();
+        this.events.emit("north-fort:arrival-changed", null);
+
+        if (pendingInfo && pendingInfo.delayDays > 0) {
+            showAlert(this, "North Fort sighted in the north", "#d8b4fe");
+        }
+
+        return this._activeFort;
+    }
+
+    scheduleNorthFortArrival({
+        delayDays = 0,
+        reason = "scheduled",
+        mainIslandOrigin = null,
+        oldMeta = null,
+    } = {}) {
+        const normalizedDelay = Math.max(0, Math.floor(Number(delayDays) || 0));
+        if (mainIslandOrigin && Number.isFinite(mainIslandOrigin.x) && Number.isFinite(mainIslandOrigin.y)) {
+            this._northFortMainIslandOrigin = { x: mainIslandOrigin.x, y: mainIslandOrigin.y };
+        } else if (!this._northFortMainIslandOrigin) {
+            this._northFortMainIslandOrigin = { ...PARCEL.MAIN_ORIGIN };
+        }
+
+        if (oldMeta?.bounds) {
+            clearNorthFort({ scene: this, map: GameMap, meta: oldMeta });
+            this._refreshOverviewFromGrid();
+        }
+
+        this._activeFort = null;
+        this._resetNorthFortArrivalState();
+
+        if (normalizedDelay <= 0) {
+            return this._spawnPendingNorthFort(reason);
+        }
+
+        const currentDay = Math.max(1, Number(this.clock?.day ?? 1));
+        this._northFortArrival = {
+            pending: true,
+            delayDays: normalizedDelay,
+            createdOnDay: currentDay,
+            arrivalDay: currentDay + normalizedDelay,
+            reason,
+            seasonIndex: Math.max(1, Number(StageState.seasonIndex || 1)),
+            stageIndex: Math.max(1, Number(StageState.stageIndex || 1)),
+        };
+
+        this._refreshNorthFortArrivalMarker();
+        this.events.emit("north-fort:arrival-changed", this.getNorthFortArrivalInfo());
+        return null;
+    }
+
+    _updateNorthFortArrival() {
+        const info = this.getNorthFortArrivalInfo();
+        if (info && Number(this.clock?.day || 0) >= info.arrivalDay) {
+            this._spawnPendingNorthFort(info.reason);
+            return;
+        }
+
+        this._refreshNorthFortArrivalMarker();
     }
 
     preload() {
@@ -182,7 +895,6 @@ export class mapView extends Phaser.Scene {
         this.load.image('zoomOutWaterTxt2', zoomOutWaterTxt2);
         this.load.image('tillOverlay', tillOverlay);
         this.load.spritesheet('char', char, {frameWidth: 60, frameHeight: 50});
-        this.load.spritesheet('charHurt', charHurt, {frameWidth: 60, frameHeight: 50});
         this.load.spritesheet('clayOven', clayOven, { frameWidth: 64, frameHeight: 64});
         this.load.image('fullBasePine', fullBasePine);
         this.load.image('fullMiddlePine', fullMiddlePine);
@@ -198,6 +910,7 @@ export class mapView extends Phaser.Scene {
         Blademaster.preload(this);
         Gunslinger.preload(this);
         Raider.preload(this);
+        preloadPlayerPortraits(this);
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
@@ -267,7 +980,7 @@ export class mapView extends Phaser.Scene {
             depth: UIDEPTH - 0.4,
             cloudCount: 10,
             cellSizePx: 6,
-            cellWorldSize: SQUARESIZE * 2
+            cellWorldSize: SQUARESIZE
         });
         this.overviewShoreWaves?.destroy?.();
         this.overviewShoreWaves = new OverviewShoreWaves(this, {
@@ -308,17 +1021,35 @@ export class mapView extends Phaser.Scene {
         this._enableGlobalTextFont();
         this._createOceanBackdrop();
         this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+            Turret.cancelPlacement();
+            Catapult.cancelPlacement();
             this.overviewOceanWaves?.destroy?.();
             this.overviewOceanWaves = null;
             this.overviewCloudLayer?.destroy?.();
             this.overviewCloudLayer = null;
             this.overviewShoreWaves?.destroy?.();
             this.overviewShoreWaves = null;
+            if (this.time) this.time.timeScale = 1;
+            if (this.tweens) this.tweens.timeScale = 1;
+            if (this.physics?.world) {
+                this.physics.world.resume?.();
+                this.physics.world.timeScale = 1;
+            }
+            if (this.anims) this.anims.globalTimeScale = 1;
+            this._destroyNorthFortArrivalMarker();
         });
         this.createAnim('water')
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
-        this.createAnim('charHurt', -1, 5, 3)
+        createPlayerPortraitAnimations(this);
+        if (!this.anims.exists('rock_projectile_spin')) {
+            this.anims.create({
+                key: 'rock_projectile_spin',
+                frames: this.anims.generateFrameNumbers('rock_projectile', { start: 0, end: 2 }),
+                frameRate: 10,
+                repeat: -1
+            });
+        }
         ZoomMixer.initMapIconContainer();
         this.wallDestroyer = new WallDestroyController(this);
 
@@ -342,7 +1073,7 @@ export class mapView extends Phaser.Scene {
             Player.characters,
             Projectile.projectileGroup,
             Projectile.handleCollision,
-            (player, bullet) => bullet.team !== player.body.team, // Only collide if teams are different
+            (player, bullet) => !bullet?.deferImpactUntilEnd && bullet.team !== player.body.team, // Only collide if teams are different
             this
         );
 
@@ -351,7 +1082,7 @@ export class mapView extends Phaser.Scene {
             Projectile.projectileGroup,
             GameMap.structureBarrier,
             Projectile.handleStructureCollision,
-            null,
+            (projectile) => !projectile?.deferImpactUntilEnd,
             this
         );
 
@@ -364,25 +1095,16 @@ export class mapView extends Phaser.Scene {
         this.stageCompleteLock = false;
         this._movementLocked = false;
 
-        // listen for fort destruction
-        StageState.onFortDestroyed(({ stageIndex, meta }) => {
-            this.startStageCompleteSequence(stageIndex, meta);
-        });
-        
-        // Variable to store the current text object
-        let currentText; 
-
-        // Variable to store the current text objects
-        let selectionCountText;
         this.registry.set('image','init');
         this.registry.events.on('changedata-image', (parent, value) => {
             console.log(`Registry key 'image' updated to value:`, value);
             const item = TILE_TYPES[value];
+            Turret.cancelPlacement();
             if(item.spread){
                 // this.gridPlace = true;
             }
             else if(item == TILE_TYPES.turret){
-                Turret.placeItem(item)
+                Turret.beginPlacing(item, 1)
             }
             else if(item == TILE_TYPES.clayOven){
                 ClayOven.beginPlacing(this, 1)
@@ -406,6 +1128,10 @@ export class mapView extends Phaser.Scene {
 
         this.input.keyboard.on('keydown-ESC', () => {
             this.selectMode = true
+            if (Turret.isPlacing) {
+                Turret.cancelPlacement();
+                return;
+            }
             // Farm mode: ESC cycles (end->start) then (start->exit farm mode)
             if (!this.farmMode && !this.farmSelectActive) return;
 
@@ -434,9 +1160,7 @@ export class mapView extends Phaser.Scene {
                 this.gridPlace = false
             }
             else if(Turret.isPlacing){
-                Turret.isPlacing = false;
-                Turret.topItem.destroy();
-                Turret.baseItem.destroy();
+                Turret.cancelPlacement();
             }
             else{
                 GameMap.isPlacing = false; // Exit placing mode
@@ -446,7 +1170,9 @@ export class mapView extends Phaser.Scene {
         });
         this.clock = new Clock(this);
         this.clock.paused = true;
+        this.applySimulationSpeed(true);
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
+        this._setupSelectionDragZone();
         this.startCell = null; // Start cell (grid coordinates)
         this.endCell = null; // End cell (grid coordinates)
         // Farm mode UX helpers (world hover + UI banner)
@@ -486,8 +1212,8 @@ export class mapView extends Phaser.Scene {
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
             const clickedInteractiveWorldObject = this.input.manager
                 .hitTest(pointer, this.children.list, cam)
-                .some((obj) => obj?.input?.enabled);
-            if(this.clock.paused) return;
+                .some((obj) => obj?.input?.enabled && obj !== this._selectionDragZone);
+            if (this.isSimulationPaused()) return;
             if (this._trackpadTapDragActive && pointer.button === 0) {
                 if (this._trackpadTapDragMoved) {
                     this._finalizeTrackpadTapDrag();
@@ -556,17 +1282,16 @@ export class mapView extends Phaser.Scene {
             }
             else if(Turret.isPlacing){
                 const items = itemTab.itemValues(this.registry.get('image'))
-                if(items.price){
-                    if(this.money>=items.price){
-                        this.updateMoney(-1*items.price)
-                    }else{
-                        showAlert(this, 'insufficient Funds', "#ff0000");
-                        return;
-                    }
+                if(items?.price && this.money < items.price){
+                    showAlert(this, 'insufficient Funds', "#ff0000");
+                    return;
                 }
-                Turret.handleMapClick(pointer, items)
-                if(!Turret.placeItem.blocked){
-                    Turret.placeItem(items)
+                const turret = Turret.handlePlacementClick(pointer, items, 1)
+                if(turret){
+                    if(items.price){
+                        this.updateMoney(-1*items.price)
+                    }
+                    Turret.beginPlacing(items, 1)
                 }
             }
             else if (
@@ -585,6 +1310,12 @@ export class mapView extends Phaser.Scene {
                 }
                 const placed = OrderRunner.issuePendingGatherPlacement(Player.selected, pointer.worldX, pointer.worldY);
                 if (placed) return;
+            }
+            else if (
+                this._canUseSelectionDrag(pointer, clickedInteractiveWorldObject, clickedOnPlayer)
+            ) {
+                this._armSelectionDrag(pointer);
+                return;
             }
             else if (
                 pointer.button === 0 &&
@@ -613,30 +1344,7 @@ export class mapView extends Phaser.Scene {
                 let posX = Math.floor(x / SQUARESIZE);
                 let posY = Math.floor(y / SQUARESIZE);
 
-                if (currentText) {
-                    currentText.destroy();
-                }
-                if (selectionCountText) {
-                    selectionCountText.destroy();
-                }
-
-                currentText = this.add.text(
-                    this.cameras.main.width - 150,
-                    50,
-                    `(${posX}, ${posY})`,
-                    { fontSize: '14px', fill: '#ffffff' }
-                )
-                .setScrollFactor(0)
-                .setDepth(UIDEPTH);
-
-                selectionCountText = this.add.text(
-                    this.cameras.main.width - 150,
-                    65,
-                    `Selected: ${Player.selected.length}\nnavGird: ${GameMap.navGrid[posY][posX]}\ngrid: ${GameMap.grid[posY][posX]}`,
-                    { fontSize: '14px', fill: '#ffffff' }
-                )
-                    .setScrollFactor(0)
-                    .setDepth(UIDEPTH);
+                this._showWorldDebugText(posX, posY);
 
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 let issuedMoveOrder = false;
@@ -716,33 +1424,7 @@ export class mapView extends Phaser.Scene {
                 let posX = Math.floor(x / SQUARESIZE) 
                 let posY = Math.floor(y / SQUARESIZE)
 
-                // Remove the previous text if it exists
-                if (currentText) {
-                    currentText.destroy();
-                }
-                if (selectionCountText) {
-                    selectionCountText.destroy();
-                }
-
-                // Add the position text
-                currentText = this.add.text(
-                    this.cameras.main.width - 150,  // Relative to camera
-                    50,                            // Slight padding from top
-                    `(${posX}, ${posY})`,
-                    { fontSize: '14px', fill: '#ffffff' }
-                )
-                .setScrollFactor(0)                // Stick to camera
-                .setDepth(UIDEPTH);
-
-                // Add the selection count text
-                selectionCountText = this.add.text(
-                    this.cameras.main.width - 150, // Relative to camera
-                    65,                            // Slight padding below the position text
-                    `Selected: ${Player.selected.length}\nnavGird: ${GameMap.navGrid[posY][posX]}\ngrid: ${GameMap.grid[posY][posX]}`, 
-                    { fontSize: '14px', fill: '#ffffff' }
-                )
-                    .setScrollFactor(0)                // Stick to camera
-                    .setDepth(UIDEPTH);
+                this._showWorldDebugText(posX, posY);
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 let issuedMoveOrder = false;
                 OrderRunner.cancelOrders(Player.selected);
@@ -855,18 +1537,14 @@ export class mapView extends Phaser.Scene {
             const gridX = Math.floor(pointer.worldX / SQUARESIZE);
             const gridY = Math.floor(pointer.worldY / SQUARESIZE);
 
-            const ok = this.isValidFarmTile(gridX, gridY);
+            this.graphics.clear();
             if (this.farmHover) {
-                this.farmHover.setVisible(true);
                 this.farmHover.clear();
-                this.farmHover.lineStyle(2, ok ? 0x00ff00 : 0xff0000, 1);
-                this.farmHover.strokeRect(
-                    gridX * SQUARESIZE,
-                    gridY * SQUARESIZE,
-                    SQUARESIZE,
-                    SQUARESIZE
-                );
+                this.farmHover.setVisible(false);
             }
+
+            const preview = this.getFarmSelectionPreviewData(gridX, gridX, gridY, gridY);
+            this.renderFarmSelectionPreview(preview.cells);
             return;
         }
         else if (this.farmSelectActive && this.farmSelectPhase === 2 && this.startCell) {
@@ -880,14 +1558,10 @@ export class mapView extends Phaser.Scene {
             const minY = Math.min(this.startCell.y, this.endCell.y);
             const maxY = Math.max(this.startCell.y, this.endCell.y);
 
-            const validSelection = this.isValidFarmSelection(minX, maxX, minY, maxY);
-            const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
-            const enoughSeeds = (this.seeds >= totalNeeded);
-            const isStartOnly = (minX === maxX && minY === maxY);
-            const ok = isStartOnly ? validSelection : (validSelection && enoughSeeds);
-            this.drawSelectionOutline(ok ? 0x00ff00 : 0xff0000);
-
-            this.setFarmInstructionPhase2(totalNeeded);
+            const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
+            this.graphics.clear();
+            this.renderFarmSelectionPreview(preview.cells);
+            this.setFarmInstructionPhase2(preview.totalNeeded);
             return;
         }
         else if (this.isBrushMode && this.isBrushActive) {
@@ -931,6 +1605,22 @@ export class mapView extends Phaser.Scene {
             this._trackpadTapDragMoved = true;
             this._refreshTrackpadTapDragTimer();
         }
+        else if (
+            (this._selectionDragPending || this._selectionDragActive) &&
+            this._selectionDragPointerId === pointer?.id &&
+            pointer?.isDown
+        ) {
+            const dx = (pointer.x ?? 0) - this._selectionDragStartScreenX;
+            const dy = (pointer.y ?? 0) - this._selectionDragStartScreenY;
+            const movedFarEnough = ((dx * dx) + (dy * dy)) >= (this._selectionDragDistanceThreshold * this._selectionDragDistanceThreshold);
+
+            if (this._selectionDragPending && movedFarEnough) {
+                this._startSelectionDrag(pointer);
+            }
+            if (this._selectionDragActive) {
+                this._updateSelectionDrag(pointer);
+            }
+        }
         else if (this.startCell) {
             const gridX = Math.floor(pointer.worldX / SQUARESIZE);
             const gridY = Math.floor(pointer.worldY / SQUARESIZE);
@@ -956,6 +1646,13 @@ export class mapView extends Phaser.Scene {
             return;
         }
         this._rememberPrimaryPointerUp(pointer);
+        if (this._selectionDragActive && this._selectionDragPointerId === pointer?.id) {
+            this._finishSelectionDrag(pointer);
+            return;
+        }
+        if (this._consumeSelectionDragTap(pointer)) {
+            return;
+        }
         this.graphics.clear();
         // Farm mode uses click-to-pick; don't let pointerup clear our selection state.
         if (this.farmSelectActive) return;
@@ -1014,7 +1711,6 @@ export class mapView extends Phaser.Scene {
     _canUseTrackpadDrag() {
         return !!(
             this.gridPlace ||
-            this.selectMode ||
             this.harvestMode ||
             this.seedGridMode ||
             this.isBrushMode
@@ -1088,6 +1784,116 @@ export class mapView extends Phaser.Scene {
     _clearTrackpadWorldSelection() {
         this._trackpadSelectStartWorld = null;
         this._trackpadSelectEndWorld = null;
+    }
+
+    _setupSelectionDragZone() {
+        if (this._selectionDragZone) {
+            this._selectionDragZone.destroy();
+            this._selectionDragZone = null;
+        }
+    }
+
+    _syncSelectionDragZoneBounds() {
+        return;
+    }
+
+    _canUseSelectionDrag(pointer, clickedInteractiveWorldObject, clickedOnPlayer) {
+        return !!(
+            pointer?.button === 0 &&
+            this.selectMode &&
+            !this.gridPlace &&
+            !this.harvestMode &&
+            !this.seedGridMode &&
+            !this.farmMode &&
+            !this.isBrushMode &&
+            !clickedInteractiveWorldObject &&
+            !(clickedOnPlayer?.length > 0) &&
+            (this.breakItems?.text ?? "") !== "Place"
+        );
+    }
+
+    _armSelectionDrag(pointer) {
+        this._selectionDragPending = true;
+        this._selectionDragActive = false;
+        this._selectionDragPointerId = pointer?.id ?? null;
+        this._selectionDragStartScreenX = pointer?.x ?? 0;
+        this._selectionDragStartScreenY = pointer?.y ?? 0;
+        this._trackpadSelectStartWorld = { x: pointer.worldX, y: pointer.worldY };
+        this._trackpadSelectEndWorld = { x: pointer.worldX, y: pointer.worldY };
+    }
+
+    _startSelectionDrag(pointer) {
+        if (!this._selectionDragPending || this._selectionDragPointerId !== pointer?.id) return;
+        this._selectionDragPending = false;
+        this._selectionDragActive = true;
+        this._trackpadSelectStartWorld = this._trackpadSelectStartWorld || { x: pointer.worldX, y: pointer.worldY };
+        this._trackpadSelectEndWorld = { x: pointer.worldX, y: pointer.worldY };
+        this._drawWorldSelectionOutline(0x00ff00);
+    }
+
+    _updateSelectionDrag(pointer) {
+        if (!this._selectionDragActive || this._selectionDragPointerId !== pointer?.id) return;
+        this._trackpadSelectEndWorld = { x: pointer.worldX, y: pointer.worldY };
+        this._drawWorldSelectionOutline(0x00ff00);
+    }
+
+    _finishSelectionDrag(pointer) {
+        if (!this._selectionDragActive || this._selectionDragPointerId !== pointer?.id) return;
+        if (this._trackpadSelectStartWorld && this._trackpadSelectEndWorld) {
+            Player.handlePlayerSelectWorldRect(this._trackpadSelectStartWorld, this._trackpadSelectEndWorld);
+        }
+        this.graphics.clear();
+        this._clearTrackpadWorldSelection();
+        this._selectionDragPending = false;
+        this._selectionDragActive = false;
+        this._selectionDragPointerId = null;
+        this._selectionDragStartScreenX = 0;
+        this._selectionDragStartScreenY = 0;
+    }
+
+    _consumeSelectionDragTap(pointer) {
+        if (!this._selectionDragPending || this._selectionDragPointerId !== pointer?.id) return false;
+
+        this._selectionDragPending = false;
+        this._selectionDragActive = false;
+        this._selectionDragPointerId = null;
+        this._selectionDragStartScreenX = 0;
+        this._selectionDragStartScreenY = 0;
+        this._clearTrackpadWorldSelection();
+        this.graphics.clear();
+
+        if (Player.selected.length > 0) {
+            Player.clearSelection();
+        } else if (pointer) {
+            const posX = Math.floor(pointer.worldX / SQUARESIZE);
+            const posY = Math.floor(pointer.worldY / SQUARESIZE);
+            this._showWorldDebugText(posX, posY);
+        }
+
+        return true;
+    }
+
+    _showWorldDebugText(posX, posY) {
+        this._debugCurrentText?.destroy?.();
+        this._debugSelectionCountText?.destroy?.();
+
+        this._debugCurrentText = this.add.text(
+            this.cameras.main.width - 150,
+            50,
+            `(${posX}, ${posY})`,
+            { fontSize: '14px', fill: '#ffffff' }
+        )
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
+
+        this._debugSelectionCountText = this.add.text(
+            this.cameras.main.width - 150,
+            65,
+            `Selected: ${Player.selected.length}\nnavGird: ${GameMap.navGrid[posY][posX]}\ngrid: ${GameMap.grid[posY][posX]}`,
+            { fontSize: '14px', fill: '#ffffff' }
+        )
+            .setScrollFactor(0)
+            .setDepth(UIDEPTH);
     }
 
     _beginTrackpadDrag(pointer) {
@@ -1302,7 +2108,7 @@ setFarmInstructionPhase2(totalNeeded) {
 
 // Valid start tile rules (matches your getSelectedCells(1) behavior)
 isValidFarmTile(x, y) {
-    if (x < 0 || y < 0 || x >= WORLD_DIMENSIONX || y >= WORLD_DIMENSIONY) return false;
+    if (!this.isFarmTileInWorld(x, y)) return false;
 
     const cell = GameMap.grid?.[y]?.[x];
     if (cell == null) return false;
@@ -1324,6 +2130,10 @@ isValidFarmTile(x, y) {
     }
 
     return false;
+}
+
+isFarmTileInWorld(x, y) {
+    return x >= 0 && y >= 0 && x < WORLD_DIMENSIONX && y < WORLD_DIMENSIONY;
 }
 
 isValidFarmSelection(minX, maxX, minY, maxY) {
@@ -1351,27 +2161,66 @@ getPendingFarmTileKeySet() {
     return set;
 }
 
-// Returns how many seeds we need if we confirm THIS rectangle,
-// INCLUDING already-queued (pending) tiles.
-getFarmSelectionSeedCost(minX, maxX, minY, maxY) {
+getFarmSelectionPreviewData(minX, maxX, minY, maxY) {
     const pending = this.getPendingFarmTileKeySet();
+    const cells = [];
+
+    const startX = Phaser.Math.Clamp(minX, 0, WORLD_DIMENSIONX - 1);
+    const endX = Phaser.Math.Clamp(maxX, 0, WORLD_DIMENSIONX - 1);
+    const startY = Phaser.Math.Clamp(minY, 0, WORLD_DIMENSIONY - 1);
+    const endY = Phaser.Math.Clamp(maxY, 0, WORLD_DIMENSIONY - 1);
+
+    if (startX > endX || startY > endY) {
+        return {
+            pendingCount: pending.size,
+            newCount: 0,
+            totalNeeded: pending.size,
+            validSelection: false,
+            enoughSeeds: pending.size <= this.seeds,
+            cells,
+        };
+    }
+
+    const availableNewSeeds = Math.max(0, (this.seeds ?? 0) - pending.size);
     let newCount = 0;
 
-    for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
+    for (let y = startY; y <= endY; y++) {
+        for (let x = startX; x <= endX; x++) {
             if (!this.isValidFarmTile(x, y)) continue;
 
             const key = `${x},${y}`;
-            if (pending.has(key)) continue;  // already queued, don't double count
+            if (pending.has(key)) continue;
 
+            const overBudget = newCount >= availableNewSeeds;
+            cells.push({
+                x,
+                y,
+                tint: overBudget ? 0xff5a5a : 0x52ff7a,
+            });
             newCount++;
         }
     }
 
-    const pendingCount = pending.size;
-    const totalNeeded = pendingCount + newCount;
+    const totalNeeded = pending.size + newCount;
+    return {
+        pendingCount: pending.size,
+        newCount,
+        totalNeeded,
+        validSelection: newCount > 0,
+        enoughSeeds: totalNeeded <= this.seeds,
+        cells,
+    };
+}
 
-    return { pendingCount, newCount, totalNeeded };
+// Returns how many seeds we need if we confirm THIS rectangle,
+// INCLUDING already-queued (pending) tiles.
+getFarmSelectionSeedCost(minX, maxX, minY, maxY) {
+    const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
+    return {
+        pendingCount: preview.pendingCount,
+        newCount: preview.newCount,
+        totalNeeded: preview.totalNeeded,
+    };
 }
 
 beginFarmSelectionIfNeeded() {
@@ -1397,6 +2246,7 @@ cancelFarmSelection(exitFarmMode = false) {
     this.endCell = null;
     this.graphics.clear();
     if (this.farmHover) this.farmHover.setVisible(false);
+    this.clearFarmSelectionPreview();
     this.hideFarmInstruction();
 
     if (exitFarmMode) {
@@ -1420,7 +2270,8 @@ cancelFarmSelection(exitFarmMode = false) {
 
         // Phase 1: pick a valid start tile
         if (this.farmSelectPhase === 1) {
-            if (!this.isValidFarmTile(gridX, gridY)) return;
+            const preview = this.getFarmSelectionPreviewData(gridX, gridX, gridY, gridY);
+            if (!preview.validSelection) return;
 
             this.startCell = { x: gridX, y: gridY };
             this.endCell = { x: gridX, y: gridY };
@@ -1432,8 +2283,6 @@ cancelFarmSelection(exitFarmMode = false) {
 
         // Phase 2: confirm end tile
         if (this.farmSelectPhase === 2 && this.startCell) {
-            if (!this.isValidFarmTile(gridX, gridY)) return;
-
             this.endCell = { x: gridX, y: gridY };
 
             const minX = Math.min(this.startCell.x, this.endCell.x);
@@ -1441,11 +2290,10 @@ cancelFarmSelection(exitFarmMode = false) {
             const minY = Math.min(this.startCell.y, this.endCell.y);
             const maxY = Math.max(this.startCell.y, this.endCell.y);
 
-            const validSelection = this.isValidFarmSelection(minX, maxX, minY, maxY);
-            if (!validSelection) return;
+            const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
+            if (!preview.validSelection) return;
 
-            const { totalNeeded } = this.getFarmSelectionSeedCost(minX, maxX, minY, maxY);
-            if (!this.checkSufficientSeeds(totalNeeded)) {
+            if (!this.checkSufficientSeeds(preview.totalNeeded)) {
                 // stay in phase 2, user can resize selection or Esc back
                 return;
             }
@@ -1487,33 +2335,18 @@ cancelFarmSelection(exitFarmMode = false) {
         const maxX = Math.max(this.startCell.x, this.endCell.x);
         const minY = Math.min(this.startCell.y, this.endCell.y);
         const maxY = Math.max(this.startCell.y, this.endCell.y);
-        // compute total seeds needed in the selected rectangle
-        const tileCount = (maxX - minX + 1) * (maxY - minY + 1);
         // if insufficient, show alert and bail out
         if (mode === 1) {
             // FARM/TILL selection mode
             const tillList = Teams.teamLists['1'].tileList;
+            const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
 
-            for (let y = minY; y <= maxY; y++) {
-                for (let x = minX; x <= maxX; x++) {
-                    const type = TILE_TYPES[TILE_MAP(GameMap.grabDepth(GameMap.grid[y][x], FLOORDEPTH))];
-                    const key = `${x},${y}`;
-                    if (existing.has(key)) continue; // don't double-add
-                    existing.add(key);
-                    // spreadable ground but not water/road
-                    if (type.spread && type.name !== "water" && type.name !== "road") {
-                        tillList.push({ x, y, assigned: 0 });
-                        this.addTillPreviewSprite(x, y);
-                    }
-                    // crop tiles: only queue if crop exists and has no seed
-                    else if (type.name === "crops") {
-                        const crop = Teams.getCropAt(x, y, 1);
-                        if (crop && !crop.hasSeed) {
-                            tillList.push({ x, y, assigned: 0 });
-                            this.addTillPreviewSprite(x, y);
-                        }
-                    }
-                }
+            for (const cell of preview.cells) {
+                const key = `${cell.x},${cell.y}`;
+                if (existing.has(key)) continue;
+                existing.add(key);
+                tillList.push({ x: cell.x, y: cell.y, assigned: 0 });
+                this.addTillPreviewSprite(cell.x, cell.y);
             }
 
             // IMPORTANT: do NOT turn farmMode off here.
@@ -1807,6 +2640,47 @@ cancelFarmSelection(exitFarmMode = false) {
             this.berryText.setFill('#ffffff');
         });
     }
+
+    updatePermits(amountDelta) {
+        this.permits = Math.max(0, (this.permits ?? 0) + amountDelta);
+        if (this.uiScene?.onPermitsChanged) {
+            this.uiScene.onPermitsChanged(amountDelta);
+            return;
+        }
+        if (!this.permitText) return;
+        this.permitText.setText(`${this.permits}`);
+
+        const isGain = amountDelta > 0;
+        const color = isGain ? '#d8b4fe' : '#fca5a5';
+        const sign = isGain ? '+' : '-';
+        this.permitText.setFill(color);
+
+        const ghost = this.add.text(
+            this.permitText.x,
+            this.permitText.y,
+            `${sign}${Math.abs(amountDelta)}📜`,
+            {
+                fontSize: '18px',
+                fill: color,
+            }
+        )
+        .setOrigin(0, 0)
+        .setScrollFactor(0)
+        .setDepth(UIDEPTH);
+
+        this.tweens.add({
+            targets: ghost,
+            y: ghost.y - 20,
+            alpha: 0,
+            duration: 800,
+            ease: 'Cubic.easeOut',
+            onComplete: () => ghost.destroy()
+        });
+
+        this.time.delayedCall(600, () => {
+            this.permitText?.setFill?.('#ffffff');
+        });
+    }
     
     
     
@@ -1819,11 +2693,19 @@ cancelFarmSelection(exitFarmMode = false) {
         });
     }
     
-    update() {
+    update(time, delta) {
         this._updateOceanBackdrop();
-        if(!this.clock?.paused){
-            Turret.update();
-            this.clock.update();
+        const effectiveSimSpeed = this.applySimulationSpeed();
+
+        if (effectiveSimSpeed > 0) {
+            const simDeltaMs = delta * effectiveSimSpeed;
+            this.simNowMs += simDeltaMs;
+            const simNowMs = this.getSimulationNow();
+
+            Turret.updateAll(simNowMs, simDeltaMs);
+            Catapult.updateAll(simNowMs, simDeltaMs);
+            this.clock.update(Math.max(1, Math.round(effectiveSimSpeed)));
+            this._updateNorthFortArrival();
             this.handleKeyboardCameraMovement();
             PineTree.updateAll(this.time.now);
             if (this.farmMode && !this._prevFarmMode) {
@@ -1836,7 +2718,8 @@ cancelFarmSelection(exitFarmMode = false) {
             this._prevFarmMode = this.farmMode;
         }
         Player.update();
-        ClayOvenUI.updateAllOvens(1);
+        ClayOvenUI.updateAllOvens(effectiveSimSpeed);
+        this._refreshNorthFortArrivalMarker();
     }
 
     showSaveNotification() {
@@ -1887,6 +2770,13 @@ cancelFarmSelection(exitFarmMode = false) {
         return berryAmnt<=this.berries;
     }
 
+    checkSufficientPermits(permitAmnt){
+        if (permitAmnt > (this.permits ?? 0)) {
+            showAlert(this, "Insufficient permits", '#ff0000');
+        }
+        return permitAmnt <= (this.permits ?? 0);
+    }
+
     processEnemySelection(start, end) {
         const team1 = Teams.teamLists['1'];
         if (!team1) return;
@@ -1927,6 +2817,53 @@ cancelFarmSelection(exitFarmMode = false) {
         .setAlpha(0.6);
 
         this.tillPreviewSprites.set(key, spr);
+    }
+
+    addFarmSelectionPreviewSprite(x, y, tint = 0x52ff7a) {
+        const key = `${x},${y}`;
+        if (this.farmSelectionPreviewSprites.has(key)) return;
+
+        const spr = this.add.image(
+            x * SQUARESIZE + SQUARESIZE / 2,
+            y * SQUARESIZE + SQUARESIZE / 2,
+            "tillOverlay"
+        )
+        .setDisplaySize(SQUARESIZE, SQUARESIZE)
+        .setDepth(FLOORDEPTH + 0.01)
+        .setAlpha(0.72)
+        .setTint(tint);
+
+        this.farmSelectionPreviewSprites.set(key, spr);
+    }
+
+    renderFarmSelectionPreview(cells = []) {
+        const desired = new Set();
+
+        for (const cell of cells) {
+            const key = `${cell.x},${cell.y}`;
+            desired.add(key);
+
+            const existing = this.farmSelectionPreviewSprites.get(key);
+            if (existing) {
+                existing.setTint(cell.tint ?? 0x52ff7a);
+                continue;
+            }
+
+            this.addFarmSelectionPreviewSprite(cell.x, cell.y, cell.tint ?? 0x52ff7a);
+        }
+
+        for (const [key, spr] of this.farmSelectionPreviewSprites.entries()) {
+            if (desired.has(key)) continue;
+            spr.destroy();
+            this.farmSelectionPreviewSprites.delete(key);
+        }
+    }
+
+    clearFarmSelectionPreview() {
+        for (const spr of this.farmSelectionPreviewSprites.values()) {
+            spr.destroy();
+        }
+        this.farmSelectionPreviewSprites.clear();
     }
 
     syncTillPulseTween() {
@@ -2042,6 +2979,76 @@ cancelFarmSelection(exitFarmMode = false) {
     _openFortRewards(stageIndex, meta) {
         // Now freeze gameplay for selection.
         this.clock.paused = true;
+        this.applySimulationSpeed(true);
+
+        const finalizeStageCompletion = () => {
+            const permitReward = getStagePermitReward(
+                StageState.stageIndex,
+                StageState.seasonIndex,
+                StageState.STAGES_PER_SEASON
+            );
+            this.updatePermits(permitReward);
+            showAlert(
+                this,
+                `North Fort cleared: +${permitReward} permit${permitReward === 1 ? "" : "s"}`,
+                "#d8b4fe"
+            );
+
+            // Stage transition cleanup:
+            // - remove only tower-spawned pressure parcels + their raiders
+            // - keep manually started pressure contracts alive (they remain paused during rewards)
+            this.parcelManager?.forceClearPressureContracts?.("stage_end_cleanup", { onlyTowerSpawned: true });
+            // Remove all fort grunts from the previous fort cycle.
+            this.parcelManager?.clearAllFortGrunts?.();
+
+            // Progress stage/season AFTER reward is chosen.
+            StageState.completeFortCycle(
+                { reason: 'fort_reward_collected' },
+                { stagesPerSeason: StageState.STAGES_PER_SEASON }
+            );
+
+            // Fully clear old fort state and give the next stage a short breather
+            // before the replacement North Fort arrives.
+            const mainIslandOrigin = this.parcelManager?.mainIslandOrigin ?? PARCEL.MAIN_ORIGIN;
+            this.scheduleNorthFortArrival({
+                delayDays: 1,
+                reason: 'fort_cleared',
+                mainIslandOrigin,
+                oldMeta: meta,
+            });
+
+            // Release sequence locks.
+            this._movementLocked = false;
+            this.stageCompleteLock = false;
+            this.clock.paused = false;
+            this.applySimulationSpeed(true);
+            this.zoomMixer?.setZoomOutLocked?.(false);
+            this._stageHud?.recompute?.();
+            this.events.emit('stage:changed');
+            this.events.emit('season:changed');
+        };
+
+        const maybeOpenBossUnlockReward = () => {
+            if (!StageState.isBossStage(stageIndex)) {
+                finalizeStageCompletion();
+                return;
+            }
+
+            const bossReward = getBossUnlockReward(stageIndex, StageState.seasonIndex);
+            if (!bossReward) {
+                finalizeStageCompletion();
+                return;
+            }
+
+            this._activeBossRewardUI?.destroy?.();
+            this._activeBossRewardUI = openBossUnlockRewardPresentation(this, {
+                reward: bossReward,
+                onComplete: () => {
+                    this._activeBossRewardUI = null;
+                    finalizeStageCompletion();
+                }
+            });
+        };
 
         this._activeRewardUI?.destroy?.();
         this._activeRewardUI = openFortRewardSelection(this, {
@@ -2049,34 +3056,7 @@ cancelFarmSelection(exitFarmMode = false) {
             meta,
             onComplete: () => {
                 this._activeRewardUI = null;
-
-                // Stage transition cleanup:
-                // - remove only tower-spawned pressure parcels + their raiders
-                // - keep manually started pressure contracts alive (they remain paused during rewards)
-                this.parcelManager?.forceClearPressureContracts?.("stage_end_cleanup", { onlyTowerSpawned: true });
-                // Remove all fort grunts from the previous fort cycle.
-                this.parcelManager?.clearAllFortGrunts?.();
-
-                // Progress stage/season AFTER reward is chosen.
-                StageState.completeFortCycle({ reason: 'fort_reward_collected' }, { stagesPerSeason: 5 });
-
-                // Fully clear old fort state and spawn the next fort.
-                const mainIslandOrigin = this.parcelManager?.mainIslandOrigin;
-                this._activeFort = respawnNorthFort({
-                    scene: this,
-                    map: GameMap,
-                    mainIslandOrigin,
-                    oldMeta: meta,
-                });
-
-                // Release sequence locks.
-                this._movementLocked = false;
-                this.stageCompleteLock = false;
-                this.clock.paused = false;
-                this.zoomMixer?.setZoomOutLocked?.(false);
-                this._stageHud?.recompute?.();
-                this.events.emit('stage:changed');
-                this.events.emit('season:changed');
+                maybeOpenBossUnlockReward();
             }
         });
     }

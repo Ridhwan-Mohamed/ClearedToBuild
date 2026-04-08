@@ -2,6 +2,7 @@ import { buildingManager } from "./buildingManager";
 import { CONTROL_STATES, SQUARESIZE } from "../constants";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
+import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 
 export class Manager {
     static scene;
@@ -11,6 +12,42 @@ export class Manager {
         if (Array.isArray(task.eligibleTroopIds) && task.eligibleTroopIds.length) {
             return task.eligibleTroopIds.includes(troop.id);
         }
+        return true;
+    }
+
+    static _assignTrackTargetTask(troop, taskList, force = false) {
+        const chosenTask = CombatSpacingCoordinator.pickBestCombatTask(troop, taskList)
+            || taskList.find(task => CombatSpacingCoordinator.getTaskTarget(task)?.active);
+        if (!chosenTask) return false;
+
+        const target = CombatSpacingCoordinator.getTaskTarget(chosenTask);
+        if (!target?.active || !target?.body) return false;
+
+        troop.roam = false;
+        troop._combatRoamDest = null;
+        CombatSpacingCoordinator.clearRoamReservation(troop);
+
+        if (force) Player.handleStateIntteruptStart(troop);
+
+        troop.track = [target.body, { x: target.x, y: target.y }];
+        troop.forcedTarget = chosenTask.forced || chosenTask.target ? target : null;
+        CombatSpacingCoordinator.setTroopFocusTarget(troop, target, { forced: !!troop.forcedTarget });
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+
+        troop.task = chosenTask;
+        chosenTask.assigned = Math.max(0, Number(chosenTask.assigned || 0)) + 1;
+        this._setTaskMeta(troop, chosenTask, CONTROL_STATES.TRACK_TARGET, null);
+
+        const approach = CombatSpacingCoordinator.getCombatApproach(troop, target);
+        const dest = approach?.destination ?? { x: target.x, y: target.y };
+        const path = Player.pathTo(troop, dest.x, dest.y, false);
+        if (path?.length) {
+            Player.moveTo(troop, path);
+        } else {
+            troop.currentPath = [];
+            troop.body?.setVelocity?.(0, 0);
+        }
+
         return true;
     }
 
@@ -62,19 +99,10 @@ export class Manager {
                         break;
                     }
                 }else if (state == CONTROL_STATES.TRACK_TARGET){
-                    troop.roam = false;
-                    troop.track = [task.body, { x: task.x, y: task.y }];
-                    if (task.target) troop.forcedTarget = task.target;
-                    if (force) Player.handleStateIntteruptStart(troop);
-                    Teams.movePlayerState(troop, state);
-                    const path = Player.pathTo(troop, task.x, task.y, false);
-                    if (path) {
-                        Player.moveTo(troop, path);
-                    } else {
-                        troop.currentPath = [];
-                        troop.body?.setVelocity?.(0, 0);
+                    if (this._assignTrackTargetTask(troop, taskList, force)) {
+                        break;
                     }
-                    break;
+                    continue;
                 }else {
                     if(this.tooManyAssigned(task, state)) continue;
                     if(force) Player.handleStateIntteruptStart(troop)
@@ -146,18 +174,7 @@ export class Manager {
                     return true;
                 }
             }else if (state == CONTROL_STATES.TRACK_TARGET){
-                troop.roam = false;
-                troop.track = [task.body, { x: task.x, y: task.y }];
-                if (task.target) troop.forcedTarget = task.target;
-                Teams.movePlayerState(troop, state);
-                const path = Player.pathTo(troop, task.x, task.y, false);
-                if(path){
-                    Player.moveTo(troop, path);
-                } else {
-                    troop.currentPath = [];
-                    troop.body?.setVelocity?.(0, 0);
-                }
-                return true;
+                return this._assignTrackTargetTask(troop, taskList, false);
             }else{
                 if(this.tooManyAssigned(task, state)) continue;
                 Teams.movePlayerState(troop, state)
@@ -233,18 +250,7 @@ export class Manager {
                 return true;
             }
         }else if (state == CONTROL_STATES.TRACK_TARGET){
-            troop.roam = false;
-            troop.track = [task.body, { x: task.x, y: task.y }];
-            if (task.target) troop.forcedTarget = task.target;
-            Teams.movePlayerState(troop, state);
-            const path = Player.pathTo(troop, task.x, task.y, false);
-            if(path){
-                Player.moveTo(troop, path);
-            } else {
-                troop.currentPath = [];
-                troop.body?.setVelocity?.(0, 0);
-            }
-            return true;
+            return this._assignTrackTargetTask(troop, [task], false);
         }else{
             if(this.tooManyAssigned(task, state)) return;
             Teams.movePlayerState(troop, state)

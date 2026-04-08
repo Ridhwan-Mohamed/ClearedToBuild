@@ -11,6 +11,75 @@ export class StorageUI {
         this.scene = scene;
     }
 
+    static refreshStatus(storage) {
+        if (!this.scene || !storage?.sprite) return;
+
+        const state = storage.getStorageWarningState?.();
+        if (!state) {
+            this.hideStatus(storage);
+            return;
+        }
+
+        const style = state === 'full'
+            ? { label: 'FULL', bg: 0xb42318, text: '#fff4f2', low: 0.38, high: 1 }
+            : { label: 'SLOTS', bg: 0xd97706, text: '#fff7d6', low: 0.5, high: 0.95 };
+
+        let ui = storage.statusUI;
+        if (!ui) {
+            const container = this.scene.add.container(0, 0).setDepth(UIDEPTH + 1).setScrollFactor(0);
+            const bg = this.scene.add.rectangle(0, 0, 48, 16, style.bg, 0.95)
+                .setStrokeStyle(1, 0xffffff, 0.18);
+            const text = this.scene.add.text(0, 0, style.label, {
+                fontSize: '9px',
+                fill: style.text,
+                fontFamily: 'Bungee',
+                align: 'center'
+            }).setOrigin(0.5);
+
+            container.add([bg, text]);
+
+            const updatePosition = () => {
+                if (!storage?.sprite?.active) return;
+                const { x, y } = storage.sprite;
+                container.setPosition(
+                    x - this.scene.cameras.main.scrollX,
+                    y - 58 - this.scene.cameras.main.scrollY
+                );
+            };
+
+            updatePosition();
+            this.scene.events.on('update', updatePosition);
+
+            ui = { container, bg, text, updatePosition, tween: null, state: null };
+            storage.statusUI = ui;
+        }
+
+        ui.bg.setFillStyle(style.bg, 0.95);
+        ui.text.setText(style.label).setColor(style.text);
+        ui.state = state;
+        ui.updatePosition?.();
+
+        ui.tween?.remove();
+        ui.container.setAlpha(style.high);
+        ui.tween = this.scene.tweens.add({
+            targets: ui.container,
+            alpha: { from: style.high, to: style.low },
+            duration: state === 'full' ? 420 : 700,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1,
+        });
+    }
+
+    static hideStatus(storage) {
+        if (!storage?.statusUI) return;
+        const { container, updatePosition, tween } = storage.statusUI;
+        tween?.remove();
+        if (updatePosition) this.scene?.events?.off('update', updatePosition);
+        container?.destroy();
+        storage.statusUI = null;
+    }
+
     // === Minor UI: show stored / capacity ===
     static showMinor(storage) {
         if (storage.minorUI) return;
@@ -42,7 +111,7 @@ export class StorageUI {
     static refreshMinor(storage) {
         if (!storage.minorUI || !Array.isArray(storage.minorUI)) return;
 
-        const total = storage.getTotalCount?.() ?? 0;
+        const total = storage.getTotalCount?.() ?? storage.totalStored ?? 0;
         const [bg, text] = storage.minorUI;
         if (text?.setText) {
             text.setText(`${total}/16`);

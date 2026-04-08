@@ -1,5 +1,3 @@
-import { Projectile } from "./Projectile";
-
 // weapons.js
 export const weapons = {
   hands : {
@@ -9,7 +7,7 @@ export const weapons = {
     critProb: 20,
     accuracy: 75,
     duration: 700,
-    range: 16,
+    range: 46,
     projectile: false,
     attackSfxKey: "sfx_hand_punch",
     moveSlowMultiplier: 0.65,
@@ -23,7 +21,7 @@ export const weapons = {
     critProb: 25,
     accuracy: 80,
     duration: 700,
-    range: 18,
+    range: 46,
     projectile: false,
     attackSfxKey: "sfx_boxing_punch",
     moveSlowMultiplier: 0.58,
@@ -37,7 +35,7 @@ export const weapons = {
     critProb: 30,
     accuracy: 90,
     duration: 1000,
-    range: 22,
+    range: 50,
     projectile: false,
     attackSfxKey: "sfx_sword_hit",
     moveSlowMultiplier: 0.62,
@@ -57,6 +55,40 @@ export const weapons = {
     attackSfxKey: "sfx_gun_shot",
     moveSlowMultiplier: 0.72,
     moveSlowDurationMs: 650,
+  },
+
+  turret: {
+    name: "turret",
+    baseDmg: 42,
+    critDmg: 68,
+    critProb: 18,
+    accuracy: 80,
+    duration: 850,
+    range: 310,
+    projectile: true,
+    speed: 340,
+    attackSfxKey: "sfx_gun_shot",
+  },
+
+  catapult: {
+    name: "catapult",
+    baseDmg: 125,
+    critDmg: 180,
+    critProb: 24,
+    accuracy: 74,
+    duration: 2200,
+    range: 400,
+    projectile: true,
+    speed: 205,
+    attackSfxKey: null,
+    projectileTextureKey: "rock_projectile",
+    projectileFrame: 0,
+    projectileAnimKey: "rock_projectile_spin",
+    impactAtEndOnly: true,
+    impactRadius: 18,
+    projectileScaleStart: 0.82,
+    projectileScaleEnd: 0.7,
+    projectilePeakScaleMin: 1.28,
+    projectilePeakScaleMax: 2.05,
   }
 };
-

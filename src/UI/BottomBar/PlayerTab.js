@@ -2,6 +2,11 @@ import { House } from "../../buildings/House.js";
 import { showAlert, CONTROL_STATES } from "../../constants";
 import { StaminaManager } from "../../Manager/staminaManager.js";
 import { Player } from "../../players/Player";
+import {
+    applyPortraitKeyToSprite,
+    DEFAULT_PLAYER_PORTRAIT_KEY,
+    getPlayerPortraitKey,
+} from "../../players/playerPortraits.js";
 import { Teams } from "../../Teams.js";
 
 
@@ -11,6 +16,7 @@ export default class PlayerTab {
     this.selected = null;
     this.rows = new Map(); // sprite.id -> { row, hpBar, stBar, nameText, bg }
     this.refreshEvt = null;
+    this._onWheel = null;
     this.BAR_SEG_UNIT = 25;
     this.BAR_SEG_GAP  = 1;
 
@@ -32,6 +38,7 @@ export default class PlayerTab {
 
     // build UI
     this.root = this.build();
+    this.bindScrollInput();
     // timed refresh (bars & list churn)
     this.refreshEvt = scene.time.addEvent({
       delay: 250,
@@ -44,6 +51,10 @@ export default class PlayerTab {
     destroy() {
         this.refreshEvt?.remove(false);
         this.refreshEvt = null;
+        if (this._onWheel) {
+            this.scene.input.off('wheel', this._onWheel);
+            this._onWheel = null;
+        }
         this.root?.destroy();
         this.rows.clear();
     }
@@ -69,6 +80,7 @@ export default class PlayerTab {
             width: this.RIGHT_W,
             height: 180,
             scrollMode: 0,
+            scrollDetectionMode: 'rectBounds',
             background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.25),
             panel: { child: this.listBody, mask: { padding: 1 } },
             sliderY: scene.rexUI.add.slider({
@@ -77,6 +89,10 @@ export default class PlayerTab {
             track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
             thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x888888),
             }),
+            scrollerY: {
+                pointerOutRelease: true,
+                rectBoundsInteractive: true,
+            },
             space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
         });
 
@@ -232,7 +248,7 @@ export default class PlayerTab {
         // ---------- header row: portrait + details ----------
         const header = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 12 } });
 
-        const portrait = scene.add.sprite(0, 0, 'char')
+        const portrait = scene.add.sprite(0, 0, DEFAULT_PLAYER_PORTRAIT_KEY)
             .setDisplaySize(48, 48)
             .setOrigin(0.5, 0.5);
         portrait.setVisible(false); // start hidden
@@ -346,13 +362,7 @@ export default class PlayerTab {
                 detailsText.setText(
                     `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
                 );
-                if (u.portraitKey) {
-                    portrait.setVisible(true);
-                    portrait.setTexture(u.portraitKey);
-                    portrait.play(u.portraitKey);
-                } else {
-                    portrait.setVisible(false);
-                }
+                applyPortraitKeyToSprite(scene, portrait, u.portraitKey, 48);
             },
             setPrices() {},
             setSleepButton() {},
@@ -477,8 +487,32 @@ export default class PlayerTab {
         });
 
         this.listBody.layout();
-        this.scroll.setMinSize(this.RIGHT_W, 180);
         this.scroll.layout();
+    }
+
+    bindScrollInput() {
+        if (this._onWheel) return;
+
+        this._onWheel = (pointer, _gameObjects, dx, dy) => {
+            if (this.scene.uiBottomBar?.currentPage !== 'players') return;
+            if (!this.scene.uiBottomBar?.expanded) return;
+            if (!this.scroll?.isOverflowY) return;
+            if (!this.isPointerOverScroll(pointer)) return;
+
+            const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+            if (Math.abs(dominantDelta) < 0.1) return;
+
+            this.scroll.addChildOY(-dominantDelta * 0.8, true);
+            this.scene.input.stopPropagation();
+        };
+
+        this.scene.input.on('wheel', this._onWheel);
+    }
+
+    isPointerOverScroll(pointer) {
+        if (!this.scroll?.getBounds) return false;
+        const bounds = this.scroll.getBounds();
+        return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
     }
 
     //refresh logic
@@ -643,7 +677,7 @@ export default class PlayerTab {
         const price = this.SELL_PRICE[type] ?? this.SELL_PRICE.Default;
 
         // same close-up logic as before
-        const portraitKey = s.health > 50 ? 'char' : 'charHurt';
+        const portraitKey = getPlayerPortraitKey(s);
         this.detailCard.setUnit({
             name:   s.name || 'Unnamed',
             type,
@@ -798,11 +832,15 @@ export default class PlayerTab {
         if (s.isGunslinger)  return 'Gunslinger';
         if (s.isBlademaster) return 'Blademaster';
         if (s.isBrawler)     return 'Brawler';
+        if (s.isFortGrunt)   return 'Fort Grunt';
+        if (s.isSeaRaider)   return 'Sea Raider';
+        if (s.isRaider)      return 'Raider';
         return 'Unit';
     }
 
     hidePortrait() {
         this.portrait?.setVisible(false);
+        this.portrait?.anims?.stop?.();
     }
 
     // Expose the root for rexUI pages.addPage(...)

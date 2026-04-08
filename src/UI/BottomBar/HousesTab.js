@@ -4,6 +4,11 @@ import { Teams } from '../../Teams';
 import { StaminaManager } from '../../Manager/staminaManager.js';
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, showAlert } from '../../constants';
 import { buildingManager } from '../../Manager/buildingManager.js';
+import {
+  applyPortraitKeyToSprite,
+  DEFAULT_PLAYER_PORTRAIT_KEY,
+  getPlayerPortraitKey,
+} from '../../players/playerPortraits.js';
 
 export default class HousesTab {
   constructor(scene, teamNumber = 1) {
@@ -11,8 +16,10 @@ export default class HousesTab {
     this.team = teamNumber;
     this.selected = null;
     this.rows = new Map(); // house -> { row, bg, hpFill, occText }
+    this._onWheel = null;
 
     this.root = this.build();
+    this.bindScrollInput();
 
     this._tickEvt = scene.time.addEvent({
       delay: 250,
@@ -24,6 +31,10 @@ export default class HousesTab {
   destroy() {
     this._tickEvt?.remove(false);
     this._tickEvt = null;
+    if (this._onWheel) {
+      this.scene.input.off('wheel', this._onWheel);
+      this._onWheel = null;
+    }
     this.root?.destroy();
     this.rows.clear();
   }
@@ -51,6 +62,7 @@ export default class HousesTab {
       width: Math.floor(scene.scale.width * (2 / 3)) - 48,
       height: 200,
       scrollMode: 0,
+      scrollDetectionMode: 'rectBounds',
       background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.25),
       panel: { child: this.listBody, mask: { padding: 1 } },
       sliderY: scene.rexUI.add.slider({
@@ -59,6 +71,10 @@ export default class HousesTab {
         track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
         thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x888888),
       }),
+      scrollerY: {
+        pointerOutRelease: true,
+        rectBoundsInteractive: true,
+      },
       space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
     });
 
@@ -208,7 +224,7 @@ export default class HousesTab {
 
     const bg = rr(0, 0, 8, 0x000000, 0.20);
 
-    const portrait = scene.add.sprite(0, 0, 'char')
+    const portrait = scene.add.sprite(0, 0, DEFAULT_PLAYER_PORTRAIT_KEY)
       .setDisplaySize(44, 44)
       .setOrigin(0.5, 0.5);
     portrait.setVisible(false);
@@ -272,11 +288,13 @@ export default class HousesTab {
       hidePortrait: () => {
         portrait.setVisible(false);
         portrait.setAlpha(0);
+        portrait.anims?.stop?.();
       },
       setTroop: (troop) => {
         if (!troop || !troop.active) {
           name.setText(`Slot ${idx + 1}: —`);
           portrait.setVisible(false);
+          portrait.anims?.stop?.();
           hp.sizer.setPercent(0);
           st.sizer.setPercent(0);
           updateBtn(null);
@@ -285,14 +303,8 @@ export default class HousesTab {
 
         name.setText(`Slot ${idx + 1}: ${troop.name || 'Unnamed'}`);
 
-        // Use same "closeup" animation keys as PlayerTab
-        const portraitKey = (troop.health ?? 0) > 50 ? 'char' : 'charHurt';
-        portrait.setVisible(true);
-        portrait.setTexture(portraitKey);
-        // if animations exist under same key, play them; safe-guard if not
-        if (scene.anims?.exists?.(portraitKey)) {
-          portrait.play(portraitKey);
-        }
+        const portraitKey = getPlayerPortraitKey(troop);
+        applyPortraitKeyToSprite(scene, portrait, portraitKey, 44);
 
         const hpPct = (troop.health ?? 0) / (troop.maxHealth || 100);
         const stPct = (troop.stamina ?? 0) / (troop.maxStamina || 100);
@@ -301,9 +313,6 @@ export default class HousesTab {
 
         updateBtn(troop);
 
-        portrait.setVisible(true);
-        portrait.setAlpha(1);   // <-- add this
-        portrait.setTexture(portraitKey);
       },
     };
   }
@@ -329,6 +338,31 @@ export default class HousesTab {
 
     this.listBody.layout();
     this.scroll.layout();
+  }
+
+  bindScrollInput() {
+    if (this._onWheel) return;
+
+    this._onWheel = (pointer, _gameObjects, dx, dy) => {
+      if (this.scene.uiBottomBar?.currentPage !== 'houses') return;
+      if (!this.scene.uiBottomBar?.expanded) return;
+      if (!this.scroll?.isOverflowY) return;
+      if (!this.isPointerOverScroll(pointer)) return;
+
+      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      if (Math.abs(dominantDelta) < 0.1) return;
+
+      this.scroll.addChildOY(-dominantDelta * 0.8, true);
+      this.scene.input.stopPropagation();
+    };
+
+    this.scene.input.on('wheel', this._onWheel);
+  }
+
+  isPointerOverScroll(pointer) {
+    if (!this.scroll?.getBounds) return false;
+    const bounds = this.scroll.getBounds();
+    return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
   }
 
   createRow(house) {

@@ -8,6 +8,8 @@ import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 
 const NIGHT_START = 18;
 const NIGHT_END = 6;
+const CROP_GROWTH_INTERVAL_HOURS = 8;
+const CROP_GROWTH_START_HOUR = 6;
 
 export class Clock {
 
@@ -54,15 +56,19 @@ export class Clock {
 
     }
 
-    update() {
-        this.tickCount++;
-        if (this.tickCount >= this.ticksPerMinute) {
-            this.tickCount = 0;
-            this.advanceTime();
+    update(stepCount = 1) {
+        const steps = Math.max(1, Math.floor(stepCount));
+        for (let i = 0; i < steps; i++) {
+            this.tickCount++;
+            if (this.tickCount >= this.ticksPerMinute) {
+                this.tickCount = 0;
+                this.advanceTime();
+            }
+
+            this.events();
         }
 
-        this.events();
-        this.externalText.setText(this.formatTimeWithDay());
+        this.externalText?.setText?.(this.formatTimeWithDay());
         this.updateLighting();
     }
 
@@ -100,26 +106,41 @@ export class Clock {
         return this.hours == NIGHT_START && this.minutes == 0
     }
 
+    isCropGrowthTick() {
+        if (this.minutes !== 0) return false;
+        const elapsed = (this.hours - CROP_GROWTH_START_HOUR + 24) % 24;
+        return elapsed % CROP_GROWTH_INTERVAL_HOURS === 0;
+    }
+
     events() {
-        if (this.isNightStart()) {
+        const dayStart = this.isDayStart();
+        const nightStart = this.isNightStart();
+        const cropGrowthTick = this.isCropGrowthTick();
+
+        if (nightStart) {
             // ✅ No enemies until Day 3
             AudioManager.setIsNight(true);
+            this.scene?.handleNightStart?.();
         }
         else if (this.isNight()) {
             // keep your later-per-hour spawning disabled for now (or remove)
         }
-        else if (this.isDayStart() /*&& !this.powerupScreenShown*/) {
+        else if (dayStart /*&& !this.powerupScreenShown*/) {
             AudioManager.setIsNight(false);
             this.powerupScreenShown = true;
             DailyNeedsTracker.consumeResources();
-            Teams.growWateredCrops(1);
-            Teams.resetDailyWatering(1);
+            this.scene?.handleDayStart?.();
             // // Daily popup pause is opt-in; default flow keeps gameplay running.
             // if (this.scene?.enableDailyPowerupPopup) {
             //     openPowerupScreen(this.scene);
             //     this.pause();
             // }
-        } else {
+        }
+
+        if (cropGrowthTick) {
+            Teams.growWateredCrops(1);
+            Teams.resetDailyWatering(1);
+        } else if (!nightStart && !dayStart) {
             this.lastSend = null;
         }
     }

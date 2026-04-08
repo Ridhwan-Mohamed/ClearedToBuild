@@ -100,14 +100,7 @@ export class Scheduler {
             case "enemy_unit": {
                 const target = candidate.ref?.gameObject || candidate.ref?.target || candidate.ref;
                 if (!target?.active || !target?.body) return false;
-                return Manager.assignOneTroopToAction(troop, [{
-                    x: target.x,
-                    y: target.y,
-                    body: target.body,
-                    assigned: 0,
-                    forced: !!candidate.ref?.forced,
-                    target,
-                }], CONTROL_STATES.TRACK_TARGET);
+                return Manager.assignOneTroopToAction(troop, [candidate.ref], CONTROL_STATES.TRACK_TARGET);
             }
             case "enemy_destroy_block": {
                 const ok = Manager.assignOneTroopToAction(troop, [candidate.ref], CONTROL_STATES.DESTROY_MODE);

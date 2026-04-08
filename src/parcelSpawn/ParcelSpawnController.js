@@ -55,10 +55,11 @@ export class ParcelSpawnController {
     const gapPx = gapTiles * tileSize;
     const westX  = islandLeft - gapPx - panelW / 2;
     const eastX  = islandLeft + islandW + gapPx + panelW / 2;
+    const northY = islandTop - gapPx - panelH / 2;
     const southY = islandTop  + islandH + gapPx + panelH / 2;
 
-    // Note: "N" (fort) intentionally not created yet.
     const defs = [
+      { id: "N", x: islandCx, y: northY },
       { id: "W", x: westX,    y: islandCy },
       { id: "E", x: eastX,    y: islandCy },
       { id: "S", x: islandCx, y: southY  },

@@ -13,6 +13,7 @@ import { ZoomMixer } from '../UI/ZoomMixer.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { AudioManager } from '../Manager/AudioManager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
+import { OrderRunner } from '../orders/OrderRunner.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
 import firemanWalkDown from 'url:../assets/players/fireman/fireman_walk_down.png';
 import firemanWalkDownLeft from 'url:../assets/players/fireman/fireman_walk_down_left.png';
@@ -112,6 +113,7 @@ export class Fireman {
         }
 
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
+        if (OrderRunner.stepUnit(troop)) return;
         if (troop.task) return;
         if (Scheduler.stepUnit(troop)) return;
 
@@ -207,7 +209,12 @@ export class Fireman {
 
     static deliverFuelToOven(troop) {
         const job = troop.pendingFuelJob;
-        if (!job || !job.oven) return false;
+        if (!job || !job.oven || job.canceled || !job.oven?.sprite?.active) {
+            troop.pendingFuelJob = null;
+            troop.task = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            return false;
+        }
 
         const oven = job.oven;
         const amount = troop.carrying?.count || 1;
@@ -229,9 +236,10 @@ export class Fireman {
     }
 
     static goRefuelOven(troop, job) {
-        if (!job?.oven) {
+        if (!job?.oven || job.canceled || !job.oven?.sprite?.active) {
+            if (troop.pendingFuelJob === job) troop.pendingFuelJob = null;
             console.error("Failed to refuel oven after wood pickup, OVEN GONE ISSUE")
-            return false; //fine for now, but in the future should have better handling if oven doesnt exist on return
+            return false; // fine for now, scheduler/storage recovery will take over
         }
         // Prepare to move back to oven
         troop.roam = false;
@@ -292,7 +300,10 @@ export class Fireman {
     }
 
     static maybeAssignOvenJobDelivery(troop, job, item) {
-        if (!job || job.canceled || !job.oven?.sprite?.active) return false;
+        if (!job || job.canceled || !job.oven?.sprite?.active) {
+            if (troop.pendingOvenJob === job) troop.pendingOvenJob = null;
+            return false;
+        }
 
         // Create a one-shot delivery task bound to this job
         const task = {
@@ -320,6 +331,15 @@ export class Fireman {
     static deliverToOven(troop) {
         const task = troop.task;
         if (!task || !task.oven) {
+            troop.pendingOvenJob = null;
+            troop.task = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            return;
+        }
+
+        const job = task.job || troop.pendingOvenJob;
+        if (job?.canceled || !task.oven?.sprite?.active) {
+            if (job && job.assigned > 0) job.assigned -= 1;
             troop.pendingOvenJob = null;
             troop.task = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -360,7 +380,6 @@ export class Fireman {
 
         if (success) {
             // job bookkeeping
-            const job = task.job || troop.pendingOvenJob;
             if (job) {
                 job.assigned = Math.max(0, job.assigned - 1);
                 job.delivered += 1;
@@ -422,7 +441,7 @@ export class Fireman {
         const canTravel = Fireman.maybeAssignOvenJobDelivery(troop, job, UI_ITEM_TYPES.unclean_water);
         if(!canTravel){
             console.error("Failed to path back to oven after water pickup, WATER TO OVEN ERROR")
-            job.assigned -= 1;
+            if (job?.assigned > 0) job.assigned -= 1;
             troop.task = null;
             troop.pendingOvenJob = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -435,6 +454,8 @@ export class Fireman {
         const teamNumber = troop.body.team;
         const team = Teams.teamLists[teamNumber];
         if (!team?.firemanList) return;
+
+        OrderRunner.handleTroopDestroyed(troop);
 
         Player._destroyMiniBars(troop)
 

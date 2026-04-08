@@ -3,7 +3,7 @@ import { TaskTicket } from "./TaskTicket";
 
 export class TaskBoard {
     static LEGACY_MAPPINGS = [
-        { arrayKey: "fightingList", kind: "enemy_unit", roles: ["Blademaster", "Brawler", "Gunslinger"], maxAssigned: 1 },
+        { arrayKey: "fightingList", kind: "enemy_unit", roles: ["Blademaster", "Brawler", "Gunslinger"], maxAssigned: 8 },
         { arrayKey: "enemyDestroyTileStates", kind: "enemy_destroy_tile", roles: ["Blademaster", "Brawler", "Gunslinger"], maxAssigned: 1 },
         { arrayKey: "enemyDestroyStates", kind: "enemy_destroy_block", roles: ["Blademaster", "Brawler", "Gunslinger"], maxAssigned: 5 },
 

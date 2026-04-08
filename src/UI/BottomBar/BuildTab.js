@@ -7,6 +7,8 @@ import { Map as GameMap } from "../../map";
 import { Teams } from "../../Teams";
 import { buildingManager } from "../../Manager/buildingManager";
 import { House } from "../../buildings/House";
+import { Turret } from "../../buildings/Turret";
+import { Catapult } from "../../buildings/Catapult";
 import { townRoads } from "../../town";
 import { Farmer } from "../../players/Farmer";
 import { Builder } from "../../players/Builder";
@@ -15,11 +17,18 @@ import { Fireman } from "../../players/Fireman";
 import { Brawler } from "../../players/Brawler";
 import { Blademaster } from "../../players/Blademaster";
 import { Gunslinger } from "../../players/Gunslinger";
+import { formatPermitCostText } from "../../permitSystem";
+import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../../parcel_system/StoreUnlockSystem";
 
 const RARITY = {
   common: { border: 0x2ecc71, label: "#2ecc71" }, // green
   rare:   { border: 0x4aa3ff, label: "#4aa3ff" }, // blue
   epic:   { border: 0xd86bff, label: "#d86bff" }, // pink-purple
+};
+
+const SPECIAL_BUILD_PLACERS = {
+  turret: Turret,
+  catapult: Catapult,
 };
 
 const UNIT_STORE = [
@@ -125,6 +134,10 @@ function ensureBuildTabIcons(scene) {
     drawCenteredTexture(scene, rt, { key: "storage", scale: 1 });
   });
 
+  buildIconTexture(scene, "icon_town_tower", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "tower", frame: 0, scale: 0.72, useSprite: true });
+  });
+
   buildIconTexture(scene, "icon_clay_oven", (rt) => {
     drawCenteredTexture(scene, rt, { key: "clayOven", frame: 0, scale: 1, useSprite: true });
   });
@@ -135,6 +148,16 @@ function ensureBuildTabIcons(scene) {
 
   buildIconTexture(scene, "icon_wood_wall", (rt) => {
     drawCenteredTexture(scene, rt, { key: "woodWall_interior", frame: 0, scale: 1.5, useSprite: true });
+  });
+
+  buildIconTexture(scene, "icon_turret_store", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "image7", scale: 0.85, x: 32, y: 40 });
+    drawCenteredTexture(scene, rt, { key: "image7a", scale: 0.85, x: 32, y: 20 });
+  });
+
+  buildIconTexture(scene, "icon_catapult_store", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "catapult_base", scale: 0.76, x: 32, y: 38 });
+    drawCenteredTexture(scene, rt, { key: "catapult_top", frame: 1, scale: 0.76, x: 32, y: 24, useSprite: true });
   });
 
   UNIT_STORE.forEach((unit) => {
@@ -153,6 +176,7 @@ function ensureBuildTabIcons(scene) {
 function hasResources(scene, cost) {
   if (!cost) return true;
   const need = (k) => Number(cost[k] ?? 0);
+  if (need("permits") > 0 && (scene.permits ?? 0) < need("permits")) return false;
   if (need("money") > 0 && (scene.money ?? 0) < need("money")) return false;
   if (need("wood") > 0 && (scene.woodAmnt ?? 0) < need("wood")) return false;
   if (need("stone") > 0 && (scene.stoneAmnt ?? 0) < need("stone")) return false;
@@ -165,6 +189,9 @@ function hasResources(scene, cost) {
 function spendResources(scene, cost) {
   if (!cost) return;
   const take = (k) => Number(cost[k] ?? 0);
+
+  const permits = take("permits");
+  if (permits) scene.updatePermits?.(-permits);
 
   const money = take("money");
   if (money) scene.updateMoney?.(-money);
@@ -202,9 +229,12 @@ function spendResources(scene, cost) {
 function fmtCost(cost) {
   if (!cost) return "";
   if (Object.keys(cost).length === 1 && cost.money) return `$${cost.money}`;
+  if (Object.keys(cost).length === 1 && cost.permits) return formatPermitCostText(cost.permits);
   const parts = [];
   for (const [k, v] of Object.entries(cost)) {
     if (!v) continue;
+    if (k === "permits") parts.push(formatPermitCostText(v));
+    else
     if (k === "money") parts.push(`$${v}`);
     else if (k === "clean_water") parts.push(`water:${v}`);
     else parts.push(`${k}:${v}`);
@@ -254,9 +284,14 @@ function normalizeTileCost(tile) {
 
 function getDefCost(def) {
   if (def?.isUnit) return def.cost ?? {};
+  if (def?.cost) return def.cost;
   // walls: use wallTypeName; buildings: tileTypeName
   const tileKey = def.isWall ? def.wallTypeName : def.tileTypeName;
   return normalizeTileCost(TILE_TYPES[tileKey]);
+}
+
+function getSpecialBuildPlacer(tile) {
+  return tile?.name ? SPECIAL_BUILD_PLACERS[tile.name] ?? null : null;
 }
 
 export default class BuildTab {
@@ -282,6 +317,12 @@ export default class BuildTab {
     this._unitDefs = this._makeUnitDefs();
     this._cardRefs = [];
 
+    this._onStoreUnlockChanged = () => this.refreshAvailableDefs();
+    scene.events.on("store:unlock-changed", this._onStoreUnlockChanged);
+    scene.events.once("shutdown", () => {
+      scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
+    });
+
     this._makeUI();
     this._ensurePlacementHooks();
 
@@ -289,14 +330,40 @@ export default class BuildTab {
   }
 
   _makeBuildDefs() {
-    return [
-      { key:"house", name:"House", desc:"Adds housing capacity.", rarity:"common", iconKey:"icon_house", tileTypeName:"house1" },      { key: "storage",  name: "Storage",   desc: "More inventory space.",  rarity: "common", iconKey: "icon_storage",  tileTypeName: "storage",},
+    const defs = [
+      { key: "tower", name: "Town Tower", desc: "Core structure. Pays dawn income and permits. Lose if they all fall.", rarity: "rare", iconKey: "icon_town_tower", tileTypeName: "tower" },
+      { key:"house", name:"House", desc:"Adds housing capacity.", rarity:"common", iconKey:"icon_house", tileTypeName:"house1", cost: { permits: 1 } },
+      { key: "storage",  name: "Storage",   desc: "More inventory space.",  rarity: "common", iconKey: "icon_storage",  tileTypeName: "storage",},
       { key: "clayOven", name: "Clay Oven", desc: "Cook food over time.",   rarity: "common", iconKey: "icon_clay_oven",tileTypeName: "clayOven",},
 
       // Walls live here now
       { key: "woodWall",  name: "Wood Wall",  desc: "Cheap defense.", rarity: "common", iconKey: "icon_wood_wall",  wallTypeName: "woodWall",  isWall: true },
       { key: "stoneWall", name: "Stone Wall", desc: "Tough defense.", rarity: "rare",   iconKey: "icon_stone_wall", wallTypeName: "wall", isWall: true },
     ];
+
+    if (hasStoreUnlock(STORE_UNLOCK_KEYS.turret)) {
+      defs.splice(3, 0, {
+        key: "turret",
+        name: "Turret",
+        desc: "Auto-firing defense that tracks enemy raiders.",
+        rarity: "epic",
+        iconKey: "icon_turret_store",
+        tileTypeName: "turret",
+      });
+    }
+
+    if (hasStoreUnlock(STORE_UNLOCK_KEYS.catapult)) {
+      defs.splice(4, 0, {
+        key: "catapult",
+        name: "Catapult",
+        desc: "Long-range siege engine that lobs heavy stones.",
+        rarity: "epic",
+        iconKey: "icon_catapult_store",
+        tileTypeName: "catapult",
+      });
+    }
+
+    return defs;
   }
 
   _makeUnitDefs() {
@@ -533,6 +600,13 @@ export default class BuildTab {
     this._makeUI();
   }
 
+  refreshAvailableDefs() {
+    this._clearSelection(true);
+    this._buildDefs = this._makeBuildDefs();
+    this._unitDefs = this._makeUnitDefs();
+    this._makeUI();
+  }
+
   _recruitUnit(def) {
     const team = "1";
     const costObj = def.cost ?? {};
@@ -575,6 +649,10 @@ export default class BuildTab {
       return;
     }
 
+    if (this.activeKey && this.activeKey !== key) {
+      this._clearSelection(true);
+    }
+
     this.activeKey = key;
     this.pendingDef = def;
 
@@ -598,6 +676,11 @@ export default class BuildTab {
     }
 
     showAlert(scene, `Begin placing: ${def.name}`, "#aaffaa");
+    const specialPlacer = getSpecialBuildPlacer(tile);
+    if (specialPlacer) {
+      specialPlacer.beginPlacing(tile, 1);
+      return;
+    }
     GameMap.beginPlacing(tile);
   }
 
@@ -611,6 +694,10 @@ export default class BuildTab {
     });
 
     if (this.scene.wallPlacer?.active) this.scene.wallPlacer.stop?.();
+
+    Object.values(SPECIAL_BUILD_PLACERS).forEach((placer) => {
+      if (placer?.isPlacing) placer.cancelPlacement();
+    });
 
     if (GameMap.isPlacing) {
       GameMap.isPlacing = false;
@@ -628,28 +715,46 @@ export default class BuildTab {
     const inputScene = this.scene.worldScene ?? this.scene;
     inputScene.input.on("pointerdown", (pointer) => {
       if (!this.pendingDef || this.pendingDef.isWall) return;
-      if (!GameMap.isPlacing || !GameMap.placingItem) return;
-      if (GameMap.placingItem.blocked) return;
+      const tile = TILE_TYPES[this.pendingDef.tileTypeName];
+      if (!tile) return;
+
+      const specialPlacer = getSpecialBuildPlacer(tile);
+      const genericPlacementActive = !!(GameMap.isPlacing && GameMap.placingItem);
+      const specialPlacementActive = !!specialPlacer?.isPlacing;
+      if (!genericPlacementActive && !specialPlacementActive) return;
+
+      if (specialPlacer) {
+        if (!specialPlacementActive || specialPlacer.placementState?.topSprite?.blocked) return;
+      } else {
+        if (!genericPlacementActive || GameMap.placingItem?.blocked) return;
+      }
 
       // Don’t place through the bottom bar
       if (pointer.y > inputScene.scale.height - 180 && this.scene.uiBottomBar?.expanded) return;
 
-      const tile = TILE_TYPES[this.pendingDef.tileTypeName];
-      if (!tile) return;
-
       const lenX = tile.lenX, lenY = tile.lenY;
-      let x = Math.floor(pointer.worldX - (pointer.worldX % SQUARESIZE));
-      let y = Math.floor(pointer.worldY - (pointer.worldY % SQUARESIZE));
-      if (lenX % 2 !== 0) x += SQUARESIZE / 2;
-      if (lenY % 2 !== 0) y += SQUARESIZE / 2;
+      let gridX;
+      let gridY;
 
-      const gridX = Math.floor(x / SQUARESIZE) - Math.floor(lenX / 2);
-      const gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
+      if (specialPlacer) {
+        const placement = specialPlacer.resolvePlacement(pointer, tile);
+        if (!placement) return;
+        gridX = placement.gridX;
+        gridY = placement.gridY;
+      } else {
+        let x = Math.floor(pointer.worldX - (pointer.worldX % SQUARESIZE));
+        let y = Math.floor(pointer.worldY - (pointer.worldY % SQUARESIZE));
+        if (lenX % 2 !== 0) x += SQUARESIZE / 2;
+        if (lenY % 2 !== 0) y += SQUARESIZE / 2;
+
+        gridX = Math.floor(x / SQUARESIZE) - Math.floor(lenX / 2);
+        gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
+      }
 
       const costObj = getDefCost(this.pendingDef);
 
       if (!hasResources(this.scene, costObj)) {
-        showAlert(this.scene, "Not enough resources", "#ff5555");
+        showAlert(this.scene, "Not enough resources or permits", "#ff5555");
         return;
       }
 
@@ -666,6 +771,7 @@ export default class BuildTab {
           type: tile,
           x: gridX,
           y: gridY,
+          teamNumber: 1,
           duration: 100,
           assigned: 0,
           prepaid: Object.keys(costObj).length > 0,

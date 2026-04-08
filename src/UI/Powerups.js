@@ -55,7 +55,8 @@ export function openPowerupScreen(scene) {
     const centerX = cam.centerX;
     const yOffset = 100;
     const uiContainer = scene.add.container(0, 0).setDepth(2000);
-    scene.time.timeScale = 0;
+    if (typeof scene.setSimulationPause === "function") scene.setSimulationPause("powerup-overlay", true);
+    else scene.time.timeScale = 0;
 
     scene.cameras.main.ignore(uiContainer);  // hide from world camera
     uiContainer.setScrollFactor(0); // lock container to camera
@@ -315,9 +316,9 @@ function closePowerupScreen(scene, container) {
     if (container) container.destroy();
     clearStoreSelectionHighlight();
     lastStoreClickTime = 0;
-    scene.clock.resume();
     scene.clock.powerupScreenShown = false;
-    scene.time.timeScale = 1;
+    if (typeof scene.setSimulationPause === "function") scene.setSimulationPause("powerup-overlay", false);
+    else scene.time.timeScale = 1;
 
     if (pendingStoreItem) {
         const item = pendingStoreItem;
@@ -508,11 +509,11 @@ export function addCardToHand(card, teamNumber = "1") {
     if (!team.cardHand) team.cardHand = [];
     const hand = team.cardHand;
 
-    // Normal pickup: apply immediately + add to hand
-    if (card.apply) card.apply();
-
     // refuse when full (swap UI handles replacement)
     if (hand.length >= 5) return false;
+
+    // Normal pickup: apply immediately + add to hand
+    if (card.apply) card.apply();
 
     hand.push(card);
     return true;

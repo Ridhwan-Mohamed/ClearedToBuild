@@ -3,6 +3,7 @@ import { POWERUP_CARDS } from "../Cards/PowerupCards";
 import { House } from "../buildings/House";
 import { SQUARESIZE, UIDEPTH, showAlert } from "../constants";
 import { addCardToHand, getCardHand } from "../UI/Powerups";
+import { createWorldCardPreview, getCardOutlineTint } from "../UI/CardPreview";
 import { Builder } from "../players/Builder";
 import { Farmer } from "../players/Farmer";
 import { Fireman } from "../players/Fireman";
@@ -10,6 +11,8 @@ import { Forager } from "../players/Forager";
 import { Gunslinger } from "../players/Gunslinger";
 import { Blademaster } from "../players/Blademaster";
 import { Brawler } from "../players/Brawler";
+import { StorageManager } from "../Manager/StorageManager";
+import { UI_ITEM_TYPES } from "../UI/UIConstants";
 
 const TEAM_ID = "1";
 const NO_HOUSE_FALLBACK_MONEY = 500;
@@ -77,45 +80,19 @@ function addResource(scene, key, amount) {
     scene.updateMoney?.(amount);
     return;
   }
-  if (key === "seeds") {
-    scene.updateSeeds?.(amount);
-    return;
-  }
-  if (key === "berry") {
-    scene.updateBerry?.(amount);
-    return;
-  }
+  const itemType = ({
+    seeds: UI_ITEM_TYPES.seedCrop,
+    berry: UI_ITEM_TYPES.seedBerry,
+    berries: UI_ITEM_TYPES.seedBerry,
+    wood: UI_ITEM_TYPES.wood,
+    stone: UI_ITEM_TYPES.stone,
+    food: UI_ITEM_TYPES.food,
+    clean_water: UI_ITEM_TYPES.clean_water,
+    water: UI_ITEM_TYPES.clean_water,
+  })[key];
 
-  if (key === "wood") {
-    scene.woodAmnt = (scene.woodAmnt ?? 0) + amount;
-    scene.woodText?.setText(String(scene.woodAmnt));
-    return;
-  }
-
-  if (key === "stone") {
-    scene.stoneAmnt = (scene.stoneAmnt ?? 0) + amount;
-    scene.stoneText?.setText(String(scene.stoneAmnt));
-    return;
-  }
-
-  if (key === "food") {
-    scene.foodAmnt = (scene.foodAmnt ?? 0) + amount;
-    if (scene.foodText) {
-      const raw = scene.foodText.text || "";
-      const parts = raw.split("/");
-      scene.foodText.setText(parts.length === 2 ? `${scene.foodAmnt}/${parts[1]}` : String(scene.foodAmnt));
-    }
-    return;
-  }
-
-  if (key === "clean_water") {
-    scene.cleanWaterAmnt = (scene.cleanWaterAmnt ?? 0) + amount;
-    if (scene.waterText) {
-      const raw = scene.waterText.text || "";
-      const parts = raw.split("/");
-      scene.waterText.setText(parts.length === 2 ? `${scene.cleanWaterAmnt}/${parts[1]}` : String(scene.cleanWaterAmnt));
-    }
-  }
+  if (!itemType) return;
+  StorageManager.grantItemToTeam(TEAM_ID, itemType, amount, scene);
 }
 
 function safeDestroy(go) {
@@ -214,44 +191,6 @@ function animateChest(sprite, toFrame, scene) {
       if (next === toFrame) sprite._frameTimer?.remove(false);
     }
   });
-}
-
-function toOutlineColor(card) {
-  return Phaser.Display.Color.HexStringToColor(card?.OUTLINE ?? "#ffffff").color;
-}
-
-function createCardPreview(scene, card, x, y) {
-  const borderColor = toOutlineColor(card);
-
-  const bg = worldify(scene, scene.add.rectangle(x, y, 170, 180, 0x222222, 0.96)
-    .setStrokeStyle(3, borderColor)
-    .setDepth(10020)
-    .setVisible(false));
-
-  const icon = worldify(scene, scene.add.image(x, y - 40, card.image)
-    .setScale(1)
-    .setDepth(10021)
-    .setVisible(false));
-
-  const name = worldify(scene, scene.add.text(x, y, card.name, {
-    fontSize: "12px",
-    color: "#ffffff",
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10021).setVisible(false));
-
-  const desc = worldify(scene, scene.add.text(x, y + 45, card.text, {
-    fontSize: "12px",
-    color: "#cccccc",
-    wordWrap: { width: 120 },
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10021).setVisible(false));
-
-  const list = [bg, icon, name, desc];
-  return {
-    show() { list.forEach(o => o.setVisible(true)); },
-    hide() { list.forEach(o => o.setVisible(false)); },
-    destroy() { list.forEach(safeDestroy); }
-  };
 }
 
 function openSwapOverlay(scene, incomingCard, onDone) {
@@ -408,7 +347,7 @@ function buildCardReward(scene, meta, ctx, completeReward) {
 
   cards.forEach((card, i) => {
     const pos = positions[i];
-    const tint = toOutlineColor(card);
+    const tint = getCardOutlineTint(card);
 
     const mini = worldify(scene, scene.add.image(pos.x, pos.y, "reward_mini_card")
       .setDepth(10010)
@@ -416,7 +355,7 @@ function buildCardReward(scene, meta, ctx, completeReward) {
       .setTint(tint)
       .setInteractive({ useHandCursor: true }));
 
-    const preview = createCardPreview(scene, card, pos.x, pos.y - 150);
+    const preview = createWorldCardPreview(scene, card, pos.x, pos.y - 150);
 
     mini.on("pointerover", () => preview.show());
     mini.on("pointerout", () => preview.hide());

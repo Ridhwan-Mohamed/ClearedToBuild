@@ -16,7 +16,9 @@ export class ZoomMixer {
     this.mode = 'detailed';
     this.IN_THRESHOLD  = 0.45;
     this.OUT_THRESHOLD = 0.35;
-    this.targetZoom = 1.0;
+    this.detailedZoom = 1.0;
+    this.overviewZoom = 0.3;
+    this.targetZoom = this.detailedZoom;
 
     this.overviewImage = null;
     this.texKey = 'mapOverview';
@@ -253,7 +255,7 @@ export class ZoomMixer {
 
 
   /** Optional keyboard shortcuts (Z/X). */
-  hookKeys(zoomOut = 0.30, zoomIn = 1.00) {
+  hookKeys(zoomOut = this.overviewZoom, zoomIn = this.detailedZoom) {
     const scene = ZoomMixer.scene;
     const isTyping = () => {
       const el = document.activeElement;
@@ -550,15 +552,17 @@ export function createZoomButtons(scene, opts = {}) {
   zoomInBtn.bg.on('pointerdown', () => {
     const zm = scene.zoomMixer;
     if (!zm) return;
-    zm.targetZoom = 1;
-    zm.smoothCenterZoomTo(1);
+    const detailedZoom = zm.detailedZoom ?? 1;
+    zm.targetZoom = detailedZoom;
+    zm.smoothCenterZoomTo(detailedZoom);
   });
 
   zoomOutBtn.bg.on('pointerdown', () => {
     const zm = scene.zoomMixer;
     if (!zm) return;
-    zm.targetZoom = 0.3;
-    zm.smoothCenterZoomTo(0.3);
+    const overviewZoom = zm.overviewZoom ?? 0.3;
+    zm.targetZoom = overviewZoom;
+    zm.smoothCenterZoomTo(overviewZoom);
   });
 
   return ui;

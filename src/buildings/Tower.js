@@ -1,7 +1,8 @@
 // buildings/Tower.js
-// Enemy Tower building (spritesheet anim + red health bar + destroyable)
+// Town Tower / enemy tower building (shared footprint + health + destroy flow)
 
 import { BLOCKDEPTH, ENEMY_BUILDING_HOVER_UI, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../constants";
+import { buildingManager } from "../Manager/buildingManager";
 import { Map } from "../map";
 import { StageState } from "../parcelController/StageState";
 import { Teams } from "../Teams";
@@ -16,15 +17,40 @@ import { VisibilitySystem } from "../UI/VisibilitySystem";
 export class TowerBuilding {
   static scene;
 
+  static getLivingTownTowers(teamNumber = 1) {
+    const towers = Teams.teamLists?.[teamNumber]?.townTowerList || [];
+    return towers.filter((tower) => tower && !tower._destroyed && tower.health > 0);
+  }
+
+  static hasLivingTownTowers(teamNumber = 1) {
+    return this.getLivingTownTowers(teamNumber).length > 0;
+  }
+
+  static grantDawnIncome(scene, teamNumber = 1) {
+    const towers = this.getLivingTownTowers(teamNumber);
+    if (!towers.length) return null;
+
+    const money = towers.length * 150;
+    const permits = towers.reduce((sum, tower) => sum + (tower.isStarterTownTower ? 2 : 1), 0);
+    scene?.updateMoney?.(money);
+    scene?.updatePermits?.(permits);
+
+    return { towers, money, permits };
+  }
+
   constructor(x, y, team = 0, opts = {}) {
     this.scene = TowerBuilding.scene;
     this.x = x;
     this.y = y;
     this.team = team;
-    this.isFortObjective = true;
-    StageState.registerFortTower(this);
     this.isPressureTower = !!opts.isPressureTower;
-    this.pressureSlotId = opts.pressureSlotId ?? null; // "W"|"E"|"S"
+    this.isFortObjective = !!opts.isFortObjective;
+    this.isTownTower = !!opts.isTownTower || (!!team && !this.isFortObjective && !this.isPressureTower);
+    this.isStarterTownTower = !!opts.isStarterTownTower;
+    this.pressureSlotId = opts.pressureSlotId ?? null; // "N"|"W"|"E"|"S"
+    if (this.isFortObjective) {
+      StageState.registerFortTower(this);
+    }
 
     const tileType = TILE_TYPES.tower || { lenX: 1, lenY: 1, name: "tower" };
     const lenX = tileType.lenX || 1;
@@ -88,15 +114,24 @@ export class TowerBuilding {
     this.collider.isBuilding = true;
     this.collider.team = this.team;
 
-
     this.sprite.buildingRef = this;
     this.sprite.team = this.team;
-    this.tileType = TILE_TYPES.tower; // Ensure tileType is set for the task
+    this.tileType = TILE_TYPES.tower;
+
+    if (this.isTownTower && Teams.teamLists?.[team]) {
+      Teams.teamLists[team].townTowerList.push(this);
+      Teams.teamLists[team].buildings.push([x, y, TILE_TYPES.tower, this.sprite]);
+      const stats = this.scene?._townTowerStats || (this.scene._townTowerStats = { built: 0, destroyed: 0 });
+      stats.built += 1;
+    }
 
     // Click enemy structure to toggle a fighter destruction task (team 1 queues)
     this.sprite.on("pointerdown", () => {
       const playerTeam = 1;
-      if (this.team === playerTeam) return; // only queue enemy towers
+      if (this.team === playerTeam || this.isTownTower) {
+        buildingManager.handleBuildingClickForBuilders(this, null, this.team);
+        return;
+      }
 
       const list = Teams.teamLists[playerTeam];
       if (!list) return;
@@ -151,20 +186,23 @@ export class TowerBuilding {
     if (!a) return;
     if (a.exists(animKey)) return;
 
-    // 2-frame loop
+    const towerTexture = this.scene?.textures?.get?.("tower");
+    const destroyedTexture = this.scene?.textures?.get?.("tower_destroyed");
+    const towerEnd = towerTexture?.has?.(1) ? 1 : 0;
+    const destroyedEnd = destroyedTexture?.has?.(1) ? 1 : 0;
+
     a.create({
       key: animKey,
-      frames: a.generateFrameNumbers("tower", { start: 0, end: 1 }),
-      frameRate: 2,
+      frames: a.generateFrameNumbers("tower", { start: 0, end: towerEnd }),
+      frameRate: towerEnd > 0 ? 2 : 1,
       repeat: -1,
     });
 
-    // 2-frame loop (destroyed state)
     if (!a.exists("tower_destroyed_idle")) {
       a.create({
         key: "tower_destroyed_idle",
-        frames: a.generateFrameNumbers("tower_destroyed", { start: 0, end: 1 }),
-        frameRate: 2,
+        frames: a.generateFrameNumbers("tower_destroyed", { start: 0, end: destroyedEnd }),
+        frameRate: destroyedEnd > 0 ? 2 : 1,
         repeat: -1,
       });
     }
@@ -303,9 +341,17 @@ export class TowerBuilding {
     this.panelText2.setPosition(cx - 80, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY);
 
     const hp = `HP: ${Math.max(0, this.health)}/${this.maxHealth}`;
+    if (this.isTownTower) {
+      const permitText = this.isStarterTownTower ? "+2 permits" : "+1 permit";
+      this.panelText1.setText(`Town Tower ${hp}`);
+      this.panelText2.setText(`Dawn: +$150 ${permitText}`);
+      return;
+    }
+
     const tpc = this.scene?.towerPressureController;
     const info = tpc?.getTowerPressureInfo?.(this) ?? null;
     const laneLabel = (slotId) => {
+      if (slotId === "N") return "North";
       if (slotId === "W") return "West";
       if (slotId === "E") return "East";
       if (slotId === "S") return "South";
@@ -345,10 +391,12 @@ export class TowerBuilding {
   destroy() {
     this._damageBarTimer?.remove(false);
     this._damageBarTimer = null;
+    this._destroyed = true;
 
-    // Win condition: if this is the active north-fort objective, advance season.
-    StageState.notifyFortTowerDestroyed(this);
-    StageState.unregisterFortTower(this);
+    if (this.isFortObjective) {
+      StageState.notifyFortTowerDestroyed(this);
+      StageState.unregisterFortTower(this);
+    }
     
     if (this.isPressureTower) {
       this.scene?.towerPressureController?.unregisterTower?.(this);
@@ -373,11 +421,23 @@ export class TowerBuilding {
       VisibilitySystem.removeLightById(this.lightId);
       this.lightId = null;
     }
-    // ✅ match Prison behavior: keep sprite, swap to destroyed anim, disable interaction
+
+    if (this.isTownTower && Teams.teamLists?.[this.team]) {
+      Teams.removeFromStateArray(this.team, "townTowerList", this);
+      const stats = this.scene?._townTowerStats || (this.scene._townTowerStats = { built: 0, destroyed: 0 });
+      stats.destroyed += 1;
+    }
+
+    // ✅ keep sprite, swap to destroyed anim, disable interaction
     if (this.sprite?.active) {
+      this.sprite._destroyed = true;
       this.sprite.setTexture("tower_destroyed", 0);
       this.sprite.play("tower_destroyed_idle");
       this.sprite.disableInteractive();
-    }  
+    }
+
+    if (this.isTownTower && !TowerBuilding.hasLivingTownTowers(this.team)) {
+      this.scene?.handleTownCoreLost?.(this);
+    }
   }
 }

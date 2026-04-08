@@ -110,11 +110,13 @@ export class Teams {
         center: [0, 0],
         ovenList: [],
         ovenJobs: [],
+        ovenDeliveryItems: [],
         storageList: [],
         ovenPickupJobs: [],
         ovenFuelJobs: [],
         ovenFuelDeliveryItems: [],
         storageDeliveryItems: [],
+        townTowerList: [],
         stateLists: {},
         cardHand: [],
         buildings: [],
@@ -343,7 +345,13 @@ export class Teams {
     }
 
     static addTroopsToFight(teamNumber, enemy){
-        Teams.teamLists[`${teamNumber}`].fightingList.push(enemy)
+        const list = Teams.teamLists[`${teamNumber}`]?.fightingList;
+        if (!Array.isArray(list) || !enemy) return;
+        const target = enemy?.target || enemy;
+        const exists = list.some(entry => (entry?.target || entry) === target);
+        if (!exists) {
+            list.push(enemy);
+        }
     }
 
     static getStorageWithCapacity(teamNumber, itemType, amount) {

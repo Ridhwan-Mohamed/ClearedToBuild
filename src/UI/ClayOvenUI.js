@@ -12,13 +12,15 @@ export class ClayOvenUI {
         this.openUIs = new Map();
     }
 
-    static updateAllOvens(delta) {
+    static updateAllOvens(speedMultiplier = 0) {
+        const delta = Number.isFinite(speedMultiplier) ? Math.max(0, speedMultiplier) : 0;
         Teams.teamLists[1]?.ovenList?.forEach(oven => {
             oven.updateCooking(delta);
 
             if (!oven.uiElements) return;
 
-            for (let i = 0; i < 3; i++) {
+            const slotCount = oven.cookingSlots?.length || 1;
+            for (let i = 0; i < slotCount; i++) {
                 const ui = oven.uiElements[i] || {};
                 const { progressFill, outIcon, cookIcon, cookLabel, outLabel } = ui;
 
@@ -97,7 +99,8 @@ export class ClayOvenUI {
 
             bg.setPosition(screenX, screenY);
             status.setPosition(screenX, screenY);
-            status.setText(`Fuel: ${oven.fuel || 0}\nSlots: ${oven.cookingSlots?.filter(x => x).length || 0}/3`);
+            const slotCount = oven.cookingSlots?.length || 1;
+            status.setText(`Fuel: ${oven.fuel || 0}\nBurner: ${oven.cookingSlots?.filter(x => x).length || 0}/${slotCount}`);
         };
 
         this.scene.events.on('update', oven.minorUIUpdater);
@@ -128,7 +131,8 @@ export class ClayOvenUI {
 
         const container = this.scene.add.container(0, 0).setDepth(UIDEPTH).setScrollFactor(0);
 
-        const bg = this.scene.add.rectangle(camX, camY, 400, 200, 0x222222, 0.95)
+        const slotCount = oven.cookingSlots?.length || 1;
+        const bg = this.scene.add.rectangle(camX, camY, 400, Math.max(160, 120 + slotCount * 44), 0x222222, 0.95)
             .setStrokeStyle(2, 0xffffff)
             .setScrollFactor(0);
         container.add(bg);
@@ -148,7 +152,7 @@ export class ClayOvenUI {
 
         oven.uiElements = [];
 
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < slotCount; i++) {
             const y = slotStartY + i * slotSpacingY;
 
             // === COOKING SLOT ===

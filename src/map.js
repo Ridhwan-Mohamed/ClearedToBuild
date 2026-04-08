@@ -1,8 +1,9 @@
 import { SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, showAlert } from "./constants";
 import Phaser from "phaser";
-import { Turret } from "./Turret";
+import { Turret } from "./buildings/Turret";
+import { Catapult } from "./buildings/Catapult";
 import { Player } from "./players/Player";
-import { buildingArray, spawnPoints, townRoads, turretTeams } from "./town";
+import { buildingArray, spawnPoints, townRoads } from "./town";
 import { Teams } from "./Teams";
 import { buildingManager } from "./Manager/buildingManager";
 import { seedManager } from "./Manager/seedManager";
@@ -325,19 +326,17 @@ export class Map{
         return this._tileIsBlocking(cell);
     }
 
-    // New array-aware placement check (used for buildings/turrets preview)
-    static checkBlockPosition(posX, posY, lenX, lenY, turret = 0){
+    // New array-aware placement check (used for building previews)
+    static checkBlockPosition(posX, posY, lenX, lenY, previewItem = this.placingItem){
         for (let y = posY; y < posY + lenY; y++) {
             for (let x = posX; x < posX + lenX; x++) {
                 if (this._cellIsBlocking(x, y)) {
-                    if (turret) Turret.topItem.blocked = true;
-                    else this.placingItem.blocked = true;
+                    if (previewItem) previewItem.blocked = true;
                     return Phaser.Display.Color.GetColor(200, 49, 19); // red
                 }
             }
         }
-        if (turret) Turret.topItem.blocked = false;
-        else this.placingItem.blocked = false;
+        if (previewItem) previewItem.blocked = false;
         return Phaser.Display.Color.GetColor(14, 209, 69); // green
         }
 
@@ -539,25 +538,39 @@ export class Map{
     }
 
     static drawBuildings(){
+        let seededStarterTownTower = false;
         for(let i = 0; i < buildingArray.length; i++){
-            if(buildingArray[i][2].name === TILE_TYPES.house1.name || buildingArray[i][2].name == TILE_TYPES.house2.name) new House(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],buildingArray[i][3]);
-            else if(buildingArray[i][2].name === TILE_TYPES.storage.name) new StorageBuilding(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
-            else if(buildingArray[i][2].name === TILE_TYPES.clayOven.name) new ClayOven(buildingArray[i][0],buildingArray[i][1],buildingArray[i][3]);
-            else if(buildingArray[i][2].name === TILE_TYPES.pine.name) {
+            const [gridX, gridY, tileType, teamNumber] = buildingArray[i];
+            if(tileType.name === TILE_TYPES.house1.name || tileType.name == TILE_TYPES.house2.name) new House(gridX, gridY, tileType, teamNumber);
+            else if(tileType.name === TILE_TYPES.storage.name) new StorageBuilding(gridX, gridY, teamNumber);
+            else if(tileType.name === TILE_TYPES.clayOven.name) new ClayOven(gridX, gridY, teamNumber);
+            else if(tileType.name === TILE_TYPES.pine.name) {
                 const level = 1; // or derive from map/seed
-                const pine = new PineTree(buildingArray[i][0], buildingArray[i][1], level);
+                const pine = new PineTree(gridX, gridY, level);
                 this.worldPines.push(pine);
             }
-            else if(buildingArray[i][2].name === TILE_TYPES.rock.name) {
+            else if(tileType.name === TILE_TYPES.rock.name) {
                 const level = 1;
-                const rock = new RockNode(buildingArray[i][0], buildingArray[i][1], level);
+                const rock = new RockNode(gridX, gridY, level);
                 this.worldStones.push(rock);
             }
-            else if (buildingArray[i][2].name === TILE_TYPES.tower.name){
-                new TowerBuilding(buildingArray[i][0], buildingArray[i][1], buildingArray[i][3], { isFortObjective: true });
+            else if (tileType.name === TILE_TYPES.turret.name){
+                new Turret(gridX, gridY, teamNumber ?? 1);
             }
-            else this.handleLoadNonSpread(buildingArray[i][0],buildingArray[i][1],buildingArray[i][2],i);
-            if(buildingArray[i][2] == TILE_TYPES.spawn) buildingArray.splice(i, 1);
+            else if (tileType.name === TILE_TYPES.catapult.name){
+                new Catapult(gridX, gridY, teamNumber ?? 1);
+            }
+            else if (tileType.name === TILE_TYPES.tower.name){
+                const isTownTower = Number(teamNumber ?? 0) === 1;
+                new TowerBuilding(gridX, gridY, teamNumber ?? 1, {
+                    isTownTower,
+                    isStarterTownTower: isTownTower && !seededStarterTownTower,
+                    isFortObjective: !isTownTower,
+                });
+                if (isTownTower && !seededStarterTownTower) seededStarterTownTower = true;
+            }
+            else this.handleLoadNonSpread(gridX, gridY, tileType, i, teamNumber);
+            if(tileType == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
         const scene = this.scene;
         const startCfg = scene?.startCfg ?? scene?.draftStartCfg;  // pick whichever you actually store
@@ -581,7 +594,7 @@ export class Map{
                 add(UI_ITEM_TYPES.food,       s.food);
                 add(UI_ITEM_TYPES.wood,       s.wood);
                 add(UI_ITEM_TYPES.stone,      s.stone);
-                add(UI_ITEM_TYPES.clean_water, s.clean_water);
+                add(UI_ITEM_TYPES.clean_water, s.water ?? s.clean_water);
             }
         }
         // map.js — after the draw loop inside drawBuildings(), add:
@@ -808,7 +821,7 @@ export class Map{
 
         if (name === 'grass') {
             const spec = shape === 'edge' ? (a.edge || a.interior) : (a.corner || a.interior);
-            return [this._makeRenderEntry(spec, angle)];
+            return this._appendGrassWaterInnerOverlay([this._makeRenderEntry(spec, angle)], x, y, name);
         }
 
         const contact = this._terrainTransitionKind(x, y, shape, angle);
@@ -816,18 +829,20 @@ export class Map{
             const waterSideAngle = this._singleWaterSideAngle(x, y);
             const shoreTransform = waterSideAngle != null ? this._shoreGrassEdgeTransform(x, y, waterSideAngle) : null;
             if (shoreTransform) {
-                return [this._makeRenderEntry(
-                    a.edge.shoreGrass,
-                    shoreTransform.angle,
-                    shoreTransform.flipX,
-                    shoreTransform.flipY
-                )];
+                return this._appendGrassWaterInnerOverlay([
+                    this._makeRenderEntry(
+                        a.edge.shoreGrass,
+                        shoreTransform.angle,
+                        shoreTransform.flipX,
+                        shoreTransform.flipY
+                    )
+                ], x, y, name);
             }
         }
         const spec = shape === 'edge'
             ? (a.edge?.[contact] || a.edge?.grass || a.interior)
             : (a.corner?.[contact] || a.corner?.grass || a.interior);
-        return [this._makeRenderEntry(spec, angle)];
+        return this._appendGrassWaterInnerOverlay([this._makeRenderEntry(spec, angle)], x, y, name);
     }
 
     static _refreshRenderCacheAt(x, y) {
@@ -916,6 +931,83 @@ export class Map{
 
     static _innerCornerWaterAngle(angle) {
         return (angle + 270) % 360;
+    }
+
+    static _supportsGrassWaterInnerOverlay(name) {
+        return name === 'grass' || name === 'dirt' || name === 'road' || name === 'fort_floor';
+    }
+
+    static _isGrassStyleNeighborFor(x, y) {
+        const neighborName = this._terrainNameAt(x, y);
+        if (!neighborName || neighborName === 'water') return false;
+        if (neighborName === 'grass') return true;
+        if (!(neighborName === 'dirt' || neighborName === 'road' || neighborName === 'fort_floor')) return false;
+
+        const cell = this.grid?.[y]?.[x];
+        if (cell == null) return false;
+
+        const val = Array.isArray(cell) ? this._pickFloorValFromCell(cell) : cell;
+        const def = TILE_TYPES[neighborName];
+        if (!def?.assets) return false;
+
+        const { shape, angle } = this._shapeAndAngle(def, val);
+
+        if (shape === 'diagJoin' || shape === 'innerCorner') return true;
+        if (shape !== 'edge' && shape !== 'corner') return false;
+
+        const contact = this._terrainTransitionKind(x, y, shape, angle);
+        if (contact === 'grass') return true;
+
+        if (contact === 'water' && def.assets.edge?.shoreGrass) {
+            const waterSideAngle = this._singleWaterSideAngle(x, y);
+            return !!(waterSideAngle != null && this._shoreGrassEdgeTransform(x, y, waterSideAngle));
+        }
+
+        return false;
+    }
+
+    static _grassWaterInnerOverlayAngles(x, y, currentName) {
+        if (!this._supportsGrassWaterInnerOverlay(currentName)) return [];
+
+        const overlays = [];
+
+        if (
+            this._terrainNameAt(x - 1, y - 1) === 'water' &&
+            this._isGrassStyleNeighborFor(x, y - 1) &&
+            this._isGrassStyleNeighborFor(x - 1, y)
+        ) overlays.push(0);
+
+        if (
+            this._terrainNameAt(x + 1, y - 1) === 'water' &&
+            this._isGrassStyleNeighborFor(x, y - 1) &&
+            this._isGrassStyleNeighborFor(x + 1, y)
+        ) overlays.push(90);
+
+        if (
+            this._terrainNameAt(x + 1, y + 1) === 'water' &&
+            this._isGrassStyleNeighborFor(x + 1, y) &&
+            this._isGrassStyleNeighborFor(x, y + 1)
+        ) overlays.push(180);
+
+        if (
+            this._terrainNameAt(x - 1, y + 1) === 'water' &&
+            this._isGrassStyleNeighborFor(x, y + 1) &&
+            this._isGrassStyleNeighborFor(x - 1, y)
+        ) overlays.push(270);
+
+        return overlays;
+    }
+
+    static _appendGrassWaterInnerOverlay(entries, x, y, currentName) {
+        const overlaySpec = TILE_TYPES.grass?.assets?.innerCorner?.water;
+        if (!overlaySpec) return entries;
+
+        const overlayAngles = this._grassWaterInnerOverlayAngles(x, y, currentName);
+        if (!overlayAngles.length) return entries;
+
+        const next = [...entries];
+        overlayAngles.forEach(angle => next.push(this._makeRenderEntry(overlaySpec, angle)));
+        return next;
     }
 
     static _shoreGrassEdgeTransform(x, y, waterSideAngle) {
@@ -1747,7 +1839,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         this.grid[y][x] = newItem.grid
     }
 
-    static handleLoadNonSpread(posX,posY,item,index=-1){
+    static handleLoadNonSpread(posX,posY,item,index=-1,teamNumber=null){
         if(item?.name === TILE_TYPES.pine.name){
             this.addBlockItem(posX,posY,item)
             return new PineTree(posX, posY);
@@ -1756,43 +1848,11 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             this.addBlockItem(posX,posY,item)
             return new RockNode(posX, posY);
         }
-        if(item.name == 'turret'){
-            Turret.baseItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[0])
-                .setDepth(item.depth) 
-                .setInteractive()
-            Turret.topItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value[1])
-                .setDepth(item.depth+1) // Ensure it's above base
-            const itemToPlace = Turret.baseItem;
-            Turret.topItem.team = turretTeams[`${posX},${posY}`]
-            const top = Turret.topItem
-            this._worldAdd(top);
-            this._worldAdd(itemToPlace);
-            this.addBlockItem(posX,posY,item)
-            itemToPlace.setInteractive();
-            itemToPlace.sx = posX
-            itemToPlace.sy = posY
-            itemToPlace.lenX = item.lenX
-            itemToPlace.lenY = item.lenY
-            itemToPlace.on('pointerover', () => {
-            if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    itemToPlace.setTint(0xaaaaaa); // Darken slightly on hover
-                }
-            });
-            itemToPlace.on('pointerout', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    itemToPlace.clearTint(); // Restore original color
-                }
-            });
-            itemToPlace.on('pointerdown', () => {
-                if(this.scene.breakItems && this.scene.breakItems.text == "Place"){
-                    console.log('Destroying item...');
-                    itemToPlace.destroy(); // Destroy the specific item
-                    top.destroy()
-                }
-            });
-            Turret.guns.push(Turret.topItem)
-            Turret.topItem.delta = 1          
-            Turret.placeItem = null;
+        if(item?.name === TILE_TYPES.turret.name){
+            return new Turret(posX, posY, teamNumber ?? buildingArray[index]?.[3] ?? 1);
+        }
+        if(item?.name === TILE_TYPES.catapult.name){
+            return new Catapult(posX, posY, teamNumber ?? buildingArray[index]?.[3] ?? 1);
         }
         else{
             this.placingItem = this.scene.add.sprite(posX*SQUARESIZE+item.lenX/2*SQUARESIZE, posY*SQUARESIZE+item.lenY/2*SQUARESIZE, item.value)

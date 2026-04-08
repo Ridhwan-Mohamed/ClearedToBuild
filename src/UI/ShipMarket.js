@@ -5,13 +5,14 @@
 // - No navgrid: ship is a sprite + pile sprites.
 // - Hover a pile -> tiny world-space buy widget above it.
 // - UI is rendered on the active world camera.
-// - Purchases are blocked if storage can't accept the full amount.
+// - Current ship offers seeds, berries, and one rotating card offer.
 //
 // Usage:
 //   1) In your scene preload: loadShipMarketAssets(this);
 //   2) On Market contract spawn: spawnMarketShip(this, { parcelCenterWorld: {x,y}, teamNumber: 1, durationMs: 60000 });
 //   3) On contract complete: destroy returned handle or call handle.destroy().
 
+import Phaser from "phaser";
 import shipPng from "url:../assets/ship/ship.png";
 import foodPilePng from "url:../assets/ship/food_pile.png";
 import waterPilePng from "url:../assets/ship/water_pile.png";
@@ -19,31 +20,27 @@ import cropPilePng from "url:../assets/ship/crop_pile.png";
 import berryPilePng from "url:../assets/ship/berry_pile.png";
 import woodPilePng from "url:../assets/ship/wood_pile.png";
 import stonePilePng from "url:../assets/ship/stone_pile.png";
+import shipMiniCardPng from "url:../assets/ship/mini_card.png";
 
 import { showAlert, UIDEPTH } from "../constants";
-import { UI_ITEM_TYPES } from "./UIConstants";
 import { Teams } from "../Teams";
+import { POWERUP_CARDS } from "../Cards/PowerupCards";
+import { addCardToHand, getCardHand } from "./Powerups";
+import { createWorldCardPreview, getCardOutlineTint } from "./CardPreview";
+import { StorageManager } from "../Manager/StorageManager";
+import { UI_ITEM_TYPES } from "./UIConstants";
 
 // Default prices should match DraftStartState.prices.supplies.
 // If you have a live DraftStartState instance on scene, pass it in spawnMarketShip({ prices }).
 export const DEFAULT_SUPPLY_PRICES = Object.freeze({
   seeds: 2,
-  food: 3,
   berries: 3,
-  wood: 4,
-  stone: 5,
-  water: 2
+  card: 80,
 });
 
-// What the ship sells.
-// NOTE: "crop" pile represents seedCrop; "berry" pile represents seedBerry.
-const GOODS = [
-  { key: "food",       label: "Food",       texture: "ship_food_pile",  itemDef: UI_ITEM_TYPES.food,        priceKey: "food" },
-  { key: "water",      label: "Clean Water",texture: "ship_water_pile", itemDef: UI_ITEM_TYPES.clean_water, priceKey: "water" },
-  { key: "crop",       label: "Crop Seed",  texture: "ship_crop_pile",  itemDef: UI_ITEM_TYPES.seedCrop,    priceKey: "seeds" },
-  { key: "berry",      label: "Berry Seed", texture: "ship_berry_pile", itemDef: UI_ITEM_TYPES.seedBerry,   priceKey: "berries" },
-  { key: "wood",       label: "Wood",       texture: "ship_wood_pile",  itemDef: UI_ITEM_TYPES.wood,        priceKey: "wood" },
-  { key: "stone",      label: "Stone",      texture: "ship_stone_pile", itemDef: UI_ITEM_TYPES.stone,       priceKey: "stone" }
+const BASE_GOODS = [
+  { key: "seeds", label: "Seeds", texture: "ship_crop_pile", priceKey: "seeds", kind: "counter", maxQty: 99 },
+  { key: "berries", label: "Berries", texture: "ship_berry_pile", priceKey: "berries", kind: "counter", maxQty: 99 },
 ];
 
 export function loadShipMarketAssets(scene) {
@@ -54,15 +51,63 @@ export function loadShipMarketAssets(scene) {
   scene.load.image("ship_berry_pile", berryPilePng);
   scene.load.image("ship_wood_pile", woodPilePng);
   scene.load.image("ship_stone_pile", stonePilePng);
+  scene.load.image("ship_mini_card", shipMiniCardPng);
 }
 
 function getPriceTable(pricesMaybe) {
-  // prefer caller's prices
-  if (pricesMaybe && typeof pricesMaybe === "object") return pricesMaybe;
-  return DEFAULT_SUPPLY_PRICES;
+  if (pricesMaybe && typeof pricesMaybe === "object") {
+    return { ...DEFAULT_SUPPLY_PRICES, ...pricesMaybe };
+  }
+  return { ...DEFAULT_SUPPLY_PRICES };
+}
+
+function getHeldCardIds(teamNumber) {
+  const hand = getCardHand(String(teamNumber)) ?? [];
+  return new Set(hand.map(card => card?.id).filter(Boolean));
+}
+
+function getEligibleShipCards(teamNumber, excludeIds = []) {
+  const blocked = getHeldCardIds(teamNumber);
+  excludeIds.forEach(id => id && blocked.add(id));
+  return POWERUP_CARDS.filter(card => card?.id && !blocked.has(card.id));
+}
+
+function pickShipCard(teamNumber, excludeIds = []) {
+  const pool = getEligibleShipCards(teamNumber, excludeIds);
+  if (!pool.length) return null;
+  return Phaser.Utils.Array.GetRandom(pool);
+}
+
+function createShipGoods(teamNumber) {
+  const goods = BASE_GOODS.map(good => ({ ...good }));
+  const card = pickShipCard(teamNumber);
+  if (card) {
+    goods.push({
+      key: `card:${card.id}`,
+      label: card.name,
+      texture: "ship_mini_card",
+      priceKey: "card",
+      kind: "card",
+      maxQty: 1,
+      card,
+      soldOut: false,
+    });
+  }
+  return goods;
 }
 
 // ---------- Storage capacity helpers (block overfill purchases) ----------
+
+function getStorageItemForGood(goodKey) {
+  switch (goodKey) {
+    case "seeds":
+      return UI_ITEM_TYPES.seedCrop;
+    case "berries":
+      return UI_ITEM_TYPES.seedBerry;
+    default:
+      return null;
+  }
+}
 
 // Compute how many of itemDef we can still fit in this specific storage.
 function storageFreeForItem(storageBuilding, itemDef) {
@@ -82,38 +127,21 @@ function storageFreeForItem(storageBuilding, itemDef) {
   return free;
 }
 
-function teamCanAcceptAmount(teamNumber, itemDef, amount) {
+function teamFreeForItem(teamNumber, itemDef) {
   const storages = Teams.teamLists?.[String(teamNumber)]?.storageList ?? Teams.teamLists?.[teamNumber]?.storageList ?? [];
-  let remaining = amount;
-
+  let free = 0;
   for (const st of storages) {
-    const free = storageFreeForItem(st, itemDef);
-    const take = Math.min(free, remaining);
-    remaining -= take;
-    if (remaining <= 0) return true;
+    free += storageFreeForItem(st, itemDef);
   }
-  return false;
+  return free;
 }
 
-function addToTeamStorage(teamNumber, itemDef, amount) {
-  const storages = Teams.teamLists?.[String(teamNumber)]?.storageList ?? Teams.teamLists?.[teamNumber]?.storageList ?? [];
-  let remaining = amount;
+function teamCanAcceptAmount(teamNumber, itemDef, amount) {
+  return teamFreeForItem(teamNumber, itemDef) >= amount;
+}
 
-  for (const st of storages) {
-    if (remaining <= 0) break;
-    // storage.addItem returns boolean "all added"; but we want partial handling:
-    // We'll try to add remaining; if it can't fully add, it will partially add.
-    const before = remaining;
-    st.addItem(itemDef, remaining);
-    // We can't directly get how many got added without reading UI, so compute via counts:
-    // Safer approach: just re-check capacity each loop. For MVP, we assume addItem adds as much as possible.
-    // We'll approximate by reducing by the storage's free at time of call (pre-add).
-    const freePre = storageFreeForItem(st, itemDef);
-    const addedApprox = Math.min(freePre, before);
-    remaining -= addedApprox;
-  }
-
-  return remaining <= 0;
+function addToTeamStorage(teamNumber, itemDef, amount, scene) {
+  return StorageManager.grantItemToTeam(String(teamNumber), itemDef, amount, scene);
 }
 
 // ---------- Money helpers ----------
@@ -143,9 +171,9 @@ function createHoverMenu(scene) {
   const c = scene.add.container(0, 0).setDepth((UIDEPTH ?? 2000) + 200);
   c.setVisible(false);
 
-  // --- hover state
   c._hoveringMenu = false;
   c._hoveringPile = false;
+  c._activePreview = null;
 
   const MENU_W = 220;
   const MENU_H = 72;
@@ -160,7 +188,6 @@ function createHoverMenu(scene) {
   });
 
   c.add(zone);
-
 
   const bg = scene.add.rectangle(0, 0, MENU_W, MENU_H, 0x000000, 0.72).setOrigin(0.5);
   bg.setStrokeStyle(2, 0xffffff, 0.65);
@@ -206,81 +233,34 @@ function createHoverMenu(scene) {
 
   c.add([bg, title, qtyText, costText, minus.r, minus.t, plus.r, plus.t, buy.r, buy.t]);
 
-  // mutable state
   c._state = {
     qty: 1,
     maxQty: 1,
     unitPrice: 0,
     label: "",
-    itemDef: null,
     teamNumber: 1,
-    priceKey: "",
+    good: null,
+    availableQty: 0,
+    storageFull: false,
   };
-
-  function applyToTopHud(scene, itemDef, qty) {
-    // Money text updates already handled by scene.updateMoney if present (spend() calls it).
-    // These are the resource counters shown on the top bar in mapView. :contentReference[oaicite:5]{index=5}
-
-    const incText = (txt, nextVal, formatter = (v) => String(v)) => {
-      if (!txt) return;
-      txt.setText(formatter(nextVal));
-    };
-
-    // Food
-    if (itemDef === UI_ITEM_TYPES.food) {
-      scene.foodAmnt = (scene.foodAmnt ?? 0) + qty;
-      // foodText is "have/need" sometimes; keep it simple: update have only if we can.
-      if (scene.foodText) {
-        const raw = scene.foodText.text || "";
-        const parts = raw.split("/");
-        if (parts.length === 2) scene.foodText.setText(`${scene.foodAmnt}/${parts[1]}`);
-        else scene.foodText.setText(String(scene.foodAmnt));
-      }
-      return;
-    }
-
-    // Clean water
-    if (itemDef === UI_ITEM_TYPES.clean_water) {
-      scene.cleanWaterAmnt = (scene.cleanWaterAmnt ?? 0) + qty;
-      if (scene.waterText) {
-        const raw = scene.waterText.text || "";
-        const parts = raw.split("/");
-        if (parts.length === 2) scene.waterText.setText(`${scene.cleanWaterAmnt}/${parts[1]}`);
-        else scene.waterText.setText(String(scene.cleanWaterAmnt));
-      }
-      return;
-    }
-
-    // Wood
-    if (itemDef === UI_ITEM_TYPES.wood) {
-      scene.woodAmnt = (scene.woodAmnt ?? 0) + qty;
-      incText(scene.woodText, scene.woodAmnt);
-      return;
-    }
-
-    // Stone
-    if (itemDef === UI_ITEM_TYPES.stone) {
-      scene.stoneAmnt = (scene.stoneAmnt ?? 0) + qty;
-      incText(scene.stoneText, scene.stoneAmnt);
-      return;
-    }
-
-    // Seeds (both crop + berry seeds feed the one "seeds" counter)
-    if (itemDef === UI_ITEM_TYPES.seedCrop || itemDef === UI_ITEM_TYPES.seedBerry) {
-      if (typeof scene.updateSeeds === "function") scene.updateSeeds(qty);
-      else {
-        scene.seeds = (scene.seeds ?? 0) + qty;
-        incText(scene.seedsText, scene.seeds);
-      }
-      return;
-    }
-  }
 
   function refresh() {
     const s = c._state;
-    qtyText.setText(`x${s.qty}`);
-    costText.setText(`$${s.qty * s.unitPrice}`);
-    title.setText(s.label);
+    title.setText(s.label || "Buy");
+    if (s.good?.kind === "counter" && s.storageFull) {
+      qtyText.setText("Full");
+      costText.setText("No storage room");
+    } else {
+      qtyText.setText(s.good?.kind === "card" ? "Unique" : `x${s.qty}`);
+      costText.setText(`$${s.qty * s.unitPrice}`);
+    }
+    const allowQty = s.good?.kind !== "card";
+    [minus.r, minus.t, plus.r, plus.t].forEach(node => {
+      node.setVisible(allowQty);
+      if (node.input) node.input.enabled = allowQty;
+    });
+    buy.r.setAlpha(s.storageFull ? 0.5 : 1);
+    buy.t.setAlpha(s.storageFull ? 0.5 : 1);
   }
 
   function shake(go) {
@@ -308,12 +288,38 @@ function createHoverMenu(scene) {
     });
   }
 
+  c._refreshPreviewPosition = () => {
+    if (!c._activePreview) return;
+    c._activePreview.setPosition(c.x + 150, c.y - 58);
+  };
+
+  c._setPreviewForGood = (good) => {
+    c._activePreview?.hide?.();
+    c._activePreview = null;
+
+    if (good?.kind !== "card" || !good.card) return;
+
+    if (!good.preview) {
+      good.preview = createWorldCardPreview(scene, good.card, c.x + 150, c.y - 58, { depth: (UIDEPTH ?? 2000) + 240 });
+    }
+    c._activePreview = good.preview;
+    c._refreshPreviewPosition();
+    c._activePreview.show();
+  };
+
+  c.hidePreview = () => {
+    c._activePreview?.hide?.();
+    c._activePreview = null;
+  };
+
   const onMinus = () => {
+    if (c._state.good?.kind === "card") return;
     c._state.qty = Math.max(1, c._state.qty - 1);
     refresh();
   };
 
   const onPlus = () => {
+    if (c._state.good?.kind === "card") return;
     c._state.qty = Math.min(c._state.maxQty, c._state.qty + 1);
     refresh();
   };
@@ -326,38 +332,90 @@ function createHoverMenu(scene) {
 
   const doBuy = () => {
     const s = c._state;
-    const totalCost = s.qty * s.unitPrice;
+    const good = s.good;
+    if (!good) return;
 
-    // funds
+    const totalCost = s.qty * s.unitPrice;
     if (!canAfford(scene, totalCost)) {
       showAlert(scene, "Not enough money", "#ff5555");
       flash(buy.r, buy.t, false);
-      shake(buy.r); shake(buy.t);
+      shake(buy.r);
+      shake(buy.t);
       return;
     }
 
-    // storage capacity
-    if (!teamCanAcceptAmount(s.teamNumber, s.itemDef, s.qty)) {
-      showAlert(scene, "Storage full", "#ff5555");
-      flash(buy.r, buy.t, false);
-      shake(buy.r); shake(buy.t);
+    if (good.kind === "counter") {
+      const itemDef = getStorageItemForGood(good.key);
+      if (!itemDef) {
+        showAlert(scene, "That market item is not configured", "#ff5555");
+        flash(buy.r, buy.t, false);
+        return;
+      }
+      if (s.storageFull || !teamCanAcceptAmount(s.teamNumber, itemDef, s.qty)) {
+        showAlert(scene, "Not enough storage space", "#ff5555");
+        flash(buy.r, buy.t, false);
+        shake(buy.r);
+        shake(buy.t);
+        return;
+      }
+
+      spend(scene, totalCost);
+      const added = addToTeamStorage(s.teamNumber, itemDef, s.qty, scene);
+      if (added <= 0) {
+        spend(scene, -totalCost);
+        showAlert(scene, "Not enough storage space", "#ff5555");
+        flash(buy.r, buy.t, false);
+        shake(buy.r);
+        shake(buy.t);
+        return;
+      }
+
+      if (added < s.qty) {
+        spend(scene, -((s.qty - added) * s.unitPrice));
+      }
+
+      showAlert(scene, `Bought x${added} ${good.label}`, "#aaffaa");
+      flash(buy.r, buy.t, true);
       return;
     }
 
-    // spend + store
-    spend(scene, totalCost);
-    addToTeamStorage(s.teamNumber, s.itemDef, s.qty);
+    if (good.kind === "card") {
+      if (!good.card || good.soldOut) {
+        showAlert(scene, "No card available", "#ff5555");
+        flash(buy.r, buy.t, false);
+        return;
+      }
 
-    // update HUD counters (snippet #3 below)
-    applyToTopHud(scene, s.itemDef, s.qty);
+      const hand = getCardHand(String(s.teamNumber)) ?? [];
+      if (hand.some(card => card?.id === good.card?.id)) {
+        showAlert(scene, "That card is already in hand", "#ff5555");
+        flash(buy.r, buy.t, false);
+        return;
+      }
+      if (hand.length >= 5) {
+        showAlert(scene, "Card hand full", "#ff5555");
+        flash(buy.r, buy.t, false);
+        return;
+      }
 
-    // success feedback
-    showAlert(scene, `Bought x${s.qty} ${s.label}`, "#aaffaa");
-    flash(buy.r, buy.t, true);
+      spend(scene, totalCost);
+      const added = addCardToHand(good.card, String(s.teamNumber));
+      if (!added) {
+        spend(scene, -totalCost);
+        showAlert(scene, "Card hand full", "#ff5555");
+        flash(buy.r, buy.t, false);
+        return;
+      }
 
-    // IMPORTANT: do NOT close UI on buy
-    // keep qty as-is or reset to 1 (your choice)
-    // s.qty = 1; refresh();
+      good.soldOut = true;
+      good.onSoldOut?.();
+      scene.events.emit("cards:updated");
+      showAlert(scene, `Bought card: ${good.card.name}`, "#aaffaa");
+      flash(buy.r, buy.t, true);
+      c.hidePreview();
+      c.setVisible(false);
+      return;
+    }
   };
 
   buy.r.on("pointerdown", doBuy);
@@ -365,19 +423,22 @@ function createHoverMenu(scene) {
 
   c.setStateFor = (pileSprite, good, teamNumber, prices) => {
     const unit = prices[good.priceKey] ?? 1;
+    const itemDef = good.kind === "counter" ? getStorageItemForGood(good.key) : null;
+    const availableQty = itemDef ? teamFreeForItem(teamNumber, itemDef) : 0;
     c._state.unitPrice = unit;
     c._state.label = good.label;
-    c._state.itemDef = good.itemDef;
     c._state.teamNumber = teamNumber;
-
-    // qty step is 1; max qty = 99 for now (but storage limit will hard-block on BUY)
-    c._state.maxQty = 99;
+    c._state.good = good;
+    c._state.availableQty = availableQty;
+    c._state.storageFull = good.kind === "counter" && availableQty <= 0;
+    c._state.maxQty = good.kind === "counter"
+      ? Math.max(1, Math.min(good.maxQty ?? 1, Math.max(0, availableQty)))
+      : Math.max(1, good.maxQty ?? 1);
     c._state.qty = 1;
 
-    // position above pile in WORLD space
     c.x = pileSprite.x;
     c.y = pileSprite.y - 46;
-
+    c._setPreviewForGood(good);
     refresh();
   };
 
@@ -395,9 +456,11 @@ function createHoverMenu(scene) {
       if (c._hoveringMenu) return;
       if (c._hoveringPile) return;
       if (pointerInsideMenu()) return;
+      c.hidePreview();
       c.setVisible(false);
     });
   };
+
   return c;
 }
 
@@ -410,6 +473,7 @@ export function spawnMarketShip(scene, {
   prices = null,
 } = {}) {
   const priceTable = getPriceTable(prices);
+  const shipGoods = createShipGoods(teamNumber);
 
   const dock = parcelCenterWorld ?? { x: scene.cameras.main.centerX, y: scene.cameras.main.centerY };
 
@@ -478,12 +542,40 @@ export function spawnMarketShip(scene, {
   const hoverMenu = createHoverMenu(scene);
 
   const pileSprites = [];
-  GOODS.forEach((good, i) => {
+  shipGoods.forEach((good, i) => {
     const pos = pilePositions[i % pilePositions.length];
     const spr = scene.add.image(pos.x, pos.y, good.texture).setOrigin(0.5).setScale(1);
+    if (good.kind === "card" && good.card) {
+      spr.setTint(getCardOutlineTint(good.card));
+      spr.setScale(1.15);
+    }
     spr.setInteractive({ useHandCursor: true });
 
+    good.onSoldOut = () => {
+      spr.disableInteractive();
+      spr.setAlpha(0.32);
+      spr.clearTint();
+    };
+
     spr.on("pointerover", () => {
+      if (good.kind === "card") {
+        if (good.soldOut) return;
+        const replacement = pickShipCard(teamNumber);
+        if (!replacement) {
+          good.onSoldOut?.();
+          hoverMenu.hidePreview?.();
+          hoverMenu.setVisible(false);
+          return;
+        }
+        if (!good.card || getHeldCardIds(teamNumber).has(good.card.id)) {
+          good.card = replacement;
+          good.label = replacement.name;
+          good.preview?.destroy?.();
+          good.preview = null;
+          spr.setTint(getCardOutlineTint(good.card));
+        }
+      }
+
       hoverMenu._hoveringPile = true;
 
       const worldX = container.x + spr.x;
@@ -499,6 +591,7 @@ export function spawnMarketShip(scene, {
       const worldY = container.y + spr.y;
       hoverMenu.x = worldX;
       hoverMenu.y = worldY - 46;
+      hoverMenu._refreshPreviewPosition?.();
     });
 
     spr.on("pointerout", () => {
@@ -522,6 +615,7 @@ export function spawnMarketShip(scene, {
   // Leave after duration
   const depart = (onDone) => {
     hoverMenu.setVisible(false);
+    hoverMenu.hidePreview?.();
 
     scene.tweens.add({
       targets: container,
@@ -530,6 +624,8 @@ export function spawnMarketShip(scene, {
       duration: 900,
       ease: "Sine.easeIn",
       onComplete: () => {
+        scene.events.off("cards:updated", onCardsUpdated);
+        shipGoods.forEach(good => good.preview?.destroy?.());
         hoverMenu.destroy(true);
         container.destroy(true);
         onDone?.();
@@ -539,6 +635,30 @@ export function spawnMarketShip(scene, {
 
   const leaveTimer = scene.time.delayedCall(durationMs, () => depart(), null, scene);
 
+  const onCardsUpdated = () => {
+    const heldIds = getHeldCardIds(teamNumber);
+    pileSprites.forEach((spr, index) => {
+      const good = shipGoods[index];
+      if (good?.kind !== "card" || good.soldOut) return;
+      if (good.card && !heldIds.has(good.card.id)) return;
+      const replacement = pickShipCard(teamNumber);
+      if (!replacement) {
+        good.card = null;
+        good.onSoldOut?.();
+        return;
+      }
+      good.card = replacement;
+      good.label = replacement.name;
+      good.preview?.destroy?.();
+      good.preview = null;
+      spr.setAlpha(1);
+      spr.setInteractive({ useHandCursor: true });
+      spr.setTint(getCardOutlineTint(replacement));
+    });
+  };
+
+  scene.events.on("cards:updated", onCardsUpdated);
+
   return {
     container,
     hoverMenu,
@@ -546,6 +666,8 @@ export function spawnMarketShip(scene, {
     depart, // <---
     destroy: () => {
       leaveTimer?.remove(false);
+      scene.events.off("cards:updated", onCardsUpdated);
+      shipGoods.forEach(good => good.preview?.destroy?.());
       hoverMenu?.destroy(true);
       container?.destroy(true);
     }

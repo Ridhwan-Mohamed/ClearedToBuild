@@ -19,6 +19,8 @@ function inBounds(x, y) { return x >= 0 && y >= 0 && x < WORLD_DIMENSIONX && y <
 export class VisibilitySystem {
   /** Phaser.Scene */
   static scene;
+  static requestedViewRect = null;
+  static _resizeHandler = null;
 
   // --- map-scale logic grids ---
   static blockerGrid;             // Uint8Array (0/1) — pines/rocks
@@ -99,6 +101,10 @@ export class VisibilitySystem {
 
   // ===== Init =====
   static init(scene) {
+    if (this._resizeHandler && this.scene?.scale) {
+      this.scene.scale.off("resize", this._resizeHandler);
+    }
+
     this.scene = scene;
 
     const N = WORLD_DIMENSIONX * WORLD_DIMENSIONY;
@@ -107,13 +113,27 @@ export class VisibilitySystem {
 
     this._buildInitialBlockers();
     this._recomputeAllOcclusion();
+
+    this._resizeHandler = () => {
+      if (!this.requestedViewRect) return;
+      const { gx0, gy0, tilesW, tilesH } = this.requestedViewRect;
+      this.setViewRect(gx0, gy0, tilesW, tilesH);
+      this._rebuildViewFull();
+    };
+    this.scene.scale?.on?.("resize", this._resizeHandler);
+
+    if (this.viewRect) {
+      this._ensureViewRT();
+      this._rebuildViewFull();
+    }
   }
 
   // ===== Public API =====
 
   // Called by your map reDraw: define current view rect (tile coords)
   static setViewRect(gx0, gy0, tilesW, tilesH) {
-    this.viewRect = { gx0, gy0, tilesW, tilesH };
+    this.requestedViewRect = { gx0, gy0, tilesW, tilesH };
+    this.viewRect = this._applyShellPadding(this.requestedViewRect);
     this._ensureViewRT();
     // full paint is triggered by callers (ambient/occluder/unit/etc.)
   }
@@ -369,6 +389,7 @@ export class VisibilitySystem {
 
   static _markDirty() {
     if (this.pendingRebuild) return;
+    if (!this.scene?.time) return;
     this.pendingRebuild = true;
     // defer to end-of-tick so many moves coalesce into a single rebuild
     this.scene.time.delayedCall(0, () => {
@@ -377,11 +398,35 @@ export class VisibilitySystem {
     });
   }
 
+  static _applyShellPadding(rect) {
+    if (!rect) return rect;
+
+    const padTiles = this._getShellPaddingTiles();
+    return {
+      gx0: rect.gx0 - padTiles,
+      gy0: rect.gy0 - padTiles,
+      tilesW: rect.tilesW + padTiles * 2,
+      tilesH: rect.tilesH + padTiles * 2,
+    };
+  }
+
+  static _getShellPaddingTiles() {
+    const scene = this.scene;
+    if (!scene?.scale) return 32;
+
+    const screenTilesX = Math.ceil((scene.scale.width || 0) / SQUARESIZE);
+    const screenTilesY = Math.ceil((scene.scale.height || 0) / SQUARESIZE);
+    const screenTiles = Math.max(screenTilesX, screenTilesY, 1);
+
+    return Math.max(32, Math.ceil(screenTiles * 2.5));
+  }
+
   static _ensureViewRT() {
-    if (!this.viewRect) return;
+    if (!this.viewRect || !this.scene?.add) return;
     const { gx0, gy0, tilesW, tilesH } = this.viewRect;
     const needNew =
       !this.viewRT ||
+      this.viewRT.scene !== this.scene ||
       this.viewRT.width  !== tilesW ||
       this.viewRT.height !== tilesH;
 
@@ -425,7 +470,7 @@ export class VisibilitySystem {
         const gy = gy0 + ly;
         for (let lx = 0; lx < tilesW; lx++) {
           const gx = gx0 + lx;
-          const O = this.occlusionGrid[idx(gx, gy)] || 0; // 0..1
+          const O = inBounds(gx, gy) ? (this.occlusionGrid[idx(gx, gy)] || 0) : 0; // 0..1
           // shade=1 when no occlusion; shade < 1 under occluders/interior
           const shade = Phaser.Math.Linear(1.0, this.occlusionMinShade, O);
           const finalDark = 1 - shade;                   // only occlusion contributes
@@ -537,7 +582,7 @@ export class VisibilitySystem {
 
         let vis = Math.max(this._fog[j], this._light[j]); // brightness
         if (this.useOcclusion) {
-          const O = this.occlusionGrid[idx(gx, gy)] || 0;
+          const O = inBounds(gx, gy) ? (this.occlusionGrid[idx(gx, gy)] || 0) : 0;
           const shade = Phaser.Math.Linear(1.0, this.occlusionMinShade, O);
           vis *= shade;
         }

@@ -7,6 +7,8 @@ import { Projectile } from "../Projectile";
 import { weapons } from "../weapons";
 import { Map } from "../map";
 import { AudioManager } from "./AudioManager";
+import { InterruptController } from "../ai/scheduler/InterruptController";
+import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 
 export class fightManager{
 
@@ -45,7 +47,7 @@ export class fightManager{
         const slowMultiplier = Number(weapon?.moveSlowMultiplier);
         const slowDurationMs = Number(weapon?.moveSlowDurationMs);
         if (slowMultiplier > 0 && slowMultiplier < 1 && slowDurationMs > 0) {
-            const now = scene.time?.now ?? 0;
+            const now = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
             const currentUntil = Number(target.moveSlowUntil) || 0;
             const currentMultiplier = Number(target.moveSlowMultiplier) || 1;
             const nextUntil = now + slowDurationMs;
@@ -176,6 +178,10 @@ export class fightManager{
                 !currentTracked.gameObject.active ||
                 currentTracked.gameObject.health <= 0
             ) {
+                if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
+                    InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
+                }
+                CombatSpacingCoordinator.clearTroopFocus(sprite);
                 sprite.track = null;
                 sprite.forcedTarget = null;
                 Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
@@ -222,6 +228,10 @@ export class fightManager{
         // Always resolve the current tracked target from sprite.track
         const tracked = sprite.track && sprite.track[0];
         if (!tracked || !tracked.gameObject || !tracked.gameObject.active) {
+            if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
+                InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
+            }
+            CombatSpacingCoordinator.clearTroopFocus(sprite);
             sprite.track = null;
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
             Player.setAnimState(sprite, sprite.idle);
@@ -315,7 +325,11 @@ export class fightManager{
         if (target.health <= 0) {
             this.checkForKillReward(sprite.body.team, target);
             Player._cleanupCombatTicketForTarget?.(sprite.body.team, target);
-            target.destroySelf();
+            if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
+                InterruptController.interruptTroop(sprite, "combat_target_killed", CONTROL_STATES.TRACK_MODE);
+            }
+            CombatSpacingCoordinator.clearTroopFocus(sprite);
+            Player.destroyPlayer(target);
             sprite.track = null;
             sprite.forcedTarget = null;
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);

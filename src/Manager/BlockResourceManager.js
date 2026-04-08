@@ -9,6 +9,7 @@ import { Map } from "../map"
 import { AudioManager } from "./AudioManager"
 import { updateDirectionalAnimationFromVelocity } from "../players/PlayerDirectionalAnimator"
 import { ORDER_KINDS } from "../orders/OrderTypes"
+import { OrderRunner } from "../orders/OrderRunner"
 
 export class blockResourceManager{
 
@@ -163,6 +164,140 @@ export class blockResourceManager{
         return !!(task && node && task.forageType === "block" && task.value === node);
     }
 
+    static _isGatherOrder(order) {
+        return !!(
+            order &&
+            order.status === "active" &&
+            (
+                order.kind === ORDER_KINDS.GATHER_TYPE ||
+                order.kind === ORDER_KINDS.GATHER_AREA ||
+                order.kind === ORDER_KINDS.GATHER_SET
+            )
+        );
+    }
+
+    static _isBlockTaskUsable(task) {
+        if (!task || task.forageType !== "block") return false;
+        const node = task.value;
+        if (!node) return false;
+        const nodeActive = !!(
+            node.active !== false &&
+            node.sprite?.active !== false &&
+            node.container?.active !== false
+        );
+        if (!nodeActive) return false;
+        return Math.max(0, Number(node.health ?? task.remaining ?? 0)) > 0;
+    }
+
+    static _queuedAssignableBlockTasksForTroop(troop) {
+        const teamNumber = troop?.body?.team;
+        return (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []).filter(task =>
+            task?.forageType === "block" &&
+            !task.directOrderId &&
+            this._isBlockTaskUsable(task) &&
+            Manager._troopEligibleForTask(troop, task, CONTROL_STATES.GET_BLOCK_RESOURCE)
+        );
+    }
+
+    static _shouldReturnTroopToTown(troop) {
+        if (!troop?.active) return false;
+        return !!(Player._isOnWater?.(troop) || Teams.farFromCenter?.(troop));
+    }
+
+    static _sendTroopBackToTown(troop) {
+        if (!troop?.active || !troop?.body) return false;
+
+        troop.roam = false;
+        troop.track = null;
+        troop.currentPath?.splice?.(0);
+        troop.finalPos = null;
+        troop.body?.setVelocity?.(0, 0);
+
+        const path = Teams.sendTroopToTown(troop);
+        if (path?.length) return true;
+
+        Teams.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN);
+        troop.play?.(troop.idle);
+        return false;
+    }
+
+    static _clearTroopBlockTask(troop, task = troop?.task, {
+        removeFromQueue = false,
+        clearNodeTask = false,
+        adjustAssigned = true,
+    } = {}) {
+        if (!troop?.active) return;
+
+        const activeTask = task ?? troop.task ?? null;
+
+        if (troop.timer) {
+            troop.timer.remove(false);
+            troop.timer = null;
+        }
+
+        this._clearGatherSwing(troop);
+        if (activeTask?.type === TILE_TYPES.pine) {
+            AudioManager.setHarvestActive(troop, "wood", false);
+        } else if (activeTask?.type === TILE_TYPES.rock) {
+            AudioManager.setHarvestActive(troop, "rock", false);
+        } else {
+            AudioManager.setHarvestActive(troop, "wood", false);
+            AudioManager.setHarvestActive(troop, "rock", false);
+        }
+
+        if (removeFromQueue && activeTask) {
+            Teams.removeFromStateArray(troop.body.team, "foragerQueue", activeTask);
+        }
+        if (clearNodeTask && activeTask?.value?.task === activeTask) {
+            activeTask.value.task = null;
+        }
+
+        if (adjustAssigned && activeTask && troop.task === activeTask) {
+            activeTask.assigned = Math.max(0, Number(activeTask.assigned || 0) - 1);
+        }
+
+        troop.task = null;
+        troop.currentPath?.splice?.(0);
+        troop.finalPos = null;
+        troop.body?.setVelocity?.(0, 0);
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        troop.play?.(troop.idle);
+    }
+
+    static _postBlockTaskCleanup(troop) {
+        if (!troop?.active) return false;
+
+        troop.roam = false;
+
+        if (StorageManager.isCarrying(troop) && StorageManager.tryCreateStorageDeliveryTask(troop)) {
+            return true;
+        }
+
+        if (this._isGatherOrder(troop.currentOrder)) {
+            const handled = OrderRunner.stepUnit(troop);
+            if (handled) {
+                if (!troop.task && !troop.timer && !troop.currentPath?.length && this._shouldReturnTroopToTown(troop)) {
+                    this._sendTroopBackToTown(troop);
+                }
+                return true;
+            }
+        }
+
+        const queued = this._queuedAssignableBlockTasksForTroop(troop);
+        if (queued.length && Manager.assignOneTroopToAction(troop, queued, CONTROL_STATES.GET_BLOCK_RESOURCE)) {
+            return true;
+        }
+
+        if (this._shouldReturnTroopToTown(troop)) {
+            this._sendTroopBackToTown(troop);
+            return true;
+        }
+
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        troop.play?.(troop.idle);
+        return false;
+    }
+
     static _queuedBlockTasks(teamNumber) {
         return (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []).filter(task => task?.forageType === "block");
     }
@@ -297,31 +432,17 @@ export class blockResourceManager{
         let task = sprite.task;
 
         if (!task) {
-            sprite.task = null
-            this._clearGatherSwing(sprite);
-            AudioManager.setHarvestActive(sprite, "wood", false);
-            AudioManager.setHarvestActive(sprite, "rock", false);
-            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE)
-            if (
-                sprite.currentOrder &&
-                (
-                    sprite.currentOrder.kind === ORDER_KINDS.GATHER_TYPE ||
-                    sprite.currentOrder.kind === ORDER_KINDS.GATHER_AREA ||
-                    sprite.currentOrder.kind === ORDER_KINDS.GATHER_SET
-                )
-            ) {
-                sprite.play(sprite.idle);
-                return;
-            }
-            let teamNumber = sprite.body.team;
-            const queued = (Teams.teamLists[teamNumber].foragerQueue || [])
-                .filter(entry =>
-                    entry?.forageType === "block" &&
-                    !entry.directOrderId &&
-                    Manager._troopEligibleForTask(sprite, entry, CONTROL_STATES.GET_BLOCK_RESOURCE)
-                );
-            Manager.assignOneTroopToAction(sprite, queued, CONTROL_STATES.GET_BLOCK_RESOURCE);
-            sprite.play(sprite.idle);
+            this._clearTroopBlockTask(sprite, null, { adjustAssigned: false });
+            this._postBlockTaskCleanup(sprite);
+            return;
+        }
+
+        if (!this._isBlockTaskUsable(task)) {
+            this._clearTroopBlockTask(sprite, task, {
+                removeFromQueue: true,
+                clearNodeTask: true,
+            });
+            this._postBlockTaskCleanup(sprite);
             return;
         }
 
@@ -339,6 +460,17 @@ export class blockResourceManager{
                     sprite.timer = null;
                     return;
                 }
+
+                if (!this._isBlockTaskUsable(task)) {
+                    sprite.timer = null;
+                    this._clearTroopBlockTask(sprite, task, {
+                        removeFromQueue: true,
+                        clearNodeTask: true,
+                    });
+                    this._postBlockTaskCleanup(sprite);
+                    return;
+                }
+
                 this._clearGatherSwing(sprite);
                 const node = task.value;
                 const isManualClick = !!task.manualClick;
@@ -395,8 +527,6 @@ export class blockResourceManager{
                 }
                 AudioManager.playBlockBreak(isWoodJob ? "wood" : "rock");
                 StorageManager.addCarriedItem(sprite, task.resource);
-                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-                sprite.play(sprite.idle);
                 sprite.timer = null;
                 if (isManualClick || task.remaining <= 0) {
                     Teams.removeFromStateArray(sprite.body.team, "foragerQueue", sprite.task);
@@ -406,9 +536,85 @@ export class blockResourceManager{
                 }
                 const finishedWoodJob = task.type == TILE_TYPES.pine;
                 AudioManager.setHarvestActive(sprite, finishedWoodJob ? "wood" : "rock", false);
-                sprite.task = null;
                 this.syncNodeFlash(sprite.body.team, task.value);
+                this._clearTroopBlockTask(sprite, task, {
+                    removeFromQueue: false,
+                    clearNodeTask: false,
+                    adjustAssigned: false,
+                });
+                this._postBlockTaskCleanup(sprite);
             });
+        }
+    }
+
+    static abortParcelResourceWork({
+        teamNumber = 1,
+        contractId = null,
+        slotId = null,
+        origin = null,
+        size = 0,
+    } = {}) {
+        const team = Teams.teamLists?.[`${teamNumber}`];
+        if (!team) return;
+
+        const matchesNode = (node) => {
+            if (!node) return false;
+            if (contractId && node.contractId === contractId) return true;
+            if (slotId && node.slotId === slotId) return true;
+            return false;
+        };
+
+        const isInsideParcel = (troop) => {
+            if (!troop?.active || !origin || !(size > 0)) return false;
+            const gx = Math.floor(troop.x / SQUARESIZE);
+            const gy = Math.floor(troop.y / SQUARESIZE);
+            return (
+                gx >= origin.x &&
+                gx < origin.x + size &&
+                gy >= origin.y &&
+                gy < origin.y + size
+            );
+        };
+
+        const parcelTasks = new Set();
+        for (const task of team.foragerQueue || []) {
+            if (task?.forageType !== "block") continue;
+            if (!matchesNode(task.value)) continue;
+            parcelTasks.add(task);
+        }
+
+        const affectedTroops = new Set();
+        for (const troop of team.foragerList || []) {
+            if (!troop?.active) continue;
+            const troopTask = troop.task?.forageType === "block" ? troop.task : null;
+            if (troopTask && (parcelTasks.has(troopTask) || matchesNode(troopTask.value))) {
+                parcelTasks.add(troopTask);
+                affectedTroops.add(troop);
+                continue;
+            }
+
+            if (isInsideParcel(troop)) {
+                affectedTroops.add(troop);
+            }
+        }
+
+        for (const task of parcelTasks) {
+            Teams.removeFromStateArray(teamNumber, "foragerQueue", task);
+            task.assigned = 0;
+            task.value?.stopFlash?.();
+            if (task.value?.task === task) {
+                task.value.task = null;
+            }
+        }
+
+        for (const troop of affectedTroops) {
+            const task = troop.task?.forageType === "block" ? troop.task : null;
+            this._clearTroopBlockTask(troop, task, {
+                removeFromQueue: true,
+                clearNodeTask: true,
+                adjustAssigned: true,
+            });
+            this._postBlockTaskCleanup(troop);
         }
     }
 
@@ -434,27 +640,11 @@ export class blockResourceManager{
         const foragers = team.foragerList || [];
         for (const f of foragers) {
             if (f?.task !== task) continue;
-
-            // stop timer/anim/audio and clear task
-            if (f.timer) {
-                f.timer.remove(false);
-                f.timer = null;
-            }
-            this._clearGatherSwing(f);
-
-            const isWoodJob = task.type === TILE_TYPES.pine;
-            AudioManager.setHarvestActive(f, isWoodJob ? "wood" : "rock", false);
-
-            f.task = null;
-            Teams.movePlayerState(f, CONTROL_STATES.TRACK_MODE);
-            if (f.idle) f.play(f.idle);
-
-            // If no other tasks exist, send back to town; otherwise let them pick a new one
-            if (!team.foragerQueue || team.foragerQueue.length === 0) {
-                Teams.sendTroopToTown(f);
-            } else {
-                Manager.assignOneTroopToAction(f, team.foragerQueue, CONTROL_STATES.TRACK_MODE);
-            }
+            this._clearTroopBlockTask(f, task, {
+                removeFromQueue: false,
+                clearNodeTask: false,
+            });
+            this._postBlockTaskCleanup(f);
         }
 
         // Clear task on the resource itself (prevents “stuck flashing”)

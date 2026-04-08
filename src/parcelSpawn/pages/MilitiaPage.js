@@ -1,8 +1,8 @@
-import { calcContractCost } from "../../constants.js";
 import { BasePage } from "./BasePage.js";
+import { formatPermitCostText, getContractPermitCost } from "../../permitSystem.js";
 export class MilitiaPage extends BasePage {
   constructor(scene, slot) {
-    const cost = calcContractCost(scene, "MILITIA");
+    const cost = getContractPermitCost("MILITIA");
     super(scene, slot, {
       bgColor: 0x0f172a,
       title: "🛡 Militia Contract",
@@ -11,7 +11,7 @@ export class MilitiaPage extends BasePage {
         "• Extra bodies for a few days",
         "• Fade out when contract ends",
         "",
-        `Cost: $${cost}`,
+        `Permit Cost: ${formatPermitCostText(cost)}`,
       ],
       primaryLabel: "Hire",
       onPrimary: () => slot.commit({ type:"MILITIA"})

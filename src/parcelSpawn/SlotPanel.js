@@ -3,8 +3,8 @@ import { BasePage } from "./pages/BasePage.js";
 import { ForestPage } from "./pages/ForestPage.js";
 import { RockPage } from "./pages/RockPage.js";
 import { PressurePage } from "./pages/PressurePage.js";
-import { calcContractCost } from "../constants.js";
 import { MarketPage } from "./pages/MarketPage.js";
+import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
 
 export class SlotPanel {
   constructor(scene, cfg) {
@@ -122,12 +122,12 @@ export class SlotPanel {
 
   _getOverviewDefs() {
     return [
-      { type: "FOREST", emoji: "🌲", cost: () => calcContractCost(this.scene, "FOREST") },
-      { type: "ROCK", emoji: "🪨", cost: () => calcContractCost(this.scene, "ROCK") },
-      { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => calcContractCost(this.scene, "PRESSURE", 1) },
-      { type: "MARKET", emoji: "🏪", cost: () => 40 },
-      { type: "FARM", emoji: "🌾", cost: () => calcContractCost(this.scene, "FARM") },
-      { type: "MILITIA", emoji: "🛡", cost: () => calcContractCost(this.scene, "MILITIA") },
+      { type: "FOREST", emoji: "🌲", cost: () => getContractPermitCost("FOREST") },
+      { type: "ROCK", emoji: "🪨", cost: () => getContractPermitCost("ROCK") },
+      { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => getContractPermitCost("PRESSURE", 1) },
+      { type: "MARKET", emoji: "🏪", cost: () => getContractPermitCost("MARKET") },
+      { type: "FARM", emoji: "🌾", cost: () => getContractPermitCost("FARM") },
+      { type: "MILITIA", emoji: "🛡", cost: () => getContractPermitCost("MILITIA") },
     ];
   }
 
@@ -172,7 +172,7 @@ export class SlotPanel {
 
       const payload = def.type === "PRESSURE"
         ? { type: "PRESSURE", difficulty: def.difficulty ?? 1 }
-        : (def.type === "MARKET" ? { type: "MARKET", cost: 40 } : { type: def.type });
+        : { type: def.type };
 
       bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
       bg.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
@@ -226,7 +226,7 @@ export class SlotPanel {
       }
       const amount = Number(card.def.cost?.() ?? 0);
       const extra = card.def.type === "PRESSURE" ? "1" : "";
-      card.costText.setText(`${extra ? `D${extra}\n` : ""}$${amount}`);
+      card.costText.setText(`${extra ? `D${extra}\n` : ""}${formatPermitCostText(amount)}`);
     }
   }
 
@@ -295,8 +295,8 @@ export class SlotPanel {
   _refreshOverviewPressureCosts() {
     for (const card of this._overviewPressureCards) {
       if (!card?.costText || card.def?.close) continue;
-      const amount = Number(calcContractCost(this.scene, "PRESSURE", card.def.difficulty) ?? 0);
-      card.costText.setText(`$${amount}`);
+      const amount = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
+      card.costText.setText(formatPermitCostText(amount));
     }
   }
 
@@ -448,29 +448,36 @@ export class SlotPanel {
     const difficulty = payload.difficulty ?? 1;
 
     // ✅ compute cost (allow payload.cost override if you really want)
-    const cost = (payload.cost != null) ? payload.cost : calcContractCost(this.scene, type, difficulty);
+    const cost = (payload.cost != null) ? payload.cost : getContractPermitCost(type, difficulty);
 
-    // ✅ enforce money
-    // mapView has checkSufficientFunds + updateMoney
+    // ✅ enforce permits
     if (cost > 0) {
-      if (!this.scene.checkSufficientFunds(cost)) return; // shows alert internally :contentReference[oaicite:2]{index=2}
-      this.scene.updateMoney(-cost);                      // :contentReference[oaicite:3]{index=3}
+      if (!this.scene.checkSufficientPermits(cost)) return;
+      this.scene.updatePermits(-cost);
     }
 
+    let started = null;
     try {
-      if (type === "FOREST") pm.startForest(this.id);
-      else if (type === "ROCK") pm.startRock(this.id);
-      else if (type === "FARM") pm.startFarm?.(this.id);          // add startFarm below
-      else if (type === "MILITIA") pm.startMilitia?.(this.id);    // stub below
-      else if (type === "PRESSURE") pm.startPressure(this.id, difficulty, { source: "manual" });
-      else if (type === "MARKET") pm.startMarket(this.id);
+      if (type === "FOREST") started = pm.startForest(this.id);
+      else if (type === "ROCK") started = pm.startRock(this.id);
+      else if (type === "FARM") started = pm.startFarm?.(this.id);
+      else if (type === "MILITIA") started = pm.startMilitia?.(this.id);
+      else if (type === "PRESSURE") started = pm.startPressure(this.id, difficulty, { source: "manual" });
+      else if (type === "MARKET") started = pm.startMarket(this.id);
       else console.warn("Unknown contract type:", type);
     } catch (e) {
       console.error("Contract commit failed:", e);
       // optional: refund on error
-      if (cost > 0) this.scene.updateMoney(+cost);
+      if (cost > 0) this.scene.updatePermits(+cost);
       return;
     }
+
+    if (!started) {
+      if (cost > 0) this.scene.updatePermits(+cost);
+      return;
+    }
+
+    pm.markContractPermitCost?.(started, cost);
 
     this.playCloseTween(() => this.setVisible(false));
   }

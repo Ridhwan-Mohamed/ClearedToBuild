@@ -7,7 +7,7 @@ import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
 import { Map as GameMap } from "../map.js";
 import { TILE_TYPES, TILE_MAP, SQUARESIZE, colorFor, removeFromArray } from "../constants.js";
 import { spawnMarketShip, DEFAULT_SUPPLY_PRICES } from "../UI/ShipMarket";
-import { DraftStartState } from "../UI/DraftUI/DraftStartState"; // adjust path to your real location
+import { blockResourceManager } from "../Manager/BlockResourceManager";
 
 function fmtMMSS(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -78,6 +78,10 @@ export class ParcelContractInstance {
     }).setOrigin(0.5, 1).setDepth(9999);
   }
 
+  _getSimulationNowMs() {
+    return Number(this.scene?.getSimulationNow?.() ?? this.scene?.simNowMs ?? 0);
+  }
+
   _updateTimerText() {
     if (!this.timerText) return;
 
@@ -86,12 +90,12 @@ export class ParcelContractInstance {
       return;
     }
     if (this.type === "MARKET") {
-      const remaining = this.expireAt ? (this.expireAt - this.scene.time.now) : 0;
+      const remaining = this.expireAt ? (this.expireAt - this._getSimulationNowMs()) : 0;
       this.timerText.setText(`🛒 ${fmtMMSS(remaining)}`);
       return;
     }
 
-    const remaining = this.expireAt ? (this.expireAt - this.scene.time.now) : 0;
+    const remaining = this.expireAt ? (this.expireAt - this._getSimulationNowMs()) : 0;
     this.timerText.setText(`${this.type === "FOREST" ? "🌲" : "🪨"} ${fmtMMSS(remaining)}`);
   }
 
@@ -221,7 +225,7 @@ export class ParcelContractInstance {
       }
 
       const ms = this.type === "FOREST" ? RESOURCE_CONTRACT_MS.FOREST : RESOURCE_CONTRACT_MS.ROCK;
-      this.expireAt = this.scene.time.now + ms;
+      this.expireAt = this._getSimulationNowMs() + ms;
 
       this._startUITick();
       this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
@@ -248,7 +252,7 @@ export class ParcelContractInstance {
       // paint ground or do nothing — market doesn’t need terrain changes
 
       const ms = 60_000; // 1 minute (changeable)
-      this.expireAt = this.scene.time.now + ms;
+      this.expireAt = this._getSimulationNowMs() + ms;
 
       // Timer UI tick reuse
       this._startUITick();
@@ -257,9 +261,8 @@ export class ParcelContractInstance {
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
 
-      // Pull prices from DraftStartState (single source of truth)
-      // If you already have a live DraftStartState instance stored somewhere, use that instead.
-      const prices = new DraftStartState().prices.supplies; // :contentReference[oaicite:3]{index=3}
+      // Ship-market pricing lives in ShipMarket now.
+      const prices = { ...DEFAULT_SUPPLY_PRICES };
 
       // Spawn ship docked near this parcel
       this._marketShipHandle = spawnMarketShip(this.scene, {
@@ -335,6 +338,16 @@ export class ParcelContractInstance {
     }
 
     this._stopUITick();
+
+    if (this.type === "FOREST" || this.type === "ROCK") {
+      blockResourceManager.abortParcelResourceWork({
+        teamNumber: 1,
+        contractId: this.id,
+        slotId: this.slotId,
+        origin: this.origin,
+        size: PARCEL_SIZE,
+      });
+    }
 
     // Sink the parcel back to water.
     paintWaterRect({

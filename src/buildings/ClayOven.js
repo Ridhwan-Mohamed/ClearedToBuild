@@ -12,6 +12,7 @@ export class ClayOven {
 
     static scene;
     static cookDuration = 500;
+    static slotCount = 1;
 
     constructor(x, y, teamNumber) {
         this.teamNumber = teamNumber;
@@ -55,11 +56,11 @@ export class ClayOven {
         Teams.teamLists[teamNumber].ovenList.push(this);
         Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.clayOven, this.sprite])
 
-        this.cookingSlots = [null, null, null];     // { item: UI_ITEM_TYPES.*, amount: number }
-        this.outputSlots = [null, null, null];      // same structure
-        this.cookTimers = [0, 0, 0];                // track elapsed time
-        this.cookDurations = [0, 0, 0];             // required time
-        this.isCooking      = [false, false, false]; // 🔹 add this    
+        this.cookingSlots = Array.from({ length: ClayOven.slotCount }, () => null); // { item: UI_ITEM_TYPES.*, amount: number }
+        this.outputSlots = Array.from({ length: ClayOven.slotCount }, () => null);  // same structure
+        this.cookTimers = Array.from({ length: ClayOven.slotCount }, () => 0);      // track elapsed time
+        this.cookDurations = Array.from({ length: ClayOven.slotCount }, () => 0);   // required time
+        this.isCooking = Array.from({ length: ClayOven.slotCount }, () => false);
         this.fuel = 0;
 
         this.sprite.setInteractive();
@@ -83,7 +84,7 @@ export class ClayOven {
     }
 
     hasFreeSlotForItem(itemType, amount) {
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < this.cookingSlots.length; i++) {
             const slot = this.cookingSlots[i];
             if (!slot) {
                 return { idx: i, remaining: itemType.stacks };
@@ -160,7 +161,7 @@ export class ClayOven {
         const maxPerSlot = itemType.stacks || 1;
         let inserted = 0;
 
-        for (let i = 0; i < 3 && count > 0; i++) {
+        for (let i = 0; i < this.cookingSlots.length && count > 0; i++) {
             const slot = this.cookingSlots[i];
 
             // Empty slot
@@ -297,10 +298,10 @@ export class ClayOven {
 
     stopAllCooking() {
         // Ensure arrays exist even if something called this early
-        if (!this.cookTimers) this.cookTimers = [0, 0, 0];
-        if (!this.isCooking)  this.isCooking  = [false, false, false];
+        if (!this.cookTimers) this.cookTimers = Array.from({ length: ClayOven.slotCount }, () => 0);
+        if (!this.isCooking) this.isCooking = Array.from({ length: ClayOven.slotCount }, () => false);
 
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < this.cookingSlots.length; i++) {
             const timer = this.cookTimers[i];
 
             // If we ever stored a Phaser timer here, clean it up
@@ -377,7 +378,7 @@ export class ClayOven {
         let anyCooking = false;
         let changed = false;
 
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < this.cookingSlots.length; i++) {
             const slot = this.cookingSlots[i];
             if (!slot) continue;
 

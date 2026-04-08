@@ -77,7 +77,7 @@ function stylizeColor(baseColor, type, x, y, w, h) {
     rgb = blend(rgb, { r: 165, g: 155, b: 145 }, 0.08);
   } else if (type === "road") {
     rgb = blend(rgb, { r: 190, g: 155, b: 105 }, 0.08);
-  } else if (type === "tower" || type === "bank" || type === "prison" || type === "storage" || type === "clayOven" || type === "house1" || type === "house2") {
+  } else if (type === "tower" || type === "bank" || type === "prison" || type === "storage" || type === "clayOven" || type === "house1" || type === "house2" || type === "catapult") {
     rgb = shade(rgb, 1.08);
     rgb = blend(rgb, { r: 245, g: 228, b: 170 }, 0.05);
   }
@@ -132,4 +132,3 @@ export function paintOverviewTexture(ctx, grid, colorForType, bounds = null) {
     }
   }
 }
-

@@ -65,7 +65,10 @@ export const TILE_TYPES = {
     assets: {
       interior: { key: 'grass_interior', sheet: false },
       edge: { key: 'grass_edge_water', sheet: false },
-      corner: { key: 'grass_corner_water', sheet: false }
+      corner: { key: 'grass_corner_water', sheet: false },
+      innerCorner: {
+        water: { key: 'grass_inner_corner_water', sheet: false }
+      }
     }
   },
 
@@ -125,9 +128,22 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 13,
-    lenX: 3, lenY: 3,
-    price: 20000,
+    lenX: 1, lenY: 1,
+    price: 200,
     depth: BLOCKDEPTH
+  },
+
+  catapult: {
+    name: "catapult",
+    value: ["catapult_base", "catapult_top"],
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 107,
+    lenX: 2, lenY: 2,
+    price: 350,
+    depth: BLOCKDEPTH,
+    maxHealth: 420,
   },
 
   // ── Dirt (complex, numbered + island; draw uses assets, not TILE_ARR) ──
@@ -455,6 +471,7 @@ export const TILE_TYPES = {
   tower :  {
     name: "tower",
     value: "tower",
+    displayName: "Town Tower",
     spriteSheet: true,
     spread: false,
     block: true,
@@ -463,6 +480,8 @@ export const TILE_TYPES = {
     depth: BLOCKDEPTH,
     lenX: 3, lenY: 3,
     stayBlocked: true,
+    maxHealth: 600,
+    cost: { money: 300, wood: 4, stone: 4 },
   },
     // ── Fort enemy buildings (64x64 sheets, 2 frames) ──
   prison: {
@@ -499,7 +518,7 @@ export const TILE_TYPES = {
 export const DRAFT_UI_X_SHIFT = 120;
 
 export const teamSetupArray = {
-    smallTeam: [TILE_TYPES.clayOven, TILE_TYPES.house2, TILE_TYPES.house1, TILE_TYPES.storage],
+    smallTeam: [TILE_TYPES.tower, TILE_TYPES.clayOven, TILE_TYPES.house2, TILE_TYPES.house1, TILE_TYPES.storage],
     bigTeam: [TILE_TYPES.well,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1,TILE_TYPES.house1,TILE_TYPES.house2,TILE_TYPES.house1]
 }
 
@@ -627,6 +646,7 @@ export const TILE_ARR = [
   'grass_corner',         // 104
   'grass_corner',         // 105
   'grass_corner',         // 106
+  ['catapult_base', 'catapult_top'], // 107 catapult
 ];
 
 // --- TILE_MAP (full) ---
@@ -671,6 +691,7 @@ export function TILE_MAP(val){
   else if (val >= 87 && val <= 92) return "road";
   else if (val >= 93 && val <= 98) return "fort_floor";
   else if (val >= 99 && val <= 106) return "grass";
+  else if (val == 107) return "catapult";
 
   return null;
 }
@@ -758,6 +779,7 @@ export const gridColors = {
     storage:0x7d4900,
     pine: 0x006400,
     rock: 0x5a682b,
+    catapult: 0x8b5b2b,
     crops: 0xFCF55F,
     fort_floor: 0x777777,
 };

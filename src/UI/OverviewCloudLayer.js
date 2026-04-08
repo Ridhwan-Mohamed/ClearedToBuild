@@ -36,7 +36,8 @@ export class OverviewCloudLayer {
     this.shadowDepth = opts.shadowDepth ?? (FLOORDEPTH + 0.01);
     this.cloudCount = opts.cloudCount ?? 10;
     this.cellSizePx = opts.cellSizePx ?? 6;
-    this.cellWorldSize = opts.cellWorldSize ?? (SQUARESIZE * 2);
+    this.cellWorldSize = opts.cellWorldSize ?? SQUARESIZE;
+    this.baseWorldScale = this.cellSizePx > 0 ? (this.cellWorldSize / this.cellSizePx) : 1;
     this.mode = "detailed";
     this.clouds = [];
     this.patternMeta = [];
@@ -213,12 +214,14 @@ export class OverviewCloudLayer {
     const worldW = this._worldW();
     const worldH = this._worldH();
     const fromLeft = Math.random() < 0.5;
-    const margin = 260;
     const y = worldH * (0.12 + Math.random() * 0.74);
-    const scale = 0.95 + Math.random() * 1.2;
+    const sizeVariance = 0.95 + Math.random() * 1.2;
+    const scale = this.baseWorldScale * sizeVariance;
     const speedPxPerSec = 18 + Math.random() * 36;
     const speedPxPerMs = speedPxPerSec / 1000;
     const driftPxPerMs = (-6 + Math.random() * 12) / 1000;
+    const visualWidth = (cloud.sprite.width || 0) * scale;
+    const margin = Math.max(260, Math.ceil(visualWidth * 0.55) + SQUARESIZE * 4);
 
     cloud.margin = margin;
     cloud.baseAlpha = 0.32 + Math.random() * 0.28;

@@ -159,6 +159,7 @@ export class DailyNeedsTracker {
                 if(p.health <= 0){
                     showAlert(scene, "Player " + p.name + " has died", "#ff0000", 5000)
                     Player.destroyPlayer(p)
+                    continue;
                 }
                 p.stamina = Math.max(0, p.stamina - 20);
 
@@ -181,6 +182,7 @@ export class DailyNeedsTracker {
             if(p.health <= 0){
                 showAlert(scene, "Player " + p.name + " has died", "#ff0000", 5000)
                 Player.destroyPlayer(p)
+                continue;
             }
             p.stamina = Math.max(0, p.stamina - 35);
 

@@ -3,6 +3,8 @@ import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
 import { TILE_TYPES, showAlert } from '../../constants'
 import { buildingManager } from '../../Manager/buildingManager.js';
+import { StorageManager } from '../../Manager/StorageManager.js';
+import { StorageBuilding } from '../../buildings/Storage.js';
 
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
@@ -11,8 +13,10 @@ export default class StorageTab {
     this.team = teamNumber;
     this.selected = null;
     this.cardByStorage = new Map();
+    this._onWheel = null;
 
     this.root = this.build();
+    this.bindScrollInput();
 
     // --- live update binding ---
     this._update = this.update.bind(this);
@@ -79,7 +83,9 @@ export default class StorageTab {
     if (this.detail?.cells) {
       this.detail.cells.forEach(c => {
         if (c.icon) c.icon.setVisible(false);
+        if (c.ghostIcon) c.ghostIcon.setVisible(false);
         if (c.text) c.text.setVisible(false);
+        if (c.queueText) c.queueText.setVisible(false);
       });
     }
     if (this.cards?.childrenMap?.grid) {
@@ -96,44 +102,475 @@ export default class StorageTab {
     this.scene.events.off("storage:removed", this._onRemoved);
     this.scene.events.off("storage:updated", this._onUpdated);
     this.scene.scale.off("resize", this._onResize);
+    if (this._onWheel) {
+      this.scene.input.off('wheel', this._onWheel);
+      this._onWheel = null;
+    }
     this.root?.destroy();
   }
 
   // ---------- UI BUILD ----------
   build() {
     const scene = this.scene;
+    const CONTENT_H = 112;
     const root = scene.rexUI.add.sizer({
+      height: CONTENT_H,
       orientation: "x",
-      space: { left: 12, right: 12, top: 8, bottom: 8, item: 12 },
+      space: { left: 8, right: 8, top: 4, bottom: 4, item: 10 },
     });
+    root.setMinSize(0, CONTENT_H);
 
     this.detail = this.buildDetailPanel();
-    root.add(this.detail.panel, { proportion: 1, expand: true });
+    this.detail.panel?.setMinSize?.(0, CONTENT_H);
+    const detailSizer = scene.rexUI.add.sizer({
+      orientation: "y",
+      height: CONTENT_H,
+    }).add(this.detail.panel, { proportion: 1, expand: true });
+    detailSizer.setMinSize(0, CONTENT_H);
+    root.add(detailSizer, { proportion: 1, expand: true });
 
     this.listBody = scene.rexUI.add.sizer({ orientation: "y", space: { item: 8 } });
 
     this.scroll = scene.rexUI.add.scrollablePanel({
       width: Math.floor(scene.scale.width * (2 / 3)) - 48,
-      height: 200,
+      height: CONTENT_H,
       scrollMode: 0,
+      scrollDetectionMode: 'rectBounds',
       background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.15),
       panel: { child: this.listBody, mask: { padding: 1 } },
       sliderY: scene.rexUI.add.slider({
-        height: 160,
+        height: CONTENT_H - 20,
         orientation: "y",
         track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
         thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x999999),
       }),
+      scrollerY: {
+        pointerOutRelease: true,
+        rectBoundsInteractive: true,
+      },
       space: { left: 6, right: 6, top: 6, bottom: 6, panel: 8 },
     });
+    this.scroll.setMinSize(0, CONTENT_H);
 
     root.add(this.scroll, { proportion: 2, expand: true });
     this.rebuildList();
+    root.layout();
     return root;
+  }
+
+  bindScrollInput() {
+    if (this._onWheel) return;
+
+    this._onWheel = (pointer, _gameObjects, dx, dy) => {
+      if (this.scene.uiBottomBar?.currentPage !== 'storage') return;
+      if (!this.scene.uiBottomBar?.expanded) return;
+      if (!this.scroll?.isOverflowY) return;
+      if (!this.isPointerOverScroll(pointer)) return;
+
+      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      if (Math.abs(dominantDelta) < 0.1) return;
+
+      this.scroll.addChildOY(-dominantDelta * 0.8, true);
+      this.scene.input.stopPropagation();
+    };
+
+    this.scene.input.on('wheel', this._onWheel);
+  }
+
+  isPointerOverScroll(pointer) {
+    if (!this.scroll?.getBounds) return false;
+    const bounds = this.scroll.getBounds();
+    return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
+  }
+
+  getProjectedSlots(storage) {
+    if (!storage) return [];
+    const teamNumber = storage.teamNumber ?? this.team ?? 1;
+    return StorageBuilding._getProjectedSlots?.(storage, teamNumber) ?? [];
   }
 
   // ---------- DETAIL PANEL ----------
   buildDetailPanel() {
+    {
+      const scene = this.scene;
+      const compact = scene.scale.width < 1180;
+      const rr = (w, h, r, c, a = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, c, a);
+      const panelBg = (w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) => {
+        const bg = rr(w, h, r, c, a);
+        bg.setStrokeStyle(2, stroke, sa);
+        bg.setDepth(-1);
+        return bg;
+      };
+      const text = (value, style = {}) => scene.add.text(0, 0, value, {
+        fontFamily: "Bungee",
+        fontSize: 12,
+        color: "#ffffff",
+        ...style,
+      }).setShadow(0, 1, "#000000", 2, true, true);
+
+      if (!scene.textures.exists("blank")) {
+        const g = scene.add.graphics();
+        g.fillStyle(0xffffff, 1);
+        g.fillRect(0, 0, 1, 1);
+        g.generateTexture("blank", 1, 1);
+        g.destroy();
+      }
+
+      const makeHpBarWithText = (width, height) => {
+        const s = scene.rexUI.add.overlapSizer({ width, height });
+        const bg = panelBg(width, height, height / 2, 0x08121a, 0.92, 0x92ddff, 0.08);
+        const fill = rr(Math.max(1, width - 4), Math.max(1, height - 4), (height - 4) / 2, 0x49cf73, 1).setOrigin(0, 0.5);
+        const label = text("HP 0/0", { fontSize: compact ? 10 : 11 });
+        s.addBackground(bg);
+        s.add(fill, { key: "fill", align: "left", expand: false, padding: { left: 2, right: 2 } });
+        s.add(label, { key: "txt", align: "center", expand: false });
+        s.layout();
+        s.setValue = (cur, max) => {
+          const m = Math.max(1, max ?? 1);
+          const c = Math.max(0, cur ?? 0);
+          const p = Phaser.Math.Clamp(c / m, 0, 1);
+          fill.width = Math.max(1, (width - 4) * p);
+          label.setText(`HP ${Math.floor(c)}/${Math.floor(m)}`);
+          s.layout();
+        };
+        return s;
+      };
+
+      const button = (label, fill = 0x305f78, stroke = 0xa9ebff) => {
+        const bg = panelBg(0, 0, 12, fill, 0.96, stroke, 0.18);
+        const labelText = text(label, { fontSize: compact ? 11 : 12 });
+        const btn = scene.rexUI.add.label({
+          background: bg,
+          text: labelText,
+          space: { left: compact ? 10 : 12, right: compact ? 10 : 12, top: compact ? 6 : 8, bottom: compact ? 6 : 8 }
+        });
+        btn.labelText = labelText;
+        btn.setInteractive({ useHandCursor: true });
+        btn.on("pointerover", () => bg.setFillStyle(fill, 1));
+        btn.on("pointerout", () => bg.setFillStyle(fill, 0.96));
+        btn.setEnabledState = (enabled) => {
+          btn.disableInteractive();
+          if (enabled) btn.setInteractive({ useHandCursor: true });
+          btn.setAlpha(enabled ? 1 : 0.35);
+        };
+        return btn;
+      };
+
+      const title = text("Storage", { fontSize: 15 });
+      const sub = text("-", { fontSize: 11, color: "#b0b0b0" });
+      const storageHpBar = makeHpBarWithText(compact ? 220 : 240, 16);
+
+      const cellSize = compact ? 32 : 36;
+      const previewSize = compact ? 60 : 68;
+      const descWrap = compact ? 145 : 188;
+      const leftPaneWidth = cellSize * 4 + 34;
+
+      let currentStorage = null;
+      let selectedSlotIndex = null;
+
+      const gridSizer = scene.rexUI.add.gridSizer({
+        column: 4,
+        row: 4,
+        columnProportions: 1,
+        rowProportions: 1,
+        space: { column: 6, row: 6, left: 2, right: 2, top: 2, bottom: 2 },
+      });
+
+      const makeCell = () => {
+        const s = scene.rexUI.add.overlapSizer({ width: cellSize, height: cellSize });
+        const bg = panelBg(cellSize, cellSize, 10, 0x102637, 0.95, 0x98e7ff, 0.12);
+        const shine = rr(cellSize - 12, 8, 4, 0xffffff, 0.08);
+        const icon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setVisible(false);
+        const ghostIcon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setAlpha(0.34).setVisible(false);
+        const count = text("", { fontSize: compact ? 8 : 9 }).setOrigin(1, 1);
+        const queued = text("", { fontSize: compact ? 7 : 8, color: "#9fdfff" }).setOrigin(0, 0).setVisible(false);
+
+        s.addBackground(bg);
+        s.add(shine, { align: "top-center", padding: { top: 6 } });
+        s.add(icon, { align: "center" });
+        s.add(ghostIcon, { align: "center" });
+        s.add(queued, { align: "top-left", padding: { left: 4, top: 3 } });
+        s.add(count, { align: "right-bottom", padding: { right: 6, bottom: 4 } });
+
+        s.icon = icon;
+        s.ghostIcon = ghostIcon;
+        s.text = count;
+        s.queueText = queued;
+        s.setIcon = (key, amt, queuedKey = null, queuedAmount = 0) => {
+          const hasIcon = key && scene.textures.exists(key);
+          if (hasIcon) {
+            icon.setTexture(key);
+            icon.setDisplaySize(cellSize - 12, cellSize - 12);
+            icon.setVisible(true);
+          } else {
+            icon.setVisible(false);
+          }
+
+          const hasQueuedIcon = queuedKey && scene.textures.exists(queuedKey) && queuedAmount > 0;
+          if (hasQueuedIcon) {
+            ghostIcon.setTexture(queuedKey);
+            ghostIcon.setDisplaySize(cellSize - 12, cellSize - 12);
+            ghostIcon.setAlpha(hasIcon ? 0.2 : 0.34);
+            ghostIcon.setVisible(true);
+            queued.setVisible(true).setText(`Q+${queuedAmount}`);
+          } else {
+            ghostIcon.setVisible(false);
+            queued.setVisible(false);
+          }
+
+          if (amt > 0) {
+            count.setVisible(true).setText(`x${amt}`);
+          } else {
+            count.setVisible(false);
+          }
+        };
+        s.setSelected = (active) => {
+          bg.setFillStyle(active ? 0x2a4f73 : 0x102637, active ? 1 : 0.95);
+          bg.setStrokeStyle(2, active ? 0xbaf1ff : 0x98e7ff, active ? 0.3 : 0.12);
+        };
+        s.setSelected(false);
+        return s;
+      };
+
+      const cells = [];
+      for (let i = 0; i < 16; i++) {
+        const cell = makeCell();
+        gridSizer.add(cell, { column: i % 4, row: Math.floor(i / 4), expand: false });
+        cells.push(cell);
+      }
+
+      const inventoryPanel = scene.rexUI.add.sizer({
+        orientation: "y",
+        width: leftPaneWidth,
+        space: { left: 8, right: 8, top: 8, bottom: 8, item: 6 }
+      })
+        .addBackground(panelBg(leftPaneWidth, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
+        .add(text("Stored Items", { fontSize: compact ? 10 : 11, color: "#9fdfff" }), { expand: false, align: "left" })
+        .add(gridSizer, { expand: false, align: "center" });
+
+      const previewSlot = scene.rexUI.add.overlapSizer({ width: previewSize, height: previewSize });
+      const previewBg = panelBg(previewSize, previewSize, 18, 0x102637, 0.96, 0x8fe6ff, 0.16);
+      const previewShine = rr(previewSize - 16, 10, 5, 0xffffff, 0.08);
+      const previewIcon = scene.add.image(0, 0, "blank").setDisplaySize(previewSize - 18, previewSize - 18).setVisible(false);
+      const previewCount = text("", { fontSize: compact ? 9 : 10 }).setOrigin(1, 1).setVisible(false);
+      const previewEmpty = text("EMPTY", { fontSize: compact ? 10 : 11, color: "#7cb9ce" });
+      previewSlot.addBackground(previewBg);
+      previewSlot.add(previewShine, { align: "top-center", padding: { top: 8 } });
+      previewSlot.add(previewIcon, { align: "center" });
+      previewSlot.add(previewEmpty, { align: "center" });
+      previewSlot.add(previewCount, { align: "right-bottom", padding: { right: 8, bottom: 6 } });
+
+      const detailTitle = text("No Slot Selected", { fontSize: compact ? 11 : 12 });
+      const detailMeta = text("Choose a filled slot on the left to inspect it.", {
+        fontSize: compact ? 8 : 9,
+        color: "#9fdfff",
+        wordWrap: { width: descWrap }
+      });
+      const detailDesc = text("", {
+        fontSize: compact ? 8 : 9,
+        color: "#d9eef8",
+        wordWrap: { width: descWrap }
+      });
+
+      const detailCopy = scene.rexUI.add.sizer({
+        orientation: "y",
+        space: { item: 4 }
+      })
+        .add(detailTitle, { expand: false, align: "left" })
+        .add(detailMeta, { expand: false, align: "left" })
+        .add(detailDesc, { expand: false, align: "left" });
+
+      const detailBody = scene.rexUI.add.sizer({
+        orientation: "x",
+        space: { item: compact ? 8 : 10 }
+      })
+        .add(previewSlot, { proportion: 0, expand: false, align: "center" })
+        .add(detailCopy, { proportion: 1, expand: true, align: "center" });
+
+      const detailPanel = scene.rexUI.add.sizer({
+        orientation: "y",
+        space: { left: 10, right: 10, top: 8, bottom: 8, item: 6 }
+      })
+        .addBackground(panelBg(0, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
+        .add(text("Slot Detail", { fontSize: compact ? 10 : 11, color: "#9fdfff" }), { expand: false, align: "left" })
+        .add(detailBody, { proportion: 0, expand: true, align: "center" });
+
+      const sellSummary = text("Select a filled slot to sell items.", {
+        fontSize: compact ? 8 : 9,
+        color: "#cfe8f4",
+        wordWrap: { width: descWrap }
+      });
+
+      const sellOneBtn = button("Sell 1", 0x7c3aed, 0xd8b4fe);
+      const sellStackBtn = button("Sell Stack", 0xc86b1f, 0xfacc15);
+      sellOneBtn.setEnabledState(false);
+      sellStackBtn.setEnabledState(false);
+
+      const actionsRow = scene.rexUI.add.sizer({
+        orientation: "x",
+        space: { item: 6 }
+      })
+        .add(sellOneBtn, { proportion: 1, expand: true })
+        .add(sellStackBtn, { proportion: 1, expand: true });
+
+      detailPanel
+        .add(sellSummary, { expand: false, align: "left" })
+        .add(actionsRow, { expand: false, align: "left" });
+
+      const fixBtn = button("Fix", 0x2f7d32, 0x95f5a6).setMinSize(110, compact ? 34 : 36);
+      fixBtn.on("pointerup", () => {
+        const storage = this.selected;
+        if (!storage) return;
+        buildingManager.requestBuildingFix(storage, this.team, []);
+      });
+
+      const contentRow = scene.rexUI.add.sizer({
+        orientation: "x",
+        space: { item: 12 }
+      })
+        .add(inventoryPanel, { proportion: 0, expand: false, align: "top" })
+        .add(detailPanel, { proportion: 1, expand: true, align: "top" });
+
+      const titleCol = scene.rexUI.add.sizer({
+        orientation: "y",
+        space: { item: 1 }
+      })
+        .add(title, { expand: false, align: "left" })
+        .add(sub, { expand: false, align: "left" });
+
+      const headerRow = scene.rexUI.add.sizer({
+        orientation: "x",
+        space: { item: 8 }
+      })
+        .add(titleCol, { proportion: 1, align: "left", expand: true })
+        .add(fixBtn, { proportion: 0, align: "right", expand: false });
+
+      const refreshSelectionUi = () => {
+        const slot = currentStorage?.storageItems?.[selectedSlotIndex] || null;
+
+        cells.forEach((cell, idx) => {
+          cell.setSelected(!!slot && idx === selectedSlotIndex);
+        });
+
+        if (!slot?.item) {
+          previewIcon.setVisible(false);
+          previewCount.setVisible(false);
+          previewEmpty.setVisible(true);
+          detailTitle.setText("No Slot Selected");
+          detailMeta.setText("Choose a filled slot on the left to inspect it.");
+          detailDesc.setText("");
+          sellSummary.setText("Select a filled slot to sell items.");
+          sellOneBtn.labelText.setText("Sell 1");
+          sellStackBtn.labelText.setText("Sell Stack");
+          sellOneBtn.setEnabledState(false);
+          sellStackBtn.setEnabledState(false);
+          return;
+        }
+
+        const item = slot.item;
+        const iconKey = UI_ITEM_TYPES[item.name]?.icon || null;
+        const price = StorageManager.getStorageSellPrice(item);
+        const total = price * slot.amount;
+
+        if (iconKey && scene.textures.exists(iconKey)) {
+          previewIcon.setTexture(iconKey);
+          previewIcon.setDisplaySize(previewSize - 22, previewSize - 22);
+          previewIcon.setVisible(true);
+          previewEmpty.setVisible(false);
+        } else {
+          previewIcon.setVisible(false);
+          previewEmpty.setVisible(true);
+        }
+
+        previewCount.setText(`x${slot.amount}`).setVisible(true);
+        detailTitle.setText(item.label || item.name);
+        detailMeta.setText(`Slot ${selectedSlotIndex + 1} | ${slot.amount}/${item.stacks || slot.amount} | $${price} each`);
+        detailDesc.setText(item.description || "Stored supply item.");
+        sellSummary.setText(`Sell one for $${price}, or clear the whole stack for $${total}.`);
+        sellOneBtn.labelText.setText(`Sell 1 ($${price})`);
+        sellStackBtn.labelText.setText(`Sell Stack ($${total})`);
+        sellOneBtn.setEnabledState(true);
+        sellStackBtn.setEnabledState(true);
+      };
+
+      const setStorage = (storage) => {
+        currentStorage = storage;
+
+        if (!storage) {
+          selectedSlotIndex = null;
+          title.setText("Storage");
+          sub.setText("-");
+          storageHpBar.setValue(0, 1);
+          cells.forEach(cell => cell.setIcon(null, 0, null, 0));
+          refreshSelectionUi();
+          return;
+        }
+
+        if (selectedSlotIndex == null || !storage.storageItems?.[selectedSlotIndex]?.item) {
+          const firstFilledIndex = storage.storageItems.findIndex(slot => slot?.item);
+          selectedSlotIndex = firstFilledIndex >= 0 ? firstFilledIndex : null;
+        }
+
+        title.setText("Storage");
+        sub.setText(`(${storage.x ?? 0}, ${storage.y ?? 0})`);
+        storageHpBar.setValue(storage.health ?? 0, storage.maxHealth ?? 1);
+        const projected = this.getProjectedSlots(storage);
+
+        for (let i = 0; i < 16; i++) {
+          const slot = storage.storageItems?.[i] || null;
+          const projectedSlot = projected?.[i] || null;
+          const key = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
+
+          let queuedKey = null;
+          let queuedAmount = 0;
+          if (projectedSlot?.item) {
+            if (!slot?.item) {
+              queuedKey = UI_ITEM_TYPES[projectedSlot.item.name]?.icon || null;
+              queuedAmount = projectedSlot.amount || 0;
+            } else if (slot.item?.name === projectedSlot.item.name && projectedSlot.amount > slot.amount) {
+              queuedKey = UI_ITEM_TYPES[projectedSlot.item.name]?.icon || null;
+              queuedAmount = projectedSlot.amount - slot.amount;
+            }
+          }
+
+          cells[i].setIcon(key, slot?.amount || 0, queuedKey, queuedAmount);
+        }
+
+        refreshSelectionUi();
+      };
+
+      const sellSelectedSlot = (sellStack = false) => {
+        const slot = currentStorage?.storageItems?.[selectedSlotIndex];
+        if (!slot?.item) return;
+
+        const amount = sellStack ? slot.amount : 1;
+        const { sold, revenue, item } = StorageManager.sellFromStorage(currentStorage, selectedSlotIndex, amount, scene);
+        if (sold <= 0) return;
+
+        showAlert(scene, `Sold ${sold} ${item?.label || item?.name} for $${revenue}`, "#33ff77", 1800);
+        if (currentStorage) setStorage(currentStorage);
+      };
+
+      sellOneBtn.on("pointerup", () => sellSelectedSlot(false));
+      sellStackBtn.on("pointerup", () => sellSelectedSlot(true));
+
+      cells.forEach((cell, idx) => {
+        cell
+          .setInteractive({ useHandCursor: true })
+          .on("pointerdown", () => {
+            const slot = currentStorage?.storageItems?.[idx];
+            selectedSlotIndex = slot?.item ? idx : null;
+            refreshSelectionUi();
+          });
+      });
+
+      const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 6 } })
+        .add(headerRow, 0, "left", 0, true)
+        .add(storageHpBar, 0, "left", 0, false)
+        .add(contentRow, { proportion: 0, expand: true });
+
+      return { panel, setStorage, cells };
+    }
     const scene = this.scene;
     const rr = (w, h, r, c, a = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, c, a);
 
@@ -183,6 +620,9 @@ export default class StorageTab {
     };
 
     const storageHpBar = makeHpBarWithText(240, 14);
+    let currentStorage = null;
+    let selectedSlotIndex = null;
+
     const gridSizer = scene.rexUI.add.gridSizer({
       column: 4, row: 4,
       columnProportions: 1, rowProportions: 1,
@@ -216,6 +656,10 @@ export default class StorageTab {
       s.add(icon,  { key: "icon",  align: "center" });
       s.add(count, { key: "count", align: "right-bottom" });
 
+      s.bg = bg;
+      s.icon = icon;
+      s.text = count;
+
       s.setIcon = (key, amt) => {
         const hasIcon = key && scene.textures.exists(key);
 
@@ -235,6 +679,13 @@ export default class StorageTab {
         }
       };
 
+      s.setSelected = (active) => {
+        bg.setFillStyle(active ? 0x6e5cff : 0x333333, active ? 0.95 : 0.9);
+        bg.setStrokeStyle(active ? 2 : 1, 0xffffff, active ? 0.35 : 0.08);
+      };
+
+      s.setSelected(false);
+
       return s;
     };
 
@@ -244,6 +695,102 @@ export default class StorageTab {
       gridSizer.add(c, { column: i % 4, row: Math.floor(i / 4), expand: false });
       cells.push(c);
     }
+
+    const selectionText = scene.add.text(0, 0, "Select a filled slot to sell items.", {
+      fontSize: 11,
+      color: "#b7c9d8",
+      fontFamily: "Bungee",
+      wordWrap: { width: 240 }
+    });
+
+    const makeActionBtn = (label, fill) => {
+      const text = scene.add.text(0, 0, label, {
+        fontFamily: "Bungee",
+        fontSize: 12,
+        color: "#ffffff"
+      });
+
+      const btn = scene.rexUI.add.label({
+        background: scene.rexUI.add.roundRectangle(0, 0, 0, 32, 10, fill, 1),
+        text,
+        space: { left: 10, right: 10, top: 6, bottom: 6 }
+      }).setMinSize(100, 32);
+
+      btn.labelText = text;
+      btn.setEnabledState = (enabled) => {
+        btn.setAlpha(enabled ? 1 : 0.35);
+      };
+      btn.setEnabledState(false);
+      return btn;
+    };
+
+    const sellOneBtn = makeActionBtn("Sell 1", 0x8b5cf6);
+    const sellStackBtn = makeActionBtn("Sell Stack", 0xde7b2a);
+
+    const actionsRow = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { item: 8 }
+    })
+      .add(sellOneBtn, { proportion: 1, expand: true })
+      .add(sellStackBtn, { proportion: 1, expand: true });
+
+    const refreshSelectionUi = () => {
+      const slot = currentStorage?.storageItems?.[selectedSlotIndex] || null;
+
+      cells.forEach((cell, idx) => {
+        cell.setSelected(!!slot && idx === selectedSlotIndex);
+      });
+
+      if (!slot?.item) {
+        selectionText.setText("Select a filled slot to sell items.");
+        sellOneBtn.labelText.setText("Sell 1");
+        sellStackBtn.labelText.setText("Sell Stack");
+        sellOneBtn.setEnabledState(false);
+        sellStackBtn.setEnabledState(false);
+        return;
+      }
+
+      const price = StorageManager.getStorageSellPrice(slot.item);
+      selectionText.setText(`${slot.item.label || slot.item.name} x${slot.amount}  •  $${price} each`);
+      sellOneBtn.labelText.setText(`Sell 1 ($${price})`);
+      sellStackBtn.labelText.setText(`Sell Stack ($${price * slot.amount})`);
+      sellOneBtn.setEnabledState(true);
+      sellStackBtn.setEnabledState(true);
+    };
+
+    const sellSelectedSlot = (sellStack = false) => {
+      const slot = currentStorage?.storageItems?.[selectedSlotIndex];
+      if (!slot?.item) return;
+
+      const amount = sellStack ? slot.amount : 1;
+      const { sold, revenue, item } = StorageManager.sellFromStorage(currentStorage, selectedSlotIndex, amount, scene);
+      if (sold <= 0) return;
+
+      showAlert(scene, `Sold ${sold} ${item?.label || item?.name} for $${revenue}`, "#33ff77", 1800);
+      selectedSlotIndex = null;
+      refreshSelectionUi();
+      if (currentStorage) {
+        setStorage(currentStorage);
+      }
+    };
+
+    sellOneBtn
+      .setInteractive({ useHandCursor: true })
+      .on("pointerup", () => sellSelectedSlot(false));
+
+    sellStackBtn
+      .setInteractive({ useHandCursor: true })
+      .on("pointerup", () => sellSelectedSlot(true));
+
+    cells.forEach((cell, idx) => {
+      cell
+        .setInteractive({ useHandCursor: true })
+        .on("pointerdown", () => {
+          const slot = currentStorage?.storageItems?.[idx];
+          selectedSlotIndex = slot?.item ? idx : null;
+          refreshSelectionUi();
+        });
+    });
 
     const fixBtn = scene.rexUI.add.label({
       background: scene.rexUI.add.roundRectangle(0, 0, 0, 34, 10, 0x2f7d32),
@@ -271,13 +818,20 @@ export default class StorageTab {
       .add(sub, 0, "left", 0, false)
       .add(storageHpBar, 0, "left", 0, false)
       .add(rr(0, 2, 0, 0xffffff, 0.15), 0, "left", 0, false)
-      .add(gridSizer, 0, "left", 0, false);
+      .add(gridSizer, 0, "left", 0, false)
+      .add(selectionText, 0, "left", 0, false)
+      .add(actionsRow, 0, "left", 0, true);
 
     const setStorage = (storage) => {
+      currentStorage = storage;
+      if (!storage || !storage.storageItems?.[selectedSlotIndex]?.item) {
+        selectedSlotIndex = null;
+      }
       if (!storage) {
         title.setText("Storage");
         sub.setText("—");
         storageHpBar.setValue(0, 1);
+        refreshSelectionUi();
         cells.forEach(c => c.setIcon(null, 0));   // 🔸 no texture for empty
         return;
       }
@@ -292,6 +846,8 @@ export default class StorageTab {
         const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
         cells[i].setIcon(key, slot?.amount || 0);
       }
+
+      refreshSelectionUi();
     };
 
     return { panel, setStorage };

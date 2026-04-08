@@ -1,9 +1,9 @@
 import { BasePage } from "./BasePage.js";
-import { calcContractCost } from "../../constants.js";
+import { formatPermitCostText, getContractPermitCost } from "../../permitSystem.js";
 
 export class RockPage extends BasePage {
   constructor(scene, slot) {
-    const cost = calcContractCost(scene, "ROCK");
+    const cost = getContractPermitCost("ROCK");
     super(scene, slot, {
       title: "🪨 Rock Contract",
       bgColor: 0x334155,
@@ -13,7 +13,7 @@ export class RockPage extends BasePage {
         "Spawns a rock parcel.",
         "Timer-based.",
         "",
-        `Cost: $${cost}`,
+        `Permit Cost: ${formatPermitCostText(cost)}`,
       ],
       primaryLabel: "Buy",
       onPrimary: () => slot.commit({ type: "ROCK" }),

@@ -5,6 +5,8 @@ export const StageState = {
   stageIndex: 1,      // 1..STAGES_PER_SEASON within a season
   seasonIndex: 1,
   STAGES_PER_SEASON: 5,
+  endlessMode: true,
+  fortObjectiveEnabled: false,
   START_OVERRIDE: {
     seasonIndex: 1,
     stageIndex: 1,
@@ -48,8 +50,44 @@ export const StageState = {
     if (towerRef) this._fortTowers.delete(towerRef);
   },
 
+  resetFortState() {
+    this._fortTowers.clear();
+    this._fortObjective = {
+      active: false,
+      seasonIndex: this.seasonIndex,
+      requiredCount: 0,
+      destroyedSet: new Set(),
+      completed: false,
+      meta: null,
+    };
+  },
+
+  startEndlessRun(override = null) {
+    const src = override ?? this.START_OVERRIDE ?? {};
+    this.endlessMode = true;
+    this.fortObjectiveEnabled = false;
+    this.seasonIndex = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
+    this.stageIndex = Math.max(1, Math.floor(Number(src.stageIndex ?? 1) || 1));
+    this.resetFortState();
+    return { seasonIndex: this.seasonIndex, stageIndex: this.stageIndex };
+  },
+
+  advanceHorde(meta = {}) {
+    this.stageIndex = Math.max(1, Number(this.stageIndex || 1)) + 1;
+    for (const fn of this._listeners.seasonAdvanced) {
+      try { fn({ seasonIndex: this.seasonIndex, stageIndex: this.stageIndex, ...meta }); } catch (_) {}
+    }
+    return { seasonIndex: this.seasonIndex, stageIndex: this.stageIndex };
+  },
+
   advanceStage() {
     this.stageIndex += 1;
+  },
+
+  isBossStage(stageIndex = this.stageIndex, opts = {}) {
+    const stagesPerSeason = Math.max(1, Number(opts.stagesPerSeason ?? this.STAGES_PER_SEASON) || 5);
+    const stage = Math.max(1, Number(stageIndex ?? this.stageIndex) || 1);
+    return stage >= stagesPerSeason;
   },
 
   applyStartOverride(override = null) {
@@ -64,15 +102,7 @@ export const StageState = {
     this.stageIndex = stage;
 
     // Fresh objective state for forced start points.
-    this._fortTowers.clear();
-    this._fortObjective = {
-      active: false,
-      seasonIndex: this.seasonIndex,
-      requiredCount: 0,
-      destroyedSet: new Set(),
-      completed: false,
-      meta: null,
-    };
+    this.resetFortState();
   },
 
   advanceSeason(meta = {}) {
@@ -99,7 +129,7 @@ export const StageState = {
   completeFortCycle(meta = {}, opts = {}) {
     const stagesPerSeason = Math.max(1, Number(opts.stagesPerSeason ?? this.STAGES_PER_SEASON) || 5);
 
-    if (this.stageIndex >= stagesPerSeason) {
+    if (this.isBossStage(this.stageIndex, { stagesPerSeason })) {
       this.advanceSeason({ reason: "fort_defeated", ...meta });
     } else {
       this.stageIndex += 1;
@@ -123,6 +153,7 @@ export const StageState = {
    * Call after all fort towers are spawned/created.
    */
   setFortObjective(meta = {}) {
+    if (!this.fortObjectiveEnabled) return;
     const snapshotCount =
       Number.isFinite(meta.requiredTowerCount) && meta.requiredTowerCount > 0
         ? Math.floor(meta.requiredTowerCount)
@@ -141,6 +172,7 @@ export const StageState = {
    * Counts down fort towers; only completes when requiredCount reached.
    */
   notifyFortTowerDestroyed(towerRef) {
+    if (!this.fortObjectiveEnabled) return false;
     const obj = this._fortObjective;
     if (!obj.active) return false;
     if (obj.completed) return false;

@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS } from '../constants.js';
+import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS, CONTROL_STATES } from '../constants.js';
 import { Map } from '../map.js';
 import { Teams } from '../Teams.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
@@ -72,6 +72,7 @@ export class StorageBuilding {
         this.addItem(UI_ITEM_TYPES.wood, 4);
         this.addItem(UI_ITEM_TYPES.stone, 10);
         this.addItem(UI_ITEM_TYPES.seedCrop, 10);
+        StorageUI.refreshStatus?.(this);
 
         // Register into the team
         Teams.teamLists[teamNumber].storageList.push(this);
@@ -96,6 +97,146 @@ export class StorageBuilding {
 
     get totalStored() {
         return this.storageItems.filter(slot => slot && slot.item && slot.item.name !== 'empty').length;
+    }
+
+    getTotalCount() {
+        return this.totalStored;
+    }
+
+    hasOpenSlots() {
+        return this.storageItems.some(slot => !slot);
+    }
+
+    hasStackRoom() {
+        return this.storageItems.some(slot =>
+            slot?.item &&
+            slot.amount < (slot.item.stacks ?? 1)
+        );
+    }
+
+    getStorageWarningState() {
+        if (this.hasOpenSlots()) return null;
+        return this.hasStackRoom() ? 'slots' : 'full';
+    }
+
+    static _cloneSlots(slots = []) {
+        return slots.map(slot => (slot ? { item: slot.item, amount: slot.amount } : null));
+    }
+
+    static _findPlacement(slots, itemDef) {
+        if (!itemDef) return null;
+        const maxStack = itemDef.stacks ?? 1;
+
+        for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            if (slot && slot.item?.name === itemDef.name && slot.amount < maxStack) {
+                return { idx: i, room: maxStack - slot.amount, isEmpty: false };
+            }
+        }
+
+        for (let i = 0; i < slots.length; i++) {
+            if (!slots[i]) {
+                return { idx: i, room: maxStack, isEmpty: true };
+            }
+        }
+
+        return null;
+    }
+
+    static _placeIntoSlots(slots, itemDef, amount = 1) {
+        let remaining = Math.max(0, Number(amount) || 0);
+        while (remaining > 0) {
+            const placement = this._findPlacement(slots, itemDef);
+            if (!placement) return false;
+
+            if (!slots[placement.idx]) {
+                slots[placement.idx] = { item: itemDef, amount: 0 };
+            }
+
+            const toAdd = Math.min(placement.room, remaining);
+            slots[placement.idx].amount += toAdd;
+            remaining -= toAdd;
+        }
+
+        return true;
+    }
+
+    static _availableCapacity(slots, itemDef) {
+        if (!itemDef) return 0;
+        const maxStack = itemDef.stacks ?? 1;
+        let available = 0;
+
+        for (const slot of slots) {
+            if (!slot) {
+                available += maxStack;
+            } else if (slot.item?.name === itemDef.name && slot.amount < maxStack) {
+                available += maxStack - slot.amount;
+            }
+        }
+
+        return available;
+    }
+
+    static _getActiveDeliveryReservations(teamNumber, storage) {
+        const team = Teams.teamLists?.[teamNumber];
+        if (!team || !storage) return [];
+
+        const players = Array.isArray(team.playerList) ? team.playerList : [];
+        const tasks = Array.isArray(team.storageDeliveryItems) ? team.storageDeliveryItems : [];
+        const reservations = [];
+
+        for (const task of tasks) {
+            if (!task || task.taskType !== 'storageDelivery' || task.storage !== storage || !task.item) continue;
+
+            const actualAssigned = players.reduce((count, troop) => {
+                const validTroop =
+                    troop?.active !== false &&
+                    troop?.task === task &&
+                    troop?.state === CONTROL_STATES.SEND_TO_STORAGE &&
+                    troop?.carrying?.name === task.item.name;
+                return count + (validTroop ? 1 : 0);
+            }, 0);
+
+            if (actualAssigned > 0) {
+                reservations.push({ item: task.item, amount: actualAssigned });
+            }
+        }
+
+        return reservations;
+    }
+
+    static _getProjectedSlots(storage, teamNumber) {
+        const projected = this._cloneSlots(storage?.storageItems ?? []);
+        const reservations = this._getActiveDeliveryReservations(teamNumber, storage);
+
+        for (const reservation of reservations) {
+            this._placeIntoSlots(projected, reservation.item, reservation.amount);
+        }
+
+        return projected;
+    }
+
+    compactItems() {
+        const before = this.storageItems
+            .map(slot => (slot ? `${slot.item?.name}:${slot.amount}` : ''))
+            .join('|');
+
+        const compacted = Array(this.capacity).fill(null);
+        for (const slot of this.storageItems) {
+            if (!slot?.item || slot.amount <= 0) continue;
+            StorageBuilding._placeIntoSlots(compacted, slot.item, slot.amount);
+        }
+
+        const after = compacted
+            .map(slot => (slot ? `${slot.item?.name}:${slot.amount}` : ''))
+            .join('|');
+
+        if (before !== after) {
+            this.storageItems = compacted;
+            return true;
+        }
+
+        return false;
     }
 
     addItem(itemType, amount) {
@@ -130,8 +271,10 @@ export class StorageBuilding {
 
         // 3. Refresh UI if needed
         if (changed) {
+            this.compactItems();
             const scene = StorageBuilding.scene;
             StorageUI.refreshMinor?.(this);
+            StorageUI.refreshStatus?.(this);
 
             const added = OGAmnt - amount;
             if (added > 0) {
@@ -172,15 +315,41 @@ export class StorageBuilding {
 
         // 2. Refresh UI if any slot changed
         if (changed) {
+            this.compactItems();
             const icon = GHOST_ITEM_ICONS[itemName];
             const text = `-${Math.abs(amount-remaining)} ${icon}`;
             // teamNumber 0 ⇒ green in showGhostText
             showGhostText(StorageBuilding.scene, this.sprite.x, this.sprite.y - 12, text, 0, 1, 0, '#ff0000');
             StorageUI.refreshMinor?.(this);
+            StorageUI.refreshStatus?.(this);
             const scene = StorageBuilding.scene;
             scene.events.emit("storage:updated", this);
         }
         return remaining <= 0; // true if full amount was removed
+    }
+
+    removeItemFromSlot(index, amount = 1) {
+        const slot = this.storageItems?.[index];
+        if (!slot?.item || amount <= 0) return 0;
+
+        const removed = Math.min(slot.amount, Math.max(0, Number(amount) || 0));
+        if (removed <= 0) return 0;
+
+        const itemName = slot.item.name;
+        slot.amount -= removed;
+        if (slot.amount <= 0) {
+            this.storageItems[index] = null;
+        }
+
+        this.compactItems();
+
+        const icon = GHOST_ITEM_ICONS[itemName];
+        const text = `-${removed} ${icon}`;
+        showGhostText(StorageBuilding.scene, this.sprite.x, this.sprite.y - 12, text, 0, 1, 0, '#ff0000');
+        StorageUI.refreshMinor?.(this);
+        StorageUI.refreshStatus?.(this);
+        StorageBuilding.scene?.events?.emit("storage:updated", this);
+        return removed;
     }
 
     canAcceptItem(itemType, amount) {
@@ -195,7 +364,7 @@ export class StorageBuilding {
 
             if (!slot) {
                 needed -= Math.min(maxStack, needed);
-            } else if (slot.item.name === itemType && slot.amount < maxStack) {
+            } else if (slot.item?.name === itemDef.name && slot.amount < maxStack) {
                 const spaceLeft = maxStack - slot.amount;
                 needed -= Math.min(spaceLeft, needed);
             }
@@ -212,15 +381,30 @@ export class StorageBuilding {
             .reduce((sum, slot) => sum + slot.amount, 0);
     }
 
-    static canAcceptItem(itemType, team) {
+    static canAcceptItem(itemType, team, preferredStorage = null) {
         const itemDef = itemType;
         if (!itemDef) return null;
 
-        const maxStack = itemDef.stacks;
-        const storages = Teams.teamLists[team].storageList;
-        const storageDeliveryItems = Teams.teamLists[team].storageDeliveryItems;
+        const storages = [...(Teams.teamLists[team]?.storageList || [])];
+        if (preferredStorage) {
+            storages.sort((a, b) => {
+                if (a === preferredStorage) return -1;
+                if (b === preferredStorage) return 1;
+                return 0;
+            });
+        }
 
         for (const storage of storages) {
+            const projected = this._getProjectedSlots(storage, team);
+            const placement = this._findPlacement(projected, itemDef);
+            if (!placement) continue;
+
+            return {
+                storage,
+                idx: placement.idx,
+                remaining: this._availableCapacity(projected, itemDef)
+            };
+
             let emptyCandidate = null;
 
             for (let i = 0; i < storage.storageItems.length; i++) {
@@ -421,8 +605,10 @@ export class StorageBuilding {
         this.sprite?.destroy();
         if (this.healthBarBg) this.healthBarBg.destroy();
         if (this.healthBar)   this.healthBar.destroy();
+        StorageUI.hideStatus?.(this);
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         Teams.removeFromStateArray(this.teamNumber, 'storageList', this);
+        StorageBuilding.scene?.events?.emit?.("storage:removed", this);
     }
 }

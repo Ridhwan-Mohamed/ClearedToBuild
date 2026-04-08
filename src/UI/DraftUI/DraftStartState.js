@@ -1,268 +1,185 @@
-// UI/DraftStartState_v5.js
+import {
+  getStarterDeckById,
+  REQUIRED_STARTER_CREW,
+  STARTER_DECKS,
+} from "./DraftStarterDecks.js";
 
-import { spawnPoints } from "../../town";
+const WALL_PRICES = Object.freeze({
+  wood: 10,
+  stone: 15,
+});
 
 export class DraftStartState {
   constructor(opts = {}) {
-    this.startingCash = opts.startingCash ?? 500;
-    this.cash = this.startingCash;
+    this.teamName = opts.teamName ?? "";
+    this.starterDecks = STARTER_DECKS.slice();
+    this.selectedDeckId = opts.defaultDeckId ?? this.starterDecks[0]?.id ?? null;
 
-    // Team
-    this.teamName = opts.teamName ?? "My Team";
-
-    // Crew (forager + builder required)
-    this.crew = {
-      forager: 1,
-      builder: 1,
-      brawler: 0,
-      gunslinger: 0,
-      blademaster: 0,
-      farmer: 0,
-      fireman: 0
-    };
-
-    // Supplies (store row)
+    this.crew = { ...REQUIRED_STARTER_CREW };
+    this.cash = 0;
     this.supplies = {
       seeds: 0,
-      food: 10,
+      food: 0,
       berries: 0,
       wood: 0,
       stone: 0,
-      water: 10
+      water: 0,
     };
 
-    // Extras
-    this.extras = {
-      house: 120,
-      storage: 90,
-      oven: 110,
+    this.cards = {
+      offered: [],
+      picked: [],
+    };
 
-      // wall settings (MUST exist so setExtra() works)
+    this.extras = {
+      house: 0,
+      storage: 1,
+      oven: 1,
       wall: 0,
       wallType: "wood",
-
-      // optional: keep if you want them displayed elsewhere, but pricing should use prices.extras
-      wallWoodPerTile: 10,
-      wallStonePerTile: 15
     };
 
-    // Cards: roll N pick K
-    this.cards = {
-      offerCount: 5,
-      pickCount: 3,
-      offered: [],
-      picked: []
-    };
-
-    // Preview/build placement output (filled by preview controller)
-    this.placedBuildings = []; // [{x,y,typeKey,teamnum}]
+    this.placedBuildings = [];
     this.wall = {
       estimatedTiles: 0,
-      estimatedCost: 0
-    };
-    // Pricing
-    this.prices = {
-      crew: {
-        forager: 50,
-        builder: 60,
-        brawler: 80,
-        gunslinger: 150,
-        blademaster: 75,
-        farmer: 70,
-        fireman: 90
-      },
-      supplies: {
-        seeds: 2,
-        food: 3,
-        berries: 3,
-        wood: 4,
-        stone: 5,
-        water: 2
-      },
-      extras: {
-        house: 120,
-        storage: 90,
-        oven: 110,
-
-        // per-tile costs (these are what setWallEstimate() uses)
-        wallWoodPerTile: 10,
-        wallStonePerTile: 15
-      },
-      cards: { base: 0 }
+      estimatedCost: 0,
     };
 
     this._listeners = new Set();
     this.recalc();
   }
 
-  onChange(cb){
+  onChange(cb) {
     this._listeners.add(cb);
     return () => this._listeners.delete(cb);
   }
-  _emit(reason = "ui"){
+
+  _emit(reason = "ui") {
     for (const cb of this._listeners) cb(this, reason);
   }
 
-  // --- Team ---
-  setTeamName(name){
-    this.teamName = (name ?? "").trim().slice(0, 24) || "My Team";
+  setTeamName(name) {
+    this.teamName = (name ?? "").trim().slice(0, 24);
     this._emit("ui");
   }
 
-  // --- Crew ---
-  setCrew(type, count){
-    if (!(type in this.crew)) return;
-    const c = Math.floor(count);
-    if (type === "forager" || type === "builder") this.crew[type] = Math.max(1, c);
-    else this.crew[type] = Math.max(0, c);
+  selectStarterDeck(deckId) {
+    const deck = getStarterDeckById(deckId);
+    if (!deck || deck.id === this.selectedDeckId) return;
+    this.selectedDeckId = deck.id;
+    this.recalc();
     this._emit("ui");
   }
-  addCrew(type, delta = 1){
-    this.setCrew(type, (this.crew[type] ?? 0) + delta);
-  }
-  getTotalCrew(){
-    return Object.values(this.crew).reduce((a,b)=>a+b,0);
-  }
-  minHousesNeeded(){
-    return Math.ceil(this.getTotalCrew()/2);
+
+  getSelectedDeck() {
+    return getStarterDeckById(this.selectedDeckId);
   }
 
-  // --- Supplies ---
-  setSupply(k, count){
-    if (!(k in this.supplies)) return;
-    this.supplies[k] = Math.max(0, Math.floor(count));
+  getSelectedResources() {
+    return { ...(this.getSelectedDeck()?.resources ?? {}) };
+  }
+
+  getTotalCrew() {
+    return Object.values(this.crew).reduce((sum, value) => sum + value, 0);
+  }
+
+  minHousesNeeded() {
+    return Math.ceil(this.getTotalCrew() / 2);
+  }
+
+  setExtra(key, value) {
+    if (!(key in this.extras)) return;
+
+    if (key === "wall") {
+      this.extras.wall = value ? 1 : 0;
+      this._emit("preview");
+      return;
+    }
+
+    if (key === "wallType") {
+      this.extras.wallType = value === "stone" ? "stone" : "wood";
+      this._emit("preview");
+      return;
+    }
+
+    this.extras[key] = Math.max(0, Math.floor(value));
     this._emit("ui");
   }
-  addSupply(k, delta = 1){
-    this.setSupply(k, (this.supplies[k] ?? 0) + delta);
-  }
 
-  // --- Extras ---
-  setExtra(k, v){
-    if (!(k in this.extras)) return;
-    if (k === "wall") this.extras.wall = v ? 1 : 0;
-    else if (k === "wallType") this.extras.wallType = (v === "stone") ? "stone" : "wood";
-    else this.extras[k] = Math.max(0, Math.floor(v));
-    this._emit(k === "wall" || k === "wallType" ? "preview" : "ui");
-  }
-
-  // Called by preview controller when placements changed
-  setPlacedBuildings(list){
+  setPlacedBuildings(list) {
     this.placedBuildings = Array.isArray(list) ? list : [];
+    this.recalc();
     this._emit("preview");
   }
 
-  setWallEstimate(tiles, silent = false){
+  setWallEstimate(tiles, silent = false) {
     this.wall.estimatedTiles = Math.max(0, Math.floor(tiles));
-    const per = (this.extras.wallType === "stone")
-      ? this.prices.extras.wallStonePerTile
-      : this.prices.extras.wallWoodPerTile;
-    this.wall.estimatedCost = this.wall.estimatedTiles * per;
+    this.wall.estimatedCost = this.wall.estimatedTiles * WALL_PRICES[this.extras.wallType];
     if (!silent) this._emit("ui");
   }
 
-  // --- Cards ---
-  setOfferedCards(cards){
-    this.cards.offered = (cards ?? []).slice(0, this.cards.offerCount);
-    this.cards.picked = this.cards.offered.slice(0, this.cards.pickCount);
-    this._emit("ui");
-  }
-  togglePickCard(card){
-    const idx = this.cards.picked.indexOf(card);
-    if (idx >= 0) {
-      this.cards.picked.splice(idx, 1);
-      this._emit("ui");
-      return;
-    }
-    if (this.cards.picked.length >= this.cards.pickCount) return;
-    if (!this.cards.offered.includes(card)) return;
-    this.cards.picked.push(card);
-    this._emit("ui");
+  canAfford() {
+    return true;
   }
 
-  _countPlaced(typeKeys){
-    const set = new Set(typeKeys);
-    let n = 0;
-    for (const b of (this.placedBuildings ?? [])) {
-      const k = b?.typeKey ?? b?.type; // tolerate older shapes
-      if (set.has(k)) n++;
-    }
-    return n;
+  recalc() {
+    const deck = this.getSelectedDeck();
+    const resources = deck?.resources ?? {};
+
+    this.cash = resources.money ?? 0;
+    this.supplies = {
+      seeds: resources.seeds ?? 0,
+      food: resources.food ?? 0,
+      berries: resources.berries ?? 0,
+      wood: resources.wood ?? 0,
+      stone: resources.stone ?? 0,
+      water: resources.water ?? 0,
+    };
+
+    this.cards.offered = deck?.cards ? deck.cards.slice() : [];
+    this.cards.picked = deck?.cards ? deck.cards.slice() : [];
+
+    const placedHouseCount = this._countPlaced(["house1", "house2"]);
+    const placedStorageCount = this._countPlaced(["storage"]);
+    const placedOvenCount = this._countPlaced(["clayOven"]);
+
+    this.extras.house = Math.max(this.minHousesNeeded(), placedHouseCount);
+    this.extras.storage = Math.max(1, placedStorageCount);
+    this.extras.oven = Math.max(1, placedOvenCount);
+    this.wall.estimatedCost = this.wall.estimatedTiles * WALL_PRICES[this.extras.wallType];
   }
 
-  _getPlacedHouseCount(){
-    // count BOTH house variants as "houses"
-    return this._countPlaced(["house1", "house2"]);
+  _countPlaced(typeKeys) {
+    const allowed = new Set(typeKeys);
+    return (this.placedBuildings ?? []).reduce((count, building) => {
+      const typeKey = building?.typeKey ?? building?.type;
+      return count + (allowed.has(typeKey) ? 1 : 0);
+    }, 0);
   }
 
-  // --- Pricing ---
-  recalc(){
-    // 1) derive "paid-for / exists" extras from what is actually placed
-    const placedH = this._getPlacedHouseCount();
-    const placedStorage = this._countPlaced(["storage"]);
-    const placedOven = this._countPlaced(["clayOven"]);
-
-    // 2) keep your rule: houses must cover crew minimum; storage+oven min 1
-    const minH = this.minHousesNeeded();
-    this.extras.house = Math.max(minH, placedH);
-
-    this.extras.storage = Math.max(1, placedStorage);
-    this.extras.oven = Math.max(1, placedOven);
-
-    // 3) cash = starting - total
-    const cost = this.getTotalCost();
-    this.cash = this.startingCash - cost;
-  }
-
-  getCrewCost(){
-    let sum = 0;
-    for (const [k,v] of Object.entries(this.crew)) sum += (this.prices.crew[k] ?? 0) * v;
-    return sum;
-  }
-  getSuppliesCost(){
-    let sum = 0;
-    for (const [k,v] of Object.entries(this.supplies)) sum += (this.prices.supplies[k] ?? 0) * v;
-    return sum;
-  }
-  getExtrasCost(){
-    const p = this.prices.extras;
-    let sum = 0;
-    sum += p.house * (this.extras.house ?? 0);
-    sum += p.storage * (this.extras.storage ?? 0);
-    sum += p.oven * (this.extras.oven ?? 0);
-    if (this.extras.wall) {
-      const per = (this.extras.wallType === "stone") ? p.wallStonePerTile : p.wallWoodPerTile;
-      sum += per * (this.wall.estimatedTiles ?? 0);
-    }
-    return sum;
-  }
-  getCardsCost(){
-    return (this.prices.cards.base ?? 0) * (this.cards.picked.length ?? 0);
-  }
-  getTotalCost(){
-    return this.getCrewCost() + this.getSuppliesCost() + this.getExtrasCost() + this.getCardsCost();
-  }
-
-  canAfford(){
+  toStartConfig() {
     this.recalc();
-    return this.cash >= 0;
-  }
+    const deck = this.getSelectedDeck();
+    const resources = this.getSelectedResources();
 
-  toStartConfig(){
-    this.recalc();
     return {
       teamName: this.teamName,
+      starterDeckId: deck?.id ?? null,
+      starterDeckName: deck?.name ?? "Starter Deck",
+      starterDeckSummary: deck?.summary ?? "",
+      crew: { ...this.crew },
+      resources,
+      supplies: { ...this.supplies },
       money: {
-        startingCash: this.startingCash,
-        spent: this.getTotalCost(),
-        remaining: this.cash
+        amount: this.cash,
       },
-      crew: structuredClone(this.crew),
-      supplies: structuredClone(this.supplies),
-      extras: structuredClone(this.extras),
-      wall: structuredClone(this.wall),
+      extras: { ...this.extras },
+      wall: { ...this.wall },
       cards: {
-        picked: (this.cards.picked ?? []).map(c => ({ id: c.id ?? c.name ?? c.key, ...c }))
+        picked: (this.cards.picked ?? []).map((card) => ({
+          id: card.id ?? card.name ?? card.key,
+          ...card,
+        })),
       },
       buildings: structuredClone(this.placedBuildings),
     };

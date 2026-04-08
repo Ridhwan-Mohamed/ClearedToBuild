@@ -13,20 +13,22 @@ export class RockNode {
     RockNode.scene = scene;
   }
 
-  // gridX, gridY are TOP-LEFT of the 3x3 footprint
+  // gridX, gridY are TOP-LEFT of the blocked footprint
   constructor(gridX, gridY, level = 1) {
     const scene = RockNode.scene;
     this.gridX = gridX;
     this.gridY = gridY;
     this.resourceTileType = TILE_TYPES.rock;
     this.resourceKind = "stone";
+    this.footprintW = this.resourceTileType.lenX ?? 1;
+    this.footprintH = this.resourceTileType.lenY ?? 1;
     this.health = 3;
     this.task = null;
     this._lastClickTime = 0;
     this.flashTween = null;
 
-    const cx = (gridX + 1.5) * SQUARESIZE;
-    const cy = (gridY + 1.5) * SQUARESIZE;
+    const cx = (gridX + this.footprintW / 2) * SQUARESIZE;
+    const cy = (gridY + this.footprintH / 2) * SQUARESIZE;
     this.sprite = scene.add
       .sprite(cx, cy, "rock3")
       .setDepth(TILE_TYPES.rock.depth)
@@ -34,7 +36,12 @@ export class RockNode {
 
     this.sprite.ownerNode = this;
     GameMap.addToWorldStatic(this.sprite);
-    this.lightId = VisibilitySystem.addLightSource({ x: gridX + 1.5, y: gridY + 1.5, r: 3.3, brightness: 0.95 });
+    this.lightId = VisibilitySystem.addLightSource({
+      x: gridX + this.footprintW / 2,
+      y: gridY + this.footprintH / 2,
+      r: 3.3,
+      brightness: 0.95,
+    });
 
     this.setLevel(level);
     this.setUpHitDetection();

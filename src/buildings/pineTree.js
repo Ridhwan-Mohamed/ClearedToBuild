@@ -19,7 +19,7 @@ export class PineTree {
 
   static init(scene) { PineTree.scene = scene; }
 
-  // gridX, gridY are TOP-LEFT of the 3x3 footprint
+  // gridX, gridY are TOP-LEFT of the blocked footprint
   constructor(gridX, gridY, level = 1) {
     const scene = PineTree.scene;
     this.level = level;
@@ -27,10 +27,11 @@ export class PineTree {
     this.gridY = gridY;
     this.resourceTileType = TILE_TYPES.pine;
     this.resourceKind = "wood";
+    this.footprintW = this.resourceTileType.lenX ?? 1;
+    this.footprintH = this.resourceTileType.lenY ?? 1;
 
-    // center of 3x3 footprint (matches old non-spread placement)
-    const cx = (gridX + 1.5) * SQUARESIZE;
-    const cy = (gridY + 1.5) * SQUARESIZE;
+    const cx = (gridX + this.footprintW / 2) * SQUARESIZE;
+    const cy = (gridY + this.footprintH / 2) * SQUARESIZE;
     this.container = scene.add.container(cx, cy).setDepth(TILE_TYPES.pine.depth);
     GameMap.addToWorldStatic(this.container);
 
@@ -53,7 +54,12 @@ export class PineTree {
     this.updateSlot = ((gridX + gridY) % PineTree.STRIDE);
 
     this.setLevel(level);
-    this.lightId = VisibilitySystem.addLightSource({ x: gridX + 1.5, y: gridY + 1.5, r: 4.0, brightness: 1.0 });
+    this.lightId = VisibilitySystem.addLightSource({
+      x: gridX + this.footprintW / 2,
+      y: gridY + this.footprintH / 2,
+      r: 4.0,
+      brightness: 1.0,
+    });
     PineTree.list.push(this);
     PineTree._register(this);
   }
@@ -125,20 +131,16 @@ export class PineTree {
     const c1x = Math.floor((gx1 - 1) / CHUNK_SIZE);
     const c1y = Math.floor((gy1 - 1) / CHUNK_SIZE);
 
-    // pine footprint in grid cells
-    const FOOT = 4; // 3x3
-
     for (let cy = c0y; cy <= c1y; cy++) {
       for (let cx = c0x; cx <= c1x; cx++) {
         const set = PineTree.buckets.get(`${cx},${cy}`);
         if (!set) continue;
 
         for (const p of set) {
-          // p.gridX, p.gridY = top-left of 3x3
           const px0 = p.gridX;
           const py0 = p.gridY;
-          const px1 = px0 + FOOT; // exclusive
-          const py1 = py0 + FOOT; // exclusive
+          const px1 = px0 + (p.footprintW ?? p.resourceTileType?.lenX ?? 1); // exclusive
+          const py1 = py0 + (p.footprintH ?? p.resourceTileType?.lenY ?? 1); // exclusive
 
           // AABB overlap test in GRID SPACE:
           // include only if pine footprint intersects redraw rect
@@ -161,9 +163,9 @@ export class PineTree {
   }
 
   setUpHitDetection(){
-    // === interactive hit area covering the 3x3 footprint ===
+    // Match the interactive footprint to the blocked footprint.
     const scene = PineTree.scene;
-    this.hit = scene.add.zone(0, 0, SQUARESIZE * 3, SQUARESIZE * 3)
+    this.hit = scene.add.zone(0, 0, SQUARESIZE * this.footprintW, SQUARESIZE * this.footprintH)
       .setOrigin(0.5)
       .setInteractive({ cursor: 'pointer' });
     this.container.add(this.hit);

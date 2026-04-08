@@ -17,6 +17,7 @@ export class OverviewOceanWaves {
     this.wavePalette = opts.wavePalette ?? [0x74d6ef, 0x9feeff, 0x59bfd9, 0xbaf8ff];
     this.cellSize = opts.cellSize ?? 180;
     this.jitterRatio = opts.jitterRatio ?? 0.46;
+    this.coverageScreens = opts.coverageScreens ?? 2.5;
     this.getWorldSize = opts.getWorldSize || (() => {
       const img = this.scene?.zoomMixer?.overviewImage || this.scene?.menuPreview;
       if (img?.displayWidth && img?.displayHeight) {
@@ -88,8 +89,14 @@ export class OverviewOceanWaves {
     if (!this.container) return;
 
     const world = this.getWorldSize?.() || {};
-    const width = Math.max(world.width || 0, WORLD_DIMENSIONX * SQUARESIZE);
-    const height = Math.max(world.height || 0, WORLD_DIMENSIONY * SQUARESIZE);
+    const worldWidth = Math.max(world.width || 0, WORLD_DIMENSIONX * SQUARESIZE);
+    const worldHeight = Math.max(world.height || 0, WORLD_DIMENSIONY * SQUARESIZE);
+    const padX = Math.max(this.scene.scale.width * this.coverageScreens, this.cellSize * 4);
+    const padY = Math.max(this.scene.scale.height * this.coverageScreens, this.cellSize * 4);
+    const originX = -padX;
+    const originY = -padY;
+    const width = worldWidth + padX * 2;
+    const height = worldHeight + padY * 2;
     const cols = Math.max(1, Math.ceil(width / this.cellSize));
     const rows = Math.max(1, Math.ceil(height / this.cellSize));
     const cellW = width / cols;
@@ -102,8 +109,8 @@ export class OverviewOceanWaves {
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
         const seed = row * cols + col + 1;
-        const px = (col + 0.5) * cellW + (hash01(col, row, 11) - 0.5) * jitterX;
-        const py = (row + 0.5) * cellH + (hash01(col, row, 17) - 0.5) * jitterY;
+        const px = originX + (col + 0.5) * cellW + (hash01(col, row, 11) - 0.5) * jitterX;
+        const py = originY + (row + 0.5) * cellH + (hash01(col, row, 17) - 0.5) * jitterY;
         const key = this.waveKeys[Math.floor(hash01(col, row, 23) * this.waveKeys.length) % this.waveKeys.length];
         const tint = this.wavePalette[Math.floor(hash01(col, row, 29) * this.wavePalette.length) % this.wavePalette.length];
         const baseScale = 0.44 + hash01(col, row, 31) * 0.28;

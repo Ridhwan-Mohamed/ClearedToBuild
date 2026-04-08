@@ -13,6 +13,7 @@ const BUTTON_STYLES = {
   wood: { fill: 0x166534, text: "#86efac", glow: 0xbbf7d0 },
   stone: { fill: 0x475569, text: "#cbd5e1", glow: 0xe2e8f0 },
   workSelected: { fill: 0x92400e, text: "#fbbf24", glow: 0xfde68a },
+  makeWater: { fill: 0x0f4c81, text: "#93c5fd", glow: 0xbfdbfe },
   defendTown: { fill: 0x0f766e, text: "#99f6e4", glow: 0xccfbf1 },
   attackFort: { fill: 0x991b1b, text: "#fca5a5", glow: 0xfecaca },
   hold: { fill: 0x5b21b6, text: "#ddd6fe", glow: 0xe9d5ff },
@@ -97,7 +98,7 @@ export class SelectionCommandBar {
           return;
         }
 
-        showAlert(this.scene, `Distributed ${result.fed} berr${result.fed === 1 ? "y" : "ies"} (+${result.healAmount} HP)`, "#e9d5ff");
+        showAlert(this.scene, `Distributed ${result.fed} berr${result.fed === 1 ? "y" : "ies"} (+${result.healAmount} HP, +${result.staminaAmount} STA)`, "#e9d5ff");
       }, { iconKey: "berry" }),
       sell: this._makeButton("sell", "CASH OUT", (snapshot) => {
         const result = OrderRunner.sellTroops(this._getActionTroops(snapshot), this.scene);
@@ -143,6 +144,15 @@ export class SelectionCommandBar {
           this._dismissForCurrentSelection(snapshot?.troops);
           showAlert(this.scene, "Assigned selected foragers to queued resource targets", "#a7f3d0");
         }
+      }),
+      makeWater: this._makeButton("makeWater", "MAKE WATER", (snapshot) => {
+        const ok = OrderRunner.issueMakeWaterOrder(this._getActionTroops(snapshot));
+        if (!ok) {
+          showAlert(this.scene, "Select only firemen to use this", "#fecaca");
+          return;
+        }
+        this._dismissForCurrentSelection(snapshot?.troops);
+        showAlert(this.scene, "Selected firemen will keep oven water and fuel balanced", "#93c5fd");
       }),
       defendTown: this._makeButton("defendTown", "DEFEND TOWN", (snapshot) => {
         const ok = OrderRunner.issueDefendTownOrder(this._getActionTroops(snapshot));
@@ -205,8 +215,11 @@ export class SelectionCommandBar {
     if (profile.allForagers) {
       layoutKeys.push("wood", "stone", "workSelected");
     }
+    if (profile.allFiremen) {
+      layoutKeys.push("makeWater");
+    }
     if (profile.allCombatants) {
-      layoutKeys.push("defendTown", "attackFort");
+      layoutKeys.push("defendTown");
     }
     if (profile.allGunslingers) {
       layoutKeys.push("hold");
@@ -420,6 +433,12 @@ export class SelectionCommandBar {
     if (key === "defendTown") {
       return profile.allCombatants && profile.troops.length > 0 && profile.troops.every(troop =>
         troop?.currentOrder?.kind === "defend_town"
+      );
+    }
+
+    if (key === "makeWater") {
+      return profile.allFiremen && profile.troops.length > 0 && profile.troops.every(troop =>
+        troop?.currentOrder?.kind === "make_water"
       );
     }
 

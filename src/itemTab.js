@@ -7,6 +7,9 @@ import rock3 from 'url:./assets/rock3.png'
 import brick from 'url:./assets/wall/brick.png'
 import turretBase from 'url:./assets/turretBase.png'
 import turret from 'url:./assets/turret.png'
+import catapultBase from 'url:./assets/catapult_base.png'
+import catapultTop from 'url:./assets/catapult_top.png'
+import rockProjectile from 'url:./assets/rock_projectile.png'
 import Wall from 'url:./assets/wall/Wall.png'
 import TWall from 'url:./assets/wall/TWall.png'
 import BWall from 'url:./assets/wall/BWall.png'
@@ -21,6 +24,7 @@ import grass_overhang_edge from 'url:./assets/terrain/grass/grass_overhang_edge.
 import grass_overhang_corner from 'url:./assets/terrain/grass/grass_overhang_corner.png'
 import grass_edge_water from 'url:./assets/terrain/grass/grass_edge_water.png'
 import grass_corner_water from 'url:./assets/terrain/grass/grass_corner_water.png'
+import grass_inner_corner_water from 'url:./assets/terrain/grass/grass_inner_corner_water.png'
 import water_interior from 'url:./assets/terrain/water/water_interior.png'
 import playerImg from 'url:./assets/Players/playerImg.png'
 import playerSwim from 'url:./assets/Players/playerSwim.png'
@@ -65,7 +69,7 @@ import pine2 from 'url:./assets/pine2.png'
 import pine1 from 'url:./assets/pine1.png'
 import rock2 from 'url:./assets/rock2.png'
 import rock1 from 'url:./assets/rock1.png'
-import tower from 'url:./assets/fortTiles/tower.png'
+import tower from 'url:./assets/townTower.png'
 import tower_destroyed from 'url:./assets/fortTiles/tower_destroyed.png'
 import prison_closed from 'url:./assets/fortTiles/prison_closed.png'
 import prison_opened from 'url:./assets/fortTiles/prison_opened.png'
@@ -99,6 +103,9 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('pine1', pine1);
         scene.load.image('image7', turretBase)
         scene.load.image('image7a', turret)
+        scene.load.image('catapult_base', catapultBase)
+        scene.load.spritesheet('catapult_top', catapultTop, { frameWidth: 64, frameHeight: 64 });
+        scene.load.spritesheet('rock_projectile', rockProjectile, { frameWidth: 38, frameHeight: 21 });
         scene.load.image('image8', water_interior); //water image
         scene.load.image('image9', playerImg); //water image
         scene.load.spritesheet('playerSwim', playerSwim, { frameWidth: 16, frameHeight: 16 });
@@ -117,6 +124,7 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('grass_overhang_corner', grass_overhang_corner);
         scene.load.image('grass_edge_water', grass_edge_water);
         scene.load.image('grass_corner_water', grass_corner_water);
+        scene.load.image('grass_inner_corner_water', grass_inner_corner_water);
         scene.load.image('dirt_interior', dirt_interior);
         scene.load.image('dirt_edge_grass', dirt_edge_grass);
         scene.load.image('dirt_corner_grass', dirt_corner_grass);

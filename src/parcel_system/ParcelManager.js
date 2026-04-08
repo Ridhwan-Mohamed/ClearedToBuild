@@ -20,8 +20,8 @@ export class ParcelManager {
 
     this.contractsById = new Map();
 
-    // ✅ keys must match ParcelConfig CONTRACT_SLOTS: W/S/E
-    this.slotToContractId = { W: null, S: null, E: null };
+    // ✅ keys must match ParcelConfig CONTRACT_SLOTS
+    this.slotToContractId = { N: null, W: null, S: null, E: null };
 
     this.onContractProgressChanged = null;
   }
@@ -186,6 +186,12 @@ export class ParcelManager {
       this.scene.updateMoney(+bonus);
     }
 
+    const permitCost = Number(inst?.permitCost ?? 0);
+    if (permitCost > 0) {
+      this.scene.updatePermits?.(+permitCost);
+      inst.permitCost = 0;
+    }
+
     // If this slot is owned by a standing tower, let the tower controller
     // immediately restart the countdown UI.
     const tpc = this.scene.towerPressureController;
@@ -198,6 +204,12 @@ export class ParcelManager {
       // Normal slot: re-show the regular contract UI panel.
       this.scene.parcelSpawnUI.showSlot(slotId);
     }
+  }
+
+  markContractPermitCost(id, permitCost) {
+    const inst = this.contractsById.get(id);
+    if (!inst) return;
+    inst.permitCost = Math.max(0, Number(permitCost) || 0);
   }
 
   notifyRaiderKilled(contractId) {
@@ -218,28 +230,42 @@ export class ParcelManager {
     if (inst) inst.onSpawnerDestroyed?.(unspawnedCount);
   }
 
-  forceClearPressureContracts(reason = "stage_end_cleanup", opts = {}) {
+  forceClearContracts(reason = "external_cleanup", opts = {}) {
     const entries = [];
+    const types = Array.isArray(opts.types) ? new Set(opts.types.map((v) => String(v).toUpperCase())) : null;
+    const excludeTypes = Array.isArray(opts.excludeTypes) ? new Set(opts.excludeTypes.map((v) => String(v).toUpperCase())) : null;
+    const sources = Array.isArray(opts.sources)
+      ? new Set(opts.sources.map((v) => String(v)))
+      : (opts.source != null ? new Set([String(opts.source)]) : null);
+
     for (const [id, inst] of this.contractsById.entries()) {
-      if (inst?.type !== "PRESSURE") continue;
-      if (opts.onlyTowerSpawned && inst?.pressureSource !== "tower") continue;
+      const type = String(inst?.type || "").toUpperCase();
+      const source = inst?.pressureSource != null ? String(inst.pressureSource) : null;
+      if (types && !types.has(type)) continue;
+      if (excludeTypes && excludeTypes.has(type)) continue;
+      if (opts.onlyTowerSpawned && source !== "tower") continue;
+      if (sources && !sources.has(source)) continue;
       entries.push([id, inst]);
     }
     if (!entries.length) return 0;
 
-    const pressureIds = new Set(entries.map(([id]) => id));
+    const pressureIds = new Set(
+      entries
+        .filter(([, inst]) => inst?.type === "PRESSURE")
+        .map(([id]) => id)
+    );
 
-    // Remove raiders tied to pressure contracts without counting as kills/completions.
-    const troops = (Player.troops || []).slice();
-    for (const troop of troops) {
-      if (!troop?.active || !troop?.isRaider) continue;
-      if (!pressureIds.has(troop.contractId)) continue;
-      troop.contractId = null;
-      troop.spawner = null;
-      try { troop.destroySelf?.(); } catch {}
+    if (pressureIds.size) {
+      const troops = (Player.troops || []).slice();
+      for (const troop of troops) {
+        if (!troop?.active || !troop?.isRaider) continue;
+        if (!pressureIds.has(troop.contractId)) continue;
+        troop.contractId = null;
+        troop.spawner = null;
+        try { troop.destroySelf?.({ silentStageCleanup: true }); } catch {}
+      }
     }
 
-    // Force-complete each pressure parcel (sinks terrain + removes spawners + frees slot).
     for (const [, inst] of entries) {
       try {
         inst.complete?.(reason);
@@ -247,6 +273,13 @@ export class ParcelManager {
     }
 
     return entries.length;
+  }
+
+  forceClearPressureContracts(reason = "stage_end_cleanup", opts = {}) {
+    return this.forceClearContracts(reason, {
+      ...opts,
+      types: ["PRESSURE"],
+    });
   }
 
   stopTowerPressureForStageEnd() {

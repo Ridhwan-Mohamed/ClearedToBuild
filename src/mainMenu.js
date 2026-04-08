@@ -8,7 +8,7 @@ import worldMap from 'url:./assets/worldMap.png'
 import townIcon from 'url:./assets/houseIcon.png'
 import { SQUARESIZE } from './constants';
 import { NavMeshUpdater } from './lib/navmesh/NavMeshUpdater.js';
-import { createZoomButtons, ZoomMixer } from './UI/ZoomMixer.js';
+import { ZoomMixer } from './UI/ZoomMixer.js';
 import { NavMesh } from './lib/navmesh/navmesh.js';
 import { GameStart } from './Controllers/GameStart.js';
 import { buildingManager } from './Manager/buildingManager.js';
@@ -25,8 +25,8 @@ import { DraftStartMenu } from './UI/DraftUI/DraftStartMenu.js';
 import { ParcelSpawnController } from './parcelSpawn/ParcelSpawnController.js';
 import { ParcelManager } from './parcel_system/ParcelManager.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
-import { spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { StageState } from './parcelController/StageState.js';
+import { paintOverviewTexture } from './UI/OverviewStylePainter.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
@@ -41,17 +41,130 @@ export class MainMenu {
         const srcH = img.naturalHeight || img.height;
         const worldW = srcW * SQUARESIZE;
         const worldH = srcH * SQUARESIZE;
-        const draftLeftPanelW = 460;
-        const mapViewportCenterX = draftLeftPanelW + ((overlayScene.scale.width - draftLeftPanelW) / 2);
-        const targetZoom = 0.7;
+        const mapViewportCenterX = overlayScene.scale.width / 2;
+        const targetZoom = 0.72;
         const targetCenterX = worldW / 2;
         const targetCenterY = worldH / 2;
 
         return {
             targetZoom,
-            targetScrollX: targetCenterX - (mapViewportCenterX / targetZoom) + 250,
+            targetScrollX: targetCenterX - (mapViewportCenterX / targetZoom),
             targetScrollY: targetCenterY + 60 - ((overlayScene.scale.height * 0.5) / targetZoom),
         };
+    }
+
+    static _getPlacedBounds(placedBuildings = null) {
+        if (!Array.isArray(placedBuildings) || !placedBuildings.length) return null;
+
+        let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+        for (const building of placedBuildings) {
+            const typeKey = building?.typeKey ?? building?.type;
+            const type = TILE_TYPES[typeKey] || TILE_TYPES[building?.type] || { lenX: 1, lenY: 1 };
+            const bx = building?.x ?? 0;
+            const by = building?.y ?? 0;
+            minx = Math.min(minx, bx);
+            miny = Math.min(miny, by);
+            maxx = Math.max(maxx, bx + (type.lenX || 1) - 1);
+            maxy = Math.max(maxy, by + (type.lenY || 1) - 1);
+        }
+
+        if (!Number.isFinite(minx)) return null;
+        return { minx, miny, maxx, maxy };
+    }
+
+    static _getTownFocusPose(scene, overlayScene = scene, placedBuildings = null) {
+        const placedBounds = MainMenu._getPlacedBounds(placedBuildings);
+        const fallback = MainMenu._getDraftCameraPose(scene, overlayScene);
+        if (!placedBounds) return fallback;
+
+        const padTilesX = 11;
+        const padTilesY = 11;
+        const minx = placedBounds.minx - padTilesX;
+        const miny = placedBounds.miny - padTilesY;
+        const maxx = placedBounds.maxx + padTilesX;
+        const maxy = placedBounds.maxy + padTilesY;
+
+        const worldMinX = minx * SQUARESIZE;
+        const worldMinY = miny * SQUARESIZE;
+        const worldMaxX = (maxx + 1) * SQUARESIZE;
+        const worldMaxY = (maxy + 1) * SQUARESIZE;
+        const worldW = Math.max(SQUARESIZE * 10, worldMaxX - worldMinX);
+        const worldH = Math.max(SQUARESIZE * 10, worldMaxY - worldMinY);
+        const centerX = worldMinX + worldW / 2;
+        const centerY = worldMinY + worldH / 2;
+
+        const fitZoom = Math.min(
+            (overlayScene.scale.width * 0.49) / worldW,
+            (overlayScene.scale.height * 0.55) / worldH,
+        );
+        const targetZoom = Phaser.Math.Clamp(fitZoom, 0.88, 1.55);
+
+        return {
+            targetZoom,
+            targetScrollX: centerX - ((overlayScene.scale.width * 0.5) / targetZoom),
+            targetScrollY: centerY - ((overlayScene.scale.height * 0.5) / targetZoom),
+        };
+    }
+
+    static _setDraftPreviewVisibility(show, opts = {}) {
+        const scene = MainMenu.scene;
+        if (!scene) return;
+
+        const overlayScene = scene.uiScene || scene;
+        const cam = scene.cameras.main;
+        const duration = opts.immediate ? 0 : (show ? 520 : 360);
+        const pose = show
+            ? MainMenu._getTownFocusPose(scene, overlayScene, opts.placedBuildings)
+            : MainMenu._getDraftCameraPose(scene, overlayScene);
+        const fadeTargets = [scene.menuPreview, scene._teamTownIcon].filter(Boolean);
+
+        for (const target of fadeTargets) {
+            target.setVisible(true);
+            if (typeof target.setActive === "function") target.setActive(true);
+        }
+
+        scene.tweens.killTweensOf(fadeTargets);
+        scene.tweens.killTweensOf(cam);
+
+        if (pose) {
+            if (duration > 0) {
+                scene.tweens.add({
+                    targets: cam,
+                    zoom: pose.targetZoom,
+                    scrollX: pose.targetScrollX,
+                    scrollY: pose.targetScrollY,
+                    duration,
+                    ease: show ? 'Cubic.easeOut' : 'Quad.easeInOut',
+                });
+            } else {
+                cam.setZoom(pose.targetZoom);
+                cam.setScroll(pose.targetScrollX, pose.targetScrollY);
+            }
+            if (scene.zoomMixer) {
+                scene.zoomMixer.targetZoom = pose.targetZoom;
+                scene.zoomMixer.anchorWorld = cam.midPoint ? { x: cam.midPoint.x, y: cam.midPoint.y } : null;
+                scene.zoomMixer.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
+            }
+        }
+
+        if (duration > 0) {
+            scene.tweens.add({
+                targets: fadeTargets,
+                alpha: show ? 1 : 0,
+                duration,
+                ease: 'Quad.easeInOut',
+                onComplete: () => {
+                    if (!show) {
+                        for (const target of fadeTargets) target.setVisible(false);
+                    }
+                }
+            });
+        } else {
+            for (const target of fadeTargets) {
+                target.setAlpha(show ? 1 : 0);
+                target.setVisible(show);
+            }
+        }
     }
 
     static _upsertTeamTownIcon(teamName = "My Team", placedBuildings = null) {
@@ -135,7 +248,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         const logo = overlayScene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.5', {
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.6', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);
@@ -203,28 +316,40 @@ export class MainMenu {
 
         startButton.on('pointerdown', () => {
             startButton.disableInteractive();
-            // Animate logo up and shrink
+            overlayScene.tweens.killTweensOf(logo);
+            overlayScene.tweens.killTweensOf(startButton);
+            overlayScene.tweens.killTweensOf(versionText);
+            overlayScene.tweens.add({
+                targets: versionText,
+                alpha: 0,
+                duration: 260,
+                ease: 'Quad.easeOut',
+            });
+
+            // Animate logo up and shrink, then only enter draft once the motion fully finishes.
             overlayScene.tweens.add({
                 targets: logo,
-                y: 80, scale: 0.25,
-                duration: 1000,
+                y: 72,
+                scale: 0.22,
+                duration: 1140,
                 alpha: 0,
                 ease: 'Cubic.easeInOut',
-                onComplete: () => logo.destroy()
+                onComplete: () => {
+                    logo.destroy();
+                    scene.time.delayedCall(140, () => {
+                        MainMenu.buildMapSelectPhase({ fromStartMenu: true });
+                    });
+                }
             });
 
             // Fade out the start button
             overlayScene.tweens.add({
                 targets: startButton,
                 alpha: 0,
-                duration: 300,
+                scaleX: 0.92,
+                scaleY: 0.92,
+                duration: 320,
                 onComplete: () => startButton.destroy()
-            });
-
-            // Transition shortly after click into draft/map-select phase.
-            overlayScene.time.delayedCall(350, () => {
-                menu.destroy();
-                MainMenu.buildMapSelectPhase({ fromStartMenu: true });
             });
         });
     }
@@ -232,40 +357,14 @@ export class MainMenu {
     static buildMapSelectPhase(opts = {}){
         const scene = MainMenu.scene;
         const overlayScene = scene.uiScene || scene;
-        const draftLeftPanelW = 460;
-        const mapViewportCenterX = draftLeftPanelW + ((overlayScene.scale.width - draftLeftPanelW) / 2);
-
-        const logoMini = overlayScene.add.image(mapViewportCenterX, 80, 'logoMini').setOrigin(0.5).setAlpha(0);
+        const logoMiniY = Phaser.Math.Clamp(Math.round(overlayScene.scale.height * 0.11), 62, 132);
+        const logoMini = overlayScene.add
+            .image(overlayScene.scale.width / 2, logoMiniY, 'logoMini')
+            .setOrigin(0.5)
+            .setAlpha(0)
+            .setVisible(false);
         // Keep world-scene ref for existing cleanup code.
         scene.logoMini = logoMini;
-        overlayScene.tweens.add({ targets: logoMini, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
-        // Drop / bob down slightly
-        overlayScene.tweens.add({
-            targets: logoMini,
-            y: 65,                   // lower than its initial 55
-            duration: 2000,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut'
-        });
-        // Wiggle side to side
-        overlayScene.tweens.add({
-            targets: logoMini,
-            angle: { from: -1.5, to: 1.5 },
-            duration: 2500,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Sine.easeInOut'
-        });
-        // Pulse scale gently
-        overlayScene.tweens.add({
-            targets: logoMini,
-            scale: { from: 1, to: 1.04 },
-            duration: 1800,
-            yoyo: true,
-            repeat: -1,
-            ease: 'Quad.easeInOut'
-        });
         // === Build Map.grid from already-loaded map image ===
         const img = scene.textures.get('worldMap').getSourceImage(); // 250x250
         const srcW = img.naturalWidth || img.width;
@@ -287,7 +386,6 @@ export class MainMenu {
             for (let x = 0; x < srcW; x++) {
                 let value;
                 Array.isArray(scene.gridData[y][x]) ? value = scene.gridData[y][x][1] : value = scene.gridData[y][x]
-                const c = colorFor(value);
                 const type = TILE_TYPES[TILE_MAP(value)]
                 if((type == TILE_TYPES.pine || type == TILE_TYPES.rock) && !Array.isArray(scene.gridData[y][x])){
                     buildingArray.push([x,y,type,null])
@@ -298,14 +396,14 @@ export class MainMenu {
                         }
                     }
                 }
-                if (type?.name === 'water') {
-                    ctx.clearRect(x, y, 1, 1);
-                    continue;
-                }
-                ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
-                ctx.fillRect(x, y, 1, 1);
             }
         }
+
+        paintOverviewTexture(
+            ctx,
+            scene.gridData,
+            (cell) => colorFor(Array.isArray(cell) ? cell[1] : cell),
+        );
 
         tex.refresh();
         tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
@@ -422,7 +520,8 @@ export class MainMenu {
             .setScale(SQUARESIZE)
             .setScrollFactor(1)
             .setDepth(UIDEPTH-2)
-            .setAlpha(0);
+            .setAlpha(0)
+            .setVisible(false);
         scene.overviewOceanWaves?.resize?.();
 
         const cam = scene.cameras.main;
@@ -463,20 +562,17 @@ export class MainMenu {
         // --- repaint helper (keep yours if already defined)
         const repaintBounds = (b) => {
         const ctx = scene._menuCtx;
-        const colorForCell = scene._colorCell;
-        for (let y = b.miny; y <= b.maxy; y++) {
-            for (let x = b.minx; x <= b.maxx; x++) {
-            const val = Array.isArray(scene.gridData[y][x]) ? scene.gridData[y][x][1] : scene.gridData[y][x];
-            const type = TILE_TYPES[TILE_MAP(val)];
-            if (type?.name === 'water') {
-                ctx.clearRect(x, y, 1, 1);
-                continue;
+        paintOverviewTexture(
+            ctx,
+            scene.gridData,
+            (cell) => colorFor(Array.isArray(cell) ? cell[1] : cell),
+            {
+                minX: b?.minx ?? 0,
+                minY: b?.miny ?? 0,
+                maxX: b?.maxx ?? (srcW - 1),
+                maxY: b?.maxy ?? (srcH - 1),
             }
-            const c = colorForCell(val);
-            ctx.fillStyle = `#${c.toString(16).padStart(6, '0')}`;
-            ctx.fillRect(x, y, 1, 1);
-            }
-        }
+        );
         scene._menuTex.refresh();
         scene._menuTex.setFilter(Phaser.Textures.FilterMode.NEAREST);
         };
@@ -509,13 +605,25 @@ export class MainMenu {
 
         draftScene.events.off("draftTeamNameChanged");
         draftScene.events.on("draftTeamNameChanged", (name) => {
-            MainMenu._upsertTeamTownIcon(name);
+            MainMenu._upsertTeamTownIcon(name || "My Team", draftMenu?.state?.placedBuildings);
+        });
+        draftScene.events.off("draftPhaseChanged");
+        draftScene.events.on("draftPhaseChanged", (payload = {}) => {
+            const placedBuildings = payload?.placedBuildings ?? draftMenu?.state?.placedBuildings;
+            MainMenu._setDraftPreviewVisibility(payload?.phase === "layout", {
+                placedBuildings,
+                immediate: !!payload?.immediate,
+            });
         });
         scene._draftTownIconUnsub?.();
         scene._draftTownIconUnsub = draftMenu?.state?.onChange?.((st) => {
-            MainMenu._upsertTeamTownIcon(st.teamName, st.placedBuildings);
+            MainMenu._upsertTeamTownIcon(st.teamName || "My Team", st.placedBuildings);
         });
         MainMenu._upsertTeamTownIcon(draftMenu?.state?.teamName || "My Team", draftMenu?.state?.placedBuildings);
+        MainMenu._setDraftPreviewVisibility(false, {
+            placedBuildings: draftMenu?.state?.placedBuildings,
+            immediate: true,
+        });
 
         // IMPORTANT: make sure the draft UI is NOT rendered by the main camera
 
@@ -540,7 +648,6 @@ export class MainMenu {
             }
         });
         });
-        scene.tweens.add({ targets: scene.menuPreview, alpha: 1, duration: 500, ease: 'Quad.easeInOut' });
     }
 
     static buildTeamSelectUI_OnMenuPreview(srcW, srcH, scale) {
@@ -673,69 +780,69 @@ export class MainMenu {
 
     static beginLoadingAndHandOff(startCfg) {
         const scene = MainMenu.scene;
+        const overlayScene = scene.uiScene || scene;
+        const t1 = Teams.teamLists && Teams.teamLists["1"];
+        const kitResources = startCfg?.resources ?? MainMenu.selectedStartKit?.resources ?? t1?.startKit?.resources;
+        const kitCards = Array.isArray(startCfg?.cards?.picked)
+            ? startCfg.cards.picked.slice(0, 3)
+            : (Array.isArray(MainMenu.selectedStartKit?.cards)
+                ? MainMenu.selectedStartKit.cards.slice(0, 3)
+                : (Array.isArray(t1?.startKit?.cards) ? t1.startKit.cards.slice(0, 3) : null));
 
         if (startCfg) {
             // team name
-            const t1 = Teams.teamLists && Teams.teamLists["1"];
             if (t1) t1.name = startCfg.teamName;
 
-            // supplies
-            scene.seeds          = startCfg.supplies.seeds;
-            scene.berries        = startCfg.supplies.berries;
-            scene.woodAmnt       = startCfg.supplies.wood;
-            scene.stoneAmnt      = startCfg.supplies.stone;
-            scene.foodAmnt       = startCfg.supplies.food;
-            scene.cleanWaterAmnt = startCfg.supplies.water;
+            // supplies + starting cash
+            const startResources = startCfg.resources ?? startCfg.supplies ?? {};
+            scene.money          = startResources.money ?? startCfg.money?.amount ?? scene.money;
+            scene.seeds          = startResources.seeds ?? 0;
+            scene.berries        = startResources.berries ?? 0;
+            scene.woodAmnt       = startResources.wood ?? 0;
+            scene.stoneAmnt      = startResources.stone ?? 0;
+            scene.foodAmnt       = startResources.food ?? 0;
+            scene.cleanWaterAmnt = startResources.water ?? 0;
 
             // cards: you’ll want to map ids back to your real card objects
             // (keep this simple for now—if your cards are already objects with apply(), you can store them directly)
-            if (t1 && Array.isArray(startCfg.cards?.picked)) {
-                t1.cardHand = startCfg.cards.picked.slice(0, 3);
-                t1.cardHand.forEach(c => c.apply?.());
-            }
-
             // crew config for GameStart
             scene.startCrew = startCfg.crew;
 
             // buildings are already written into gridData + buildingArray during the draft preview
         }
+
+        scene.permits = 2;
         
-        const centerX = scene.scale.width / 2;
-        const centerY = scene.scale.height - 40; // same Y as Play button
-
         // Apply the chosen starting kit (resources + starting cards) to Team 1
-        const fallbackTeam = Teams.teamLists && Teams.teamLists['1'];
-        const kit = MainMenu.selectedStartKit ||
-                    (fallbackTeam && fallbackTeam.startKit);
-
-        if (kit && kit.resources) {
-            const r = kit.resources;
-
-            scene.seeds          = r.seeds;
-            scene.berries        = r.berries;
-            scene.woodAmnt       = r.wood;
-            scene.stoneAmnt      = r.stone;
-            scene.foodAmnt       = r.food;
-            scene.cleanWaterAmnt = r.water;
-
-
-            if (Array.isArray(kit.cards) && fallbackTeam) {
-                fallbackTeam.cardHand = kit.cards.slice(0, 3);
-                fallbackTeam.cardHand.forEach(element => {
-                    element.apply();
-                });
-            }
+        if (kitResources) {
+            scene.money          = kitResources.money ?? scene.money;
+            scene.seeds          = kitResources.seeds ?? scene.seeds;
+            scene.berries        = kitResources.berries ?? scene.berries;
+            scene.woodAmnt       = kitResources.wood ?? scene.woodAmnt;
+            scene.stoneAmnt      = kitResources.stone ?? scene.stoneAmnt;
+            scene.foodAmnt       = kitResources.food ?? scene.foodAmnt;
+            scene.cleanWaterAmnt = kitResources.water ?? scene.cleanWaterAmnt;
         }
 
-        // Overlay container for bg + spinner
-        const loading = scene.add.container(0, 0).setDepth(9999).setScrollFactor(0);
+        if (t1 && Array.isArray(kitCards)) {
+            t1.cardHand = kitCards;
+            t1.cardHand.forEach((card) => {
+                card.apply?.();
+            });
+        }
 
-        // Dark background under spinner
-        const darkBg = scene.add.rectangle(
-            0, 0, scene.scale.width, scene.scale.height,
-            0x000000, 0.65
-        ).setOrigin(0).setAlpha(0);
-        loading.add(darkBg);
+        // UI-scene loading cover so it stays above draft/menu UI during the handoff.
+        const loading = overlayScene.add.container(0, 0).setDepth(50000).setScrollFactor(0);
+        const inputBlocker = overlayScene.add.rectangle(
+            0,
+            0,
+            overlayScene.scale.width,
+            overlayScene.scale.height,
+            0x000000,
+            0.14
+        ).setOrigin(0);
+        inputBlocker.setInteractive({ useHandCursor: false });
+        loading.add(inputBlocker);
 
         if (ZoomMixer.mapIconContainer) {
             ZoomMixer.mapIconContainer.iterate(child => {
@@ -746,29 +853,90 @@ export class MainMenu {
             });
         }
 
-        // Spinner at play button spot
-        const spinner = scene.add.graphics({ x: centerX, y: centerY });
-        spinner.lineStyle(6, 0xffffff, 1);
-        spinner.arc(0, 0, 15, Phaser.Math.DegToRad(0), Phaser.Math.DegToRad(270), false);
-        spinner.strokePath();
-        spinner.setAlpha(0);
-        loading.add(spinner);
+        if (scene.logoMini) {
+            scene.logoMini.setVisible(false).setAlpha(0);
+        }
 
-        // Fade both in
-        scene.tweens.add({ targets: darkBg, alpha: 1, duration: 400, ease: 'Quad.easeInOut' });
-        scene.tweens.add({ targets: spinner, alpha: 1, duration: 400, ease: 'Quad.easeInOut' });
+        const logoShowcaseY = Phaser.Math.Clamp(Math.round(overlayScene.scale.height * 0.11), 62, 132);
+        const logoShowcase = overlayScene.add.container(overlayScene.scale.width / 2, logoShowcaseY)
+            .setAlpha(0)
+            .setScale(0.92);
+        const logoSprite = overlayScene.add.image(0, 0, 'logoMini').setOrigin(0.5).setScale(1.02);
+        logoShowcase.add(logoSprite);
+        loading.add(logoShowcase);
 
-        // Spin tween
-        scene.tweens.add({
-            targets: spinner,
-            angle: 360,
-            duration: 1000,
-            repeat: -1,
-            ease: 'Linear'
+        overlayScene.tweens.add({
+            targets: logoShowcase,
+            alpha: 1,
+            scaleX: 1,
+            scaleY: 1,
+            duration: 220,
+            ease: 'Cubic.easeOut'
         });
 
         // Worker setup
         const worker = new Worker(new URL('./workers/navMeshWorker.js', import.meta.url), { type: 'module' });
+        let launchSequencePlayed = false;
+        const playReadyLogoSequence = (focusPose) => {
+            if (launchSequencePlayed) return;
+            launchSequencePlayed = true;
+
+            const fadeTargets = [scene.menu, scene._teamTownIcon].filter(Boolean);
+            if (fadeTargets.length) {
+                overlayScene.tweens.add({
+                    targets: fadeTargets,
+                    alpha: 0,
+                    duration: 180,
+                    ease: 'Quad.easeInOut',
+                });
+            }
+
+            overlayScene.time.delayedCall(420, () => {
+                scene.menu?.destroy?.();
+                scene._teamTownIcon?.destroy?.();
+                scene._teamTownIcon = null;
+                scene.logoMini?.destroy?.();
+                scene.logoMini = null;
+                scene.menuPreview?.removeAllListeners?.();
+
+                const cam = scene.cameras.main;
+                const targetZoom = scene.zoomMixer?.detailedZoom ?? 1;
+                const targetScrollX = focusPose?.targetScrollX ?? cam.scrollX;
+                const targetScrollY = focusPose?.targetScrollY ?? cam.scrollY;
+                scene.zoomMixer.targetZoom = targetZoom;
+                scene.zoomMixer.anchorWorld = cam.midPoint ? { x: cam.midPoint.x, y: cam.midPoint.y } : null;
+                scene.zoomMixer.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
+
+                scene.tweens.add({
+                    targets: cam,
+                    scrollX: targetScrollX,
+                    scrollY: targetScrollY,
+                    zoom: targetZoom,
+                    duration: 1000,
+                    ease: 'Cubic.easeInOut',
+                    onComplete: () => {
+                        VisibilitySystem.init(scene);
+                        scene.zoomMixer.swapMode('detailed');
+                        scene.uiScene?.initGameplayUI?.();
+                        if (scene.clock) scene.clock.paused = false;
+
+                        overlayScene.tweens.add({
+                            targets: loading,
+                            alpha: 0,
+                            duration: 220,
+                            ease: 'Quad.easeInOut',
+                            onComplete: () => {
+                                loading.destroy();
+                            }
+                        });
+
+                        scene.zoomMixer.hookWheel();
+                        scene.zoomMixer.hookKeys();
+                        worker.terminate();
+                    }
+                });
+            });
+        };
 
         worker.onmessage = (e) => {
             const { success, polys, error } = e.data;
@@ -835,10 +1003,7 @@ export class MainMenu {
             blockResourceManager.NavMeshUpdater = scene.navMeshUpdater;
             blockResourceManager.EnemyNavMeshUpdater = scene.enemyNavMeshUpdater;
             Map.drawBuildings();
-            if (scene.clock) scene.clock.paused = false;
             GameStart.placePlayers(startCfg);
-            scene.uiScene?.initGameplayUI?.();
-            VisibilitySystem.init(scene);           // build blockers + occlusion from the map
             scene.parcelSpawnUI = new ParcelSpawnController(scene, {
                 islandTileX: 37,
                 islandTileY: 37,
@@ -859,7 +1024,6 @@ export class MainMenu {
                     rng: Math.random,
                 }
             });
-            createZoomButtons(scene)
             Teams.newTeam(0);
             scene.rebuildBothNavMeshes = function rebuildBothNavMeshes() {
                 // ✅ kill old overlays/listeners first
@@ -912,61 +1076,12 @@ export class MainMenu {
                 blockResourceManager.NavMeshUpdater = this.navMeshUpdater;
                 blockResourceManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
             };
-            // --- North Fort (raid/boss island) ---
-            // Spawn immediately so you can see it on load.
-            StageState.applyStartOverride();
-            spawnNorthFort({
-                scene,
-                map: Map,
-                mainIslandOrigin: PARCEL.MAIN_ORIGIN,
-            });
-            // Keep the minimap/overview synced after painting
-            scene.zoomMixer?.buildOverviewTextureFromGrid?.(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+            // Endless horde run: start clean without a north-fort objective.
+            StageState.startEndlessRun?.();
             scene.overviewOceanWaves?.resize?.();
-            Map._uiIgnoreWorldLayer?.();
 
-            // Fade out everything in menu + loading UI
-            const fadeTargets = [scene.menu, scene.logoMini, loading];
-            scene.tweens.add({
-                targets: fadeTargets,
-                alpha: 0,
-                duration: 600,
-                ease: 'Quad.easeInOut',
-                onComplete: () => {
-                    scene.menu.destroy();
-                    scene.logoMini.destroy();
-                    loading.destroy();
-                    scene.menuPreview.removeAllListeners();
-
-                    // Now continue into zoom + gameplay
-                    const b = townBounds[1];
-                    if (b) {
-                        const cx = (b.minx + b.maxx) / 2 * SQUARESIZE;
-                        const cy = (b.miny + b.maxy) / 2 * SQUARESIZE;
-                        const cam = scene.cameras.main;
-                        scene.zoomMixer.targetZoom = 1.0;
-                        scene.zoomMixer.anchorWorld = { x: cx, y: cy };
-                        scene.zoomMixer.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
-                        scene.tweens.add({
-                            targets: cam,
-                            scrollX: cx - cam.width / 2,
-                            scrollY: cy - cam.height / 2,
-                            zoom: 1.0,
-                            duration: 1000,
-                            ease: 'Quad.easeInOut',
-                            onComplete: () => {
-                                scene.zoomMixer.swapMode('detailed');
-                            }
-                        });
-
-                    } else {
-                        scene.zoomMixer.swapMode('detailed');
-                    }
-                    scene.zoomMixer.hookWheel();
-                    scene.zoomMixer.hookKeys();
-                    worker.terminate();
-                }
-            });
+            const focusPose = MainMenu._getTownFocusPose(scene, scene.uiScene || scene, startCfg?.buildings);
+            playReadyLogoSequence(focusPose);
         };
 
         worker.postMessage({ navGrid: Map.navGrid, gridData: scene.gridData });

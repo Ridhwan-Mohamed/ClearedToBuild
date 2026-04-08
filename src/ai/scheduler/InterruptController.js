@@ -1,5 +1,6 @@
 import { Teams } from "../../Teams";
 import { CONTROL_STATES } from "../../constants";
+import { CombatSpacingCoordinator } from "../CombatSpacingCoordinator";
 
 export class InterruptController {
     static interruptTroop(troop, reason = "generic_interrupt", targetState = null) {
@@ -21,6 +22,9 @@ export class InterruptController {
         }
 
         troop.roam = false;
+        troop._combatRoamDest = null;
+        CombatSpacingCoordinator.clearRoamReservation(troop);
+        CombatSpacingCoordinator.clearTroopFocus(troop);
         if (troop.currentPath?.length) troop.currentPath.length = 0;
         troop.body?.setVelocity?.(0, 0);
 
@@ -121,4 +125,3 @@ export class InterruptController {
         }
     }
 }
-

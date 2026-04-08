@@ -1,15 +1,11 @@
-// ClayOvenTab.js
 import { showAlert, TILE_TYPES, UIDEPTH } from "../../constants";
 import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { buildingManager } from "../../Manager/buildingManager.js";
 
-
 export default class ClayOvenTab {
-
   static ensureBlankTexture(scene) {
     if (scene.textures.exists("blank")) return;
-
     const g = scene.add.graphics();
     g.fillStyle(0xffffff, 1);
     g.fillRect(0, 0, 1, 1);
@@ -21,45 +17,35 @@ export default class ClayOvenTab {
     this.scene = scene;
     this.team = teamNumber;
     this.selected = null;
-
-    // 🔥 map ovens to their UI rows
     this.cardByOven = new Map();
+    this._onWheel = null;
     this.root = this.build();
+    this.bindScrollInput();
 
-    // live detail refresh still ok
     this._update = this.update.bind(this);
-    this.scene.events.on('update', this._update);
+    this.scene.events.on("update", this._update);
 
-    // 🔊 listen for oven lifecycle
     this._onOvenUpdated = (oven) => {
       if (!oven || oven.teamNumber !== this.team) return;
-
-      const current = this.scene.uiBottomBar?.currentPage;
-
-      // 🔒 Only touch UI if the ovens tab is actually open
-      if (current !== 'ovens') return;
-
-      // Keep the row UI in sync with the oven state (only when tab is open)
+      if (this.scene.uiBottomBar?.currentPage !== "ovens") return;
       this.updateCard(oven);
-
-      // And only touch detail panel if this oven is selected
-      if (this.selected === oven && this.detail?.setOven) {
-        this.detail.setOven(oven);
-      }
+      if (this.selected === oven) this.detail?.setOven?.(oven);
     };
+
     this._onOvenAdded = (oven) => {
       if (!oven || oven.teamNumber !== this.team) return;
       const idx = (Teams.teamLists[this.team]?.ovenList || []).indexOf(oven);
       const row = this.createCard(oven, idx >= 0 ? idx : this.cardByOven.size);
-      this.listBody.add(row, { expand: false });
+      this.listBody.add(row, { expand: true });
       this.cardByOven.set(oven, row);
       this.scroll.layout();
     };
+
     this._onOvenRemoved = (oven) => {
-      const jobs = Teams.teamLists[this.team]?.ovenJobs;
-      if (jobs) {
-        for (let i = jobs.length - 1; i >= 0; i--) {
-          if (jobs[i].oven === oven) jobs.splice(i, 1);
+      const team = Teams.teamLists[this.team];
+      if (team) {
+        for (const key of ["ovenJobs", "ovenFuelJobs", "ovenPickupJobs", "ovenDeliveryItems", "ovenFuelDeliveryItems"]) {
+          if (Array.isArray(team[key])) team[key] = team[key].filter((job) => job?.oven !== oven);
         }
       }
       const row = this.cardByOven.get(oven);
@@ -70,967 +56,677 @@ export default class ClayOvenTab {
       }
       if (this.selected === oven) {
         this.selected = null;
-        this.detail.setOven(null);
+        this.detail?.setOven?.(null);
       }
     };
 
     this._onResize = () => { if (this.jobPopup) this.positionJobPopup(this.jobPopup); };
-    this.scene.scale.on('resize', this._onResize);
-
-    scene.events.on('oven:updated', this._onOvenUpdated);
-    scene.events.on('oven:added',   this._onOvenAdded);
-    scene.events.on('oven:removed', this._onOvenRemoved);
+    scene.events.on("oven:updated", this._onOvenUpdated);
+    scene.events.on("oven:added", this._onOvenAdded);
+    scene.events.on("oven:removed", this._onOvenRemoved);
+    scene.scale.on("resize", this._onResize);
   }
 
   get view() { return this.root; }
 
   hide() {
     this.selected = null;
-    // Hide or clear detail panel
-    if (this.detail?.setOven) this.detail.setOven(null);
-    if (this.detail?.setStorage) this.detail.setStorage(null);
-    // Hide any visible count texts / icons
-    // if (this.detail?.cells) {
-    //   this.detail.cells.forEach(c => {
-    //     if (c.icon) c.icon.setVisible(false);
-    //     if (c.text) c.text.setVisible(false);
-    //   });
-    // }
-    // if (this.cards?.childrenMap?.grid) {
-    //   this.cards.childrenMap.grid.getAllVisibleChildren?.().forEach(child => {
-    //     if (child.setVisible) child.setVisible(false);
-    //   });
-    // }
-    // // Hide icons & counters inside each oven card
-    // for (const [oven, row] of this.cardByOven.entries()) {
-    //   if (!row?.userData) continue;
-    //   // hide cook slot counters/icons
-    //   row.userData.cookIcons?.forEach(ic => {
-    //     ic?.setVisible(false);
-    //     ic?.children?.map?.forEach?.(ch => ch.setVisible(false)); // icon + text
-    //   });
-    //   // hide output slot counters/icons
-    //   row.userData.outIcons?.forEach(ic => {
-    //     ic?.setVisible(false);
-    //     ic?.children?.map?.forEach?.(ch => ch.setVisible(false));
-    //   });
-    //   // hide fuel text/icon
-    //   row.userData.fuelValueText?.setVisible(false);
-    //   row.userData.fuelBadge?.setVisible?.(false);
-    // }
+    this.detail?.setOven?.(null);
+    this.closeJobEditor?.();
   }
 
   destroy() {
-    this.scene.events.off('update', this._update);
-    this.scene.events.off('oven:updated', this._onOvenUpdated);
-    this.scene.events.off('oven:added',   this._onOvenAdded);
-    this.scene.events.off('oven:removed', this._onOvenRemoved);
-    this.scene.scale.off('resize', this._onResize);
+    this.scene.events.off("update", this._update);
+    this.scene.events.off("oven:updated", this._onOvenUpdated);
+    this.scene.events.off("oven:added", this._onOvenAdded);
+    this.scene.events.off("oven:removed", this._onOvenRemoved);
+    this.scene.scale.off("resize", this._onResize);
+    if (this._onWheel) this.scene.input.off("wheel", this._onWheel);
+    this.closeJobEditor?.();
     this.root?.destroy();
   }
 
+  rr(w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) {
+    const rect = this.scene.rexUI.add.roundRectangle(0, 0, w, h, r, c, a);
+    rect.setStrokeStyle(2, stroke, sa);
+    return rect;
+  }
 
-  // ---------- UI Builders ----------
+  panelBg(w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) {
+    const bg = this.rr(w, h, r, c, a, stroke, sa);
+    bg.setDepth(-1);
+    return bg;
+  }
+
+  txt(text, style = {}) {
+    const label = this.scene.add.text(0, 0, text, { fontFamily: "Bungee", fontSize: 12, color: "#ffffff", ...style });
+    label.setAlpha(1);
+    label.setShadow(0, 1, "#000000", 2, true, true);
+    return label;
+  }
+
+  button(label, fill = 0x305f78, stroke = 0xa9ebff, color = "#ffffff") {
+    const compact = this.scene.scale.width < 1080;
+    const bg = this.panelBg(0, 0, 12, fill, 0.95, stroke, 0.18);
+    const text = this.txt(label, { fontSize: compact ? 11 : 12, color });
+    const btn = this.scene.rexUI.add.label({
+      background: bg,
+      text,
+      space: { left: compact ? 10 : 12, right: compact ? 10 : 12, top: compact ? 6 : 8, bottom: compact ? 6 : 8 }
+    });
+    btn.setInteractive({ useHandCursor: true });
+    btn.on("pointerover", () => bg.setFillStyle(fill, 1));
+    btn.on("pointerout", () => bg.setFillStyle(fill, 0.95));
+    btn.setEnabledState = (enabled) => {
+      btn.disableInteractive();
+      if (enabled) btn.setInteractive({ useHandCursor: true });
+      btn.setAlpha(enabled ? 1 : 0.4);
+    };
+    return btn;
+  }
+
+  pill(text, fill = 0x17384c, stroke = 0x93dfff, color = "#d7f5ff") {
+    const compact = this.scene.scale.width < 1080;
+    const bg = this.panelBg(0, 0, 11, fill, 0.92, stroke, 0.16);
+    const label = this.txt(text, { fontSize: compact ? 9 : 10, color });
+    const pill = this.scene.rexUI.add.label({
+      background: bg,
+      text: label,
+      space: { left: compact ? 8 : 10, right: compact ? 8 : 10, top: compact ? 4 : 5, bottom: compact ? 4 : 5 }
+    });
+    pill.setValue = (nextText, nextFill = fill, nextStroke = stroke, nextColor = color) => {
+      label.setText(nextText);
+      label.setColor(nextColor);
+      bg.setFillStyle(nextFill, 0.92);
+      bg.setStrokeStyle(2, nextStroke, 0.16);
+    };
+    return pill;
+  }
+
+  slot(size = 54) {
+    const s = this.scene.rexUI.add.overlapSizer({ width: size, height: size });
+    const bg = this.panelBg(size, size, 13, 0x102637, 0.95, 0x98e7ff, 0.14);
+    const shine = this.scene.rexUI.add.roundRectangle(0, 0, size - 16, 12, 6, 0xffffff, 0.08);
+    const icon = this.scene.add.image(0, 0, "blank").setDisplaySize(size - 18, size - 18).setVisible(false);
+    const count = this.txt("", { fontSize: 10, stroke: "#091018", strokeThickness: 3 }).setOrigin(1, 1).setVisible(false);
+    const hint = this.txt("", { fontSize: 9, color: "#98bed0", align: "center", wordWrap: { width: size - 12 } }).setOrigin(0.5);
+    s.addBackground(bg);
+    s.add(shine, { align: "top", padding: { top: 7 } });
+    s.add(icon, { align: "center" });
+    s.add(hint, { align: "center" });
+    s.add(count, { align: "right-bottom", padding: { right: 6, bottom: 5 } });
+    s.setItem = (item, amount = 0, empty = "") => {
+      const ui = typeof item === "string" ? UI_ITEM_TYPES[item] : (item?.name ? UI_ITEM_TYPES[item.name] : item);
+      const iconKey = ui?.icon || null;
+      const showIcon = !!(iconKey && this.scene.textures.exists(iconKey));
+      icon.setVisible(showIcon);
+      if (showIcon) icon.setTexture(iconKey);
+      hint.setVisible(!showIcon && !!empty).setText(showIcon ? "" : empty);
+      count.setVisible(amount > 1).setText(amount > 1 ? `x${amount}` : "");
+      s.layout();
+    };
+    return s;
+  }
+
+  bar(width = 150, height = 12) {
+    const s = this.scene.rexUI.add.overlapSizer({ width, height });
+    const bg = this.panelBg(width, height, height / 2, 0x08121a, 0.92, 0x92ddff, 0.08);
+    const fill = this.scene.rexUI.add.roundRectangle(0, 0, 1, height - 4, (height - 4) / 2, 0x49cf73, 1).setOrigin(0, 0.5);
+    const text = this.txt("Idle", { fontSize: (width < 110 || this.scene.scale.width < 1080) ? 8 : 9, color: "#d7f3dc" }).setOrigin(0.5);
+    s.addBackground(bg);
+    s.add(fill, { align: "left", padding: { left: 2, right: 2 } });
+    s.add(text, { align: "center" });
+    s.setValue = (pct, label = "Idle", color = 0x49cf73) => {
+      const fillWidth = Math.max(1, (width - 4) * Phaser.Math.Clamp(pct || 0, 0, 1));
+      fill.setSize(fillWidth, height - 4);
+      fill.setFillStyle(color, 1);
+      text.setText(label);
+      s.layout();
+    };
+    return s;
+  }
+
+  cookJob(oven) { return (Teams.teamLists[this.team]?.ovenJobs || []).find((j) => !j.canceled && j.oven === oven && j.inputidx === 0); }
+  fuelJob(oven) { return (Teams.teamLists[this.team]?.ovenFuelJobs || []).find((j) => !j.canceled && j.oven === oven); }
+  pickupJob(oven) { return (Teams.teamLists[this.team]?.ovenPickupJobs || []).find((j) => j.oven === oven && j.outputidx === 0 && j.amount > 0); }
+
   build() {
     const scene = this.scene;
+    const rootSpace = { left: 10, right: 10, top: 8, bottom: 8, item: 12 };
+    const splitWidth = Math.max(0, scene.scale.width - rootSpace.left - rootSpace.right - rootSpace.item);
+    if (splitWidth < 420) {
+      this.detailWidth = Math.max(160, Math.floor(splitWidth * 0.46));
+      this.listWidth = Math.max(160, splitWidth - this.detailWidth);
+    } else {
+      const minPaneWidth = splitWidth >= 700 ? 320 : 240;
+      this.detailWidth = Phaser.Math.Clamp(
+        Math.floor(splitWidth * 0.44),
+        minPaneWidth,
+        Math.max(minPaneWidth, splitWidth - minPaneWidth)
+      );
+      this.listWidth = Math.max(minPaneWidth, splitWidth - this.detailWidth);
+    }
 
-    // Root split: left (details) 1/3, right (cards) 2/3
-    const root = scene.rexUI.add.sizer({
-      orientation: 'x',
-      space: { left: 12, right: 12, top: 8, bottom: 8, item: 12 }
-    });
-
-    // Left details panel
+    const root = scene.rexUI.add.sizer({ orientation: "x", space: rootSpace });
     this.detail = this.buildDetailPanel();
-    root.add(this.detail.panel, { proportion: 1, expand: true });
-
-    // Right: scrollable list of oven cards
-    this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 8 } });
-
-    this.scroll = scene.rexUI.add.scrollablePanel({
-      width: Math.floor(scene.scale.width * (2/3)) - 48,
+    this.detailScroll = scene.rexUI.add.scrollablePanel({
+      width: this.detailWidth,
       height: 200,
       scrollMode: 0,
-      background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.15),
-      panel: { child: this.listBody, mask: { padding: 1 } },
+      scrollDetectionMode: "rectBounds",
+      background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
+      panel: { child: this.detail.panel, mask: { padding: 2 } },
       sliderY: scene.rexUI.add.slider({
         height: 160,
-        orientation: 'y',
-        track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
-        thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x999999),
+        orientation: "y",
+        track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x0f1d28, 0.9),
+        thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 30, 5, 0x7adfff, 0.8),
       }),
-      space: { left: 6, right: 6, top: 6, bottom: 6, panel: 8 }
+      scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
+      space: { left: 8, right: 8, top: 8, bottom: 8, panel: 8 },
     });
+    root.add(this.detailScroll, { proportion: 1.4, expand: true });
 
-    root.add(this.scroll, { proportion: 2, expand: true });
-
-    // build list once
+    this.listBody = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 10 } });
+    this.scroll = this.scene.rexUI.add.scrollablePanel({
+      width: this.listWidth,
+      height: 200,
+      scrollMode: 0,
+      scrollDetectionMode: "rectBounds",
+      background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
+      panel: { child: this.listBody, mask: { padding: 2 } },
+      sliderY: this.scene.rexUI.add.slider({
+        height: 168,
+        orientation: "y",
+        track: this.scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x0f1d28, 0.9),
+        thumb: this.scene.rexUI.add.roundRectangle(0, 0, 10, 34, 5, 0x7adfff, 0.8),
+      }),
+      scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
+      space: { left: 8, right: 8, top: 8, bottom: 8, panel: 10 },
+    });
+    root.add(this.scroll, { proportion: 1.6, expand: true });
     this.rebuildList();
     return root;
   }
 
+  bindScrollInput() {
+    if (this._onWheel) return;
+    this._onWheel = (pointer, _gameObjects, dx, dy) => {
+      if (this.scene.uiBottomBar?.currentPage !== "ovens") return;
+      if (!this.scene.uiBottomBar?.expanded) return;
+      if (!this.scroll?.isOverflowY) return;
+      if (!this.isPointerOverScroll(pointer)) return;
+      const d = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      if (Math.abs(d) < 0.1) return;
+      this.scroll.addChildOY(-d * 0.8, true);
+      this.scene.input.stopPropagation();
+    };
+    this.scene.input.on("wheel", this._onWheel);
+  }
+
+  isPointerOverScroll(pointer) {
+    if (!this.scroll?.getBounds) return false;
+    return Phaser.Geom.Rectangle.Contains(this.scroll.getBounds(), pointer.x, pointer.y);
+  }
+
   buildDetailPanel() {
-    const scene = this.scene;
-    const rr = (w,h,r,c,a=1) => scene.rexUI.add.roundRectangle(0,0,w,h,r,c,a);
-
-    // helper: generic percent bar (used for HP)
-    const makeBar = (width, height, fillColor) => {
-      const s = scene.rexUI.add.overlapSizer({ width, height });
-      const bg = rr(width, height, 4, 0x222222, 1);
-      const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 4, fillColor, 1).setOrigin(0, 0.5);
-
-      s.addBackground(bg);
-      s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
-      s.layout();
-
-      s.setPercent = (pct) => {
-        const p = Phaser.Math.Clamp(pct ?? 0, 0, 1);
-        fill.width = Math.max(1, (width - 2) * p);
-        s.layout();
-      };
-
-      return s;
-    };
-
-    // helper: HP bar with centered text (HP cur/max)
-    const makeHpBarWithText = (width, height) => {
-      const s = scene.rexUI.add.overlapSizer({ width, height });
-
-      const bg = rr(width, height, 5, 0x222222, 1);
-      const fill = rr(Math.max(1, width - 2), Math.max(1, height - 2), 5, 0x4caf50, 1).setOrigin(0, 0.5);
-
-      const txt = scene.add.text(0, 0, 'HP —/—', {
-        fontFamily: 'Bungee',
-        fontSize: 12,
-        color: '#ffffff',
-      }).setOrigin(0.5, 0.5);
-
-      s.addBackground(bg);
-      s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
-      s.add(txt,  { key: 'txt',  align: 'center', expand: false });
-      s.layout();
-
-      s.setValue = (cur, max) => {
-        const m = Math.max(1, (max ?? 0));
-        const c = Math.max(0, (cur ?? 0));
-        const p = Phaser.Math.Clamp(c / m, 0, 1);
-        fill.width = Math.max(1, (width - 2) * p);
-        txt.setText(`HP ${Math.floor(c)}/${Math.floor(m)}`);
-        s.layout();
-      };
-
-      return s;
-    };
-
-    // header: title + coords + HP
-    const title = scene.add.text(0,0,"Oven", { fontSize: 16, color: "#ffffff", fontFamily: "Bungee" });
-    const sub = scene.add.text(0,0,"—", { fontSize: 12, color: "#b0b0b0", fontFamily: "Bungee" });
-    const ovenHpBar = makeHpBarWithText(240, 14);
-
-    // after 'title' create a fuel row
-    const woodIconKey = (UI_ITEM_TYPES['wood']?.icon) || 'wood' || 'blank';
-    const fuelIcon = scene.add.image(0,0, woodIconKey).setDisplaySize(20,20).setOrigin(0.5);
-    const fuelText = scene.add.text(0,0, 'Fuel: 0', { fontSize: 14, color: '#ffd27f' });
-
-    const fuelRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } })
-          .add(fuelIcon, 0, 'center', 0, false)
-          .add(fuelText, 0, 'center', 0, false);
-
-    const refuelBtn = scene.rexUI.add.label({
-      background: scene.rexUI.add.roundRectangle(0,0,0,0,6,0x444444),
-      text: scene.add.text(0,0,'Refuel Oven',{ fontSize:12, color:'#ffffff' }),
-      space: { left:10,right:10,top:4,bottom:4 }
-    })
-    .setInteractive()
-    .on('pointerup', () => {
-      if (this.selected) this.openRefuelEditor(this.selected);
-    });
-
-    const fixBtn = scene.rexUI.add.label({
-      background: scene.rexUI.add.roundRectangle(0,0,0,0,10,0x2f7d32),
-      text: scene.add.text(0,0,'🛠 Fix', { fontSize: 14, color: '#ffffff', fontFamily: 'Bungee' }),
-      space: { left: 12, right: 12, top: 7, bottom: 7 }
-    })
-      .setMinSize(110, 34)
-      .setInteractive({ useHandCursor: true });
-
-    fixBtn.on('pointerup', () => {
-      const b = this.selected; // oven
-      if (!b) return;
-      buildingManager.requestBuildingFix(b, this.team, []);
-    });
-
-    // Make them share row width (prevents stacking in narrow panels)
-    refuelBtn.setMinSize(0, 34);
-    fixBtn.setMinSize(0, 34);
-
-    const actionRow = scene.rexUI.add.sizer({
-      orientation: 'x',
-      space: { item: 10 }
-    })
-      .add(refuelBtn, { proportion: 1, align: 'center', expand: true })
-      .add(fixBtn,    { proportion: 1, align: 'center', expand: true });
-
-
-    // helper: icon with count (overlay bottom-right)
-    const iconWithCount = () => {
-      const c = scene.rexUI.add.overlapSizer({ width: 28, height: 28 });
-
-      // 🔲 background box for the slot (neutral gray like the tabs)
-      const bg = rr(28, 28, 4, 0x333333, 0.9);
-      c.addBackground(bg);
-
-      const icon = scene.add.image(0, 0, "blank")
-        .setDisplaySize(24, 24)
-        .setOrigin(0.5);
-
-      const count = scene.add.text(0, 0, "", {
-        fontSize: 12,
-        color: "#ffffff",
-        stroke: "#000",
-        strokeThickness: 2,
-        fontFamily: "Bungee"
-      }).setOrigin(1, 1);
-
-      c.add(icon, { key: "icon", align: "center" });
-      c.add(count, { key: "count", align: "right-bottom" });
-
-      c.setIcon = (key, amt) => {
-        const hasIcon =
-          key && key !== "empty" && scene.textures.exists(key);
-
-        if (hasIcon) {
-          icon.setTexture(key);
-          icon.setVisible(true);
-        } else {
-          // 🔕 no icon → just show the gray box
-          icon.setVisible(false);
-        }
-
-        if (amt && amt > 1) {
-          count.setVisible(true).setText("x" + amt);
-        } else {
-          count.setVisible(false);
-        }
-      };
-
-      return c;
-    };
-
-    // helper: mini progress bar (overlapped so fill is above bg)
-    const makeProgress = () => {
-      const s = scene.rexUI.add.overlapSizer({ width: 80, height: 8 });
-      const bg   = rr(80,8,4,0x111111,1);
-      const fill = rr(1, 8,4,0x22cc66,1).setOrigin(0,0.5);
-      s.addBackground(bg);
-      s.add(fill, { key: "fill", align: "left", expand: false, padding: { left: 2, right: 2 } });
-      s.setPct = (p) => {
-        const pct = Phaser.Math.Clamp(p, 0, 1);
-        fill.width = Math.max(1, (80-4) * pct);
-        s.layout();
-      };
-      return s;
-    };
-
-    // build 3 rows: [ cookIcon + count ] [progress] → [ outIcon + count ]
-    const rows = [];
-    const col = scene.rexUI.add.sizer({ orientation: "y", space: { item: 10 } });
-
-    for (let i=0;i<3;i++) {
-      const cook = iconWithCount();
-      const prog = makeProgress();
-      const arrow = scene.add.text(0,0,"→", { fontSize: 16, color: "#bbbbbb" });
-      const out  = iconWithCount();
-
-      const row = scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
-        .add(cook, 0, "center", 0, false)
-        .add(prog, 0, "center", 0, false)
-        .add(arrow,0, "center", 0, false)
-        .add(out,  0, "center", 0, false);
-
-      col.add(row, 0, "left", 0, false);
-      rows.push({ cook, prog, out });
-      cook.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-        this.openJobEditor(this.selected, i);
-      });
-      out.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
-        this.queueOvenOutputPickup(this.selected, i);
-      });
+    const compact = this.scene.scale.width < 1080;
+    const contentWidth = Math.max(220, (this.detailWidth || 360) - 54);
+    let queueColumnWidth = Math.max(156, Math.floor(contentWidth * 0.36));
+    let burnerWidth = contentWidth - queueColumnWidth - 10;
+    if (burnerWidth < 210) {
+      burnerWidth = Math.floor((contentWidth - 10) * 0.58);
+      queueColumnWidth = contentWidth - burnerWidth - 10;
     }
 
-    const panel = scene.rexUI.add.sizer({
-      orientation: "y",
-      space: { left: 10, right: 10, top: 6, bottom: 6, item: 10 }
-    })
-      .add(title,     0, "left", 0, false)
-      .add(sub,       0, "left", 0, false)
-      .add(ovenHpBar, 0, "left", 0, false)
-      .add(fuelRow,   0, "left", 0, false)
-      .add(actionRow, 0, "left", 0, false)
-      .add(col,       0, "left", 0, true);
+    const burnerBg = this.panelBg(0, 0, 15, 0x1f4a64, 0.46, 0x9ce7ff, 0.16);
+    const title = this.txt("Clay Oven", { fontSize: compact ? 16 : 18 });
+    const hp = this.bar(Math.max(150, contentWidth - 112), 13);
+    const fuel = this.pill("Fuel 0", 0x2c2817, 0xffcf88, "#ffe8b2");
+    const input = this.slot(compact ? 54 : 58);
+    const output = this.slot(compact ? 54 : 58);
+    const progress = this.bar(Math.max(98, burnerWidth - 172), 12);
+    const burnerStatus = this.txt("Click the left tray to queue cooking. Click the right tray to request pickup.", {
+      fontSize: compact ? 9 : 10, color: "#d9f5ff", wordWrap: { width: Math.max(110, burnerWidth - 176) }
+    });
+    const pickup = this.pill("No pickup queued", 0x17354a, 0x93dfff, "#d7f5ff");
+    const refuelBtn = this.button("Queue Fuel");
+    const fixBtn = this.button("Fix", 0x387344, 0xb4ffd1);
+    const cookBubble = this.buildQueueBubble("Cook Request", 0x16384d, 0x6dd3ff, queueColumnWidth);
+    const fuelBubble = this.buildQueueBubble("Fuel Request", 0x2a2517, 0xffcf88, queueColumnWidth);
+    const actionButtonWidth = Math.max(118, Math.floor((contentWidth - 10) / 2));
+    refuelBtn.setMinSize(actionButtonWidth, 38);
+    fixBtn.setMinSize(actionButtonWidth, 38);
+    fuel.setMinSize(96, 0);
 
-    // methods to update details
+    input.setInteractive({ useHandCursor: true }).on("pointerup", () => { if (this.selected) this.openJobEditor(this.selected); });
+    output.setInteractive({ useHandCursor: true }).on("pointerup", () => { if (this.selected) this.queueOvenOutputPickup(this.selected); });
+    refuelBtn.on("pointerup", () => { if (this.selected) this.openRefuelEditor(this.selected); });
+    fixBtn.on("pointerup", () => { if (this.selected) buildingManager.requestBuildingFix(this.selected, this.team, []); });
+
+    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 10 } })
+      .add(refuelBtn, { proportion: 1, expand: true })
+      .add(fixBtn, { proportion: 1, expand: true });
+    const burnerMid = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 5 } })
+      .add(this.txt("Burner Lane", { fontSize: compact ? 10 : 11, color: "#effcff" }), { expand: false })
+      .add(progress, { expand: false })
+      .add(burnerStatus, { expand: false });
+    const burnerRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 10 } })
+      .add(input, { expand: false })
+      .add(burnerMid, { proportion: 1, expand: true })
+      .add(this.txt("->", { fontSize: 16, color: "#9ccde0" }), { expand: false })
+      .add(output, { expand: false });
+    const burnerCard = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 10, right: 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 5 : 6 } })
+      .addBackground(burnerBg)
+      .add(burnerRow, { expand: true })
+      .add(pickup, { expand: false, align: "left" });
+    const statRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(hp, { proportion: 1, expand: true })
+      .add(fuel, { expand: false, align: "center" });
+    const queueColumn = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 6 } })
+      .add(cookBubble.box, { expand: true })
+      .add(fuelBubble.box, { expand: true });
+    const workRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 10 } })
+      .add(burnerCard, { proportion: 1, expand: true })
+      .add(queueColumn, { proportion: 0, expand: false, align: "top" });
+    const panel = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 4, right: 4, top: 2, bottom: 2, item: 6 } })
+      .add(title, { expand: false, align: "left" })
+      .add(statRow, { expand: true })
+      .add(actionRow, { expand: true })
+      .add(workRow, { expand: true });
+
+    panel.setMinSize(contentWidth, 0);
+    burnerCard.setMinSize(burnerWidth, 0);
+    cookBubble.box.setMinSize(queueColumnWidth, 0);
+    fuelBubble.box.setMinSize(queueColumnWidth, 0);
+
     const setOven = (oven) => {
       if (!oven) {
-        title.setText('Oven');
-        sub.setText('—');
-        ovenHpBar.setValue(0, 1);
-        rows.forEach(r => {
-          r.cook.setIcon(null, 0);  // 🔸 no texture → just gray box
-          r.prog.setPct(0);
-          r.out.setIcon(null, 0);
-        });
-        fuelText.setText('Fuel: 0');
+        title.setText("Clay Oven");
+        hp.setValue(0, "", 0x49cf73);
+        fuel.setValue("Fuel 0", 0x2c2817, 0xffcf88, "#ffe8b2");
+        input.setItem(null, 0, "");
+        output.setItem(null, 0, "");
+        progress.setValue(0, "", 0x49cf73);
+        burnerStatus.setText("");
+        pickup.setValue("", 0x17354a, 0x93dfff, "#d7f5ff");
+        cookBubble.set("", "", null, 0, false, null);
+        fuelBubble.set("", "", null, 0, false, null);
+        refuelBtn.setEnabledState(false);
+        fixBtn.setEnabledState(false);
+        panel.layout();
         return;
       }
 
-      title.setText('Oven');
-      sub.setText(`(${oven.x ?? 0}, ${oven.y ?? 0})`);
-      ovenHpBar.setValue(oven.health ?? 0, oven.maxHealth ?? 1);
-
-      fuelText.setText(`Fuel: ${oven.fuel|0}`);
-      for (let i=0;i<3;i++) {
-        const cookSlot = oven.cookingSlots[i];
-        const outSlot  = oven.outputSlots[i];
-        const cookKey = UI_ITEM_TYPES[cookSlot?.item?.name || "empty"]?.icon || null;
-        const outKey  = UI_ITEM_TYPES[outSlot?.item?.name  || "empty"]?.icon || null;
-        rows[i].cook.setIcon(cookKey, cookSlot?.amount || 0);
-        rows[i].out.setIcon(outKey,  outSlot?.amount  || 0);
-
-        const dur = oven.cookDurations[i] || 0;
-        const t   = oven.cookTimers[i] || 0;
-        rows[i].prog.setPct(dur > 0 ? Math.min(t/dur, 1) : 0);
-      }
+      const slot = oven?.cookingSlots?.[0] || null;
+      const out = oven?.outputSlots?.[0] || null;
+      const cookJob = oven ? this.cookJob(oven) : null;
+      const fuelJob = oven ? this.fuelJob(oven) : null;
+      const pickupJob = oven ? this.pickupJob(oven) : null;
+      const dur = oven?.cookDurations?.[0] || 0;
+      const elapsed = oven?.cookTimers?.[0] || 0;
+      const pct = dur > 0 ? Math.min(elapsed / dur, 1) : 0;
+      title.setText(oven ? `Oven (${oven.x}, ${oven.y})` : "Clay Oven");
+      hp.setValue((oven?.health || 0) / Math.max(1, oven?.maxHealth || 1), oven ? `HP ${Math.floor(oven.health)}/${Math.floor(oven.maxHealth || 1)}` : "Idle", 0x49cf73);
+      fuel.setValue(`Fuel ${oven?.fuel || 0}`, 0x2c2817, 0xffcf88, "#ffe8b2");
+      input.setItem(slot?.item || null, slot?.amount || 0, "Cook");
+      output.setItem(out?.item || null, out?.amount || 0, "Out");
+      refuelBtn.setEnabledState(true);
+      fixBtn.setEnabledState(true);
+      progress.setValue(pct, slot ? (pct > 0 ? `${Math.round(pct * 100)}%` : "Queued") : "Idle", 0x49cf73);
+      burnerStatus.setText(slot ? `${slot.item?.label || slot.item?.name || "Item"} is in the burner.` : "Click the left tray to queue cooking. Click the right tray to request pickup.");
+      pickup.setValue(
+        pickupJob ? `Pickup queued | ${pickupJob.amount} ready` : (out?.amount > 0 ? "Output ready | click tray to queue pickup" : "No pickup queued"),
+        out?.amount > 0 ? 0x24453a : 0x17354a,
+        out?.amount > 0 ? 0x8bf0c3 : 0x93dfff,
+        out?.amount > 0 ? "#e5fff6" : "#d7f5ff"
+      );
+      cookBubble.set(cookJob ? `${cookJob.item?.label || cookJob.item?.name} x${cookJob.target}` : "Cook Request", cookJob ? `${cookJob.remaining}/${cookJob.target} left${cookJob.assigned > 0 ? ` | ${cookJob.assigned} assigned` : ""}` : "No cook request queued. Click the left tray to add one.", cookJob?.item || null, cookJob?.target || 0, !!cookJob, () => this.cancelOvenJob(cookJob));
+      fuelBubble.set(fuelJob ? `Wood x${fuelJob.target}` : "Fuel Request", fuelJob ? `${fuelJob.remaining}/${fuelJob.target} wood left${fuelJob.assigned > 0 ? ` | ${fuelJob.assigned} assigned` : ""}` : "No fuel request queued. Use Queue Fuel to call for wood.", UI_ITEM_TYPES.wood, fuelJob?.target || 0, !!fuelJob, () => this.cancelFuelJob(fuelJob));
+      panel.layout();
     };
 
-    return { panel, setOven, fuelText };
+    return { panel, setOven };
   }
 
-  // ---------- List (cards) ----------
+  buildQueueBubble(name, fill, stroke, widthOverride = null) {
+    const compact = this.scene.scale.width < 1080 || (widthOverride || 0) < 220;
+    const contentWidth = widthOverride || Math.max(300, (this.detailWidth || 360) - 34);
+    const bg = this.panelBg(0, 0, 14, fill, 0.44, stroke, 0.16);
+    const icon = this.slot(compact ? 36 : 42);
+    const title = this.txt(name, { fontSize: compact ? 11 : 12, color: "#f3fcff" });
+    const cancelWidth = Math.max(82, Math.min(102, Math.floor(contentWidth * 0.3)));
+    const body = this.txt("No request queued.", { fontSize: compact ? 9 : 10, color: "#e3f8ff", wordWrap: { width: Math.max(104, contentWidth - cancelWidth - 76) } });
+    const cancel = this.button("Cancel", 0x7a2d41, 0xffb4c3);
+    cancel.setMinSize(cancelWidth, compact ? 30 : 32);
+    const textCol = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: compact ? 2 : 4 } })
+      .add(title, { expand: false })
+      .add(body, { expand: false });
+    const box = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 10, right: 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 8 : 10 } })
+      .addBackground(bg)
+      .add(icon, { expand: false })
+      .add(textCol, { proportion: 1, expand: true })
+      .add(cancel, { expand: false });
+    box.setMinSize(contentWidth, 0);
+    return {
+      box,
+      set: (nextTitle, nextBody, item, amount, canCancel, onCancel) => {
+        title.setText(nextTitle);
+        body.setText(nextBody);
+        const emptyHint = item
+          ? ""
+          : ((nextTitle || nextBody) ? (name === "Fuel Request" ? "Fuel" : "Cook") : "");
+        icon.setItem(item, amount, emptyHint);
+        cancel.removeAllListeners("pointerup");
+        cancel.on("pointerup", () => { if (canCancel) onCancel?.(); });
+        cancel.setEnabledState(canCancel);
+        box.layout();
+      }
+    };
+  }
+
   rebuildList() {
-    const scene = this.scene;
     this.cardByOven.clear();
     this.listBody.clear(true);
-
-    const ovens = Teams.teamLists[this.team]?.ovenList || [];
-    ovens.forEach((oven, idx) => {
+    (Teams.teamLists[this.team]?.ovenList || []).forEach((oven, idx) => {
       const row = this.createCard(oven, idx);
-      this.listBody.add(row, { expand: false });
+      this.listBody.add(row, { expand: true });
       this.cardByOven.set(oven, row);
     });
-
     this.scroll.layout();
   }
 
-
   createCard(oven, idx) {
-    const scene = this.scene;
-    const arrow = scene.add.text(0,0,"→", { fontSize: 16, color: "#bbbbbb" });
-    const name = scene.add.text(0, 0, `Oven ${idx + 1} (${oven.x},${oven.y})`, {
-      fontSize: 13,
-      color: "#ffffff",
+    const width = Math.max(220, (this.listWidth || (Math.floor(this.scene.scale.width * (2 / 3)) - 46)) - 24);
+    const compact = width < 420 || this.scene.scale.width < 1080;
+    const rowHeight = compact ? 76 : 80;
+    const slotSize = compact ? 38 : 44;
+    const progressWidth = compact ? 92 : 112;
+    const bg = this.rr(width, rowHeight, 16, 0x102a3b, 0.78, 0x8fe5ff, 0.16);
+    const input = this.slot(slotSize);
+    const output = this.slot(slotSize);
+    const progress = this.bar(progressWidth, 12);
+    const fuel = this.pill("Fuel 0", 0x2e2a18, 0xffcf88, "#ffe8b2");
+    const cook = this.pill("No cook request");
+    const fuelReq = this.pill("No fuel request", 0x2a2417, 0xffcf88, "#ffe8b2");
+    const pickup = this.pill("No pickup queued");
+    const hp = this.bar(Math.max(80, width - 28), 9);
+    const titleColWidth = compact ? 124 : 150;
+    const titleLabel = this.txt(`Oven ${idx + 1} (${oven.x}, ${oven.y})`, {
+      fontSize: compact ? 11 : 13,
+      color: "#f4fcff",
+      wordWrap: { width: titleColWidth }
     });
-
-    const woodKey = UI_ITEM_TYPES["wood"]?.icon || "wood" || "blank";
-    const fuelValueText = scene.add.text(0, 0, String(oven.fuel | 0), {
-      fontSize: 12,
-      color: "#ffd27f",
-    });
-
-    const fuelBadge = scene.rexUI
-      .add.sizer({ orientation: "x", space: { item: 4 } })
-      .add(
-        scene.add.image(0, 0, woodKey).setDisplaySize(16, 16).setOrigin(0.5)
-      )
-      .add(fuelValueText);
-
-    // helper: icon overlay
-    const icon = (key, amt) => {
-      const c = scene.rexUI.add.overlapSizer({ width: 30, height: 30 });
-
-      // background gray box
-      const bg = scene.rexUI.add.roundRectangle(0,0,26,26,4,0x333333,0.9);
-      c.addBackground(bg);
-
-      // the ACTUAL item icon (still Phaser Image)
-      const im = scene.add.image(0,0,"blank")
-        .setDisplaySize(22,22)
-        .setOrigin(0.5)
-        .setVisible(false);       // start hidden
-
-      const tx = scene.add.text(0,0,"",{
-        fontSize:11, color:"#fff", stroke:"#000", strokeThickness:2
-      }).setOrigin(1,1);
-
-      c.add(im, { key:"im", align:"center" });
-      c.add(tx, { key:"tx", align:"right-bottom" });
-
-      c.setIcon = (k, a) => {
-        if (k && scene.textures.exists(k)) {
-          im.setTexture(k).setVisible(true);
-        } else {
-          im.setVisible(false);
-        }
-
-        if (a && a > 1) tx.setText("x"+a).setVisible(true);
-        else tx.setVisible(false);
-      };
-
-      c.setIcon(key, amt || 0);
-      return c;
-    };
-
-    // input row icons
-    const cookRow = scene.rexUI.add.sizer({ orientation: "x", space: { item: 6 } });
-    const cookIcons = [];
-    for (let i = 0; i < 3; i++) {
-      const slot = oven.cookingSlots[i];
-      let key = null;
-      let amount = 0;
-
-      if (slot && slot.item) {
-        const uiItem = UI_ITEM_TYPES[slot.item.name];
-        if (uiItem && uiItem.icon && scene.textures.exists(uiItem.icon)) {
-          key = uiItem.icon;
-        }
-        amount = slot.amount || 0;
-      }
-
-      const ic = icon(key, amount);
-      cookRow.add(ic);
-      cookIcons.push(ic);
-    }
-
-    // output row icons
-    const outRow = scene.rexUI.add.sizer({ orientation: "x", space: { item: 6 } });
-    const outIcons = [];
-    for (let i = 0; i < 3; i++) {
-      const slot = oven.outputSlots[i];
-      let key = null;
-      let amount = 0;
-
-      if (slot && slot.item) {
-        const uiItem = UI_ITEM_TYPES[slot.item.name];
-        if (uiItem && uiItem.icon && scene.textures.exists(uiItem.icon)) {
-          key = uiItem.icon;
-        }
-        amount = slot.amount || 0;
-      }
-
-      const ic = icon(key, amount);
-      outRow.add(ic);
-      outIcons.push(ic);
-    }
-
-    // background
-    const bg = scene.rexUI
-      .add.roundRectangle(0, 0, 0, 0, 6, 0xffffff, 0.08)
-      .setStrokeStyle(1, 0xffffff, 0.15);
-
-    // helper: HP bar (no text) that can be updated without changing row height
-    const makeHpBar = (width, height) => {
-      const s = scene.rexUI.add.overlapSizer({ width, height });
-      const b = scene.rexUI.add.roundRectangle(0, 0, width, height, 4, 0x222222, 1);
-      const f = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), Math.max(1, height - 2), 4, 0x4caf50, 1)
-        .setOrigin(0, 0.5);
-      s.addBackground(b);
-      s.add(f, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
-      s.layout();
-      s.setPercent = (pct) => {
-        const p = Phaser.Math.Clamp(pct ?? 0, 0, 1);
-        f.width = Math.max(1, (width - 2) * p);
-        s.layout();
-      };
-      return s;
-    };
-
-    // inner content row (top)
-    const content = scene.rexUI.add.sizer({
-      orientation: "x",
-      space: { left: 12, right: 12, top: 6, bottom: 14, item: 12 }, // bottom padding leaves room for HP bar
-    })
-      .add(name, { proportion: 1, expand: false })
-      .add(fuelBadge, { proportion: 0, expand: false })
-      .add(cookRow, { proportion: 0, expand: false })
-      .add(arrow, { proportion: 0, expand: false })
-      .add(outRow, { proportion: 0, expand: false });
-
-    // 🔥 stretch full width (keep existing height)
-    const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
-    const hpBar = makeHpBar(Math.max(80, fullWidth - 24), 6);
-    hpBar.setPercent((oven.health ?? 0) / (oven.maxHealth || 1));
-
-    const row = scene.rexUI.add.overlapSizer({ width: fullWidth, height: 48 })
+    const lane = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(input, { expand: false })
+      .add(progress, { expand: false })
+      .add(this.txt("->", { fontSize: 14, color: "#a5cfdf" }), { expand: false })
+      .add(output, { expand: false });
+    const top = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: compact ? 6 : 8 } })
+      .add(this.scene.rexUI.add.sizer({ orientation: "x" }).add(titleLabel, { expand: false, align: "left" }), { expand: false, align: "center" })
+      .add(lane, { proportion: 1, expand: true, align: "center" })
+      .add(fuel, { expand: false, align: "center" });
+    const bottom = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(cook, { proportion: 1, expand: true }).add(fuelReq, { proportion: 1, expand: true }).add(pickup, { proportion: 1, expand: true });
+    const row = this.scene.rexUI.add.overlapSizer({ width, height: rowHeight })
       .addBackground(bg)
-      .add(content, { key: 'content', align: 'top', expand: false })
-      .add(hpBar, { key: 'hp', align: 'bottom', expand: false, padding: { left: 12, right: 12, bottom: 6 } });
-
-    row.userData = { oven, name, cookIcons, outIcons, fuelBadge, fuelValueText, hpBar };
-
-    row.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
-      this.selectOven(oven);
-      this.centerCameraOnOven(oven);
-    });
-
-    row.on("pointerover", () => bg.setFillStyle(0xffffff, 0.15));
-    row.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
-
+      .add(this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: compact ? 8 : 10, bottom: compact ? 8 : 10, item: compact ? 6 : 8 } })
+        .add(top, { expand: true }).add(bottom, { expand: true }).add(hp, { expand: false }), { expand: true });
+    row.userData = { bg, input, output, progress, fuel, cook, fuelReq, pickup, hp };
+    row.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.selectOven(oven); this.centerCameraOnOven(oven); });
+    row.on("pointerover", () => bg.setFillStyle(0x13354a, 0.9));
+    row.on("pointerout", () => bg.setFillStyle(0x102a3b, 0.78));
+    this.updateCard(oven);
     return row;
   }
 
-  queueOvenOutputPickup(oven, idx) {
-    if (!oven) return;
-
-    const team = Teams.teamLists[this.team];
-    if (!team) return;
-
-    const slot = oven.outputSlots?.[idx];
-    if (!slot || !slot.item || slot.amount <= 0) {
-        showAlert(this.scene, 'Nothing to pick up in that slot.');
-        return;
-    }
-
-    const jobs = team.ovenPickupJobs || (team.ovenPickupJobs = []);
-
-    // Don't double-queue a live job for this oven/output slot
-    const existing = jobs.find(j =>
-        j.oven === oven &&
-        j.outputidx === idx &&
-        j.taskType === 'ovenPickup' &&
-        j.amount > j.assigned
+  updateCard(oven) {
+    const row = this.cardByOven.get(oven);
+    if (!row?.userData) return;
+    const slot = oven.cookingSlots?.[0] || null;
+    const out = oven.outputSlots?.[0] || null;
+    const cookJob = this.cookJob(oven);
+    const fuelJob = this.fuelJob(oven);
+    const pickupJob = this.pickupJob(oven);
+    const dur = oven.cookDurations?.[0] || 0;
+    const elapsed = oven.cookTimers?.[0] || 0;
+    const pct = dur > 0 ? Math.min(elapsed / dur, 1) : 0;
+    row.userData.input.setItem(slot?.item || null, slot?.amount || 0, "Cook");
+    row.userData.output.setItem(out?.item || null, out?.amount || 0, "Out");
+    row.userData.progress.setValue(pct, slot ? (pct > 0 ? `${Math.round(pct * 100)}%` : "Queued") : "Idle", 0x49cf73);
+    row.userData.fuel.setValue(`Fuel ${oven.fuel | 0}`, 0x2e2a18, 0xffcf88, "#ffe8b2");
+    row.userData.cook.setValue(cookJob ? `${cookJob.item?.label || cookJob.item?.name} ${cookJob.remaining}/${cookJob.target}` : "No cook request");
+    row.userData.fuelReq.setValue(fuelJob ? `Wood ${fuelJob.remaining}/${fuelJob.target}` : "No fuel request", 0x2a2417, 0xffcf88, "#ffe8b2");
+    row.userData.pickup.setValue(
+      pickupJob ? `Pickup ${pickupJob.amount} ready` : (out?.amount > 0 ? "Output ready" : "No pickup queued"),
+      out?.amount > 0 ? 0x24453a : 0x17384c,
+      out?.amount > 0 ? 0x8bf0c3 : 0x93dfff,
+      out?.amount > 0 ? "#e5fff6" : "#d7f5ff"
     );
+    row.userData.hp.setValue((oven.health || 0) / Math.max(1, oven.maxHealth || 1), "", 0x49cf73);
+  }
 
-    if (existing) {
-        showAlert(this.scene, 'Pickup is already queued for this slot.');
-        return;
-    }
-
-    // Create a job for the current amount in that slot
-    jobs.push({
-        oven,
-        outputidx: idx,
-        x: oven.x,
-        y: oven.y,
-        type: TILE_TYPES.clayOven, // same shape as auto-created tasks
-        assigned: 0,
-        amount: slot.amount,
-        taskType: 'ovenPickup'
-    });
-
-    // Let UI/others know oven state changed
-    this.scene.events.emit('oven:updated', oven);
+  queueOvenOutputPickup(oven) {
+    if (!oven) return;
+    const team = Teams.teamLists[this.team];
+    const slot = oven.outputSlots?.[0];
+    if (!team || !slot?.item || slot.amount <= 0) return showAlert(this.scene, "Nothing to pick up in that tray.");
+    const existing = (team.ovenPickupJobs || []).find((j) => j.oven === oven && j.outputidx === 0 && j.taskType === "ovenPickup" && j.amount > j.assigned);
+    if (existing) return showAlert(this.scene, "Pickup is already queued for this tray.");
+    (team.ovenPickupJobs || (team.ovenPickupJobs = [])).push({ oven, outputidx: 0, x: oven.x, y: oven.y, type: TILE_TYPES.clayOven, assigned: 0, amount: slot.amount, taskType: "ovenPickup" });
+    this.scene.events.emit("oven:updated", oven);
   }
 
   onShow() {
-    // Called when the Clay Ovens tab becomes visible
-    const team = Teams.teamLists[this.team];
-    if (!team) return;
-
-    const ovens = team.ovenList || [];
-
-    // If nothing selected (or old selection is gone), pick the first oven
-    if (!this.selected || !ovens.includes(this.selected)) {
-      if (ovens[0]) {
-        this.selectOven(ovens[0]);
-      } else {
-        this.selected = null;
-        if (this.detail?.setOven) this.detail.setOven(null);
-        return;
-      }
-    } else if (this.detail?.setOven) {
-      // Ensure detail panel is synced with existing selection
-      this.detail.setOven(this.selected);
-    }
-
-    // Refresh every row from current oven state
-    ovens.forEach((oven) => {
-      this.updateCard(oven);
-    });
+    const ovens = Teams.teamLists[this.team]?.ovenList || [];
+    if (!this.selected || !ovens.includes(this.selected)) this.selected = ovens[0] || null;
+    this.detail?.setOven?.(this.selected);
+    ovens.forEach((oven) => this.updateCard(oven));
   }
 
-  // ---------- BEHAVIOR ----------
-  selectOven(oven) {
-    this.selected = oven;
-    if (this.detail?.setOven) {
-      this.detail.setOven(oven);
-    }
-  }
-
+  selectOven(oven) { this.selected = oven; this.detail?.setOven?.(oven); }
+  selectFromWorld(oven) { this.selectOven(oven); }
   centerCameraOnOven(oven) {
     if (!oven?.sprite) return;
     const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     cam.centerOn(oven.sprite.x, oven.sprite.y);
   }
 
-  // Allow map clicks to open the detail view directly
-  selectFromWorld(oven) {
-    this.selectOven(oven);
-    // no camera move on world click
-  }
-
-  updateCard(oven) {
-    const row = this.cardByOven.get(oven);
-    if (!row || !row.userData) return;
-
-    // cooking slots
-    for (let i = 0; i < 3; i++) {
-      const slot = oven.cookingSlots[i];
-      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
-      row.userData.cookIcons[i].setIcon(key, slot?.amount || 0);
-    }
-
-    // output slots
-    for (let i = 0; i < 3; i++) {
-      const slot = oven.outputSlots[i];
-      const key  = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
-      row.userData.outIcons[i].setIcon(key, slot?.amount || 0);
-    }
-
-    const fuelText = row.userData.fuelValueText;
-    if (fuelText && fuelText.setText) {
-      fuelText.setText(String(oven.fuel | 0));
-    }
-
-    // HP bar
-    if (row.userData.hpBar?.setPercent) {
-      row.userData.hpBar.setPercent((oven.health ?? 0) / (oven.maxHealth || 1));
-    }
-  }
-
-  // ------------ JOBS ------------
-
-  findJob(oven, idx) {
-    const jobs = Teams.teamLists[this.team]?.ovenJobs || [];
-    return jobs.find(j => j.oven === oven && j.inputidx === idx);
-  }
-
-  openJobEditor(oven, idx) {
+  openJobEditor(oven) {
     if (!oven) return;
-
-    // close existing popup
     this.closeJobEditor?.();
-
-    const scene = this.scene;
-    const cookables = Object.values(UI_ITEM_TYPES).filter(it => it.cooksTo);
-    const itemKeys = cookables.map(it => it.name);
-    let itemKey = cookables[0]?.name;
-    const maxStacks = (n) => UI_ITEM_TYPES[n]?.stacks || 1;
-
-    // current slot occupancy to cap target
-    const slot = oven.cookingSlots[idx];
-    const currentItem = slot?.item?.name;
-    const currentAmt  = slot?.amount || 0;
-
-    if(currentItem && currentAmt >= currentItem.stacks){
-      showAlert(scene, "To much in slot");
+    const existing = this.cookJob(oven);
+    const cookables = Object.values(UI_ITEM_TYPES).filter((item) => item.cooksTo);
+    const keys = cookables.map((item) => item.name);
+    let itemKey = existing?.item?.name || cookables[0]?.name;
+    let amount = Math.max(1, existing?.remaining || 1);
+    const current = oven.cookingSlots?.[0];
+    const currentItem = current?.item?.name || null;
+    const currentAmt = current?.amount || 0;
+    const capFor = (key) => Math.max(0, (UI_ITEM_TYPES[key]?.stacks || 1) - (currentItem === key ? currentAmt : 0));
+    if (capFor(itemKey) <= 0 && !existing) {
+      showAlert(this.scene, "That burner is already full.");
       return;
     }
-
-    let amount = 1;
-
-    // 🔹 CREATE BACKGROUND FIRST so it’s behind everything
-    const tbBg = scene.rexUI.add.roundRectangle(
-      0, 0, 0, 0, 6, 0x333333, 1
-    );
-    // optional: force it behind by depth, if you want
-    tbBg.setDepth(-1);
-
-    // make sure toolbar/text aren’t inheriting any opacity
-    const white = { fontSize: 13, color: '#ffffff' };
-    const itemText = scene.add.text(0,0,itemKey, white).setAlpha(1);
-    const amtText  = scene.add.text(0,0,String(amount),{ fontSize:14, color:'#ffffff' }).setAlpha(1);
-
-    // optional readability bump for small UI text
-    itemText.setShadow(0,1,'#000',2,true,true);
-    amtText.setShadow(0,1,'#000',2,true,true);
-
-    const dec = scene.rexUI.add.label({ text: scene.add.text(0,0,'−',{fontSize:16,color:'#fff'}), space:{left:6,right:6,top:4,bottom:4} })
-      .setInteractive().on('pointerup', ()=> {
-        amount = Math.max(1, amount-1);
-        amtText.setText(String(amount));
-      });
-
-    const inc = scene.rexUI.add.label({ text: scene.add.text(0,0,'＋',{fontSize:16,color:'#fff'}), space:{left:6,right:6,top:4,bottom:4} })
-      .setInteractive().on('pointerup', ()=> {
-        const cap = maxStacks(itemKey) - (currentItem === itemKey ? currentAmt : 0);
-        amount = Math.max(1, Math.min(cap, amount+1));
-        amtText.setText(String(amount));
-      });
-
-    const rr = (w,h,r,c) => this.scene.rexUI.add.roundRectangle(0,0,w,h,r,c);
-
-    // small button helper with guaranteed text area
-    const mkBtn = (txt, bg) => this.scene.rexUI.add.label({
-      text: this.scene.add.text(0,0,txt,{ fontSize: 12, color:'#ffffff' }),
-      space:{ left:10,right:10,top:6,bottom:6 },
-      background: scene.rexUI.add.roundRectangle(0,0,0,0,6,0x000000, 0.2)
-    }).setMinSize(84, 28);// label factory
-
-    const lbl = (t)=> this.scene.add.text(0,0,t,{ fontSize:12, color:'#ffffff' });
-
-    // Cycle button (unchanged behavior)
-    const cycle = scene.rexUI.add.label({
-      background: scene.rexUI.add.roundRectangle(0,0,0,0,6,0x515151), // slightly brighter
-      text: scene.add.text(0,0,'Change Item',{ fontSize:12, color:'#ffffff' })
-    }).setInteractive()
-    .on('pointerup', () => {
-      const i = itemKeys.indexOf(itemKey);
-      itemKey = itemKeys[(i+1) % itemKeys.length];
-      itemText.setText(itemKey);
-      const cap = maxStacks(itemKey) - (currentItem === itemKey ? currentAmt : 0);
-      amount = Math.max(1, Math.min(cap, amount));
+    const popupBg = this.panelBg(0, 0, 14, 0x102738, 0.98, 0x8fe6ff, 0.18);
+    const title = this.txt("Queue Burner Job", { fontSize: 13 });
+    const itemText = this.txt(UI_ITEM_TYPES[itemKey]?.label || itemKey, { fontSize: 12, color: "#dff6ff" });
+    const amtText = this.txt(String(amount), { fontSize: 14 });
+    const change = this.button("Change Item");
+    const dec = this.button("-", 0x21394a, 0x8fe6ff);
+    const inc = this.button("+", 0x21394a, 0x8fe6ff);
+    const start = this.button(existing ? "Update Job" : "Start Job", 0x2f6b4a, 0xb4ffd1);
+    const end = this.button("Cancel Job", 0x7a2d41, 0xffb4c3);
+    const close = this.button("Close", 0x4a5661, 0xc9d6df);
+    dec.setMinSize(34, 34); inc.setMinSize(34, 34); end.setEnabledState(!!existing);
+    change.on("pointerup", () => {
+      const i = keys.indexOf(itemKey);
+      itemKey = keys[(i + 1) % keys.length];
+      itemText.setText(UI_ITEM_TYPES[itemKey]?.label || itemKey);
+      const cap = capFor(itemKey);
+      amount = cap > 0 ? Math.min(cap, amount) : 1;
       amtText.setText(String(amount));
     });
-
-    // NEW: vertical stack → [Item name] on top, [Cycle] under it
-    const itemCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
-      .add(itemText, 0, 'center', 0, false)
-      .add(cycle,    0, 'center', 0, false);
-
-      // --- action buttons ---
-      const startBtn = mkBtn('Start Job', '#ffffff')
-        .setInteractive()
-        .on('pointerup', () => {
-          this.startOvenJob(oven, idx, itemKey, amount);
-          this.closeJobEditor();
-        });
-
-      const cancelBtn = mkBtn('Close', 0x555555)
-        .setInteractive()
-        .on('pointerup', () => this.closeJobEditor());
-
-      const existing = this.findJob(oven, idx);
-      const endBtn = existing
-        ? mkBtn('End Job', 0xcc4444)
-            .setInteractive()
-            .on('pointerup', () => {
-              this.cancelOvenJob(existing);
-              this.closeJobEditor();
-            })
-        : null;
-
-    // main toolbar with buttons
-    const toolbar = this.scene.rexUI.add.sizer({
-      orientation: 'x',
-      space: { left: 8, right: 8, top: 8, bottom: 8, item: 10 },
-    })
-      .add(lbl('Item:'), 0, 'center', 0, false)
-      .add(itemCol,      0, 'center', 0, false)
-      .add(lbl('Qty:'),  0, 'center', 0, false)
-      .add(dec,          0, 'center', 0, false)
-      .add(amtText,      0, 'center', 0, false)
-      .add(inc,          0, 'center', 0, false)
-      .add(startBtn,     0, 'center', 0, false);
-
-    if (endBtn) toolbar.add(endBtn, 0, 'center', 0, false);
-    toolbar.add(cancelBtn, 0, 'center', 0, false);
-
-    // 🔧 use a simple sizer instead of overlapSizer for the popup
-    const popup = this.scene.rexUI.add.sizer({
-      orientation: 'x',
-      space: { left: 8, right: 8, top: 8, bottom: 8 }
-    })
-      .addBackground(tbBg)
+    dec.on("pointerup", () => { amount = Math.max(1, amount - 1); amtText.setText(String(amount)); });
+    inc.on("pointerup", () => {
+      const cap = capFor(itemKey);
+      amount = cap > 0 ? Math.min(cap, amount + 1) : 1;
+      amtText.setText(String(amount));
+    });
+    start.on("pointerup", () => { this.startOvenJob(oven, itemKey, amount); this.closeJobEditor(); });
+    end.on("pointerup", () => { const live = this.cookJob(oven); if (live) this.cancelOvenJob(live); this.closeJobEditor(); });
+    close.on("pointerup", () => this.closeJobEditor());
+    const qtyRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(this.txt("Qty", { fontSize: 11, color: "#a7cbdc" }), { expand: false, align: "center" })
+      .add(dec, { expand: false, align: "center" })
+      .add(amtText, { expand: false, align: "center" })
+      .add(inc, { expand: false, align: "center" });
+    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(start, { proportion: 1, expand: true })
+      .add(end, { proportion: 1, expand: true })
+      .add(close, { proportion: 1, expand: true });
+    const toolbar = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: 12, bottom: 12, item: 10 } })
+      .add(title, { expand: false, align: "left" })
+      .add(itemText, { expand: false, align: "left" })
+      .add(change, { expand: true })
+      .add(qtyRow, { expand: false, align: "left" })
+      .add(actionRow, { expand: true });
+    const popup = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 8, right: 8, top: 8, bottom: 8 } })
+      .addBackground(popupBg)
       .add(toolbar, { proportion: 1, expand: true });
+    popup.setMinSize(360, 0);
+    this.showPopup(popup);
+  }
 
+  openRefuelEditor(oven) {
+    if (!oven) return;
+    this.closeJobEditor?.();
+    const existing = this.fuelJob(oven);
+    let amount = Math.max(1, existing?.remaining || 5);
+    const popupBg = this.panelBg(0, 0, 14, 0x102738, 0.98, 0x8fe6ff, 0.18);
+    const amtText = this.txt(String(amount), { fontSize: 14 });
+    const dec = this.button("-", 0x21394a, 0x8fe6ff);
+    const inc = this.button("+", 0x21394a, 0x8fe6ff);
+    const start = this.button(existing ? "Update Fuel" : "Start Fuel", 0x2f6b4a, 0xb4ffd1);
+    const end = this.button("Cancel Fuel", 0x7a2d41, 0xffb4c3);
+    const close = this.button("Close", 0x4a5661, 0xc9d6df);
+    dec.setMinSize(34, 34); inc.setMinSize(34, 34); end.setEnabledState(!!existing);
+    dec.on("pointerup", () => { amount = Math.max(1, amount - 1); amtText.setText(String(amount)); });
+    inc.on("pointerup", () => { amount = Math.min(99, amount + 1); amtText.setText(String(amount)); });
+    start.on("pointerup", () => { this.startRefuelJob(oven, amount); this.closeJobEditor(); });
+    end.on("pointerup", () => { const live = this.fuelJob(oven); if (live) this.cancelFuelJob(live); this.closeJobEditor(); });
+    close.on("pointerup", () => this.closeJobEditor());
+    const amountRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(this.txt("Wood", { fontSize: 11, color: "#a7cbdc" }), { expand: false, align: "center" })
+      .add(dec, { expand: false, align: "center" })
+      .add(amtText, { expand: false, align: "center" })
+      .add(inc, { expand: false, align: "center" });
+    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(start, { proportion: 1, expand: true })
+      .add(end, { proportion: 1, expand: true })
+      .add(close, { proportion: 1, expand: true });
+    const toolbar = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: 12, bottom: 12, item: 10 } })
+      .add(this.txt("Queue Fuel Delivery", { fontSize: 13 }), { expand: false, align: "left" })
+      .add(this.txt("Request wood for this oven.", { fontSize: 11, color: "#abd0e0" }), { expand: false, align: "left" })
+      .add(amountRow, { expand: false, align: "left" })
+      .add(actionRow, { expand: true });
+    const popup = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 8, right: 8, top: 8, bottom: 8 } })
+      .addBackground(popupBg)
+      .add(toolbar, { proportion: 1, expand: true });
+    popup.setMinSize(350, 0);
+    this.showPopup(popup);
+  }
+
+  showPopup(popup) {
     this.jobPopup = popup;
-
-    // float & layout
     this.scene.add.existing(popup);
     popup.setDepth(UIDEPTH + 100).layout();
     this.positionJobPopup(popup);
-
-    // click-away blocker (kept below popup)
     this.jobBlocker?.destroy();
-    this.jobBlocker = this.scene.add.rectangle(
-      0, 0, this.scene.scale.width, this.scene.scale.height, 0x000000, 0.001
-    )
-      .setOrigin(0)
-      .setDepth(UIDEPTH+99)
-      .setInteractive()
-      .on('pointerup', (pointer) => {
-        const b = popup.getBounds();
-        if (!Phaser.Geom.Rectangle.Contains(b, pointer.x, pointer.y)) this.closeJobEditor();
+    this.jobBlocker = this.scene.add.rectangle(0, 0, this.scene.scale.width, this.scene.scale.height, 0x000000, 0.01)
+      .setOrigin(0).setDepth(UIDEPTH + 99).setInteractive()
+      .on("pointerup", (pointer) => {
+        const bounds = popup.getBounds();
+        if (!Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) this.closeJobEditor();
       });
-
-    // cleanup
     this.closeJobEditor = () => {
       this.jobBlocker?.destroy(); this.jobBlocker = null;
-      if (this.jobPopup && this.jobPopup.scene) this.jobPopup.destroy();
+      if (this.jobPopup?.scene) this.jobPopup.destroy();
       this.jobPopup = null;
     };
   }
 
   positionJobPopup(popup) {
     const pad = 12;
-    // If your bottom bar expanded height differs, adjust this:
-    const EXPANDED = 160;
-
-    popup.layout(); // ensure width/height are valid
-    const pw = popup.width  || popup.getBounds().width;
+    popup.layout();
+    const pw = popup.width || popup.getBounds().width;
     const ph = popup.height || popup.getBounds().height;
-
-    const pointer = this.scene.input.activePointer;
-
-    // X anywhere on screen, clamped to keep popup visible
-    let x = Phaser.Math.Clamp(pointer.x, pad + pw / 2, this.scene.scale.width - pad - pw / 2);
-
-    // Y restricted to the bottom bar area (so it doesn't drift off-screen)
-    const yTop = this.scene.scale.height - EXPANDED + pad + ph / 2;
-    const yBot = this.scene.scale.height - pad - ph / 2;
-    let y = Phaser.Math.Clamp(pointer.y, yTop, yBot);
-
+    const bounds = this.detailScroll?.getBounds?.();
+    const preferredX = bounds ? bounds.centerX : this.scene.scale.width / 2;
+    const preferredY = bounds ? bounds.y + 18 + ph / 2 : this.scene.scale.height / 2;
+    const x = Phaser.Math.Clamp(preferredX, pad + pw / 2, this.scene.scale.width - pad - pw / 2);
+    const y = Phaser.Math.Clamp(preferredY, pad + ph / 2, this.scene.scale.height - pad - ph / 2);
     popup.setPosition(x, y);
   }
 
-
-  startOvenJob(oven, idx, itemKey, amount) {
+  startOvenJob(oven, itemKey, amount) {
     const item = UI_ITEM_TYPES[itemKey];
-    if (!item || !item.cooksTo) return;
-
-    // cap to stack size minus existing amount in that slot
-    const current = oven.cookingSlots[idx];
-    const inSlot = (current && current.item?.name === itemKey) ? current.amount : 0;
-    const cap = Math.max(0, (item.stacks||1) - inSlot);
-    const target = Math.max(1, Math.min(cap, amount));
-    if (target <= 0) return;
-
+    if (!item?.cooksTo) return;
+    const current = oven.cookingSlots?.[0];
+    const inSlot = current?.item?.name === itemKey ? current.amount : 0;
+    const capacity = Math.max(0, (item.stacks || 1) - inSlot);
+    if (capacity <= 0) {
+      showAlert(this.scene, "That burner is already full.");
+      return;
+    }
+    const target = Math.max(1, Math.min(capacity, amount));
     const team = Teams.teamLists[this.team];
-    const job = {
-      oven, inputidx: idx, item,
-      target, delivered: 0, remaining: target,
-      assigned: 0, canceled: false,
-      x: oven.x, y: oven.y
-    };
-    team.ovenJobs.push(job);
-
-    // ping UI
-    this.scene.events.emit('oven:updated', oven);
+    const existing = this.cookJob(oven);
+    if (existing) this.cancelOvenJob(existing, true);
+    team.ovenJobs.push({ oven, inputidx: 0, item, target, delivered: 0, remaining: target, assigned: 0, canceled: false, x: oven.x, y: oven.y });
+    this.scene.events.emit("oven:updated", oven);
   }
 
-  cancelOvenJob(job) {
+  cancelOvenJob(job, silent = false) {
+    if (!job) return;
     const team = Teams.teamLists[this.team];
     job.canceled = true;
-
-    // remove any pending delivery tasks for this job
-    const arr = team.ovenDeliveryItems;
+    const arr = team.ovenDeliveryItems || (team.ovenDeliveryItems = []);
     for (let i = arr.length - 1; i >= 0; i--) {
-      const t = arr[i];
-      if (t.oven === job.oven && t.inputidx === job.inputidx && t.item.name === job.item.name) {
-        arr.splice(i, 1);
-      }
+      const task = arr[i];
+      if (task.oven === job.oven && task.inputidx === job.inputidx && task.item?.name === job.item?.name) arr.splice(i, 1);
     }
-
-    // remove job from queue
-    const i = team.ovenJobs.indexOf(job);
-    if (i !== -1) team.ovenJobs.splice(i,1);
-
-    this.scene.events.emit('oven:updated', job.oven);
-  }
-
-  openRefuelEditor(oven) {
-    if (!oven) return;
-    this.closeJobEditor?.();
-
-    const scene = this.scene;
-    const rr = (w,h,r,c)=>scene.rexUI.add.roundRectangle(0,0,w,h,r,c);
-    let amount = 5;
-
-    // --- popup container with background panel ---
-    const bgPanel = scene.rexUI.add.roundRectangle(
-      0, 0, 300, 110, 10, 0x333333, 1 // 🟩 semi-transparent black
-    ).setStrokeStyle(2, 0xffffff, 0.2);   // thin white border
-
-    const amtText = scene.add.text(0,0,String(amount),{fontSize:14,color:'#fff'});
-    const dec = scene.rexUI.add.label({ text: scene.add.text(0,0,'−',{fontSize:16,color:'#fff'}) })
-      .setInteractive().on('pointerup',()=>{amount=Math.max(1,amount-1);amtText.setText(amount);});
-    const inc = scene.rexUI.add.label({ text: scene.add.text(0,0,'＋',{fontSize:16,color:'#fff'}) })
-      .setInteractive().on('pointerup',()=>{amount=Math.min(99,amount+1);amtText.setText(amount);});
-
-    const startBtn = scene.rexUI.add.label({
-      background: rr(0,0,6,0x2a5bd8),
-      text: scene.add.text(0,0,'Start Refuel',{fontSize:12,color:'#fff'}),
-      space:{left:10,right:10,top:6,bottom:6}
-    }).setInteractive().on('pointerup',()=>{
-      this.startRefuelJob(oven, amount);
-      this.closeJobEditor();
-    });
-
-    const cancelBtn = scene.rexUI.add.label({
-      background: rr(0,0,6,0x555555,0.5),
-      text: scene.add.text(0,0,'Cancel',{fontSize:12,color:'#fff'}),
-      space:{left:10,right:10,top:6,bottom:6}
-    }).setInteractive().on('pointerup',()=>this.closeJobEditor());
-
-    const toolbar = scene.rexUI.add.sizer({orientation:'x',space:{left:10,right:10,item:8}})
-      .add(scene.add.text(0,0,'Fuel:',{fontSize:12,color:'#fff'}))
-      .add(dec).add(amtText).add(inc)
-      .add(startBtn).add(cancelBtn);
-
-    const popup = scene.rexUI.add.overlapSizer({
-      width: 280,
-      height: 80,
-    })
-      .addBackground(bgPanel)
-      .add(toolbar, { align: "center", expand: false });
-
-    // center it visually
-    scene.add.existing(popup);
-    popup.setDepth(10000).layout();
-    this.positionJobPopup(popup);
-
-    // 🟡 click-outside blocker (keeps dim overlay behind popup)
-    this.jobBlocker?.destroy();
-    this.jobBlocker = scene.add.rectangle(
-      0, 0, scene.scale.width, scene.scale.height, 0x000000, 0.01// dark overlay
-    )
-      .setOrigin(0)
-      .setDepth(9999)
-      .setInteractive()
-      .on("pointerup", p => {
-        const b = popup.getBounds();
-        if (!Phaser.Geom.Rectangle.Contains(b, p.x, p.y)) this.closeJobEditor();
-      });
-
-    this.closeJobEditor = () => {
-      this.jobBlocker?.destroy();
-      this.jobBlocker = null;
-      popup.destroy();
-      this.jobPopup = null;
-    };
+    const idx = team.ovenJobs.indexOf(job);
+    if (idx !== -1) team.ovenJobs.splice(idx, 1);
+    if (!silent) this.scene.events.emit("oven:updated", job.oven);
   }
 
   startRefuelJob(oven, amount) {
     const team = Teams.teamLists[this.team];
-    const job = {
-      oven,
-      target: amount,
-      delivered: 0,
-      remaining: amount,
-      assigned: 0,
-      canceled: false,
-      x: oven.x, y: oven.y
-    };
-    team.ovenFuelJobs.push(job);
-    this.scene.events.emit('oven:updated', oven);
+    const target = Math.max(1, Math.min(99, amount | 0));
+    const existing = this.fuelJob(oven);
+    if (existing) this.cancelFuelJob(existing, true);
+    team.ovenFuelJobs.push({ oven, target, delivered: 0, remaining: target, assigned: 0, canceled: false, x: oven.x, y: oven.y });
+    this.scene.events.emit("oven:updated", oven);
   }
 
-  // ---------- Behavior ----------
-  selectOven(oven) {
-    this.selected = oven;
-    this.detail.setOven(oven);
-  }
-
-  centerCameraOnOven(oven) {
-    if (!oven?.sprite) return;
-    const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
-    cam.centerOn(oven.sprite.x, oven.sprite.y);
+  cancelFuelJob(job, silent = false) {
+    if (!job) return;
+    const team = Teams.teamLists[this.team];
+    job.canceled = true;
+    const arr = team.ovenFuelDeliveryItems || (team.ovenFuelDeliveryItems = []);
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const task = arr[i];
+      if (task.job === job || task.oven === job.oven) arr.splice(i, 1);
+    }
+    const idx = team.ovenFuelJobs.indexOf(job);
+    if (idx !== -1) team.ovenFuelJobs.splice(idx, 1);
+    if (!silent) this.scene.events.emit("oven:updated", job.oven);
   }
 
   update() {
-    const current = this.scene.uiBottomBar?.currentPage;
-    if (current !== 'ovens' || !this.selected) return;
-
-    this.detail.setOven(this.selected);
+    if (this.scene.uiBottomBar?.currentPage !== "ovens" || !this.selected) return;
+    this.detail?.setOven?.(this.selected);
+    this.updateCard(this.selected);
   }
 }

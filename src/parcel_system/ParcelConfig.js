@@ -2,6 +2,7 @@
 export const PARCEL_SIZE = 25;
 
 export const CONTRACT_SLOTS = {
+  N:  { id: "N",  dx: 0,            dy: -PARCEL_SIZE },
   W:  { id: "W",  dx: -PARCEL_SIZE, dy: 0 },
   S: { id: "S", dx: 0,            dy: PARCEL_SIZE },
   E:  { id: "E",  dx: PARCEL_SIZE,  dy: 0 },

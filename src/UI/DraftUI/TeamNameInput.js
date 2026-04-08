@@ -13,18 +13,8 @@ export class TeamNameInput {
     this.onChange = opts.onChange ?? (() => {});
 
     const width = opts.width ?? 220;
-
-    const html = `
-      <div style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
-        <input
-          type="text"
-          maxlength="24"
-          autocapitalize="words"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="${(opts.placeholder ?? "Team name").replaceAll('"', '&quot;')}"
-          value="${(opts.initialValue ?? "").replaceAll('"', '&quot;')}"
-          style="
+    const wrapperStyle = opts.wrapperStyle ?? "display:flex; flex-direction:column; gap:6px; align-items:stretch;";
+    const inputStyle = opts.inputStyle ?? `
             width:${width}px;
             padding:6px 10px;
             font-size:14px;
@@ -38,7 +28,19 @@ export class TeamNameInput {
             color:white;
             outline:none;
             caret-color:white;
-          "
+          `;
+
+    const html = `
+      <div style="${wrapperStyle}">
+        <input
+          type="text"
+          maxlength="24"
+          autocapitalize="words"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="${(opts.placeholder ?? "Team name").replaceAll('"', '&quot;')}"
+          value="${(opts.initialValue ?? "").replaceAll('"', '&quot;')}"
+          style="${inputStyle}"
         />
       </div>
     `;
@@ -47,6 +49,7 @@ export class TeamNameInput {
     this.dom.setScrollFactor(0).setDepth(100000);
 
     const input = this.dom.node.querySelector("input");
+    this.input = input;
     input.addEventListener("input", () => {
       const v = input.value ?? "";
       this.onChange(v);
@@ -82,9 +85,17 @@ export class TeamNameInput {
     scene.input.on("pointerdown", this._outsidePointerHandler);
   }
 
+  getInputElement() {
+    return this.input ?? this.dom?.node?.querySelector?.("input") ?? null;
+  }
+
   setValue(v) {
-    const input = this.dom.node.querySelector("input");
-    input.value = v ?? "";
+    const input = this.getInputElement();
+    if (input) input.value = v ?? "";
+  }
+
+  focus() {
+    this.getInputElement()?.focus?.();
   }
 
   destroy() {
@@ -92,6 +103,7 @@ export class TeamNameInput {
       this.scene?.input?.off?.("pointerdown", this._outsidePointerHandler);
       this._outsidePointerHandler = null;
     }
+    this.input = null;
     this.dom?.destroy();
   }
 }

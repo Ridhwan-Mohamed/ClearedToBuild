@@ -16,11 +16,15 @@ export class Projectile {
         this.projectileGroup = this.scene.physics.add.group();
     }
 
-    constructor(x, y, angle, teamNumber, weapon, player = null, offset = false) {
+    constructor(x, y, angle, teamNumber, weapon, player = null, offset = false, options = null) {
         // Offset the starting position by 25 units in the direction of the angle
-        const speed = weapon.speed;
-        let offsetX = 5, offsetY = 5;
-        if(offset){
+        const speed = weapon?.speed ?? 0;
+        let offsetX = 0, offsetY = 0;
+        if(typeof offset === "number"){
+            offsetX = Math.cos(angle) * offset;
+            offsetY = Math.sin(angle) * offset;
+        }
+        else if(offset){
             offsetX = Math.cos(angle) * 25;
             offsetY = Math.sin(angle) * 25;
         }
@@ -30,18 +34,208 @@ export class Projectile {
         if(player) AudioManager.playWeaponAttack(player, player.weapon);
 
         // Create a graphics object for the rectangle
-        const newCube = Projectile.scene.physics.add.sprite(startX, startY, 'cube');
+        const textureKey = weapon?.projectileTextureKey ?? 'cube';
+        const textureFrame = weapon?.projectileFrame ?? undefined;
+        const newCube = Projectile.scene.physics.add.sprite(startX, startY, textureKey, textureFrame);
         Projectile.projectileGroup.add(newCube);
         newCube.body.dontTrack = true;
+        newCube.team = teamNumber;
+        newCube.weapon = weapon;
+        if(player) newCube.player = player;
+
+        const deferImpactUntilEnd =
+            !!weapon?.impactAtEndOnly &&
+            Number.isFinite(Number(options?.impactX)) &&
+            Number.isFinite(Number(options?.impactY));
+        newCube.deferImpactUntilEnd = deferImpactUntilEnd;
 
         // Enable physics for the graphics object
         newCube.body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-        newCube.team = teamNumber;
-        newCube.setDepth(TILE_TYPES.turret.depth);
+        newCube.setDepth(weapon?.projectileDepth ?? TILE_TYPES.turret.depth);
         newCube.body.dontTrack = true;
+        if (deferImpactUntilEnd) {
+            newCube.body.checkCollision.none = true;
+            Projectile.scheduleImpactResolution(newCube, weapon, options);
+        }
 
-        newCube.weapon = weapon;
-        if(player) newCube.player = player;
+        if (weapon?.projectileAnimKey && Projectile.scene.anims.exists(weapon.projectileAnimKey)) {
+            newCube.play(weapon.projectileAnimKey, true);
+        }
+
+        Projectile.applyTravelScaleArc(newCube, weapon, options);
+    }
+
+    static getTravelDurationMs(weapon, options = null) {
+        const travelDistance = Number(options?.travelDistance ?? 0);
+        if (!travelDistance || !weapon) return 0;
+        return Math.max(200, Math.round((travelDistance / Math.max(weapon.speed ?? 1, 1)) * 1000));
+    }
+
+    static applyTravelScaleArc(projectile, weapon, options = null) {
+        if (!projectile || !weapon) return;
+
+        const startScale = Number.isFinite(options?.startScale)
+            ? options.startScale
+            : weapon.projectileScaleStart;
+        const endScale = Number.isFinite(options?.endScale)
+            ? options.endScale
+            : weapon.projectileScaleEnd;
+
+        if (Number.isFinite(startScale)) {
+            projectile.setScale(startScale);
+        }
+
+        const travelDistance = Number(options?.travelDistance ?? 0);
+        if (!travelDistance || !Number.isFinite(startScale) || !Number.isFinite(endScale)) return;
+
+        const distanceRatio = Phaser.Math.Clamp(
+            Number(options?.distanceRatio ?? (travelDistance / Math.max(weapon.range ?? travelDistance, 1))),
+            0,
+            1
+        );
+
+        const defaultPeakScale = Phaser.Math.Linear(
+            Number.isFinite(weapon.projectilePeakScaleMin) ? weapon.projectilePeakScaleMin : startScale,
+            Number.isFinite(weapon.projectilePeakScaleMax) ? weapon.projectilePeakScaleMax : Math.max(startScale, endScale),
+            distanceRatio
+        );
+        const peakScale = Number.isFinite(options?.peakScale) ? options.peakScale : defaultPeakScale;
+        const travelMs = this.getTravelDurationMs(weapon, options);
+
+        projectile._travelScaleTween?.remove?.();
+        projectile._travelScaleTween = Projectile.scene.tweens.addCounter({
+            from: 0,
+            to: 1,
+            duration: travelMs,
+            ease: "Linear",
+            onUpdate: (tween) => {
+                if (!projectile.active) return;
+                const t = tween.getValue();
+                const baseScale = Phaser.Math.Linear(startScale, endScale, t);
+                const arcT = 4 * t * (1 - t);
+                projectile.setScale(baseScale + arcT * (peakScale - Math.max(startScale, endScale)));
+            },
+            onComplete: () => {
+                projectile._travelScaleTween = null;
+            },
+        });
+
+        projectile.once("destroy", () => {
+            projectile._travelScaleTween?.remove?.();
+            projectile._travelScaleTween = null;
+        });
+    }
+
+    static scheduleImpactResolution(projectile, weapon, options = null) {
+        if (!projectile?.active || !weapon?.impactAtEndOnly) return;
+
+        const impactX = Number(options?.impactX);
+        const impactY = Number(options?.impactY);
+        if (!Number.isFinite(impactX) || !Number.isFinite(impactY)) return;
+
+        const travelMs = this.getTravelDurationMs(weapon, options);
+        if (!travelMs) return;
+
+        projectile._impactTimer?.remove?.(false);
+        projectile._impactTimer = Projectile.scene.time.delayedCall(travelMs, () => {
+            projectile._impactTimer = null;
+            this.resolveImpactAtPoint(projectile, impactX, impactY, options);
+        });
+
+        projectile.once("destroy", () => {
+            projectile._impactTimer?.remove?.(false);
+            projectile._impactTimer = null;
+        });
+    }
+
+    static resolveImpactAtPoint(projectile, impactX, impactY, options = null) {
+        if (!projectile?.active) return;
+
+        projectile._resolvingImpact = true;
+        projectile.body?.setVelocity?.(0, 0);
+        projectile.setPosition(impactX, impactY);
+
+        const impactRadius = Math.max(10, Number(options?.impactRadius ?? projectile.weapon?.impactRadius ?? 18));
+        const preferredTarget = options?.impactTarget ?? null;
+
+        const target = this.findImpactTarget(projectile, impactX, impactY, impactRadius, preferredTarget);
+        if (target) {
+            this.handleCollision(target, projectile);
+            return;
+        }
+
+        const structureHit = this.findImpactStructure(projectile, impactX, impactY, impactRadius);
+        if (structureHit) {
+            this.handleStructureCollision(projectile, structureHit);
+            return;
+        }
+
+        showGhostText(
+            Projectile.scene,
+            impactX,
+            impactY - 10,
+            "MISS",
+            projectile.team,
+            false,
+            true
+        );
+        projectile.destroy();
+    }
+
+    static findImpactTarget(projectile, impactX, impactY, impactRadius, preferredTarget = null) {
+        const radiusSq = impactRadius * impactRadius;
+        const isValidEnemy = (target) =>
+            !!target?.active &&
+            !!target.body &&
+            target.body.team != null &&
+            target.body.team !== projectile.team &&
+            !target.dontTrack &&
+            !target.body.dontTrack &&
+            (target.health ?? 1) > 0;
+
+        if (isValidEnemy(preferredTarget)) {
+            const distSq = Phaser.Math.Distance.Squared(preferredTarget.x, preferredTarget.y, impactX, impactY);
+            if (distSq <= radiusSq) return preferredTarget;
+        }
+
+        let nearest = null;
+        let nearestDistSq = radiusSq;
+        for (const target of Player.troops) {
+            if (!isValidEnemy(target)) continue;
+            const distSq = Phaser.Math.Distance.Squared(target.x, target.y, impactX, impactY);
+            if (distSq > nearestDistSq) continue;
+            nearest = target;
+            nearestDistSq = distSq;
+        }
+        return nearest;
+    }
+
+    static findImpactStructure(projectile, impactX, impactY, impactRadius) {
+        const hits = Map.structureBarrier?.getChildren?.() ?? [];
+        let nearest = null;
+        let nearestDistSq = impactRadius * impactRadius;
+
+        for (const hit of hits) {
+            if (!hit?.active) continue;
+
+            const hitTeam = hit.team ?? hit.body?.team;
+            if (hitTeam != null && hitTeam === projectile.team) continue;
+
+            const left = Number.isFinite(hit.body?.left) ? hit.body.left : (hit.x - (hit.displayWidth ?? 0) / 2);
+            const right = Number.isFinite(hit.body?.right) ? hit.body.right : (hit.x + (hit.displayWidth ?? 0) / 2);
+            const top = Number.isFinite(hit.body?.top) ? hit.body.top : (hit.y - (hit.displayHeight ?? 0) / 2);
+            const bottom = Number.isFinite(hit.body?.bottom) ? hit.body.bottom : (hit.y + (hit.displayHeight ?? 0) / 2);
+
+            const nearestX = Phaser.Math.Clamp(impactX, left, right);
+            const nearestY = Phaser.Math.Clamp(impactY, top, bottom);
+            const distSq = Phaser.Math.Distance.Squared(impactX, impactY, nearestX, nearestY);
+            if (distSq > nearestDistSq) continue;
+
+            nearest = hit;
+            nearestDistSq = distSq;
+        }
+
+        return nearest;
     }
 
     static leadAndAngle(attacker, target, projectileSpeed) {
@@ -64,40 +258,39 @@ export class Projectile {
         const x1 = Math.floor(target.x / SQUARESIZE);
         const y1 = Math.floor(target.y / SQUARESIZE);
 
-        // --- NEW: compute "ignore rectangle" if target is a multi-tile building ---
-        // Works if the sprite has buildingRef with x/y in tile coords (your Tower has this.x/this.y)
-        // and TILE_TYPES entry has lenX/lenY.
-        let ignoreMinX = null, ignoreMinY = null, ignoreMaxX = null, ignoreMaxY = null;
+        const resolveIgnoreRect = (obj) => {
+            const building = obj?.buildingRef || obj?.gameObject?.buildingRef || null;
+            if (!building) return null;
 
-        const building = target?.buildingRef || null;
-        if (building) {
-            // tile anchor for the building (top-left)
-            const bx = building.x ?? building.tilePos?.tileX;
-            const by = building.y ?? building.tilePos?.tileY;
-
-            const tt = building.type || building.tileType || null; // depends on how you store it
+            const bx = building.x ?? building.gridX ?? building.tilePos?.tileX;
+            const by = building.y ?? building.gridY ?? building.tilePos?.tileY;
+            const tt = building.type || building.tileType || null;
             const lenX = tt?.lenX ?? 1;
             const lenY = tt?.lenY ?? 1;
 
-            if (Number.isFinite(bx) && Number.isFinite(by)) {
-            ignoreMinX = bx;
-            ignoreMinY = by;
-            ignoreMaxX = bx + lenX - 1;
-            ignoreMaxY = by + lenY - 1;
-            }
-        }
+            if (!Number.isFinite(bx) || !Number.isFinite(by)) return null;
+
+            return {
+                minX: bx,
+                minY: by,
+                maxX: bx + lenX - 1,
+                maxY: by + lenY - 1,
+            };
+        };
+
+        const ignoreRects = [resolveIgnoreRect(shooter), resolveIgnoreRect(target)].filter(Boolean);
 
         const line = new Phaser.Geom.Line(x0, y0, x1, y1);
         const points = Phaser.Geom.Line.BresenhamPoints(line);
 
         for (const p of points) {
-            // --- NEW: don't let target building block itself ---
-            if (
-            ignoreMinX != null &&
-            p.x >= ignoreMinX && p.x <= ignoreMaxX &&
-            p.y >= ignoreMinY && p.y <= ignoreMaxY
-            ) {
-            continue;
+            if (ignoreRects.some((rect) =>
+                p.x >= rect.minX &&
+                p.x <= rect.maxX &&
+                p.y >= rect.minY &&
+                p.y <= rect.maxY
+            )) {
+                continue;
             }
 
             const cell = Map.grid[p.y]?.[p.x];
@@ -133,7 +326,7 @@ export class Projectile {
 
             if (target.health <= 0) {
                 fightManager.checkForKillReward(projectile.team, target);
-                target.destroySelf();
+                Player.destroyPlayer(target);
 
                 if (projectile.player) {
                     Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE);

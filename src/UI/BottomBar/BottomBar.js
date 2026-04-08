@@ -22,11 +22,12 @@ const START_OPEN  = false; // start expanded?
 
 export function CreateBottomBar(scene) {
   const tabPage = CreateTabPage(scene);
+  const collapsedOffset = EXPANDED - COLLAPSED + 155;
 
   const ui = tabPage.sizer
     .setOrigin(0.5, 1)
     // ✅ start in collapsed position (no mystery +95/+155)
-    .setPosition(scene.scale.width / 2, scene.scale.height + (EXPANDED - COLLAPSED + 155))
+    .setPosition(scene.scale.width / 2, scene.scale.height + collapsedOffset)
     .setMinSize(scene.scale.width, EXPANDED)
     .layout();
 
@@ -52,17 +53,32 @@ export function CreateBottomBar(scene) {
     openProgress: START_OPEN ? 1 : 0,
   };
 
+  const syncBottomBarLayout = () => {
+    const width = scene.scale.width;
+    const expandedY = scene.scale.height;
+    const collapsedY = scene.scale.height + collapsedOffset;
+    const progress = scene.uiBottomBar?.openProgress ?? (expanded ? 1 : 0);
+    ui.setMinSize(width, EXPANDED);
+    ui.setPosition(width / 2, Phaser.Math.Linear(collapsedY, expandedY, progress));
+    ui.layout();
+    scene.uiBottomBar.expandedY = expandedY;
+    scene.uiBottomBar.collapsedY = collapsedY;
+  };
+  syncBottomBarLayout();
+
   // ensure setBottomBar updates scene.uiBottomBar.expanded too
   function setBottomBar(open) {
     if (tween) tween.stop();
     tween = scene.tweens.add({
       targets: ui,
-      y: open ? EXPANDED_Y : COLLAPSED_Y,
+      y: open ? scene.uiBottomBar.expandedY : scene.uiBottomBar.collapsedY,
       duration: 200,
       ease: 'Cubic.easeOut',
       onUpdate: () => {
-        const travel = COLLAPSED_Y - EXPANDED_Y;
-        const progress = travel <= 0 ? (open ? 1 : 0) : Phaser.Math.Clamp((COLLAPSED_Y - ui.y) / travel, 0, 1);
+        const expandedY = scene.uiBottomBar.expandedY;
+        const collapsedY = scene.uiBottomBar.collapsedY;
+        const travel = collapsedY - expandedY;
+        const progress = travel <= 0 ? (open ? 1 : 0) : Phaser.Math.Clamp((collapsedY - ui.y) / travel, 0, 1);
         scene.uiBottomBar.openProgress = progress;
       },
       onComplete: () => {
@@ -160,6 +176,7 @@ export function CreateBottomBar(scene) {
 
   // (optional) spacebar toggle
   scene.input.keyboard.on('keydown-SPACE', () => toggleBottomBar());
+  scene.scale.on('resize', syncBottomBarLayout);
 
   scene.housesTab?.hide?.();
 }

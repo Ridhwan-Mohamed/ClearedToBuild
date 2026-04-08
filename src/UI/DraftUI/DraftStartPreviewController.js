@@ -177,6 +177,38 @@ export class DraftStartPreviewController {
     return a.minx === b.minx && a.miny === b.miny && a.maxx === b.maxx && a.maxy === b.maxy;
   }
 
+  _tileBlocksNav(typeKey) {
+    if (!typeKey) return false;
+    if (typeKey === "water") return true;
+    return !!TILE_TYPES[typeKey]?.block;
+  }
+
+  _cellBlocksNav(cell) {
+    if (Array.isArray(cell)) {
+      return this._tileBlocksNav(TILE_MAP(cell[0])) || this._tileBlocksNav(TILE_MAP(cell[1]));
+    }
+    return this._tileBlocksNav(TILE_MAP(cell));
+  }
+
+  syncNavGridFromDraftLayout() {
+    const hasSizedNavGrid =
+      Array.isArray(GameMap.navGrid) &&
+      GameMap.navGrid.length === this.srcH &&
+      GameMap.navGrid.every((row) => Array.isArray(row) && row.length === this.srcW);
+
+    if (!hasSizedNavGrid) {
+      GameMap.navGrid = Array.from({ length: this.srcH }, () => Array(this.srcW).fill(1));
+    }
+
+    for (let y = 0; y < this.srcH; y++) {
+      for (let x = 0; x < this.srcW; x++) {
+        GameMap.navGrid[y][x] = this._cellBlocksNav(this.gridData[y][x]) ? 0 : 1;
+      }
+    }
+
+    return GameMap.navGrid;
+  }
+
   _boundsOfPlacedExcluding(exclude) {
     const ps = this.placed.filter(p => p.tag === "draftPreview" && p !== exclude);
     if (!ps.length) return null;
@@ -288,10 +320,14 @@ export class DraftStartPreviewController {
       this._lastWallBounds = null;
     }
 
-    // 5) Spawn icon road cache stale
+    // 5) Re-derive nav blockers from the latest preview layout so moved buildings
+    // become the source of truth instead of the original generateTown placement.
+    this.syncNavGridFromDraftLayout();
+
+    // 6) Spawn icon road cache stale
     this._roadTilesCache = null;
 
-    // 6) Tell menu state about placed buildings
+    // 7) Tell menu state about placed buildings
     this._updatePlacedBuildingsIntoState(state);
   }
 
@@ -588,7 +624,7 @@ export class DraftStartPreviewController {
 
   /**
    * Build the mandatory town preview ONCE.
-   * - storage + clayOven + N houses (N determined by state)
+   * - town tower + storage + clayOven + N houses (N determined by state)
    * - roads rings + simple road connections between building centers
    */
   initBaseTown(state) {
@@ -600,7 +636,7 @@ export class DraftStartPreviewController {
       if (buildingArray[i]?.[4] === "draftPreview") buildingArray.splice(i, 1);
     }
 
-    // Build the “mandatory 3” using YOUR town style:
+    // Build the mandatory base using YOUR town style:
     // - house count is based on crew (2 per house)
     // - force at least 1 storage + 1 clay oven
     const housesNeeded = state.minHousesNeeded(); // your existing rule
@@ -610,11 +646,11 @@ export class DraftStartPreviewController {
 
     const buildings = [];
 
-    // Seed with a HOUSE in the center (generateTown grows outward from seed)
-    buildings.push(TILE_TYPES.house1);
+    // Seed with the Town Tower in the center (generateTown grows outward from seed)
+    buildings.push(TILE_TYPES.tower);
 
-    // Add remaining houses alternating house1/house2
-    for (let i = 1; i < state.extras.house; i++) {
+    // Add houses alternating house1/house2
+    for (let i = 0; i < state.extras.house; i++) {
       buildings.push((i % 2 === 0) ? TILE_TYPES.house1 : TILE_TYPES.house2);
     }
 
@@ -622,15 +658,15 @@ export class DraftStartPreviewController {
     buildings.push(TILE_TYPES.storage);
     buildings.push(TILE_TYPES.clayOven);
 
-    // Call YOUR generator. Pass navGrid if you have it; if not, null is fine now.
-    // Also pass a tag so every building it places is marked "draftPreview".
+    // Let the preview layout become the nav source of truth after stamping.
+    // Passing null here avoids leaving behind the generator's first blocker pass.
     const res = generateTown(
       this.gridData,     // grid
       buildings,         // buildings list
       1,                 // teamNumber
       Math.floor(this.srcW/2),              // optional start pos if your generateTown supports it; else omit
       Math.floor(this.srcH/2),
-      GameMap.navGrid,              // navGrid (draft stage may not have it)
+      null,
       "draftPreview"     // <-- ADD THIS PARAM in generateTown -> placeBuilding
     );
 
@@ -656,6 +692,8 @@ export class DraftStartPreviewController {
       });
 
     }
+
+    this.syncNavGridFromDraftLayout();
 
     // draw once (no per-frame redraw)
     this.fullRepaint?.();

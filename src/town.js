@@ -23,8 +23,6 @@ export function clearBuildingArray(){
     buildingArray.length = 0;
 }
 
-export const turretTeams = {}
-
 export function setupTownBoundsToggle(scene) {
     const isTyping = () => {
       const el = document.activeElement;
@@ -95,7 +93,6 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
     const center = getValidCenterTile(townCenterX, townCenterY, buildings[0])
     Teams.teamLists[`${teamNumber}`].center[0] = center.tx
     Teams.teamLists[`${teamNumber}`].center[1] = center.ty
-    if(buildings[0] == TILE_TYPES.turret) turretTeams[`${townCenterX},${townCenterY}`] = teamNumber;
     townRoads[`${teamNumber}`] = [];
     let outerRoads = [];
     outerRoads.push(expandRoads(grid, townCenterX, townCenterY, buildings[0], teamNumber)[1]); // Step 2: Expand roads around seed
@@ -109,7 +106,6 @@ export function generateTown(grid, buildings, teamNumber, startX = -1, startY = 
                 let canFit = canPlaceBuildingAtAnyCorner(grid, spot[0], spot[1], curBuilding)
                 if(canFit.success){
                     outerRoads[0] = outerRoads[0].filter(([x, y]) => x !== spot[0] || y !== spot[1]);
-                    if(curBuilding == TILE_TYPES.turret) turretTeams[`${spot[0]},${spot[1]}`] = teamNumber;
                     placeBuilding(grid, canFit.x, canFit.y, curBuilding, teamNumber, navGrid, tag);
                     buildings.splice(i, 1);
                     let [roads, newOuterRoads] = expandRoads(grid, canFit.x, canFit.y, curBuilding, teamNumber);

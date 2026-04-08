@@ -118,7 +118,7 @@ export class TowerPressureController {
     if (!st) return null;
 
     const slotId = st.currentSlotId ?? null;
-    const now = this.scene?.time?.now ?? 0;
+    const now = this._getSimulationNowMs();
     const remainingMs = Math.max(0, (st.countdownEndsAt ?? 0) - now);
     const hasActiveRaid = !!(slotId && this.scene?.parcelManager?.slotToContractId?.[slotId]);
 
@@ -143,7 +143,7 @@ export class TowerPressureController {
     const st = this._towerState?.get?.(tower);
     if (!st) return null;
 
-    const now = this.scene?.time?.now ?? 0;
+    const now = this._getSimulationNowMs();
     const remainingMs = Math.max(0, (st.countdownEndsAt ?? 0) - now);
     const hasActiveRaid = !!(slotId && this.scene?.parcelManager?.slotToContractId?.[slotId]);
     const difficulty = this._difficultyForCurrentStage();
@@ -173,6 +173,10 @@ export class TowerPressureController {
     st.uiTickEvent?.remove(false);
     st.countdownEvent = null;
     st.uiTickEvent = null;
+  }
+
+  _getSimulationNowMs() {
+    return Number(this.scene?.getSimulationNow?.() ?? this.scene?.simNowMs ?? 0);
   }
 
   _difficultyForCurrentStage() {
@@ -254,7 +258,7 @@ export class TowerPressureController {
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     if (slotPanel?._state === "PAGE") slotPanel.back?.();
 
-    st.countdownEndsAt = this.scene.time.now + this.countdownMs;
+    st.countdownEndsAt = this._getSimulationNowMs() + this.countdownMs;
 
     // draw countdown immediately
     this._showCountdownUI(slotId, st);
@@ -277,7 +281,7 @@ export class TowerPressureController {
   }
 
   _showCountdownUI(slotId, st) {
-    const remaining = Math.max(0, st.countdownEndsAt - this.scene.time.now);
+    const remaining = Math.max(0, st.countdownEndsAt - this._getSimulationNowMs());
     const diff = this._difficultyForCurrentStage();
     const spawners = diff;
     const enemies = spawners * (PRESSURE.baseEnemiesPerSpawner ?? 3);
@@ -309,7 +313,7 @@ export class TowerPressureController {
 
     // If slot is already occupied (player contract still active), try again soon.
     if (pm.slotToContractId?.[slotId]) {
-      st.countdownEndsAt = this.scene.time.now + 3_000;
+      st.countdownEndsAt = this._getSimulationNowMs() + 3_000;
       st.countdownEvent = this.scene.time.delayedCall(3_000, () => this._spawnWave(st));
       return;
     }

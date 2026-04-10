@@ -712,9 +712,6 @@ parcelHelpers.export(exports, "calcPressureBonus", ()=>calcPressureBonus);
 parcelHelpers.export(exports, "RESOURCE_PARCEL", ()=>RESOURCE_PARCEL);
 var _uiconstants = require("./UI/UIConstants");
 var _stageState = require("./parcelController/StageState");
-// ---- Contract economy (costs + rewards) ----
-// constants.js
-var _stageStateJs = require("./parcelController/StageState.js"); // <-- adjust path if needed
 function create2DArray(rows, cols) {
     let array = new Array(rows);
     for(let i = 0; i < rows; i++)array[i] = new Array(cols).fill(1);
@@ -1413,6 +1410,7 @@ const TILE_TYPES = {
     tower: {
         name: "tower",
         value: "tower",
+        displayName: "Town Tower",
         spriteSheet: true,
         spread: false,
         block: true,
@@ -1421,7 +1419,13 @@ const TILE_TYPES = {
         depth: BLOCKDEPTH,
         lenX: 3,
         lenY: 3,
-        stayBlocked: true
+        stayBlocked: true,
+        maxHealth: 600,
+        cost: {
+            money: 300,
+            wood: 4,
+            stone: 4
+        }
     },
     // ── Fort enemy buildings (64x64 sheets, 2 frames) ──
     prison: {
@@ -1456,6 +1460,7 @@ const TILE_TYPES = {
 const DRAFT_UI_X_SHIFT = 120;
 const teamSetupArray = {
     smallTeam: [
+        TILE_TYPES.tower,
         TILE_TYPES.clayOven,
         TILE_TYPES.house2,
         TILE_TYPES.house1,
@@ -1655,14 +1660,17 @@ function handleGridXY(x, y, itemX, itemY) {
         finalY
     ];
 }
-function showAlert(scene, message, color = '#ffffff', duration = 1000) {
-    const alert = scene.add.text(scene.cameras.main.width / 2, 0, message, {
+function showAlert(scene, message, color = '#ffffff', duration = 1400) {
+    const uiScene = scene?.uiScene || scene?.scene?.get?.('GameUIScene') || scene;
+    if (uiScene && uiScene !== scene && typeof uiScene.showAlertMessage === 'function') return uiScene.showAlertMessage(message, color, duration);
+    if (uiScene && typeof uiScene.showAlertMessage === 'function') return uiScene.showAlertMessage(message, color, duration);
+    const alert = uiScene.add.text(uiScene.cameras.main.width / 2, 0, message, {
         fontSize: '24px',
         fill: color,
         stroke: '#000000',
         strokeThickness: 3
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(UIDEPTH);
-    scene.tweens.add({
+    uiScene.tweens.add({
         targets: alert,
         y: 50,
         alpha: 0,
@@ -1670,6 +1678,7 @@ function showAlert(scene, message, color = '#ffffff', duration = 1000) {
         ease: 'Cubic.easeOut',
         onComplete: ()=>alert.destroy()
     });
+    return alert;
 }
 function intDiv(n, d) {
     return Math.floor(n / d);
@@ -1861,7 +1870,7 @@ const CONTRACT_ECON = {
 };
 function getContractStage(scene) {
     // ✅ preferred: global stage state
-    if ((0, _stageStateJs.StageState)?.stageIndex != null) return (0, _stageStateJs.StageState).stageIndex;
+    if ((0, _stageState.StageState)?.stageIndex != null) return (0, _stageState.StageState).stageIndex;
     // fallback if you ever run without StageState wired
     if (!scene.contractStage) scene.contractStage = 1;
     return scene.contractStage;
@@ -1918,7 +1927,7 @@ const RESOURCE_PARCEL = {
     WATER_EDGE_BUFFER: 2
 };
 
-},{"./UI/UIConstants":"424Vy","./parcelController/StageState":"3gSPQ","./parcelController/StageState.js":"3gSPQ","@parcel/transformer-js/src/esmodule-helpers.js":"jnFvT"}],"424Vy":[function(require,module,exports,__globalThis) {
+},{"./UI/UIConstants":"424Vy","./parcelController/StageState":"3gSPQ","@parcel/transformer-js/src/esmodule-helpers.js":"jnFvT"}],"424Vy":[function(require,module,exports,__globalThis) {
 var parcelHelpers = require("@parcel/transformer-js/src/esmodule-helpers.js");
 parcelHelpers.defineInteropFlag(exports);
 parcelHelpers.export(exports, "UI_ITEM_TYPES", ()=>UI_ITEM_TYPES);
@@ -2033,7 +2042,10 @@ parcelHelpers.export(exports, "StageState", ()=>StageState);
 const StageState = {
     stageIndex: 1,
     seasonIndex: 1,
+    startDay: 1,
     STAGES_PER_SEASON: 5,
+    endlessMode: true,
+    fortObjectiveEnabled: false,
     START_OVERRIDE: {
         seasonIndex: 1,
         stageIndex: 1
@@ -2069,6 +2081,64 @@ const StageState = {
     unregisterFortTower (towerRef) {
         if (towerRef) this._fortTowers.delete(towerRef);
     },
+    resetFortState () {
+        this._fortTowers.clear();
+        this._fortObjective = {
+            active: false,
+            seasonIndex: this.seasonIndex,
+            requiredCount: 0,
+            destroyedSet: new Set(),
+            completed: false,
+            meta: null
+        };
+    },
+    getConfiguredStartDay (override = null) {
+        const src = override ?? this.START_OVERRIDE ?? {};
+        const explicitDay = Math.floor(Number(src.day ?? src.dayIndex) || 0);
+        if (explicitDay >= 1) return explicitDay;
+        const stage = Math.max(1, Math.floor(Number(src.stageIndex ?? this.stageIndex ?? 1) || 1));
+        return stage <= 1 ? 1 : stage + 1;
+    },
+    getCompletedHordesForStart (override = null) {
+        return Math.max(0, this.getConfiguredStartDay(override) - 2);
+    },
+    startEndlessRun (override = null) {
+        const src = override ?? this.START_OVERRIDE ?? {};
+        this.endlessMode = true;
+        this.fortObjectiveEnabled = false;
+        this.seasonIndex = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
+        this.stageIndex = Math.max(1, Math.floor(Number(src.stageIndex ?? 1) || 1));
+        this.startDay = this.getConfiguredStartDay(src);
+        this.resetFortState();
+        return {
+            seasonIndex: this.seasonIndex,
+            stageIndex: this.stageIndex,
+            day: this.startDay,
+            completedHordes: this.getCompletedHordesForStart(src)
+        };
+    },
+    resetForMenu () {
+        this.endlessMode = true;
+        this.fortObjectiveEnabled = false;
+        this.seasonIndex = 1;
+        this.stageIndex = 1;
+        this.startDay = 1;
+        this.resetFortState();
+    },
+    advanceHorde (meta = {}) {
+        this.stageIndex = Math.max(1, Number(this.stageIndex || 1)) + 1;
+        for (const fn of this._listeners.seasonAdvanced)try {
+            fn({
+                seasonIndex: this.seasonIndex,
+                stageIndex: this.stageIndex,
+                ...meta
+            });
+        } catch (_) {}
+        return {
+            seasonIndex: this.seasonIndex,
+            stageIndex: this.stageIndex
+        };
+    },
     advanceStage () {
         this.stageIndex += 1;
     },
@@ -2083,16 +2153,9 @@ const StageState = {
         const stage = Math.max(1, Math.min(this.STAGES_PER_SEASON, Math.floor(Number(src.stageIndex ?? 1) || 1)));
         this.seasonIndex = season;
         this.stageIndex = stage;
+        this.startDay = this.getConfiguredStartDay(src);
         // Fresh objective state for forced start points.
-        this._fortTowers.clear();
-        this._fortObjective = {
-            active: false,
-            seasonIndex: this.seasonIndex,
-            requiredCount: 0,
-            destroyedSet: new Set(),
-            completed: false,
-            meta: null
-        };
+        this.resetFortState();
     },
     advanceSeason (meta = {}) {
         this.seasonIndex += 1;
@@ -2145,6 +2208,7 @@ const StageState = {
    * Arm the north-fort objective for the CURRENT season.
    * Call after all fort towers are spawned/created.
    */ setFortObjective (meta = {}) {
+        if (!this.fortObjectiveEnabled) return;
         const snapshotCount = Number.isFinite(meta.requiredTowerCount) && meta.requiredTowerCount > 0 ? Math.floor(meta.requiredTowerCount) : this._fortTowers.size > 0 ? this._fortTowers.size : 1;
         this._fortObjective.active = true;
         this._fortObjective.seasonIndex = this.seasonIndex;
@@ -2157,6 +2221,7 @@ const StageState = {
    * Called by TowerBuilding.destroy()
    * Counts down fort towers; only completes when requiredCount reached.
    */ notifyFortTowerDestroyed (towerRef) {
+        if (!this.fortObjectiveEnabled) return false;
         const obj = this._fortObjective;
         if (!obj.active) return false;
         if (obj.completed) return false;

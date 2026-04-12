@@ -2454,6 +2454,7 @@ export class GameUIScene extends Phaser.Scene {
       strokeAlpha: 0.42,
       topStripColor: accent,
       topStripAlpha: 0.95,
+      topStripHeight: 24,
       shadowColor: 0x031018,
       shadowAlpha: 0.22,
       shadowOffsetY: 10,
@@ -2461,7 +2462,24 @@ export class GameUIScene extends Phaser.Scene {
 
     const glow = this.add.circle(-width * 0.22, -height * 0.12, Math.max(20, Math.round(width * 0.18)), accent, 0.12);
     const shimmer = this.add.circle(width * 0.18, -height * 0.2, Math.max(12, Math.round(width * 0.08)), 0xffffff, 0.10);
-    const value = this.add.text(0, -12, `${entry?.value ?? 0}`, {
+    const textFlagHeight = Math.max(52, Math.round(height * 0.42));
+    const textFlagY = (height / 2) - (textFlagHeight / 2) - 10;
+    const textFlag = this.add.graphics();
+    this._drawRoundedPanel(textFlag, width - 16, textFlagHeight, {
+      radius: 18,
+      fillColor: 0x0b1926,
+      fillAlpha: 0.50,
+      strokeColor: accent,
+      strokeAlpha: 0.14,
+      strokeWidth: 1,
+      topStripColor: accent,
+      topStripAlpha: 0.12,
+      topStripHeight: 12,
+      shadowAlpha: 0,
+    });
+    textFlag.setPosition(0, textFlagY);
+
+    const value = this.add.text(0, -18, `${entry?.value ?? 0}`, {
       fontFamily: "Bungee",
       fontSize: width < 170 ? "24px" : "28px",
       color: valueColor,
@@ -2469,26 +2487,28 @@ export class GameUIScene extends Phaser.Scene {
       strokeThickness: 4,
       align: "center",
     }).setOrigin(0.5);
-    const label = this.add.text(0, 30, entry?.label ?? "", {
+    const label = this.add.text(0, textFlagY - 4, entry?.label ?? "", {
       fontFamily: "Bungee",
-      fontSize: "12px",
+      fontSize: width < 170 ? "10px" : "11px",
       color: labelColor,
       stroke: "#06121b",
       strokeThickness: 3,
       align: "center",
-      wordWrap: { width: width - 24 },
-    }).setOrigin(0.5);
-    const hint = this.add.text(0, height / 2 - 22, entry?.hint ?? "", {
+      wordWrap: { width: width - 34 },
+      lineSpacing: 2,
+    }).setOrigin(0.5, 1);
+    const hint = this.add.text(0, textFlagY + 6, entry?.hint ?? "", {
       fontFamily: "Bungee",
-      fontSize: "10px",
+      fontSize: width < 170 ? "9px" : "10px",
       color: hintColor,
       stroke: "#06121b",
       strokeThickness: 2,
       align: "center",
-      wordWrap: { width: width - 28 },
-    }).setOrigin(0.5);
+      wordWrap: { width: width - 34 },
+      lineSpacing: 2,
+    }).setOrigin(0.5, 0);
 
-    root.add([bg, glow, shimmer, value, label, hint]);
+    root.add([bg, glow, shimmer, textFlag, value, label, hint]);
     root.setAlpha(0).setScale(0.9);
 
     this.tweens.add({
@@ -2594,7 +2614,7 @@ export class GameUIScene extends Phaser.Scene {
       strokeWidth: 3,
       topStripColor: 0x7dd3fc,
       topStripAlpha: 0.95,
-      topStripHeight: 12,
+      topStripHeight: 34,
       shadowColor: 0x031018,
       shadowAlpha: 0.3,
       shadowOffsetY: 16,
@@ -2647,9 +2667,10 @@ export class GameUIScene extends Phaser.Scene {
     const gapX = cols >= 5 ? 12 : 18;
     const gapY = 16;
     const cardWidth = Math.min(cols >= 5 ? 176 : 224, Math.floor((panelWidth - 120 - (gapX * Math.max(0, cols - 1))) / Math.max(1, cols)));
-    const cardHeight = cam.width < 760 ? 108 : 116;
+    const cardHeight = cam.width < 760 ? 124 : 132;
     const gridTop = -(panelHeight / 2) + 270;
     const rows = Math.ceil(primaryStats.length / Math.max(1, cols));
+    const gridBottom = gridTop + (rows * cardHeight) + (Math.max(0, rows - 1) * gapY);
 
     primaryStats.forEach((entry, index) => {
       const row = Math.floor(index / cols);
@@ -2663,7 +2684,7 @@ export class GameUIScene extends Phaser.Scene {
     });
 
     const unlockLabels = Array.isArray(summaryData?.troopUnlockLabels) ? summaryData.troopUnlockLabels : [];
-    const unlockHeaderY = gridTop + (rows * cardHeight) + (Math.max(0, rows - 1) * gapY) + 42;
+    const unlockHeaderY = gridBottom + 42;
     const unlockHeaderText = unlockLabels.length
       ? "Run-Earned Troops"
       : "Run-Earned Troops: None This Run";
@@ -2676,6 +2697,8 @@ export class GameUIScene extends Phaser.Scene {
       align: "center",
     }).setOrigin(0.5);
     panel.add(unlockHeader);
+
+    const unlockChipY = unlockHeaderY + 40;
 
     if (unlockLabels.length) {
       const chipGap = 14;
@@ -2696,10 +2719,10 @@ export class GameUIScene extends Phaser.Scene {
           fillAlpha: 0.98,
           strokeColor: 0xffffff,
           strokeAlpha: 0.24,
-          shadowAlpha: 0.12,
-          shadowOffsetY: 6,
+            shadowAlpha: 0.12,
+            shadowOffsetY: 6,
         });
-        const chip = this.add.container(0, unlockHeaderY + 40, [bg, text]).setAlpha(0).setScale(0.9);
+        const chip = this.add.container(0, unlockChipY, [bg, text]).setAlpha(0).setScale(0.9);
         return { chip, width };
       });
 
@@ -2730,10 +2753,18 @@ export class GameUIScene extends Phaser.Scene {
       });
     }
 
+    const unlockContentBottomY = unlockLabels.length ? unlockChipY + 26 : unlockHeaderY + 6;
+    const buttonWidth = Math.min(260, panelWidth - 180);
+    const buttonHeight = 72;
+    const buttonY = (panelHeight / 2) - 60;
+    const secondaryY = Math.min(
+      buttonY - 78,
+      Math.max(unlockContentBottomY + 26, (panelHeight / 2) - 122)
+    );
     const secondaryLine = (summaryData?.secondaryStats || [])
       .map((entry) => `${entry.label}: ${entry.value}`)
       .join("   •   ");
-    const secondary = this.add.text(0, (panelHeight / 2) - 118, secondaryLine, {
+    const secondary = this.add.text(0, secondaryY, secondaryLine, {
       fontFamily: "Bungee",
       fontSize: "11px",
       color: "#9fc1d2",
@@ -2745,8 +2776,6 @@ export class GameUIScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const buttonBg = this.add.graphics();
-    const buttonWidth = Math.min(260, panelWidth - 180);
-    const buttonHeight = 58;
     const drawButton = (hovered = false) => {
       this._drawRoundedPanel(buttonBg, buttonWidth, buttonHeight, {
         radius: 24,
@@ -2760,17 +2789,17 @@ export class GameUIScene extends Phaser.Scene {
       });
     };
     drawButton(false);
-    buttonBg.setPosition(0, (panelHeight / 2) - 56);
+    buttonBg.setPosition(0, buttonY);
     buttonBg.setInteractive(new Phaser.Geom.Rectangle(-(buttonWidth / 2), -(buttonHeight / 2), buttonWidth, buttonHeight), Phaser.Geom.Rectangle.Contains);
 
-    const buttonText = this.add.text(0, buttonBg.y - 2, summaryData?.restartLabel || "Restart Run", {
+    const buttonText = this.add.text(0, buttonBg.y - 10, summaryData?.restartLabel || "Restart Run", {
       fontFamily: "Bungee",
       fontSize: "18px",
       color: "#0b2a3e",
       stroke: "#f8feff",
       strokeThickness: 2,
     }).setOrigin(0.5);
-    const buttonHint = this.add.text(0, buttonBg.y + 26, "Fade back to the clouds", {
+    const buttonHint = this.add.text(0, buttonBg.y + 14, "Fade back to the clouds", {
       fontFamily: "Bungee",
       fontSize: "10px",
       color: "#d8f6ff",

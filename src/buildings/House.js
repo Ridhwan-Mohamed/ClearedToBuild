@@ -21,7 +21,11 @@ export class House {
         this.team = team;
         this.capacity = 2;
         this.occupants = [];
+        this._isBroken = false;
+        this._removedFromHouseList = false;
         this.uiContainer = House.scene.add.container(0, 0).setDepth(UIDEPTH);
+        this.sleepFxContainer = House.scene.add.container(0, 0).setDepth(UIDEPTH + 1);
+        this.sleepFxByPlayer = new globalThis.Map();
 
         // 🔹 Building health
         this.maxHealth = 300;
@@ -85,7 +89,7 @@ export class House {
     }
 
     canAcceptPlayer() {
-        return this.occupants.length < this.capacity;
+        return !this._isBroken && this.occupants.length < this.capacity;
     }
 
     static availableHouse(team) {
@@ -143,6 +147,168 @@ export class House {
             return icon;
         });
 
+    }
+
+    getSleepAnchorForOccupant(player) {
+        if (!this.sprite) return null;
+        const idx = Math.max(0, this.occupants?.indexOf(player) ?? 0);
+        return {
+            x: this.sprite.x + 16 + idx * 28,
+            y: this.sprite.y - 20,
+            side: idx <= 0 ? "left" : "right",
+            index: idx
+        };
+    }
+
+    getSleepGlyphAnchorForOccupant(player) {
+        const anchor = this.getSleepAnchorForOccupant(player);
+        if (!anchor || !this.sprite) return anchor;
+        const spriteHeight = this.sprite.displayHeight || (TILE_TYPES.house1.lenY * SQUARESIZE);
+        return {
+            ...anchor,
+            y: this.sprite.y + Math.round(spriteHeight * 0.5)
+        };
+    }
+
+    _spawnSleepGlyph(player, fx) {
+        if (!player || !fx || !this.scene || !this.sprite || player.home !== this || player.state !== CONTROL_STATES.SLEEP_MODE) {
+            this.stopSleepingVisual(player);
+            return;
+        }
+
+        const anchor = this.getSleepGlyphAnchorForOccupant(player);
+        if (!anchor) return;
+
+        const leftSide = anchor.side === "left";
+        const xJitter = leftSide ? -4 + Math.random() * 4 : 4 - Math.random() * 4;
+        const glyph = this.scene.add.text(anchor.x + xJitter, anchor.y, "Z", {
+            fontFamily: "Bungee",
+            fontSize: "18px",
+            color: "#f8fafc",
+            stroke: "#164e63",
+            strokeThickness: 4
+        })
+            .setOrigin(0.5)
+            .setDepth(UIDEPTH + 2)
+            .setAlpha(0.96)
+            .setScale(0.48)
+            .setAngle(leftSide ? -9 : 9);
+
+        this.sleepFxContainer.add(glyph);
+        fx.glyphs.add(glyph);
+
+        const riseY = glyph.y - (22 + Math.random() * 10);
+        const driftX = glyph.x + (leftSide ? -3 - Math.random() * 2 : 3 + Math.random() * 2);
+        const startAngle = glyph.angle;
+        const swayDelta = leftSide ? -7 : 7;
+
+        this.scene.tweens.add({
+            targets: glyph,
+            angle: startAngle + swayDelta,
+            duration: 220,
+            ease: "Sine.easeInOut",
+            yoyo: true,
+            repeat: 2
+        });
+
+        this.scene.tweens.add({
+            targets: glyph,
+            x: driftX,
+            y: riseY,
+            scale: 1.18,
+            alpha: 0,
+            duration: 960,
+            ease: "Sine.easeOut",
+            onComplete: () => {
+                fx.glyphs.delete(glyph);
+                glyph.destroy();
+            }
+        });
+    }
+
+    startSleepingVisual(player) {
+        if (!player || !this.scene) return;
+        this.stopSleepingVisual(player);
+
+        const fx = {
+            glyphs: new Set(),
+            event: null
+        };
+
+        this.sleepFxByPlayer.set(player, fx);
+        this._spawnSleepGlyph(player, fx);
+        fx.event = this.scene.time.addEvent({
+            delay: 420,
+            loop: true,
+            callback: () => this._spawnSleepGlyph(player, fx)
+        });
+    }
+
+    stopSleepingVisual(player) {
+        const fx = this.sleepFxByPlayer?.get(player);
+        if (!fx) return;
+
+        fx.event?.remove(false);
+        for (const glyph of fx.glyphs) {
+            this.scene?.tweens?.killTweensOf?.(glyph);
+            glyph.destroy?.();
+        }
+        fx.glyphs.clear();
+        this.sleepFxByPlayer.delete(player);
+    }
+
+    stopAllSleepingVisuals() {
+        if (!this.sleepFxByPlayer?.size) return;
+        for (const player of Array.from(this.sleepFxByPlayer.keys())) {
+            this.stopSleepingVisual(player);
+        }
+    }
+
+    _removeFromHouseList() {
+        if (this._removedFromHouseList) return;
+        const list = Teams.teamLists?.[this.team]?.houseList;
+        if (Array.isArray(list)) {
+            const i = list.indexOf(this);
+            if (i !== -1) list.splice(i, 1);
+        }
+        this._removedFromHouseList = true;
+    }
+
+    evacuateResidents() {
+        if (this._isBroken && (!Array.isArray(this.occupants) || this.occupants.length === 0)) {
+            return;
+        }
+
+        this._isBroken = true;
+        this._removeFromHouseList();
+        this.stopAllSleepingVisuals();
+
+        const displacedPlayers = Array.isArray(this.occupants) ? [...this.occupants] : [];
+        this.occupants = [];
+
+        for (const player of displacedPlayers) {
+            if (!player || player.active === false) continue;
+
+            if (player.state === CONTROL_STATES.SLEEP_MODE) {
+                StaminaManager.wakeUp(player);
+            } else if (player.state === CONTROL_STATES.GO_HOME_MODE) {
+                player.task = null;
+                player.currentPath = [];
+                player.setVelocity?.(0, 0);
+                Teams.movePlayerState(player, CONTROL_STATES.TRACK_MODE);
+            }
+
+            if (player.home === this) {
+                player.home = null;
+            }
+            if (player.icon) {
+                player.icon.followingHouse = false;
+            }
+        }
+
+        this.clearIcons?.();
+        this.scene?.events?.emit?.("housing:updated", this.team);
+        Teams.assignHomelessPlayersToHouses?.(this.team);
     }
 
     clearIcons() {
@@ -238,6 +404,10 @@ export class House {
         this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
         this.health = Math.max(0, currentHealth);
 
+        if (this.health <= 0 && !this._isBroken) {
+            this.evacuateResidents();
+        }
+
         this.shakeAndFlash();
         const now = House.scene?.time?.now ?? 0;
         this._damageBarUntil = now + 2000;
@@ -266,43 +436,13 @@ export class House {
     destroy() {
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
-
-        const displacedPlayers = Array.isArray(this.occupants) ? [...this.occupants] : [];
-        this.occupants = [];
-         
-        // remove from team house list so UI rows vanish
-        const list = Teams.teamLists?.[this.team]?.houseList;
-        if (Array.isArray(list)) {
-            const i = list.indexOf(this);
-            if (i !== -1) list.splice(i, 1);
-        }
-
-        for (const player of displacedPlayers) {
-            if (!player || player.active === false) continue;
-
-            if (player.home === this) {
-                player.home = null;
-            }
-            if (player.icon) {
-                player.icon.followingHouse = false;
-            }
-
-            if (player.state === CONTROL_STATES.SLEEP_MODE) {
-                StaminaManager.wakeUp(player);
-            } else if (player.state === CONTROL_STATES.GO_HOME_MODE) {
-                player.task = null;
-                player.currentPath = [];
-                player.setVelocity?.(0, 0);
-                Teams.movePlayerState(player, CONTROL_STATES.TRACK_MODE);
-            }
-        }
-
-        Teams.assignHomelessPlayersToHouses?.(this.team);
+        this.evacuateResidents();
 
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         if (this.healthBarBg) this.healthBarBg.destroy();
         if (this.healthBar)   this.healthBar.destroy();
+        this.sleepFxContainer?.destroy();
         this.sprite?.destroy();
         this.clearIcons?.();
         this.scene?.events?.emit?.("housing:updated", this.team);

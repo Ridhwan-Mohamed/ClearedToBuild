@@ -291,6 +291,11 @@ export class Player {
             return;
         }
 
+        if (troop.state === CONTROL_STATES.SLEEP_MODE) {
+            indicator?.setVisible(false);
+            return;
+        }
+
         const visual = this._resolveCarryVisual(troop);
         if (!visual) {
             indicator?.setVisible(false);
@@ -2286,6 +2291,16 @@ export class Player {
     troop._miniBarsInit = false;
     }
 
+    static _hideMiniBars(troop) {
+    if (!troop?._miniBarsInit) return;
+    for (let i = 0; i < (troop._miniBarsSegCap || 0); i++) {
+        troop._hpSegBg?.[i]?.setVisible(false);
+        troop._hpSegFill?.[i]?.setVisible(false);
+        troop._stSegBg?.[i]?.setVisible(false);
+        troop._stSegFill?.[i]?.setVisible(false);
+    }
+    }
+
     static _layoutSegmentBar({ bgArr, fillArr, xLeft, y, totalW, cur, max, segUnit, gap, pad, segCap }) {
     const safeMax = Math.max(0.0001, Number(max) || 0);
     const safeCur = Phaser.Math.Clamp(Number(cur) || 0, 0, safeMax);
@@ -2334,6 +2349,11 @@ export class Player {
     static _updateMiniBars(troop) {
     if (!this.scene || !troop || !troop.active) return;
 
+    if (troop.state === CONTROL_STATES.SLEEP_MODE || troop.visible === false || troop.alpha === 0) {
+        this._hideMiniBars(troop);
+        return;
+    }
+
     const scene = this.scene;
 
     const fromSelection = !!troop.selected;
@@ -2346,14 +2366,7 @@ export class Player {
     const shouldShow = fromSelection || fromHover || fromTab;
 
     if (!shouldShow) {
-        if (troop._miniBarsInit) {
-        for (let i = 0; i < (troop._miniBarsSegCap || 0); i++) {
-            troop._hpSegBg?.[i]?.setVisible(false);
-            troop._hpSegFill?.[i]?.setVisible(false);
-            troop._stSegBg?.[i]?.setVisible(false);
-            troop._stSegFill?.[i]?.setVisible(false);
-        }
-        }
+        this._hideMiniBars(troop);
         return;
     }
 
@@ -2443,6 +2456,27 @@ export class Player {
             t._miniBarSelectedFromTab = (t === selectedTroop);
             this._updateSelectionIndicator(t);
         });
+    }
+
+    static prepareTroopForSleep(troop) {
+        if (!troop) return;
+
+        const selectedIndex = this.selected.indexOf(troop);
+        if (selectedIndex !== -1) {
+            this.selected.splice(selectedIndex, 1);
+        }
+
+        troop._miniBarHover = false;
+        troop._miniBarSelectedFromTab = false;
+        troop._miniBarLastHit = 0;
+        this._setTroopSelected(troop, false);
+        this._hideMiniBars(troop);
+
+        this.clearPoseLock(troop, troop.idle);
+        troop.deferredCarry = null;
+        troop.carrying = null;
+        StorageManager.releaseDeliveryReservation(troop);
+        this._updateCarryIndicator(troop);
     }
 
 static onWallDestroyed(troop, task) {

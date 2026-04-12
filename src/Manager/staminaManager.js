@@ -2,6 +2,7 @@ import { CONTROL_STATES, TILE_TYPES } from "../constants";
 import { Teams } from "../Teams";
 import { Player } from "../players/Player";
 import { buildingManager } from "./buildingManager";
+import { InterruptController } from "../ai/scheduler/InterruptController";
 
 export class StaminaManager {
     static scene;
@@ -22,41 +23,50 @@ export class StaminaManager {
     }
 
     static sendTroopHome(troop) {
-        if (!troop.home) return;
+        if (!troop?.home) return false;
+        if (troop.state === CONTROL_STATES.SLEEP_MODE || troop.state === CONTROL_STATES.GO_HOME_MODE) {
+            return true;
+        }
+
+        InterruptController.interruptTroop(troop, "sleep_request", CONTROL_STATES.TRACK_MODE);
+        Player.clearPoseLock(troop, troop.idle);
+
         const { x, y } = troop.home;
         const approach = buildingManager.findBuildApproachBlock(x, y, TILE_TYPES.house1, troop);
-        if (!approach) return;
+        if (!approach) return false;
         troop.task = true;
         troop.roam = false;
         const path = approach.path;
         if (path) {
             Player.moveTo(troop, path);
             Teams.movePlayerState(troop, CONTROL_STATES.GO_HOME_MODE);
+            return true;
         }
+        return false;
     }
 
     static arriveAtHome(troop) {
+        Player.prepareTroopForSleep(troop);
         troop.setVisible(false);
         troop.body.setEnable(false);
         Teams.movePlayerState(troop, CONTROL_STATES.SLEEP_MODE);
 
-        if (troop.home && troop.icon) {
+        if (troop.home) {
             const house = troop.home;
-            const idx = house.occupants.indexOf(troop);
+            const anchor = house.getSleepAnchorForOccupant?.(troop);
 
-            // offsets for left/right positions
-            const offsetX = idx === 0 ? -12 : 12;
-            const offsetY = -20;
+            if (troop.icon && anchor) {
+                troop.icon.setPosition(anchor.x, anchor.y);
+                troop.icon.followingHouse = true;
+            }
 
-            troop.icon.setPosition(house.sprite.x + offsetX, house.sprite.y + offsetY);
-
-            // stop following troop.x/troop.y
-            troop.icon.followingHouse = true;
+            house.startSleepingVisual?.(troop);
         }
     }
 
 
     static wakeUp(troop) {
+        troop.home?.stopSleepingVisual?.(troop);
         troop.task = null;
         troop.setVisible(true);
         troop.body.setEnable(true);

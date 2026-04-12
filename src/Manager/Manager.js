@@ -65,6 +65,27 @@ export class Manager {
         return true;
     }
 
+    static _resolveApproachTileForTask(troop, task, state) {
+        if (state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T) {
+            return buildingManager.findBuildApproachTile(task.x, task.y, troop);
+        }
+        if (!this.blockType(state)) {
+            return null;
+        }
+        if (state === CONTROL_STATES.GET_FROM_STORAGE) {
+            return buildingManager.findFrontDoorApproachBlock(task.x, task.y, task.type, troop);
+        }
+        if (
+            state === CONTROL_STATES.BUILD_MODE_B ||
+            state === CONTROL_STATES.DESTROY_MODE ||
+            state === CONTROL_STATES.FIX_BUILDING ||
+            state === CONTROL_STATES.GET_BLOCK_RESOURCE
+        ) {
+            return buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
+        }
+        return buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task);
+    }
+
     static assignTroopsToAction(troopList, taskList, state, force = false){
         if (taskList.length <= 0) return;
         for(let troop of troopList){
@@ -85,21 +106,7 @@ export class Manager {
                 if(this.buildType(state)){
                     if(this.tooManyAssigned(task, state)) continue;
                     if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
-                    let approachTile;
-                    if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
-                        approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
-                    }else if(this.blockType(state)){
-                        if (
-                            state === CONTROL_STATES.BUILD_MODE_B ||
-                            state === CONTROL_STATES.DESTROY_MODE ||
-                            state === CONTROL_STATES.FIX_BUILDING ||
-                            state === CONTROL_STATES.GET_BLOCK_RESOURCE
-                        ) {
-                            approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
-                        } else {
-                            approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
-                        }
-                    }
+                    const approachTile = this._resolveApproachTileForTask(troop, task, state);
                     if(approachTile){
                         troop.roam = false;
                         if(force) Player.handleStateIntteruptStart(troop)
@@ -162,21 +169,7 @@ export class Manager {
             if(this.buildType(state)){
                 if(this.tooManyAssigned(task, state)) continue;
                 if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) continue; 
-                let approachTile;
-                if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
-                    approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
-                }else if(this.blockType(state)){
-                    if (
-                        state === CONTROL_STATES.BUILD_MODE_B ||
-                        state === CONTROL_STATES.DESTROY_MODE ||
-                        state === CONTROL_STATES.FIX_BUILDING ||
-                        state === CONTROL_STATES.GET_BLOCK_RESOURCE
-                    ) {
-                        approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
-                    } else {
-                        approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
-                    }
-                }
+                const approachTile = this._resolveApproachTileForTask(troop, task, state);
                 if(approachTile){
                     troop.roam = false;
                     Teams.movePlayerState(troop, state)
@@ -239,21 +232,7 @@ export class Manager {
         if(this.buildType(state)){
             if(this.tooManyAssigned(task, state)) return;
             if((state === CONTROL_STATES.SEND_TO_OVEN || state === CONTROL_STATES.SEND_TO_STORAGE) && task.item.name != troop.carrying.name) return; 
-            let approachTile;
-            if(state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T){
-                approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
-            }else if(this.blockType(state)){
-                if (
-                    state === CONTROL_STATES.BUILD_MODE_B ||
-                    state === CONTROL_STATES.DESTROY_MODE ||
-                    state === CONTROL_STATES.FIX_BUILDING ||
-                    state === CONTROL_STATES.GET_BLOCK_RESOURCE
-                ) {
-                    approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
-                } else {
-                    approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
-                }
-            }
+            const approachTile = this._resolveApproachTileForTask(troop, task, state);
             if(approachTile){
                 troop.roam = false;
                 Teams.movePlayerState(troop, state)

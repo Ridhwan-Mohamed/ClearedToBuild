@@ -685,6 +685,26 @@ export class buildingManager{
         return this.findApproachAnyPerimeter(x, y, type, troop, tStartX, tStartY, task);
     }
 
+    static findFrontDoorApproachBlock(x, y, type, troop) {
+        if (!type || !troop) return null;
+
+        const tx = x + Math.floor((type.lenX || 1) / 2);
+        const ty = y + (type.lenY || 1);
+        const { navGrid } = Player._getNavForTroop(troop);
+
+        if (tx < 0 || ty < 0 || ty >= navGrid.length || tx >= navGrid[0].length) {
+            return null;
+        }
+        if (!navGrid[ty]?.[tx]) {
+            return null;
+        }
+
+        const path = Player.pathTo(troop, tx, ty, true);
+        if (!path?.length) return null;
+
+        return { tx, ty, path };
+    }
+
     static _assignedPerimeterDestKeys(task, troop) {
         if (!task || !troop) return new Set();
 

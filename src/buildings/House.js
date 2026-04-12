@@ -1,8 +1,9 @@
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../constants";
+import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE, TILE_TYPES, UIDEPTH, showGhostText } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { buildingManager } from "../Manager/buildingManager";
+import { StaminaManager } from "../Manager/staminaManager";
 import {
     applyPortraitKeyToSprite,
     DEFAULT_PLAYER_PORTRAIT_KEY,
@@ -18,6 +19,7 @@ export class House {
         this.x = x;
         this.y = y;
         this.team = team;
+        this.capacity = 2;
         this.occupants = [];
         this.uiContainer = House.scene.add.container(0, 0).setDepth(UIDEPTH);
 
@@ -78,16 +80,16 @@ export class House {
         this.uiIcons = [null, null];
         Teams.teamLists[team].houseList.push(this);
         Teams.teamLists[team].buildings.push([x, y, TILE_TYPES.house1, this.sprite])
+        Teams.assignHomelessPlayersToHouses?.(team);
+        this.scene?.events?.emit?.("housing:updated", team);
     }
 
     canAcceptPlayer() {
-        return this.occupants.length < 2;
+        return this.occupants.length < this.capacity;
     }
 
     static availableHouse(team) {
-        const house = Teams.teamLists[team].houseList.find(h => h.canAcceptPlayer());
-        if (!house) return false;
-        return true;
+        return Teams.canRecruitPlayer?.(team) ?? false;
     }
 
     static assignPlayerToHouse(player, team){
@@ -99,8 +101,20 @@ export class House {
 
     assignPlayer(player) {
         if (!this.canAcceptPlayer()) return false;
+        const oldHouse = player?.home && player.home !== this ? player.home : null;
+        if (player?.home && player.home !== this) {
+            const oldIndex = player.home.occupants?.indexOf(player) ?? -1;
+            if (oldIndex !== -1) {
+                player.home.occupants.splice(oldIndex, 1);
+            }
+        }
         this.occupants.push(player);
         player.home = this;   // 🔑 reference to their house
+        if (oldHouse) {
+            if (oldHouse.isHovered && oldHouse.occupants?.length) oldHouse.updateIcons?.();
+            else oldHouse.clearIcons?.();
+        }
+        this.scene?.events?.emit?.("housing:updated", this.team);
         return true;
     }
 
@@ -252,7 +266,10 @@ export class House {
     destroy() {
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
-        
+
+        const displacedPlayers = Array.isArray(this.occupants) ? [...this.occupants] : [];
+        this.occupants = [];
+         
         // remove from team house list so UI rows vanish
         const list = Teams.teamLists?.[this.team]?.houseList;
         if (Array.isArray(list)) {
@@ -260,11 +277,34 @@ export class House {
             if (i !== -1) list.splice(i, 1);
         }
 
+        for (const player of displacedPlayers) {
+            if (!player || player.active === false) continue;
+
+            if (player.home === this) {
+                player.home = null;
+            }
+            if (player.icon) {
+                player.icon.followingHouse = false;
+            }
+
+            if (player.state === CONTROL_STATES.SLEEP_MODE) {
+                StaminaManager.wakeUp(player);
+            } else if (player.state === CONTROL_STATES.GO_HOME_MODE) {
+                player.task = null;
+                player.currentPath = [];
+                player.setVelocity?.(0, 0);
+                Teams.movePlayerState(player, CONTROL_STATES.TRACK_MODE);
+            }
+        }
+
+        Teams.assignHomelessPlayersToHouses?.(this.team);
+
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         if (this.healthBarBg) this.healthBarBg.destroy();
         if (this.healthBar)   this.healthBar.destroy();
         this.sprite?.destroy();
         this.clearIcons?.();
+        this.scene?.events?.emit?.("housing:updated", this.team);
     }
 }

@@ -1,6 +1,6 @@
 // === ClayOven.js ===
 
-import { BLOCKDEPTH, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS } from "../constants";
+import { BLOCKDEPTH, CONTROL_STATES, SQUARESIZE, TILE_TYPES, showGhostText, GHOST_ITEM_ICONS } from "../constants";
 import { Map } from "../map";
 import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
@@ -40,6 +40,7 @@ export class ClayOven {
         this.x = x;
         this.y = y;
         this.cooking = false;
+        this._destroyed = false;
 
         // 🔹 Building health (for destroy feedback)
         this.maxHealth = 250;
@@ -288,12 +289,15 @@ export class ClayOven {
     }
 
     updateAnimation() {
-        const anyCooking = this.cookingSlots.some(state => state);
-        if (anyCooking) {
-            this.sprite.anims.play('oven_cooking', true);
-        } else {
-            this.sprite.anims.play('oven_idle');
-        }
+        const sprite = this.sprite;
+        const anims = sprite?.anims;
+        if (this._destroyed || !sprite?.active || typeof anims?.play !== "function") return;
+
+        const anyCooking = Array.isArray(this.isCooking)
+            ? this.isCooking.some(Boolean)
+            : !!this.cooking;
+
+        anims.play(anyCooking ? 'oven_cooking' : 'oven_idle', true);
     }
 
     stopAllCooking() {
@@ -338,7 +342,13 @@ export class ClayOven {
             const gridX = Math.floor(x / SQUARESIZE) - Math.floor(lenX / 2);
             const gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
 
-            const isBlocked = Map.checkBlockPositionGen(gridX, gridY, lenX, lenY);
+            const isBlocked = Map.checkBlockPositionGen(
+                gridX,
+                gridY,
+                lenX,
+                lenY,
+                { padding: 1, protectFarmSpots: true }
+            );
 
             ghost.setTint(isBlocked ? 0xff4444 : 0x44ff44);
             ghost.setPosition(
@@ -375,6 +385,8 @@ export class ClayOven {
     }
 
     updateCooking(delta) {
+        if (this._destroyed || !this.sprite?.active) return;
+
         let anyCooking = false;
         let changed = false;
 
@@ -458,7 +470,9 @@ export class ClayOven {
         // Only switch animation if needed
         if (this.cooking !== anyCooking) {
             this.cooking = anyCooking;
-            this.sprite.anims.play(this.cooking ? 'oven_cooking' : 'oven_idle', true);
+            if (typeof this.sprite?.anims?.play === "function") {
+                this.sprite.anims.play(this.cooking ? 'oven_cooking' : 'oven_idle', true);
+            }
         }
     }
 
@@ -475,6 +489,80 @@ export class ClayOven {
             0,0,0,'#00ff00'
         );
         return true;
+    }
+
+    clearQueuedWork() {
+        const team = Teams.teamLists?.[this.teamNumber];
+        if (!team) return;
+
+        const listKeys = [
+            "ovenJobs",
+            "ovenPickupJobs",
+            "ovenFuelJobs",
+            "ovenDeliveryItems",
+            "ovenFuelDeliveryItems",
+        ];
+
+        for (const key of listKeys) {
+            if (!Array.isArray(team[key])) continue;
+            team[key] = team[key].filter((task) => {
+                if (task?.oven !== this) return true;
+                task.canceled = true;
+                return false;
+            });
+        }
+
+        const players = Array.isArray(team.playerList) ? team.playerList : [];
+        for (const troop of players) {
+            if (!troop || troop.active === false) continue;
+
+            let changed = false;
+            if (troop.pendingOvenJob?.oven === this) {
+                troop.pendingOvenJob.canceled = true;
+                troop.pendingOvenJob = null;
+                changed = true;
+            }
+            if (troop.pendingFuelJob?.oven === this) {
+                troop.pendingFuelJob.canceled = true;
+                troop.pendingFuelJob = null;
+                changed = true;
+            }
+            if (troop.task?.oven === this || troop.task?.job?.oven === this) {
+                troop.task = null;
+                changed = true;
+            }
+            if (
+                changed &&
+                (troop.state === CONTROL_STATES.SEND_TO_OVEN ||
+                 troop.state === CONTROL_STATES.GET_FROM_STORAGE ||
+                 troop.state === CONTROL_STATES.GET_WATER_MODE)
+            ) {
+                troop.task = null;
+            }
+
+            if (!changed) continue;
+
+            troop.currentPath = [];
+            troop.setVelocity?.(0, 0);
+
+            if (
+                troop.state === CONTROL_STATES.SEND_TO_OVEN ||
+                troop.state === CONTROL_STATES.GET_FROM_STORAGE ||
+                troop.state === CONTROL_STATES.GET_WATER_MODE
+            ) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
+        }
+    }
+
+    clearStoredContents() {
+        this.stopAllCooking();
+        this.cookingSlots = Array.from({ length: ClayOven.slotCount }, () => null);
+        this.outputSlots = Array.from({ length: ClayOven.slotCount }, () => null);
+        this.cookTimers = Array.from({ length: ClayOven.slotCount }, () => 0);
+        this.cookDurations = Array.from({ length: ClayOven.slotCount }, () => 0);
+        this.isCooking = Array.from({ length: ClayOven.slotCount }, () => false);
+        this.fuel = 0;
     }
 
     ensureHealthBar() {
@@ -570,10 +658,15 @@ export class ClayOven {
     }
 
     destroy() {
+        if (this._destroyed) return;
+        this._destroyed = true;
+
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
-        
-        this.stopAllCooking();
+
+        Teams.removeFromStateArray(this.teamNumber, 'ovenList', this);
+        this.clearQueuedWork();
+        this.clearStoredContents();
         ClayOven.scene.events.emit('oven:removed', this);
         if (this.healthBarBg) this.healthBarBg.destroy();
         if (this.healthBar)   this.healthBar.destroy();

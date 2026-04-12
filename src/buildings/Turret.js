@@ -138,7 +138,8 @@ export class Turret {
         placement.gridY,
         item.lenX,
         item.lenY,
-        state.topSprite
+        state.topSprite,
+        { padding: 1, protectFarmSpots: true }
       );
 
       state.baseSprite.setPosition(placement.centerX, placement.centerY);

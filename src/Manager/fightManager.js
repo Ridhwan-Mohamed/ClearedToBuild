@@ -58,6 +58,13 @@ export class fightManager{
             target.moveSlowUntil = Math.max(currentUntil, nextUntil);
         }
 
+        const attackerIsPlayerFighter =
+            attacker?.body?.team === 1 &&
+            Player._isFighterUnit?.(attacker);
+        if (target?.isRaider && attackerIsPlayerFighter) {
+            target._raiderRetaliationTarget = attacker;
+        }
+
         // 3) Knockback ONLY team 0 units, away from the attacker
         // if (!attacker || !target.body || target.body.team !== 0) return;
 
@@ -182,6 +189,7 @@ export class fightManager{
                     InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
                 }
                 CombatSpacingCoordinator.clearTroopFocus(sprite);
+                Player.resetRoamState(sprite);
                 sprite.track = null;
                 sprite.forcedTarget = null;
                 Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
@@ -232,6 +240,7 @@ export class fightManager{
                 InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
             }
             CombatSpacingCoordinator.clearTroopFocus(sprite);
+            Player.resetRoamState(sprite);
             sprite.track = null;
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
             Player.setAnimState(sprite, sprite.idle);
@@ -330,6 +339,7 @@ export class fightManager{
             }
             CombatSpacingCoordinator.clearTroopFocus(sprite);
             Player.destroyPlayer(target);
+            Player.resetRoamState(sprite);
             sprite.track = null;
             sprite.forcedTarget = null;
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);

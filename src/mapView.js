@@ -11,7 +11,7 @@ import zoomOutWaterTxt2 from 'url:./assets/zoomOutWaterTxt2.png'
 import { Map as GameMap } from './map.js';
 import { Turret } from './buildings/Turret.js';
 import { Catapult } from './buildings/Catapult.js';
-import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, PARCEL, showAlert, colorFor } from './constants';
+import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, PARCEL, PRESSURE_CONTRACT, showAlert, colorFor } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Farmer } from './players/Farmer.js';
@@ -27,7 +27,7 @@ import player from 'url:./assets/Players/player.png'
 import gun1 from 'url:./assets/Players/gun1.png'
 import playerAction from 'url:./assets/Players/playerAction.png'
 import playerCarry from 'url:./assets/Players/playerCarry.png'
-import { playerDict, setupTownBoundsToggle, townBounds, townRoads } from './town.js';
+import { playerDict, setupTownBoundsToggle, townBounds, townRoads, clearBuildingArray, clearPlayerDict, spawnPoints } from './town.js';
 import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
 import { buildingManager } from './Manager/buildingManager.js';
@@ -38,7 +38,7 @@ import { seedManager } from './Manager/seedManager.js';
 import char from 'url:./assets/char.png'
 import berry from 'url:./assets/berry.png'
 import spawn from 'url:./assets/hole.png'
-import { recalculateDestroyTasksFromPoint } from './Manager/spawnManager.js';
+import { recalculateDestroyTasksFromPoint, spawnSeaRaider } from './Manager/spawnManager.js';
 import { Clock } from './Controllers/Clock.js';
 import clayOven from 'url:./assets/clayOven.png'
 import { ClayOven } from './buildings/ClayOven.js';
@@ -80,23 +80,64 @@ import { Prison } from './buildings/Prison.js';
 import { TowerPressureController } from './parcel_system/TowerPressureController.js';
 import { StageState } from './parcelController/StageState.js';
 import { loadShipMarketAssets } from './UI/ShipMarket.js';
-import { openFortRewardSelection } from './parcel_system/FortRewardSystem.js';
 import { clearNorthFort, spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { GameUIScene } from './UI/GameUIScene.js';
 import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
 import { OverviewOceanWaves } from './UI/OverviewOceanWaves.js';
 import { OverviewShoreWaves } from './UI/OverviewShoreWaves.js';
 import { OrderRunner } from './orders/OrderRunner.js';
-import { getStagePermitReward } from './permitSystem.js';
 import { getBossUnlockReward, openBossUnlockRewardPresentation } from './parcel_system/BossUnlockRewardSystem.js';
-import { createPlayerPortraitAnimations, preloadPlayerPortraits } from './players/playerPortraits.js';
+import { getHordeUnlockReward } from './parcel_system/HordeUnlockTrack.js';
+import { hasStoreUnlock, STORE_UNLOCK_KEYS } from './parcel_system/StoreUnlockSystem.js';
+import { createPlayerPortraitAnimations, getPlayerPortraitKey, preloadPlayerPortraits } from './players/playerPortraits.js';
+import { getHordeModifierForIndex } from './parcel_system/HordeModifiers.js';
+import { addCardToHand, getCardHand } from './UI/Powerups.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
+const RUN_TROOP_UNLOCK_KEYS = new Set([
+    STORE_UNLOCK_KEYS.blademaster,
+    STORE_UNLOCK_KEYS.gunslinger,
+]);
+const TOWN_XP_TEAM_ID = "1";
+const TOWN_XP_COLORS = Object.freeze({
+    mint: 0x93f5d7,
+    cyan: 0x8fe7ff,
+    cream: 0xfff0c9,
+    peach: 0xffd7a5,
+    lilac: 0xd8c4ff,
+    blue: 0x1b405d,
+});
+const TOWN_XP_SOURCE_VALUES = Object.freeze({
+    parcelClaim: 20,
+    raiderKill: 4,
+    fortGruntKill: 8,
+    hordeSurvived: 55,
+    fortCleared: 95,
+});
+const TOWN_XP_RECRUIT_DEFS = Object.freeze([
+    { key: "farmer", title: "Fresh Farmer", subtitle: "Recruit 1 Farmer for your village", accentColor: 0x8b5a2b, ctor: Farmer },
+    { key: "builder", title: "Busy Builder", subtitle: "Recruit 1 Builder for faster construction", accentColor: 0x4433ff, ctor: Builder },
+    { key: "forager", title: "Trail Forager", subtitle: "Recruit 1 Forager for quick gathering", accentColor: 0x2cb96f, ctor: Forager },
+    { key: "fireman", title: "Spark Fireman", subtitle: "Recruit 1 Fireman to keep ovens and flames humming", accentColor: 0xff9933, ctor: Fireman },
+    { key: "brawler", title: "Town Brawler", subtitle: "Recruit 1 Brawler to help hold the line", accentColor: 0xffd712, ctor: Brawler },
+    { key: "gunslinger", title: "Quickdraw Gunslinger", subtitle: "Recruit 1 Gunslinger if that troop is unlocked", accentColor: 0x9999ff, ctor: Gunslinger, unlockKey: STORE_UNLOCK_KEYS.gunslinger },
+    { key: "blademaster", title: "Swift Blademaster", subtitle: "Recruit 1 Blademaster if that troop is unlocked", accentColor: 0xaa33ee, ctor: Blademaster, unlockKey: STORE_UNLOCK_KEYS.blademaster },
+]);
 
 export class mapView extends Phaser.Scene {
     constructor() {
         super('mapView');
+        this._bindSceneStatics();
+        this._resetRuntimeState();
+    }
+
+    init() {
+        this._bindSceneStatics();
+        this._resetRuntimeState();
+    }
+
+    _bindSceneStatics() {
         mapView.scene = this;
         GameMap.scene = this;
         Turret.scene = this;
@@ -111,6 +152,63 @@ export class mapView extends Phaser.Scene {
         itemTab.mapRef = this;
         House.scene = this;
         ZoomMixer.scene = this;
+    }
+
+    _createRunStats() {
+        return {
+            nightsSurvived: 0,
+            parcelsClaimed: 0,
+            enemiesDefeated: 0,
+            troopUnlockKeys: new Set(),
+            troopUnlockLabels: [],
+            claimedContractIds: new Set(),
+            defeatedEnemyIds: new Set(),
+        };
+    }
+
+    _getTownXpRequirement(level = 1) {
+        const normalized = Math.max(1, Number(level || 1));
+        const priorLevels = Math.max(0, normalized - 1);
+        return 70 + (priorLevels * 26) + (Math.max(0, priorLevels - 1) * priorLevels * 4);
+    }
+
+    _createTownXpState() {
+        return {
+            level: 1,
+            xpIntoLevel: 0,
+            xpForNextLevel: this._getTownXpRequirement(1),
+            totalEarned: 0,
+            pendingLevelRewards: 0,
+            gainSerial: 0,
+            lastGainAmount: 0,
+            lastGainLabel: "",
+            rewardReadyAt: 0,
+        };
+    }
+
+    getTownXpSnapshot() {
+        const state = this._townXp || (this._townXp = this._createTownXpState());
+        return {
+            level: Math.max(1, Number(state.level || 1)),
+            xpIntoLevel: Math.max(0, Number(state.xpIntoLevel || 0)),
+            xpForNextLevel: Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1))),
+            totalEarned: Math.max(0, Number(state.totalEarned || 0)),
+            pendingLevelRewards: Math.max(0, Number(state.pendingLevelRewards || 0)),
+            gainSerial: Math.max(0, Number(state.gainSerial || 0)),
+            lastGainAmount: Math.max(0, Number(state.lastGainAmount || 0)),
+            lastGainLabel: String(state.lastGainLabel || "Town XP"),
+            progress: Math.max(
+                0,
+                Math.min(
+                    1,
+                    Math.max(0, Number(state.xpIntoLevel || 0))
+                    / Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1)))
+                )
+            ),
+        };
+    }
+
+    _resetRuntimeState() {
         this.gridPlace = false;
         this.selectMode = true;
         this.brushTiles = []; // Array to store affected tiles
@@ -129,7 +227,7 @@ export class mapView extends Phaser.Scene {
         this.farmBannerParts = null;       // { left, esc, middle, seedCount, seedIcon, right }
         this.farmInstructionText = null;   // top-center instruction banner
         this.harvestMode = false;
-        this.money = 1300; // Starting amount
+        this.money = 400; // Starting fallback amount
         this.seeds = 10;
         this.foodAmnt = 15;
         this.cleanWaterAmnt = 15;
@@ -188,10 +286,478 @@ export class mapView extends Phaser.Scene {
         this._northFortArrivalMarker = null;
         this._activeFort = null;
         this._activeNightHorde = null;
+        this._cachedNightHordePlan = null;
         this._hordeRewardInProgress = false;
         this._townTowerLossInProgress = false;
+        this._restartToMainMenuInProgress = false;
+        this._lastTownCoreLost = null;
         this._gameOverOverlay = null;
         this._townTowerStats = { built: 0, destroyed: 0 };
+        this._runStats = this._createRunStats();
+        this._townXp = this._createTownXpState();
+        this._activeRewardUI = null;
+        this._activeBossRewardUI = null;
+        this._activeTownXpRewardUI = null;
+        this._movementLocked = false;
+        this.stageCompleteLock = false;
+        this.clock = null;
+        this.uiScene = null;
+        this.zoomMixer = null;
+        this.parcelSpawnUI = null;
+        this.parcelManager = null;
+        this.navMeshUpdater = null;
+        this.enemyNavMeshUpdater = null;
+        this.menu = null;
+        this.logo = null;
+        this.logoMini = null;
+        this.startButton = null;
+        this.menuPreview = null;
+        this.draftMenu = null;
+        this._teamTownIcon = null;
+        this._draftTownIconUnsub = null;
+        this._stageHud = null;
+        this._pendingMenuPhase = false;
+        this._menuRevealFx = null;
+        this._restartCarryCover = null;
+        this._scaleResizeHandlers = [];
+        this._registryImageChangedHandler = null;
+    }
+
+    _trackScaleResize(handler) {
+        if (!handler) return null;
+        this.scale?.on?.("resize", handler);
+        this._scaleResizeHandlers.push(handler);
+        return handler;
+    }
+
+    registerRunParcelClaim(type, meta = {}) {
+        const normalized = String(type || "").toUpperCase();
+        if (!normalized || normalized === "PRESSURE" || normalized === "MILITIA") return;
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        const key = meta?.contractId || `${normalized}:${meta?.slotId ?? "?"}:${stats.parcelsClaimed}`;
+        if (stats.claimedContractIds.has(key)) return;
+        stats.claimedContractIds.add(key);
+        stats.parcelsClaimed += 1;
+        this.addTownXp(TOWN_XP_SOURCE_VALUES.parcelClaim, "Parcel Claimed");
+    }
+
+    registerRunEnemyDefeat(troop, opts = {}) {
+        if (opts?.silentStageCleanup) return;
+        if (!troop?.isRaider && !troop?.isFortGrunt) return;
+
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        const key = Number.isFinite(troop?.id) ? troop.id : `${troop?.type?.name || "enemy"}:${stats.enemiesDefeated}`;
+        if (stats.defeatedEnemyIds.has(key)) return;
+        stats.defeatedEnemyIds.add(key);
+        stats.enemiesDefeated += 1;
+        this.addTownXp(
+            troop?.isFortGrunt ? TOWN_XP_SOURCE_VALUES.fortGruntKill : TOWN_XP_SOURCE_VALUES.raiderKill,
+            troop?.isFortGrunt ? "Fort Grunt Defeated" : "Raider Defeated"
+        );
+    }
+
+    _isTroopUnlockReward(reward) {
+        return RUN_TROOP_UNLOCK_KEYS.has(String(reward?.unlockKey || ""));
+    }
+
+    _registerRunTroopUnlock(reward) {
+        if (!this._isTroopUnlockReward(reward)) return;
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        const key = String(reward?.unlockKey || reward?.displayLabel || reward?.title || "");
+        if (!key || stats.troopUnlockKeys.has(key)) return;
+        stats.troopUnlockKeys.add(key);
+        stats.troopUnlockLabels.push(
+            String(reward?.displayLabel || reward?.title || key)
+                .replace(/\s+Unlocked$/i, "")
+                .trim()
+        );
+    }
+
+    _getMainIslandCenterGrid() {
+        const bounds = this._getMainIslandBounds();
+        return {
+            x: Math.floor((bounds.minx + bounds.maxx) * 0.5),
+            y: Math.floor((bounds.miny + bounds.maxy) * 0.5),
+        };
+    }
+
+    _grantTownXpResources(bundle = {}) {
+        if ((bundle.money || 0) > 0) this.updateMoney(Math.max(0, Number(bundle.money || 0)));
+        if ((bundle.permits || 0) > 0) this.updatePermits(Math.max(0, Number(bundle.permits || 0)));
+        if ((bundle.wood || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "wood", Math.max(0, Number(bundle.wood || 0)), this);
+        if ((bundle.stone || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "stone", Math.max(0, Number(bundle.stone || 0)), this);
+        if ((bundle.food || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "food", Math.max(0, Number(bundle.food || 0)), this);
+        if ((bundle.cleanWater || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "clean_water", Math.max(0, Number(bundle.cleanWater || 0)), this);
+        if ((bundle.seeds || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "seedCrop", Math.max(0, Number(bundle.seeds || 0)), this);
+        if ((bundle.berries || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "seedBerry", Math.max(0, Number(bundle.berries || 0)), this);
+    }
+
+    _getAvailableTownXpRecruitDefs() {
+        return TOWN_XP_RECRUIT_DEFS.filter((entry) => !entry.unlockKey || hasStoreUnlock(entry.unlockKey));
+    }
+
+    _getTownXpRecruitPortraitKey(recruitKey) {
+        const stub = {
+            health: 999,
+            isFarmer: recruitKey === "farmer",
+            isBuilder: recruitKey === "builder",
+            isForager: recruitKey === "forager",
+            isFireman: recruitKey === "fireman",
+            isBrawler: recruitKey === "brawler",
+            isGunslinger: recruitKey === "gunslinger",
+            isBlademaster: recruitKey === "blademaster",
+        };
+        return getPlayerPortraitKey(stub);
+    }
+
+    _createTownXpSupplyOption(kind, level = 1) {
+        const bonusScale = Math.max(0, Number(level || 1) - 1);
+        if (kind === "treasury") {
+            const reward = {
+                money: 180 + (bonusScale * 35),
+                permits: 1 + Math.floor(bonusScale / 3),
+            };
+            return {
+                id: `treasury:${level}`,
+                badgeLabel: "TREASURY",
+                title: "Sunny Treasury",
+                subtitle: `+$${reward.money} and +${reward.permits} permit${reward.permits === 1 ? "" : "s"}`,
+                hint: "A clean little bankroll boost for your next build spree.",
+                presentationType: "chest",
+                chestContents: [
+                    { key: "monies", label: "Money", amount: reward.money },
+                    { key: "playerIcon", label: "Permits", amount: reward.permits },
+                ],
+                accentColor: TOWN_XP_COLORS.cyan,
+                panelColor: 0x153449,
+                grant: () => {
+                    this._grantTownXpResources(reward);
+                    showAlert(this, `Town reward: +$${reward.money} and ${reward.permits} permit${reward.permits === 1 ? "" : "s"}`, "#8fe7ff");
+                },
+            };
+        }
+
+        if (kind === "builder_cache") {
+            const reward = {
+                wood: 6 + Math.floor(bonusScale * 1.5),
+                stone: 6 + Math.floor(bonusScale * 1.5),
+                seeds: 4 + Math.floor(bonusScale / 2),
+            };
+            return {
+                id: `builder_cache:${level}`,
+                badgeLabel: "SUPPLIES",
+                title: "Builder Cache",
+                subtitle: `+${reward.wood} wood, +${reward.stone} stone, +${reward.seeds} seeds`,
+                hint: "Perfect for throwing down defenses and fresh plots fast.",
+                presentationType: "chest",
+                chestContents: [
+                    { key: "woodIcon", label: "Wood", amount: reward.wood },
+                    { key: "stoneIcon", label: "Stone", amount: reward.stone },
+                    { key: "seeds", label: "Seeds", amount: reward.seeds },
+                ],
+                accentColor: TOWN_XP_COLORS.peach,
+                panelColor: 0x2c3347,
+                grant: () => {
+                    this._grantTownXpResources(reward);
+                    showAlert(this, `Town reward: +${reward.wood} wood, +${reward.stone} stone, +${reward.seeds} seeds`, "#ffd7a5");
+                },
+            };
+        }
+
+        if (kind === "camp_chow") {
+            const reward = {
+                food: 8 + Math.floor(bonusScale * 1.5),
+                cleanWater: 8 + Math.floor(bonusScale * 1.5),
+                berries: 3 + Math.floor(bonusScale / 2),
+            };
+            return {
+                id: `camp_chow:${level}`,
+                badgeLabel: "SUPPER",
+                title: "Camp Chow",
+                subtitle: `+${reward.food} food, +${reward.cleanWater} water, +${reward.berries} berry seeds`,
+                hint: "A comfy bump that keeps the crew cheerful through the next day.",
+                presentationType: "chest",
+                chestContents: [
+                    { key: "foodIcon", label: "Food", amount: reward.food },
+                    { key: "waterIcon", label: "Water", amount: reward.cleanWater },
+                    { key: "berry", label: "Berry", amount: reward.berries },
+                ],
+                accentColor: TOWN_XP_COLORS.mint,
+                panelColor: 0x173743,
+                grant: () => {
+                    this._grantTownXpResources(reward);
+                    showAlert(this, `Town reward: +${reward.food} food and +${reward.cleanWater} water`, "#a7f3d0");
+                },
+            };
+        }
+
+        const reward = {
+            money: 110 + (bonusScale * 18),
+            permits: 2 + Math.floor((bonusScale + 1) / 3),
+        };
+        return {
+            id: `permit_parade:${level}`,
+            badgeLabel: "PERMITS",
+            title: "Permit Parade",
+            subtitle: `+${reward.permits} permits and +$${reward.money}`,
+            hint: "A juicy expansion nudge for grabbing the next parcel ring.",
+            presentationType: "chest",
+            chestContents: [
+                { key: "playerIcon", label: "Permits", amount: reward.permits },
+                { key: "monies", label: "Money", amount: reward.money },
+            ],
+            accentColor: TOWN_XP_COLORS.lilac,
+            panelColor: 0x26284a,
+            grant: () => {
+                this._grantTownXpResources(reward);
+                showAlert(this, `Town reward: +${reward.permits} permits`, "#d8c4ff");
+            },
+        };
+    }
+
+    _createTownXpCardOption(level = 1) {
+        const source = POWERUP_CARDS.slice();
+        Phaser.Utils.Array.Shuffle(source);
+        const card = source[0];
+        if (!card) return null;
+
+        const outline = String(card.OUTLINE || "").replace("#", "");
+        const accentColor = Number.parseInt(outline, 16);
+        return {
+            id: `card:${card.id || level}`,
+            badgeLabel: "CARD",
+            title: card.name || "Power Card",
+            subtitle: card.text || "Add a fresh perk to the town hand.",
+            hint: "A run perk that kicks in right away and sticks for this village.",
+            presentationType: "card",
+            cardImageKey: card.image,
+            cardText: card.text || "",
+            accentColor: Number.isFinite(accentColor) ? accentColor : TOWN_XP_COLORS.cyan,
+            panelColor: 0x17324c,
+            grant: () => {
+                addCardToHand(card, TOWN_XP_TEAM_ID);
+                this.events.emit("cards:updated");
+                showAlert(this, `Town reward: ${card.name}`, "#8fe7ff");
+            },
+        };
+    }
+
+    _createTownXpRecruitOption(level = 1) {
+        const recruitDefs = this._getAvailableTownXpRecruitDefs().slice();
+        if (!recruitDefs.length || !Teams.canRecruitPlayer?.(TOWN_XP_TEAM_ID)) return null;
+        Phaser.Utils.Array.Shuffle(recruitDefs);
+        const recruit = recruitDefs[0];
+        if (!recruit?.ctor) return null;
+
+        return {
+            id: `recruit:${recruit.key}:${level}`,
+            badgeLabel: "CREW",
+            title: recruit.title,
+            subtitle: recruit.subtitle,
+            hint: "Adds another cheerful pair of hands to the run right now.",
+            presentationType: "recruit",
+            portraitKey: this._getTownXpRecruitPortraitKey(recruit.key),
+            accentColor: recruit.accentColor ?? TOWN_XP_COLORS.cream,
+            panelColor: 0x213248,
+            grant: () => {
+                const center = this._getMainIslandCenterGrid();
+                const troop = new recruit.ctor(center.x, center.y, 1);
+                const assigned = House.assignPlayerToHouse(troop, TOWN_XP_TEAM_ID);
+                if (!assigned) {
+                    troop.destroySelf?.() ?? troop.destroy?.();
+                    const fallbackMoney = 240 + (Math.max(0, level - 1) * 25);
+                    this.updateMoney(fallbackMoney);
+                    showAlert(this, `No free bed: +$${fallbackMoney} instead`, "#ffd7a5");
+                    return;
+                }
+                showAlert(this, `Town reward: ${recruit.title}`, "#a7f3d0");
+            },
+        };
+    }
+
+    _buildTownXpRewardOptions(level = this._townXp?.level || 1) {
+        const options = [];
+        const addOption = (entry) => {
+            if (!entry) return;
+            if (options.some((candidate) => candidate.id === entry.id)) return;
+            options.push(entry);
+        };
+
+        const supplyKinds = ["treasury", "builder_cache", "camp_chow", "permit_parade"];
+        Phaser.Utils.Array.Shuffle(supplyKinds);
+
+        addOption(this._createTownXpCardOption(level));
+        if (Teams.canRecruitPlayer?.(TOWN_XP_TEAM_ID)) {
+            addOption(this._createTownXpRecruitOption(level));
+        }
+
+        while (options.length < 3 && supplyKinds.length) {
+            addOption(this._createTownXpSupplyOption(supplyKinds.shift(), level));
+        }
+        while (options.length < 3) {
+            addOption(this._createTownXpSupplyOption("treasury", level + options.length));
+        }
+
+        Phaser.Utils.Array.Shuffle(options);
+        return options.slice(0, 3);
+    }
+
+    addTownXp(amount, reason = "Town XP", opts = {}) {
+        const normalized = Math.max(0, Math.floor(Number(amount) || 0));
+        if (!(normalized > 0)) return 0;
+
+        const state = this._townXp || (this._townXp = this._createTownXpState());
+        state.totalEarned = Math.max(0, Number(state.totalEarned || 0)) + normalized;
+        state.xpIntoLevel = Math.max(0, Number(state.xpIntoLevel || 0)) + normalized;
+        state.gainSerial = Math.max(0, Number(state.gainSerial || 0)) + 1;
+        state.lastGainAmount = normalized;
+        state.lastGainLabel = String(reason || "Town XP");
+
+        let levelsGained = 0;
+        while (state.xpIntoLevel >= Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1)))) {
+            state.xpIntoLevel -= Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1)));
+            state.level = Math.max(1, Number(state.level || 1)) + 1;
+            state.xpForNextLevel = this._getTownXpRequirement(state.level);
+            state.pendingLevelRewards = Math.max(0, Number(state.pendingLevelRewards || 0)) + 1;
+            levelsGained += 1;
+        }
+
+        const now = Number(this.time?.now || 0);
+        if (levelsGained > 0) {
+            state.rewardReadyAt = Math.max(now + 320, Number(state.rewardReadyAt || 0));
+            showAlert(
+                this,
+                `Town Level ${state.level}! A new village reward is ready.`,
+                "#ffe8b8",
+                1700
+            );
+        } else if (opts.alert) {
+            showAlert(this, `${reason}: +${normalized} XP`, "#8fe7ff", 1100);
+        }
+
+        this.events.emit("townxp:changed", this.getTownXpSnapshot());
+        return levelsGained;
+    }
+
+    _canPresentPendingTownXpReward() {
+        const state = this._townXp || (this._townXp = this._createTownXpState());
+        if (!(state.pendingLevelRewards > 0)) return false;
+        if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return false;
+        if (this._activeRewardUI || this._activeBossRewardUI || this._activeTownXpRewardUI) return false;
+        if (this._hordeRewardInProgress || this.stageCompleteLock) return false;
+        if (!this.uiScene?.showTownXpRewardPresentation) return false;
+        if (this.menu?.active || this.draftMenu?.active) return false;
+        if (this.clock?.paused) return false;
+
+        const phaseKey = this._currentPhaseKey || this.clock?.getPhaseKey?.();
+        if (phaseKey === "night") return false;
+        if (Number(this.time?.now || 0) < Math.max(0, Number(state.rewardReadyAt || 0))) return false;
+        return true;
+    }
+
+    _tryPresentPendingTownXpReward() {
+        if (!this._canPresentPendingTownXpReward()) return false;
+
+        const state = this._townXp || (this._townXp = this._createTownXpState());
+        const snapshot = this.getTownXpSnapshot();
+        const options = this._buildTownXpRewardOptions(snapshot.level);
+
+        this.clock.paused = true;
+        this.applySimulationSpeed(true);
+        this._movementLocked = true;
+
+        this._activeTownXpRewardUI?.destroy?.();
+        this._activeTownXpRewardUI = this.uiScene.showTownXpRewardPresentation({
+            level: snapshot.level,
+            xpSnapshot: snapshot,
+            options,
+            onChoose: (selection) => {
+                try {
+                    selection?.grant?.();
+                } finally {
+                    state.pendingLevelRewards = Math.max(0, Number(state.pendingLevelRewards || 0) - 1);
+                    state.rewardReadyAt = Number(this.time?.now || 0) + 140;
+                    this._activeTownXpRewardUI = null;
+                    this._movementLocked = false;
+                    if (!this._townTowerLossInProgress && !this._restartToMainMenuInProgress) {
+                        this.clock.paused = false;
+                        this.applySimulationSpeed(true);
+                    }
+                    this.events.emit("townxp:changed", this.getTownXpSnapshot());
+                }
+            },
+            onCancel: () => {
+                this._activeTownXpRewardUI = null;
+                this._movementLocked = false;
+                if (!this._townTowerLossInProgress && !this._restartToMainMenuInProgress) {
+                    this.clock.paused = false;
+                    this.applySimulationSpeed(true);
+                }
+            },
+        });
+
+        return true;
+    }
+
+    _getRunSummaryData() {
+        const stats = this._runStats || this._createRunStats();
+        const team = Teams.teamLists?.["1"] || {};
+        const livingPlayers = (team.playerList || []).filter((player) => player?.active).length;
+        const towerStats = this._townTowerStats || { built: 0, destroyed: 0 };
+        const troopUnlockLabels = Array.isArray(stats.troopUnlockLabels) ? stats.troopUnlockLabels.slice() : [];
+        const townXp = this.getTownXpSnapshot();
+
+        return {
+            badgeLabel: "ENDLESS RUN RECAP",
+            title: "Town Tumbled!",
+            subtitle: "The last Town Tower finally gave way, but the crew still put together a pretty cheerful little legend.",
+            primaryStats: [
+                {
+                    label: "Nights Survived",
+                    value: stats.nightsSurvived,
+                    hint: "Completed hordes only",
+                    accentColor: 0x8fe7ff,
+                    panelColor: 0x153449,
+                },
+                {
+                    label: "Towers Built",
+                    value: towerStats.built,
+                    hint: `Lost ${towerStats.destroyed}`,
+                    accentColor: 0xffd7a5,
+                    panelColor: 0x2d3248,
+                },
+                {
+                    label: "Parcels Claimed",
+                    value: stats.parcelsClaimed,
+                    hint: "Expansion contracts started",
+                    accentColor: 0xa7f3d0,
+                    panelColor: 0x173743,
+                },
+                {
+                    label: "Enemies Defeated",
+                    value: stats.enemiesDefeated,
+                    hint: "Actual hostile kills",
+                    accentColor: 0xfca5a5,
+                    panelColor: 0x35243a,
+                },
+                {
+                    label: "Troops Unlocked",
+                    value: troopUnlockLabels.length,
+                    hint: troopUnlockLabels.length ? troopUnlockLabels.join(" • ") : "No run-earned unit unlocks",
+                    accentColor: 0xc4b5fd,
+                    panelColor: 0x26284a,
+                },
+            ],
+            troopUnlockLabels,
+            secondaryStats: [
+                { label: "Town Level", value: townXp.level },
+                { label: "Day Reached", value: Math.max(1, Number(this.clock?.day || 1)) },
+                { label: "Money Banked", value: `$${Math.max(0, Math.floor(this.money || 0))}` },
+                { label: "Crew Alive", value: livingPlayers },
+                { label: "Horde Reached", value: Math.max(1, this.getCurrentHordeIndex()) },
+            ],
+            restartLabel: "Restart Run",
+        };
     }
 
     setSimulationSpeed(multiplier) {
@@ -286,6 +852,139 @@ export class mapView extends Phaser.Scene {
         return Math.max(1, Number(StageState.stageIndex || 1));
     }
 
+    _slotLabel(slotId) {
+        if (slotId === "N") return "North";
+        if (slotId === "E") return "East";
+        if (slotId === "S") return "South";
+        if (slotId === "W") return "West";
+        return String(slotId || "");
+    }
+
+    _invalidateNightHordePlan() {
+        this._cachedNightHordePlan = null;
+    }
+
+    _getNightHordeEnemyLabel(modifier = null) {
+        if (modifier?.key === "heavy_grunts") return "Heavy Raiders";
+        return String(modifier?.enemyTypeLabel || "Raiders");
+    }
+
+    _getNightHordeEnemyMods(modifier = null) {
+        return {
+            key: modifier?.key ?? null,
+            label: modifier?.label ?? null,
+            speedMultiplier: Math.max(0.5, Number(modifier?.speedMultiplier ?? 1) || 1),
+            healthMultiplier: Math.max(0.5, Number(modifier?.healthMultiplier ?? 1) || 1),
+            damageMultiplier: Math.max(0.5, Number(modifier?.damageMultiplier ?? 1) || 1),
+        };
+    }
+
+    _getNightHordeHeadline(totalEnemies = 0, phase = "preview") {
+        if (phase === "active") return "Raiders Incoming";
+        if (totalEnemies >= 28) return "Heavy Horde Tonight";
+        return "Coastal Assault Tonight";
+    }
+
+    _countActiveNightHordeTroops(hordeId = this._activeNightHorde?.id ?? null) {
+        if (!hordeId) return 0;
+        return (Player.troops || []).filter((troop) => (
+            troop?.active
+            && troop?.nightHordeId === hordeId
+            && (troop?.isRaider || troop?.isFortGrunt)
+        )).length;
+    }
+
+    _clearNightHordeState(active = this._activeNightHorde, opts = {}) {
+        if (!active) return 0;
+
+        for (const event of active.spawnEvents || []) {
+            event?.remove?.(false);
+        }
+        active.spawnEvents = [];
+
+        if (!opts.destroyTroops) return 0;
+
+        let removed = 0;
+        const troops = (Player.troops || []).slice();
+        for (const troop of troops) {
+            if (!troop?.active || troop?.nightHordeId !== active.id) continue;
+            if (!troop?.isRaider && !troop?.isFortGrunt) continue;
+            try {
+                troop.destroySelf?.({ silentStageCleanup: true });
+                removed++;
+            } catch {}
+        }
+
+        return removed;
+    }
+
+    _estimateNightLaneDetails(edgeKey, difficulty, hordeIndex, modifier = null) {
+        const diff = Math.max(1, Math.min(PRESSURE_CONTRACT.MAX_DIFFICULTY ?? 3, difficulty | 0));
+        const extraSpawners = Math.max(0, Number(modifier?.extraSpawners ?? 0) || 0);
+        const spawners = Math.max(1, Math.min(3, diff + extraSpawners));
+        const quotaBase =
+            Math.max(1, Number(PRESSURE_CONTRACT.BASE_QUOTA_PER_SPAWNER ?? 3))
+            + Math.max(0, Number(hordeIndex || 1) - 1);
+        const enemiesPerSpawner = Math.max(
+            1,
+            Math.round(quotaBase * Math.max(0.5, Number(modifier?.quotaMultiplier ?? 1) || 1))
+        );
+        const baseIntervalMs = Math.max(
+            Number(PRESSURE_CONTRACT.MIN_INTERVAL_MS ?? 1500),
+            Number(PRESSURE_CONTRACT.BASE_INTERVAL_MS ?? 6000)
+                - Math.max(0, Number(hordeIndex || 1) - 1) * Number(PRESSURE_CONTRACT.INTERVAL_DROP_PER_STAGE_MS ?? 250)
+        );
+        const spawnIntervalMs = Math.max(
+            Number(PRESSURE_CONTRACT.MIN_INTERVAL_MS ?? 1500),
+            Math.round(baseIntervalMs * Math.max(0.4, Number(modifier?.intervalMultiplier ?? 1) || 1))
+        );
+        const enemyMods = this._getNightHordeEnemyMods(modifier);
+        const enemyTypeLabel = this._getNightHordeEnemyLabel(modifier);
+
+        return {
+            edgeKey,
+            difficulty: diff,
+            spawners,
+            enemiesPerSpawner,
+            enemies: spawners * enemiesPerSpawner,
+            spawnIntervalMs,
+            swimSpeed: Math.max(180, Math.round(220 * Math.max(1, Number(enemyMods.speedMultiplier ?? 1) || 1))),
+            enemyType: "raider",
+            enemyTypeLabel,
+            enemyMods,
+            modifierKey: modifier?.key ?? null,
+            modifierLabel: modifier?.label ?? null,
+        };
+    }
+
+    _buildNightHordePlan(hordeIndex = this.getCurrentHordeIndex()) {
+        const horde = Math.max(1, Number(hordeIndex || 1));
+        const laneCount =
+            horde <= 1 ? 1 :
+            horde <= 3 ? 2 :
+            horde <= 5 ? 3 :
+            4;
+        const baseDifficulty = Math.min(3, 1 + Math.floor(Math.max(0, horde - 1) / 2));
+        const modifier = getHordeModifierForIndex(horde);
+        const edgeKeys = Phaser.Utils.Array.Shuffle(["top", "right", "bottom", "left"].slice()).slice(0, laneCount);
+        const laneDetails = edgeKeys.map((edgeKey, idx) => {
+            const laneDifficulty = Math.min(3, baseDifficulty + ((idx === edgeKeys.length - 1 && horde >= 4) ? 1 : 0));
+            return this._estimateNightLaneDetails(edgeKey, laneDifficulty, horde, modifier);
+        });
+        const totalEnemies = laneDetails.reduce((sum, lane) => sum + lane.enemies, 0);
+
+        return {
+            hordeIndex: horde,
+            laneCount,
+            baseDifficulty,
+            edgeKeys,
+            modifier,
+            enemyLabel: this._getNightHordeEnemyLabel(modifier),
+            laneDetails,
+            totalEnemies,
+        };
+    }
+
     _getMainIslandBounds() {
         const origin = this.parcelManager?.mainIslandOrigin ?? PARCEL.MAIN_ORIGIN;
         const minx = Number(origin?.x ?? PARCEL.MAIN_ORIGIN.x);
@@ -307,22 +1006,171 @@ export class mapView extends Phaser.Scene {
     }
 
     _getNightHordePlan(hordeIndex = this.getCurrentHordeIndex()) {
-        const laneCount = Math.min(3, 1 + Math.floor(Math.max(0, hordeIndex - 1) / 2));
-        const baseDifficulty = Math.min(3, 1 + Math.floor(Math.max(0, hordeIndex - 1) / 3));
-        const slotIds = Phaser.Utils.Array.Shuffle(["W", "E", "S"].slice()).slice(0, laneCount);
-        return { hordeIndex, laneCount, baseDifficulty, slotIds };
+        const horde = Math.max(1, Number(hordeIndex || 1));
+        const cached = this._cachedNightHordePlan;
+        if (cached?.hordeIndex === horde) return cached;
+        const plan = this._buildNightHordePlan(horde);
+        this._cachedNightHordePlan = plan;
+        return plan;
+    }
+
+    _resetParcelUiState() {
+        this.uiScene?.contractHud?.closePopup?.(false);
+        this.parcelSpawnUI?.resetUiState?.();
+    }
+
+    getUpcomingNightHordePlan() {
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return null;
+        if (this._activeNightHorde?.plan) return this._activeNightHorde.plan;
+        if (Number(this.clock?.day || 1) < 2) return null;
+        return this._getNightHordePlan();
+    }
+
+    getNightPressurePreviewForSlot(slotId) {
+        return null;
+    }
+
+    getUpcomingHordePreviewSummary() {
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return null;
+
+        if (this._activeNightHorde) {
+            const totalEnemies = Math.max(
+                0,
+                Number(
+                    this._activeNightHorde.totalEnemies
+                    || this._activeNightHorde.laneDetails?.reduce((sum, lane) => sum + Math.max(0, Number(lane?.enemies || 0)), 0)
+                    || 0
+                )
+            );
+            const enemyLabel = this._activeNightHorde.enemyLabel || this._getNightHordeEnemyLabel(this._activeNightHorde.modifier);
+            const headline = this._getNightHordeHeadline(totalEnemies, "active");
+            return {
+                phase: "night",
+                hordeIndex: this._activeNightHorde.hordeIndex,
+                laneCount: this._activeNightHorde.laneDetails?.length || 0,
+                modifierLabel: this._activeNightHorde.modifier?.label ?? null,
+                enemyLabel,
+                totalEnemies,
+                aliveEnemies: this._countActiveNightHordeTroops(this._activeNightHorde.id),
+                countdownText: this.clock?.getPhaseCountdownText?.() || "",
+                headline,
+                bannerText: `${headline} | H${this._activeNightHorde.hordeIndex} | ${totalEnemies} ${enemyLabel}${this._activeNightHorde.modifier?.label ? ` | ${this._activeNightHorde.modifier.label}` : ""}`,
+            };
+        }
+
+        const plan = this.getUpcomingNightHordePlan();
+        if (!plan) return null;
+
+        const totalEnemies = Math.max(0, Number(plan.totalEnemies || 0));
+        const enemyLabel = plan.enemyLabel || this._getNightHordeEnemyLabel(plan.modifier);
+        const headline = this._getNightHordeHeadline(totalEnemies, this.clock?.getPhaseKey?.() === "dusk" ? "dusk" : "preview");
+
+        return {
+            phase: this.clock?.getPhaseKey?.() || "day",
+            hordeIndex: plan.hordeIndex,
+            laneCount: plan.laneDetails?.length || 0,
+            modifierLabel: plan.modifier?.label ?? null,
+            enemyLabel,
+            totalEnemies,
+            countdownText: this.clock?.getPhaseCountdownText?.() || "",
+            headline,
+            bannerText: `${headline} | H${plan.hordeIndex} | ${totalEnemies} ${enemyLabel}${plan.modifier?.label ? ` | ${plan.modifier.label}` : ""}`,
+        };
+    }
+
+    _syncNightPressurePreviewPanels() {
+        return;
+    }
+
+    _isTroopOnMainIsland(troop) {
+        if (!troop?.active) return false;
+        const gx = Math.floor(troop.x / SQUARESIZE);
+        const gy = Math.floor(troop.y / SQUARESIZE);
+        return (
+            gx >= PARCEL.MAIN_ORIGIN.x &&
+            gx < PARCEL.MAIN_ORIGIN.x + PARCEL.SIZE &&
+            gy >= PARCEL.MAIN_ORIGIN.y &&
+            gy < PARCEL.MAIN_ORIGIN.y + PARCEL.SIZE
+        );
+    }
+
+    _recallRemoteParcelWorkers() {
+        const team = Teams.teamLists?.["1"];
+        if (!team?.playerList?.length) return 0;
+
+        let recalled = 0;
+        for (const troop of team.playerList) {
+            if (!troop?.active || troop.body?.team !== 1) continue;
+            if (!(troop.isForager || troop.isFarmer || troop.isBuilder || troop.isFireman)) continue;
+            if (this._isTroopOnMainIsland(troop) && !Player._isOnWater?.(troop)) continue;
+
+            OrderRunner._clearTroopOrder?.(troop, {
+                interrupt: true,
+                targetState: CONTROL_STATES.BACK_TO_TOWN,
+            });
+            troop.task = null;
+            troop.finalPos = null;
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
+            Teams.sendTroopToTown(troop);
+            recalled += 1;
+        }
+
+        return recalled;
+    }
+
+    handlePhaseChanged(phaseKey, phaseInfo = null) {
+        this._currentPhaseKey = phaseKey;
+        this.events.emit("phase:changed", phaseKey, phaseInfo || this.clock?.getPhaseInfo?.());
+
+        const marker = `${this.clock?.day || 1}:${phaseKey}`;
+        if (this._lastPhaseAnnouncement === marker) return;
+        this._lastPhaseAnnouncement = marker;
+
+        const colors = {
+            dawn: "#b8f2ff",
+            day: "#b9fbc0",
+            dusk: "#ffd6a5",
+            night: "#fecaca",
+        };
+        const labels = {
+            dawn: "Dawn: tower income and village rewards",
+            day: "Day: build, gather, and expand",
+            dusk: "Dusk: prepare for the coastal assault",
+            night: "Night: defend town, parcels stay open",
+        };
+
+        const label = labels[phaseKey];
+        if (label) {
+            showAlert(this, label, colors[phaseKey] || "#ffffff");
+        }
+    }
+
+    handleDuskStart() {
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        const preview = this.getUpcomingHordePreviewSummary();
+        if (preview) {
+            const alertText = `${preview.headline || "Coastal Assault Tonight"} | H${preview.hordeIndex} | ${Math.max(0, Number(preview.totalEnemies || 0))} ${preview.enemyLabel || "Raiders"}${preview.modifierLabel ? ` | ${preview.modifierLabel}` : ""}`;
+            showAlert(this, alertText, "#ffd6a5", 2200);
+        }
     }
 
     handleNightStart() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         if (this._activeNightHorde?.startedOnDay === this.clock?.day) return;
+        if (Number(this.clock?.day || 1) < 2) {
+            showAlert(this, "Free day: the first horde arrives tomorrow night", "#a7f3d0");
+            return;
+        }
         this.startNightlyHorde();
     }
 
     handleDayStart() {
-        if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        this._resetParcelUiState();
         this.grantTownTowerDawnIncome();
+        if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         this.finishNightlyHordeAtDawn();
+        this._syncNightPressurePreviewPanels();
     }
 
     grantTownTowerDawnIncome() {
@@ -340,13 +1188,22 @@ export class mapView extends Phaser.Scene {
     handleTownCoreLost(tower) {
         if (this._townTowerLossInProgress) return;
         this._townTowerLossInProgress = true;
+        this._lastTownCoreLost = tower || null;
         this._movementLocked = true;
         this.stageCompleteLock = true;
+
+        this._activeRewardUI?.destroy?.();
+        this._activeRewardUI = null;
+        this._activeBossRewardUI?.destroy?.();
+        this._activeBossRewardUI = null;
+        this._activeTownXpRewardUI?.destroy?.();
+        this._activeTownXpRewardUI = null;
+
+        AudioManager.playSound?.('sfx_end_stage_explosions');
+        this.cameras.main.shake(260, 0.006);
         if (this.clock) this.clock.paused = true;
         this.applySimulationSpeed(true);
 
-        AudioManager.playSound?.('sfx_end_stage_explosions');
-        this.cameras.main.shake(900, 0.012);
         this._playTownTowerCollapseSequence(tower, () => {
             this._showGameOverOverlay();
         });
@@ -354,157 +1211,306 @@ export class mapView extends Phaser.Scene {
 
     _playTownTowerCollapseSequence(tower, onDone) {
         const sprite = tower?.sprite;
+        if (this.uiScene?.playTownLossCollapseSequence) {
+            this.uiScene.playTownLossCollapseSequence({
+                towerWorldX: sprite?.x,
+                towerWorldY: sprite?.y,
+                onComplete: onDone,
+            });
+            return;
+        }
+
         if (!sprite?.active) {
             onDone?.();
             return;
         }
-
-        const spots = [];
-        for (let i = 0; i < 5; i++) {
-            spots.push({
-                x: sprite.x + Phaser.Math.Between(-28, 28),
-                y: sprite.y + Phaser.Math.Between(-28, 28),
-                delay: i * 90,
-            });
-        }
-
-        let finished = 0;
-        const total = spots.length;
-        spots.forEach((spot) => {
-            this.time.delayedCall(spot.delay, () => {
-                const fx = this.add.sprite(spot.x, spot.y, 'explosions')
-                    .setDepth(10050)
-                    .setScrollFactor(1);
-                fx.play('explosions');
-                fx.once('animationcomplete', () => {
-                    fx.destroy();
-                    finished += 1;
-                    if (finished >= total) onDone?.();
-                });
-            });
-        });
+        onDone?.();
     }
 
     _getRunSummaryLines() {
-        const team = Teams.teamLists?.["1"] || {};
-        const hordesCleared = Math.max(0, this.getCurrentHordeIndex() - 1);
-        const dayReached = Math.max(1, Number(this.clock?.day || 1));
-        const livingPlayers = (team.playerList || []).filter((player) => player?.active).length;
-        const cardsHeld = (team.cardHand || []).length;
-        const stats = this._townTowerStats || { built: 0, destroyed: 0 };
+        const summary = this._getRunSummaryData();
+        const primaryLines = (summary.primaryStats || []).map((entry) => `${entry.label}: ${entry.value}`);
+        const secondaryLines = (summary.secondaryStats || []).map((entry) => `${entry.label}: ${entry.value}`);
+        if (summary.troopUnlockLabels?.length) {
+            secondaryLines.push(`Unlocked Troops: ${summary.troopUnlockLabels.join(", ")}`);
+        }
 
-        return [
-            `Hordes Survived: ${hordesCleared}`,
-            `Day Reached: ${dayReached}`,
-            `Town Towers Built: ${stats.built}`,
-            `Town Towers Lost: ${stats.destroyed}`,
-            `Crew Alive: ${livingPlayers}`,
-            `Cards Held: ${cardsHeld}`,
-            `Money Banked: $${Math.max(0, Math.floor(this.money || 0))}`,
-        ];
+        return [...primaryLines, ...secondaryLines];
     }
 
     _showGameOverOverlay() {
-        if (this._gameOverOverlay?.active) return;
+        if (this.uiScene?.showTownLossPresentation) {
+            this.uiScene.showTownLossPresentation(this._getRunSummaryData());
+            return;
+        }
 
+        if (this._gameOverOverlay?.active) return;
         const cam = this.cameras.main;
         const overlay = this.add.container(0, 0).setDepth(20000).setScrollFactor(0);
-        const shade = this.add.rectangle(0, 0, cam.width, cam.height, 0x030712, 0.78)
+        const shade = this.add.rectangle(0, 0, cam.width, cam.height, 0x07131f, 0.84)
             .setOrigin(0)
             .setScrollFactor(0)
-            .setInteractive({ useHandCursor: true });
-        const panel = this.add.rectangle(cam.centerX, cam.centerY, Math.min(620, cam.width - 100), 320, 0x0f172a, 0.94)
-            .setStrokeStyle(3, 0xf87171, 0.4)
-            .setScrollFactor(0);
-        const title = this.add.text(cam.centerX, cam.centerY - 118, "Town Lost", {
+            .setInteractive({ useHandCursor: false });
+        const title = this.add.text(cam.centerX, cam.centerY - 40, "Town Tumbled!", {
             fontFamily: "Bungee",
-            fontSize: "34px",
-            color: "#fff5f5",
-            stroke: "#300808",
+            fontSize: "30px",
+            color: "#fff7ed",
+            stroke: "#08131d",
             strokeThickness: 6,
         }).setOrigin(0.5).setScrollFactor(0);
-        const subtitle = this.add.text(cam.centerX, cam.centerY - 82, "Your last Town Tower collapsed.", {
-            fontFamily: "Bungee",
-            fontSize: "13px",
-            color: "#fecaca",
-            align: "center",
-        }).setOrigin(0.5).setScrollFactor(0);
-        const summary = this.add.text(cam.centerX, cam.centerY - 16, this._getRunSummaryLines().join("\n"), {
+        const summary = this.add.text(cam.centerX, cam.centerY + 26, this._getRunSummaryLines().join("\n"), {
             fontFamily: "Bungee",
             fontSize: "14px",
-            color: "#e5eef6",
+            color: "#dbeafe",
             align: "center",
-            lineSpacing: 8,
+            lineSpacing: 7,
         }).setOrigin(0.5).setScrollFactor(0);
-
-        const buttonBg = this.add.rectangle(cam.centerX, cam.centerY + 112, 230, 50, 0x4ade80, 0.98)
-            .setStrokeStyle(2, 0xffffff, 0.22)
-            .setScrollFactor(0)
-            .setInteractive({ useHandCursor: true });
-        const buttonText = this.add.text(cam.centerX, cam.centerY + 112, "Back To Main Menu", {
-            fontFamily: "Bungee",
-            fontSize: "16px",
-            color: "#0f172a",
-            stroke: "#ffffff",
-            strokeThickness: 2,
-        }).setOrigin(0.5).setScrollFactor(0);
-
-        const reload = () => window.location.reload();
-        buttonBg.on("pointerover", () => buttonBg.setFillStyle(0x86efac, 1));
-        buttonBg.on("pointerout", () => buttonBg.setFillStyle(0x4ade80, 0.98));
-        buttonBg.on("pointerdown", reload);
-        buttonText.setInteractive({ useHandCursor: true }).on("pointerdown", reload);
-
-        overlay.add([shade, panel, title, subtitle, summary, buttonBg, buttonText]);
-        overlay.setAlpha(0);
-        this.tweens.add({
-            targets: overlay,
-            alpha: 1,
-            duration: 260,
-            ease: "Quad.easeOut",
-        });
+        overlay.add([shade, title, summary]);
         this._gameOverOverlay = overlay;
     }
 
-    startNightlyHorde() {
-        if (!this.parcelManager || this._hordeRewardInProgress) return;
-
-        const plan = this._getNightHordePlan();
-        this.parcelManager.forceClearContracts?.("nightfall_cleanup");
-
-        const contractIds = [];
-        const laneDetails = [];
-
-        plan.slotIds.forEach((slotId, idx) => {
-            const difficulty = Math.min(3, plan.baseDifficulty + ((idx === plan.slotIds.length - 1 && plan.hordeIndex >= 4) ? 1 : 0));
-            const contractId = this.parcelManager.startPressure(slotId, difficulty, { source: "night_horde" });
-            if (!contractId) return;
-            contractIds.push(contractId);
-            laneDetails.push({ slotId, difficulty });
+    restartToMainMenu({ hostScene } = {}) {
+        if (this._restartToMainMenuInProgress) return;
+        this._restartToMainMenuInProgress = true;
+        MainMenu.queueRestartReveal?.({
+            color: 0x64b9ff,
+            fadeOutDuration: 920,
         });
 
-        if (!contractIds.length) return;
+        const fadeScene = hostScene || this.uiScene || this;
+        const fadeDepth = (UIDEPTH ?? 2000) + 5000;
+        const fadeFx = fadeScene.add.container(0, 0).setDepth(fadeDepth).setScrollFactor(0);
+        const fadeCover = fadeScene.add.rectangle(
+            0,
+            0,
+            fadeScene.scale.width,
+            fadeScene.scale.height,
+            0x64b9ff,
+            0
+        ).setOrigin(0).setScrollFactor(0);
+        fadeCover.setInteractive({ useHandCursor: false });
+        const fadeGlowA = fadeScene.add.circle(
+            fadeScene.scale.width * 0.26,
+            fadeScene.scale.height * 0.3,
+            210,
+            0xffffff,
+            0.08
+        ).setAlpha(0);
+        const fadeGlowB = fadeScene.add.circle(
+            fadeScene.scale.width * 0.74,
+            fadeScene.scale.height * 0.62,
+            260,
+            0xdbeafe,
+            0.06
+        ).setAlpha(0);
+        fadeFx.add([fadeCover, fadeGlowA, fadeGlowB]);
+
+        const lossPresentation = fadeScene._townLossPresentation?.root || null;
+        if (lossPresentation) {
+            fadeScene.tweens.add({
+                targets: lossPresentation,
+                alpha: 0,
+                scaleX: 0.94,
+                scaleY: 0.94,
+                duration: 320,
+                ease: "Cubic.easeOut",
+            });
+        }
+
+        fadeScene.tweens.add({
+            targets: [fadeGlowA, fadeGlowB],
+            alpha: { from: 0.02, to: 0.16 },
+            scaleX: { from: 0.9, to: 1.12 },
+            scaleY: { from: 0.9, to: 1.12 },
+            duration: 760,
+            ease: "Sine.easeInOut",
+        });
+        fadeScene.tweens.add({
+            targets: fadeCover,
+            alpha: 1,
+            duration: 760,
+            ease: "Cubic.easeInOut",
+            onComplete: () => {
+                const carryCover = this.add.rectangle(
+                    0,
+                    0,
+                    this.scale.width,
+                    this.scale.height,
+                    0x64b9ff,
+                    1
+                ).setOrigin(0).setScrollFactor(0).setDepth(fadeDepth + 10);
+                this._restartCarryCover = carryCover;
+                if (this.scene.isActive('GameUIScene')) {
+                    const liveUiScene = this.scene.get('GameUIScene');
+                    liveUiScene?._destroyTownLossPresentation?.();
+                    liveUiScene?._destroyGameplayUi?.();
+                    liveUiScene?._clearWorldEventBridge?.();
+                    this.scene.stop('GameUIScene');
+                }
+                this.scene.restart();
+            },
+        });
+    }
+
+    _cleanupForSceneShutdown() {
+        Turret.cancelPlacement();
+        Catapult.cancelPlacement();
+        this.overviewOceanWaves?.destroy?.();
+        this.overviewOceanWaves = null;
+        this.overviewCloudLayer?.destroy?.();
+        this.overviewCloudLayer = null;
+        this.overviewShoreWaves?.destroy?.();
+        this.overviewShoreWaves = null;
+        this._activeRewardUI?.destroy?.();
+        this._activeRewardUI = null;
+        this._activeBossRewardUI?.destroy?.();
+        this._activeBossRewardUI = null;
+        this._activeTownXpRewardUI?.destroy?.();
+        this._activeTownXpRewardUI = null;
+        this.menu?.destroy?.();
+        this.menu = null;
+        this.logo?.destroy?.();
+        this.logo = null;
+        this.logoMini?.destroy?.();
+        this.logoMini = null;
+        this.startButton?.destroy?.();
+        this.startButton = null;
+        this.menuPreview?.destroy?.();
+        this.menuPreview = null;
+        this._menuRevealFx?.destroy?.(true);
+        this._menuRevealFx = null;
+        this._restartCarryCover?.destroy?.();
+        this._restartCarryCover = null;
+        this._teamTownIcon?.destroyWithLabel?.();
+        this._teamTownIcon?.destroy?.();
+        this._teamTownIcon = null;
+        this.draftMenu?.destroy?.();
+        this.draftMenu = null;
+        this._draftTownIconUnsub?.();
+        this._draftTownIconUnsub = null;
+        this.parcelSpawnUI?.root?.destroy?.(true);
+        this.parcelSpawnUI = null;
+        this.parcelManager = null;
+        this.navMeshUpdater?.destroy?.();
+        this.navMeshUpdater = null;
+        this.enemyNavMeshUpdater?.destroy?.();
+        this.enemyNavMeshUpdater = null;
+        this.zoomMixer?.overviewImage?.destroy?.();
+        this.zoomMixer = null;
+        ZoomMixer.mapIconContainer?.destroy?.();
+        ZoomMixer.mapIconContainer = null;
+        if (this._registryImageChangedHandler) {
+            this.registry?.events?.off?.('changedata-image', this._registryImageChangedHandler);
+            this._registryImageChangedHandler = null;
+        }
+        if (Array.isArray(this._scaleResizeHandlers)) {
+            this._scaleResizeHandlers.forEach((handler) => {
+                this.scale?.off?.("resize", handler);
+            });
+            this._scaleResizeHandlers.length = 0;
+        }
+
+        if (this.time) this.time.timeScale = 1;
+        if (this.tweens) this.tweens.timeScale = 1;
+        if (this.physics?.world) {
+            this.physics.world.resume?.();
+            this.physics.world.timeScale = 1;
+        }
+        if (this.anims) this.anims.globalTimeScale = 1;
+        if (this.input?.keyboard) this.input.keyboard.enabled = true;
+        this._destroyNorthFortArrivalMarker();
+        this.scene.stop('GameUIScene');
+
+        GameMap.resetRuntimeState?.();
+        VisibilitySystem.reset?.();
+        AudioManager.stopAll?.();
+        Player.resetRuntimeState?.();
+        Teams.resetAll?.();
+        StageState.resetForMenu?.();
+        clearBuildingArray?.();
+        clearPlayerDict?.();
+        spawnPoints.length = 0;
+        Object.keys(townBounds).forEach((key) => delete townBounds[key]);
+        Object.keys(townRoads).forEach((key) => delete townRoads[key]);
+    }
+
+    _spawnNightlyHordeTroop(active, lane) {
+        if (!active || this._activeNightHorde?.id !== active.id) return null;
+
+        const troop = spawnSeaRaider(this, {
+            edge: lane.edgeKey,
+            targetPoint: this._getMainIslandCenterWorld(),
+            swimSpeed: lane.swimSpeed,
+            modifier: lane.enemyMods,
+            modifierKey: lane.modifierKey,
+            modifierLabel: lane.modifierLabel,
+            enemyTypeLabel: lane.enemyTypeLabel,
+            hordeIndex: active.hordeIndex,
+            nightHordeId: active.id,
+        });
+
+        if (troop) {
+            active.spawnedCount = Math.max(0, Number(active.spawnedCount || 0)) + 1;
+        }
+        return troop;
+    }
+
+    _scheduleNightlyHordeSpawns(active) {
+        if (!active?.laneDetails?.length) return [];
+
+        const events = [];
+        active.laneDetails.forEach((lane, laneIndex) => {
+            const intervalMs = Math.max(350, Number(lane.spawnIntervalMs || 1500));
+            const initialDelay = Phaser.Math.Between(0, Math.max(400, Math.round(intervalMs * 0.35)));
+
+            for (let spawnerIndex = 0; spawnerIndex < Math.max(1, Number(lane.spawners || 1)); spawnerIndex++) {
+                const streamOffset = initialDelay + laneIndex * 180 + spawnerIndex * 320;
+                for (let enemyIndex = 0; enemyIndex < Math.max(1, Number(lane.enemiesPerSpawner || 1)); enemyIndex++) {
+                    const delay = Math.max(0, streamOffset + enemyIndex * intervalMs);
+                    events.push(this.time.delayedCall(delay, () => {
+                        this._spawnNightlyHordeTroop(active, lane);
+                    }));
+                }
+            }
+        });
+
+        active.spawnEvents = events;
+        return events;
+    }
+
+    startNightlyHorde() {
+        if (this._hordeRewardInProgress) return;
+
+        const plan = this.getUpcomingNightHordePlan() || this._getNightHordePlan();
+        const laneDetails = (plan?.laneDetails || []).map((lane) => ({ ...lane }));
+        if (!laneDetails.length) return;
 
         this._activeNightHorde = {
+            id: `night_horde_${plan.hordeIndex}_${Math.max(1, Number(this.clock?.day || 1))}_${Date.now()}`,
             hordeIndex: plan.hordeIndex,
             startedOnDay: Math.max(1, Number(this.clock?.day || 1)),
-            contractIds,
             laneDetails,
+            laneCount: laneDetails.length,
+            modifier: plan.modifier ?? null,
+            enemyLabel: plan.enemyLabel || this._getNightHordeEnemyLabel(plan.modifier),
+            totalEnemies: Math.max(0, Number(plan.totalEnemies || 0)),
+            spawnEvents: [],
+            spawnedCount: 0,
+            plan,
         };
-
-        showAlert(
-            this,
-            `Horde ${plan.hordeIndex} incoming: ${laneDetails.length} lane${laneDetails.length === 1 ? "" : "s"}`,
-            "#fecaca"
-        );
+        this._scheduleNightlyHordeSpawns(this._activeNightHorde);
+        const nightAlertText = `Raiders Incoming | H${plan.hordeIndex} | ${Math.max(0, Number(plan.totalEnemies || 0))} ${plan.enemyLabel || this._getNightHordeEnemyLabel(plan.modifier)}${plan.modifier?.label ? ` | ${plan.modifier.label}` : ""}`;
+        showAlert(this, nightAlertText, "#fecaca", 2200);
     }
 
     finishNightlyHordeAtDawn() {
         const active = this._activeNightHorde;
         if (!active) return;
 
-        this.parcelManager?.forceClearContracts?.("night_horde_end", { source: "night_horde" });
+        this._clearNightHordeState(active, { destroyTroops: true });
         this._activeNightHorde = null;
+        this._invalidateNightHordePlan();
+        this._runStats.nightsSurvived += 1;
         this.startHordeRewardSequence(active.hordeIndex);
     }
 
@@ -512,48 +1518,50 @@ export class mapView extends Phaser.Scene {
         if (this._hordeRewardInProgress) return;
         this._hordeRewardInProgress = true;
 
-        const cam = this.cameras.main;
-        const center = this._getMainIslandCenterWorld();
-        const bounds = this._getMainIslandBounds();
-
-        this.zoomMixer?.setZoomOutLocked?.(true);
-        this._movementLocked = true;
-
-        if (this.zoomMixer) {
-            this.zoomMixer.targetZoom = 1;
-            this.zoomMixer.smoothCenterZoomTo(1, 220);
-        }
-
-        const openRewards = () => {
-            this.clock.paused = true;
+        const finalizeHordeReward = () => {
+            StageState.advanceHorde({ reason: "night_horde_survived", hordeIndex });
+            this._invalidateNightHordePlan();
+            this._movementLocked = false;
+            this.clock.paused = false;
             this.applySimulationSpeed(true);
-            this._activeRewardUI?.destroy?.();
-            this._activeRewardUI = openFortRewardSelection(this, {
-                stageIndex: hordeIndex,
-                meta: { bounds },
+            this.zoomMixer?.setZoomOutLocked?.(false);
+            this._hordeRewardInProgress = false;
+            this._stageHud?.recompute?.();
+            this.events.emit("stage:changed");
+            this._syncNightPressurePreviewPanels();
+            this.addTownXp(TOWN_XP_SOURCE_VALUES.hordeSurvived, `Horde ${hordeIndex} Survived`, { alert: true });
+            showAlert(this, `Horde ${hordeIndex} survived`, "#a7f3d0");
+        };
+
+        const maybeOpenHordeUnlockReward = () => {
+            const unlockReward = getHordeUnlockReward(hordeIndex);
+            if (!unlockReward) {
+                finalizeHordeReward();
+                return;
+            }
+
+            this._registerRunTroopUnlock(unlockReward);
+
+            this._activeBossRewardUI?.destroy?.();
+            this._activeBossRewardUI = openBossUnlockRewardPresentation(this, {
+                reward: unlockReward,
                 onComplete: () => {
-                    this._activeRewardUI = null;
-                    StageState.advanceHorde({ reason: "night_horde_survived", hordeIndex });
-                    this._movementLocked = false;
-                    this.clock.paused = false;
-                    this.applySimulationSpeed(true);
-                    this.zoomMixer?.setZoomOutLocked?.(false);
-                    this._hordeRewardInProgress = false;
-                    this._stageHud?.recompute?.();
-                    this.events.emit("stage:changed");
-                    showAlert(this, `Horde ${hordeIndex} survived`, "#a7f3d0");
+                    this._activeBossRewardUI = null;
+                    finalizeHordeReward();
                 }
             });
         };
+        const unlockReward = getHordeUnlockReward(hordeIndex);
+        if (!unlockReward) {
+            finalizeHordeReward();
+            return;
+        }
 
-        this.tweens.add({
-            targets: cam,
-            scrollX: center.x - cam.width / 2,
-            scrollY: center.y - cam.height / 2,
-            duration: 260,
-            ease: "Quad.easeInOut",
-            onComplete: openRewards,
-        });
+        this.zoomMixer?.setZoomOutLocked?.(true);
+        this._movementLocked = true;
+        this.clock.paused = true;
+        this.applySimulationSpeed(true);
+        maybeOpenHordeUnlockReward();
     }
 
     getNorthFortArrivalInfo() {
@@ -993,7 +2001,7 @@ export class mapView extends Phaser.Scene {
 
         this._setOceanBackdropMode(this.zoomMixer?.mode || "detailed");
 
-        this.scale.on("resize", ({ width, height }) => {
+        this._trackScaleResize(({ width, height }) => {
             this.oceanBackdropBase?.setSize(width, height);
             this.oceanBackdropGradient?.setDisplaySize(width, height);
             this.overviewOceanWaves?.resize?.();
@@ -1021,22 +2029,7 @@ export class mapView extends Phaser.Scene {
         this._enableGlobalTextFont();
         this._createOceanBackdrop();
         this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-            Turret.cancelPlacement();
-            Catapult.cancelPlacement();
-            this.overviewOceanWaves?.destroy?.();
-            this.overviewOceanWaves = null;
-            this.overviewCloudLayer?.destroy?.();
-            this.overviewCloudLayer = null;
-            this.overviewShoreWaves?.destroy?.();
-            this.overviewShoreWaves = null;
-            if (this.time) this.time.timeScale = 1;
-            if (this.tweens) this.tweens.timeScale = 1;
-            if (this.physics?.world) {
-                this.physics.world.resume?.();
-                this.physics.world.timeScale = 1;
-            }
-            if (this.anims) this.anims.globalTimeScale = 1;
-            this._destroyNorthFortArrivalMarker();
+            this._cleanupForSceneShutdown();
         });
         this.createAnim('water')
         this.createAnim('crops',0,1)
@@ -1056,14 +2049,16 @@ export class mapView extends Phaser.Scene {
         Player.init(this);
         Player.createAnim('oven_idle', 'clayOven', 0, 0, -1, 1);
         Player.createAnim('oven_cooking', 'clayOven', 1, 2, -1, 3);
+        this._pendingMenuPhase = true;
         if (!this.scene.isActive('GameUIScene')) {
             this.scene.launch('GameUIScene', { worldSceneKey: 'mapView' });
         }
         this.uiScene = this.scene.get('GameUIScene');
         this.uiScene?.bindWorldScene?.(this);
         this.cameras.main.useBounds = false;
-
-        MainMenu.startMenuPhase();
+        if (this.uiScene?.sys?.isActive?.() && !this.menu?.active) {
+            MainMenu.startMenuPhase();
+        }
         setupTownBoundsToggle(this);
         this.cursors = this.input.keyboard.createCursorKeys();
         // Add collision between the cube and the barriers
@@ -1082,7 +2077,9 @@ export class mapView extends Phaser.Scene {
             Projectile.projectileGroup,
             GameMap.structureBarrier,
             Projectile.handleStructureCollision,
-            (projectile) => !projectile?.deferImpactUntilEnd,
+            (projectile, structureHit) =>
+                !projectile?.deferImpactUntilEnd &&
+                !Projectile.isFriendlyStructureHit(projectile, structureHit),
             this
         );
 
@@ -1096,7 +2093,7 @@ export class mapView extends Phaser.Scene {
         this._movementLocked = false;
 
         this.registry.set('image','init');
-        this.registry.events.on('changedata-image', (parent, value) => {
+        this._registryImageChangedHandler = (parent, value) => {
             console.log(`Registry key 'image' updated to value:`, value);
             const item = TILE_TYPES[value];
             Turret.cancelPlacement();
@@ -1112,7 +2109,8 @@ export class mapView extends Phaser.Scene {
             else{
                 GameMap.beginPlacing(item)
             }
-        });
+        };
+        this.registry.events.on('changedata-image', this._registryImageChangedHandler);
 
         // Store references to keys
         this.keys = this.input.keyboard.addKeys({
@@ -1344,7 +2342,7 @@ export class mapView extends Phaser.Scene {
                 let posX = Math.floor(x / SQUARESIZE);
                 let posY = Math.floor(y / SQUARESIZE);
 
-                this._showWorldDebugText(posX, posY);
+                // this._showWorldDebugText(posX, posY);
 
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 let issuedMoveOrder = false;
@@ -1424,7 +2422,7 @@ export class mapView extends Phaser.Scene {
                 let posX = Math.floor(x / SQUARESIZE) 
                 let posY = Math.floor(y / SQUARESIZE)
 
-                this._showWorldDebugText(posX, posY);
+                // this._showWorldDebugText(posX, posY);
                 const formationSpots = Player.getFormation(posX,posY,Player.selected.length);
                 let issuedMoveOrder = false;
                 OrderRunner.cancelOrders(Player.selected);
@@ -1867,7 +2865,7 @@ export class mapView extends Phaser.Scene {
         } else if (pointer) {
             const posX = Math.floor(pointer.worldX / SQUARESIZE);
             const posY = Math.floor(pointer.worldY / SQUARESIZE);
-            this._showWorldDebugText(posX, posY);
+            // this._showWorldDebugText(posX, posY);
         }
 
         return true;
@@ -2027,9 +3025,9 @@ ensureFarmInstructionUI() {
     // ignore by camera
 
     // keep centered on resize
-    this.scale.on("resize", ({ width }) => {
-        if (this.farmInstructionUI) this.farmInstructionUI.setX(width / 2);
-    });
+        this._trackScaleResize(({ width }) => {
+            if (this.farmInstructionUI) this.farmInstructionUI.setX(width / 2);
+        });
 }
 
 layoutFarmInstruction() {
@@ -2107,29 +3105,33 @@ setFarmInstructionPhase2(totalNeeded) {
 }
 
 // Valid start tile rules (matches your getSelectedCells(1) behavior)
-isValidFarmTile(x, y) {
-    if (!this.isFarmTileInWorld(x, y)) return false;
+getFarmTilePlacementType(x, y) {
+    if (!this.isFarmTileInWorld(x, y)) return null;
 
     const cell = GameMap.grid?.[y]?.[x];
-    if (cell == null) return false;
+    if (cell == null) return null;
 
     const vals = Array.isArray(cell) ? cell : [cell];
     const names = vals.map((v) => TILE_MAP(v)).filter(Boolean);
-    if (names.includes("water") || names.includes("road")) return false;
+    if (names.includes("water") || names.includes("road")) return null;
 
     const floorName = TILE_MAP(GameMap.grabDepth(cell, FLOORDEPTH));
     const type = floorName ? TILE_TYPES[floorName] : null;
 
-    // Tillable ground (spread tiles) excluding water/road
-    if (type?.spread && type.name !== "water" && type.name !== "road") return true;
-
-    // Existing crop tile that doesn't have a seed yet
     if (names.includes("crops") || type?.name === "crops") {
         const crop = Teams.getCropAt(x, y, 1);
-        if (crop && !crop.hasSeed) return true;
+        return crop && !crop.hasSeed ? "reseed" : null;
     }
 
-    return false;
+    if (type?.spread && type.name !== "water" && type.name !== "road") {
+        return "fresh";
+    }
+
+    return null;
+}
+
+isValidFarmTile(x, y) {
+    return !!this.getFarmTilePlacementType(x, y);
 }
 
 isFarmTileInWorld(x, y) {
@@ -2184,18 +3186,27 @@ getFarmSelectionPreviewData(minX, maxX, minY, maxY) {
     const availableNewSeeds = Math.max(0, (this.seeds ?? 0) - pending.size);
     let newCount = 0;
 
-    for (let y = startY; y <= endY; y++) {
+        for (let y = startY; y <= endY; y++) {
         for (let x = startX; x <= endX; x++) {
-            if (!this.isValidFarmTile(x, y)) continue;
+            const kind = this.getFarmTilePlacementType(x, y);
+            if (!kind) continue;
 
             const key = `${x},${y}`;
             if (pending.has(key)) continue;
 
             const overBudget = newCount >= availableNewSeeds;
+            const tint = overBudget
+                ? 0xff5a5a
+                : kind === "reseed"
+                    ? 0x68dcff
+                    : 0x52ff7a;
+            const queuedTint = kind === "reseed" ? 0x45c9ff : 0x7cff97;
             cells.push({
                 x,
                 y,
-                tint: overBudget ? 0xff5a5a : 0x52ff7a,
+                kind,
+                tint,
+                queuedTint,
             });
             newCount++;
         }
@@ -2345,8 +3356,8 @@ cancelFarmSelection(exitFarmMode = false) {
                 const key = `${cell.x},${cell.y}`;
                 if (existing.has(key)) continue;
                 existing.add(key);
-                tillList.push({ x: cell.x, y: cell.y, assigned: 0 });
-                this.addTillPreviewSprite(cell.x, cell.y);
+                tillList.push({ x: cell.x, y: cell.y, assigned: 0, kind: cell.kind });
+                this.addTillPreviewSprite(cell.x, cell.y, cell.queuedTint ?? cell.tint);
             }
 
             // IMPORTANT: do NOT turn farmMode off here.
@@ -2418,7 +3429,7 @@ cancelFarmSelection(exitFarmMode = false) {
             .setScrollFactor(0)
             .setDepth(UIDEPTH - 1);
 
-        this.scale.on("resize", ({ width }) => bar.setSize(width, H));
+        this._trackScaleResize(({ width }) => bar.setSize(width, H));
 
         const makeIcon = (x, key) =>
             this.add.image(x, H / 2, key)
@@ -2720,6 +3731,8 @@ cancelFarmSelection(exitFarmMode = false) {
         Player.update();
         ClayOvenUI.updateAllOvens(effectiveSimSpeed);
         this._refreshNorthFortArrivalMarker();
+        this._syncNightPressurePreviewPanels();
+        this._tryPresentPendingTownXpReward();
     }
 
     showSaveNotification() {
@@ -2801,11 +3814,14 @@ cancelFarmSelection(exitFarmMode = false) {
         fightManager.sendToAttack()
     }
 
-    addTillPreviewSprite(x, y) {
+    addTillPreviewSprite(x, y, tint = 0x7cff97) {
         const key = `${x},${y}`;
 
-        // already exists?
-        if (this.tillPreviewSprites.has(key)) return;
+        const existing = this.tillPreviewSprites.get(key);
+        if (existing) {
+            existing.setTint(tint);
+            return;
+        }
 
         const spr = this.add.image(
             x * SQUARESIZE + SQUARESIZE / 2,
@@ -2814,7 +3830,8 @@ cancelFarmSelection(exitFarmMode = false) {
         )
         .setDisplaySize(SQUARESIZE, SQUARESIZE)
         .setDepth(FLOORDEPTH)
-        .setAlpha(0.6);
+        .setAlpha(0.6)
+        .setTint(tint);
 
         this.tillPreviewSprites.set(key, spr);
     }
@@ -2977,23 +3994,11 @@ cancelFarmSelection(exitFarmMode = false) {
     }
 
     _openFortRewards(stageIndex, meta) {
-        // Now freeze gameplay for selection.
+        // Freeze gameplay only if we need an unlock presentation.
         this.clock.paused = true;
         this.applySimulationSpeed(true);
 
         const finalizeStageCompletion = () => {
-            const permitReward = getStagePermitReward(
-                StageState.stageIndex,
-                StageState.seasonIndex,
-                StageState.STAGES_PER_SEASON
-            );
-            this.updatePermits(permitReward);
-            showAlert(
-                this,
-                `North Fort cleared: +${permitReward} permit${permitReward === 1 ? "" : "s"}`,
-                "#d8b4fe"
-            );
-
             // Stage transition cleanup:
             // - remove only tower-spawned pressure parcels + their raiders
             // - keep manually started pressure contracts alive (they remain paused during rewards)
@@ -3026,6 +4031,7 @@ cancelFarmSelection(exitFarmMode = false) {
             this._stageHud?.recompute?.();
             this.events.emit('stage:changed');
             this.events.emit('season:changed');
+            this.addTownXp(TOWN_XP_SOURCE_VALUES.fortCleared, `Fort ${stageIndex} Cleared`, { alert: true });
         };
 
         const maybeOpenBossUnlockReward = () => {
@@ -3050,15 +4056,7 @@ cancelFarmSelection(exitFarmMode = false) {
             });
         };
 
-        this._activeRewardUI?.destroy?.();
-        this._activeRewardUI = openFortRewardSelection(this, {
-            stageIndex,
-            meta,
-            onComplete: () => {
-                this._activeRewardUI = null;
-                maybeOpenBossUnlockReward();
-            }
-        });
+        maybeOpenBossUnlockReward();
     }
 
     _waitForFortEvacuation(metaOrBounds, timeoutMs = 7000, done = null) {

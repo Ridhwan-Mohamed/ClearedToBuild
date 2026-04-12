@@ -11,6 +11,7 @@ export const CONTRACT_SLOTS = {
 export const RESOURCE_CONTRACT_MS = {
   FOREST: 60_000,
   ROCK:   60_000,
+  FARM:   60_000,
 };
 
 export const PRESSURE = {

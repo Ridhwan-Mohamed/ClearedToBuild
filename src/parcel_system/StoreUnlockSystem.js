@@ -41,6 +41,9 @@ function persistUnlocks() {
 }
 
 export const STORE_UNLOCK_KEYS = Object.freeze({
+  blademaster: "blademaster",
+  gunslinger: "gunslinger",
+  stoneWall: "stone_wall",
   turret: "turret",
   catapult: "catapult",
 });
@@ -69,4 +72,29 @@ export function unlockStoreItem(key, scene = null) {
   });
 
   return changed;
+}
+
+export function resetStoreUnlocks(keys = null, scene = null) {
+  const unlocks = loadUnlocks();
+  const targets = Array.isArray(keys) && keys.length
+    ? keys.filter((key) => typeof key === "string" && key.length > 0)
+    : Array.from(unlocks);
+
+  let changed = false;
+  for (const key of targets) {
+    if (!unlocks.has(key)) continue;
+    unlocks.delete(key);
+    changed = true;
+  }
+
+  if (!changed) return false;
+
+  persistUnlocks();
+  scene?.events?.emit?.("store:unlock-changed", {
+    key: null,
+    changed: true,
+    reset: true,
+    unlocks: getStoreUnlockSnapshot(),
+  });
+  return true;
 }

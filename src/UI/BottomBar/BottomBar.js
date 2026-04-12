@@ -21,6 +21,7 @@ const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
 const START_OPEN  = false; // start expanded?
 
 export function CreateBottomBar(scene) {
+  scene.uiBottomBar?.destroy?.();
   const tabPage = CreateTabPage(scene);
   const collapsedOffset = EXPANDED - COLLAPSED + 155;
 
@@ -102,6 +103,34 @@ export function CreateBottomBar(scene) {
     setBottomBar(!expanded);
   }
 
+  const onTogglePointerUp = () => toggleBottomBar();
+  const onTabButtonClick = (btn) => {
+    const key = btn?.name;
+    if (!key) return;
+    scene.cameras.main?.setScroll?.(0, 0);
+
+    pages.swapPage(key);
+    scene.uiBottomBar.currentPage = key;
+
+    if (!expanded) setBottomBar(true);
+
+    if (key !== 'players') {
+      scene.playerTab?.hidePortrait?.();
+      scene.playerTab?.onHide?.();
+    }
+    if (key !== 'ovens')   scene.clayTab?.hide?.();
+    if (key !== 'storage') scene.storageTab?.hide?.();
+    if (key !== 'houses')  scene.housesTab?.hide?.();
+    if (key !== 'build') scene.buildTab?.hide?.();
+
+    if (key === 'ovens')   scene.clayTab?.onShow?.();
+    if (key === 'storage') scene.storageTab?.onShow?.();
+    if (key === 'players') scene.playerTab?.onShow?.();
+    if (key === 'houses')  scene.housesTab?.onShow?.();
+    if (key === 'build') scene.buildTab?.onShow?.();
+  };
+  const onSpaceToggle = () => toggleBottomBar();
+
   scene.setBottomBar = setBottomBar;
 
   scene.openDetailPage = function(pageKey, callback) {
@@ -141,42 +170,57 @@ export function CreateBottomBar(scene) {
   // ✅ toggle button
   toggleBtn
     .setInteractive({ useHandCursor: true })
-    .on('pointerup', () => toggleBottomBar());
+    .on('pointerup', onTogglePointerUp);
 
   // ✅ click tabs
-  tabs.on('button.click', (btn) => {
-    const key = btn?.name;
-    if (!key) return;
-    scene.cameras.main?.setScroll?.(0, 0);
-
-    pages.swapPage(key);
-    scene.uiBottomBar.currentPage = key;
-
-    if (!expanded) setBottomBar(true);
-
-    if (key !== 'players') {
-      scene.playerTab?.hidePortrait?.();
-      scene.playerTab?.onHide?.();
-    }
-    if (key !== 'ovens')   scene.clayTab?.hide?.();
-    if (key !== 'storage') scene.storageTab?.hide?.();
-    if (key !== 'houses')  scene.housesTab?.hide?.();
-    if (key !== 'build') scene.buildTab?.hide?.();
-
-    if (key === 'ovens')   scene.clayTab?.onShow?.();
-    if (key === 'storage') scene.storageTab?.onShow?.();
-    if (key === 'players') scene.playerTab?.onShow?.();
-    if (key === 'houses')  scene.housesTab?.onShow?.();
-    if (key === 'build') scene.buildTab?.onShow?.();
-  });
+  tabs.on('button.click', onTabButtonClick);
 
   // default page
   pages.swapPage('functions');
   tabs.setValue?.('functions');
 
   // (optional) spacebar toggle
-  scene.input.keyboard.on('keydown-SPACE', () => toggleBottomBar());
+  scene.input.keyboard.on('keydown-SPACE', onSpaceToggle);
   scene.scale.on('resize', syncBottomBarLayout);
+
+  scene.uiBottomBar.destroy = () => {
+    const bar = scene.uiBottomBar;
+    if (!bar || bar._destroying) return;
+    bar._destroying = true;
+
+    if (tween) {
+      tween.stop();
+      tween = null;
+    }
+
+    toggleBtn?.off?.('pointerup', onTogglePointerUp);
+    tabs?.off?.('button.click', onTabButtonClick);
+    scene.input?.keyboard?.off?.('keydown-SPACE', onSpaceToggle);
+    scene.scale?.off?.('resize', syncBottomBarLayout);
+
+    scene.functionTab?.destroy?.();
+    scene.playerTab?.destroy?.();
+    scene.clayTab?.destroy?.();
+    scene.storageTab?.destroy?.();
+    scene.housesTab?.destroy?.();
+    scene.buildTab?.destroy?.();
+    scene.cardsTab?.destroy?.();
+
+    scene.functionTab = null;
+    scene.playerTab = null;
+    scene.clayTab = null;
+    scene.storageTab = null;
+    scene.housesTab = null;
+    scene.buildTab = null;
+    scene.cardsTab = null;
+    scene.setBottomBar = null;
+    scene.openDetailPage = null;
+
+    bar.ui?.destroy?.(true);
+    if (scene.uiBottomBar === bar) {
+      scene.uiBottomBar = null;
+    }
+  };
 
   scene.housesTab?.hide?.();
 }

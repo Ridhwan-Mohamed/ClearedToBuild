@@ -14,15 +14,7 @@ export default class FunctionTab {
     };
 
     this.activeMode = null;
-
-    this.container = scene.rexUI.add.sizer({ orientation: 'x', space:{left: 0, right:0,} });
-    
-    this.buttons = [];
-    this.createButtons();
-    this.registerHotkeys();
-
-    // When the scene tells us a mode is completed, clear highlight AND shut off the actual mode flag
-    this.scene.events.on('mode:completed', (mode) => {
+    this._onModeCompleted = (mode) => {
       if (!mode) return;
 
       if (mode === "Farm")   this.scene.farmMode = false;
@@ -38,7 +30,19 @@ export default class FunctionTab {
         this.activeMode = null;
         this.updateVisuals();
       }
-    });
+    };
+    this._onKeyFarm = () => this.toggleMode('Farm');
+    this._onKeySeed = () => this.toggleMode('Seed');
+    this._onKeyAttack = () => this.toggleMode('Attack');
+
+    this.container = scene.rexUI.add.sizer({ orientation: 'x', space:{left: 0, right:0,} });
+    
+    this.buttons = [];
+    this.createButtons();
+    this.registerHotkeys();
+
+    // When the scene tells us a mode is completed, clear highlight AND shut off the actual mode flag
+    this.scene.events.on('mode:completed', this._onModeCompleted);
 
 
     scene.functionTab = this;
@@ -126,10 +130,19 @@ export default class FunctionTab {
   }
 
   registerHotkeys() {
-    this.scene.input.keyboard.on('keydown-F', () => this.toggleMode('Farm'));
-    this.scene.input.keyboard.on('keydown-V', () => this.toggleMode('Seed'));
-    this.scene.input.keyboard.on('keydown-K', () => this.toggleMode('Attack'));
+    this.scene.input.keyboard.on('keydown-F', this._onKeyFarm);
+    this.scene.input.keyboard.on('keydown-V', this._onKeySeed);
+    this.scene.input.keyboard.on('keydown-K', this._onKeyAttack);
   }
 
   getContainer() { return this.container; }
+
+  destroy() {
+    this.scene.events.off('mode:completed', this._onModeCompleted);
+    this.scene.input.keyboard.off('keydown-F', this._onKeyFarm);
+    this.scene.input.keyboard.off('keydown-V', this._onKeySeed);
+    this.scene.input.keyboard.off('keydown-K', this._onKeyAttack);
+    this.container?.destroy?.(true);
+    this.buttons = [];
+  }
 }

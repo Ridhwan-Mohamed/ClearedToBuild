@@ -218,8 +218,7 @@ export class Projectile {
         for (const hit of hits) {
             if (!hit?.active) continue;
 
-            const hitTeam = hit.team ?? hit.body?.team;
-            if (hitTeam != null && hitTeam === projectile.team) continue;
+            if (this.isFriendlyStructureHit(projectile, hit)) continue;
 
             const left = Number.isFinite(hit.body?.left) ? hit.body.left : (hit.x - (hit.displayWidth ?? 0) / 2);
             const right = Number.isFinite(hit.body?.right) ? hit.body.right : (hit.x + (hit.displayWidth ?? 0) / 2);
@@ -236,6 +235,13 @@ export class Projectile {
         }
 
         return nearest;
+    }
+
+    static isFriendlyStructureHit(projectile, hit) {
+        if (!projectile || !hit) return false;
+        const projectileTeam = projectile.team ?? projectile.body?.team;
+        const hitTeam = hit.team ?? hit.body?.team ?? hit.wallRef?.team ?? hit.buildingRef?.team ?? hit.buildingRef?.teamNumber;
+        return projectileTeam != null && hitTeam != null && projectileTeam === hitTeam;
     }
 
     static leadAndAngle(attacker, target, projectileSpeed) {
@@ -366,6 +372,10 @@ export class Projectile {
     }
 
     static handleStructureCollision(projectile, hit) {
+        if (this.isFriendlyStructureHit(projectile, hit)) {
+            return;
+        }
+
         const weapon = projectile.weapon;
         const result = fightManager.calculateHitResultFromWeapon(weapon);
 

@@ -6,23 +6,23 @@ import { Teams } from "../Teams";
 import { spawnPoints } from "../town";
 import Phaser from "phaser";
 import { Map } from "../map";
-import { ZoomMixer } from "../UI/ZoomMixer"; 
+import { ZoomMixer } from "../UI/ZoomMixer";
 import { Raider } from "../players/Raider";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 
-export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = '0', troop) {
+export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = "0", troop) {
     const targetsAdded = new Set();
-    const buildingArray = Teams.teamLists['1'].buildings;
+    const buildingArray = Teams.teamLists["1"].buildings;
     const pointsToCheck = (x !== null && y !== null) ? [[x, y]] : spawnPoints;
 
     for (const [px, py] of pointsToCheck) {
         const playerMock = { x: px, y: py };
 
-        for (let [bx, by, type, building] of buildingArray) {
+        for (const [bx, by, type, building] of buildingArray) {
             const key = `${bx},${by}`;
 
             const alreadyInState = Teams.teamLists[teamNumber].destroyStates.some(
-                t => t.x === bx && t.y === by
+                (t) => t.x === bx && t.y === by
             );
 
             if (alreadyInState || targetsAdded.has(key)) continue;
@@ -35,16 +35,15 @@ export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber 
                     x: bx,
                     y: by,
                     duration: 100,
-                    assigned: 0
+                    assigned: 0,
                 };
-                Teams.addToStateArrayIfNotExists(teamNumber, 'destroyStates', task);
+                Teams.addToStateArrayIfNotExists(teamNumber, "destroyStates", task);
                 targetsAdded.add(key);
             }
         }
     }
 }
 
-// helper (inside spawnManager)
 export function pickRaidApproachForPOI(poiX, poiY, type, raiderTroop) {
     const targets = SiegePlanner.buildPerimeterTargets(
         poiX, poiY, type.lenX, type.lenY,
@@ -52,24 +51,24 @@ export function pickRaidApproachForPOI(poiX, poiY, type, raiderTroop) {
         Map.enemyNavGrid.length
     );
 
-    // Try nearest-first by euclid; validate with path
     targets.sort((a, b) => {
-        const awx = a.x * SQUARESIZE + SQUARESIZE/2, awy = a.y * SQUARESIZE + SQUARESIZE/2;
-        const bwx = b.x * SQUARESIZE + SQUARESIZE/2, bwy = b.y * SQUARESIZE + SQUARESIZE/2;
-        const da = (awx - raiderTroop.x)**2 + (awy - raiderTroop.y)**2;
-        const db = (bwx - raiderTroop.x)**2 + (bwy - raiderTroop.y)**2;
+        const awx = a.x * SQUARESIZE + SQUARESIZE / 2;
+        const awy = a.y * SQUARESIZE + SQUARESIZE / 2;
+        const bwx = b.x * SQUARESIZE + SQUARESIZE / 2;
+        const bwy = b.y * SQUARESIZE + SQUARESIZE / 2;
+        const da = (awx - raiderTroop.x) ** 2 + (awy - raiderTroop.y) ** 2;
+        const db = (bwx - raiderTroop.x) ** 2 + (bwy - raiderTroop.y) ** 2;
         return da - db;
     });
 
     for (const t of targets) {
         if (Map.enemyNavGrid[t.y][t.x] !== 1) continue;
-            // use troop-aware approach finder (now mesh-agnostic after patch #1)
-            const res = buildingManager.findApproachAnyPerimeter(
+        const res = buildingManager.findApproachAnyPerimeter(
             poiX, poiY, type, raiderTroop
         );
 
         if (res && res.path && res.path.length) {
-            return res; // { tx, ty, path }
+            return res;
         }
     }
     return null;
@@ -81,10 +80,11 @@ export function spawnAndSend() {
 
     Manager.assignOneTroopToAction(
         player,
-        Teams.teamLists['0'].destroyStates,
+        Teams.teamLists["0"].destroyStates,
         CONTROL_STATES.DESTROY_MODE
     );
 }
+
 export function spawnRaiderAtWorld(worldX, worldY, teamNumber = 0) {
     const gx = Math.floor(worldX / SQUARESIZE);
     const gy = Math.floor(worldY / SQUARESIZE);
@@ -92,7 +92,6 @@ export function spawnRaiderAtWorld(worldX, worldY, teamNumber = 0) {
     const x = Math.max(0, Math.min(WORLD_DIMENSIONX - 1, gx));
     const y = Math.max(0, Math.min(WORLD_DIMENSIONY - 1, gy));
 
-    // If blocked, try a tiny local search
     const nav = Map.enemyNavGrid;
     if (nav && nav[y] && nav[y][x] !== 1) {
         for (let dy = -1; dy <= 1; dy++) {
@@ -107,85 +106,166 @@ export function spawnRaiderAtWorld(worldX, worldY, teamNumber = 0) {
 
     return new Raider(x, y, teamNumber);
 }
-// 🌊 Spawn a single sea-raider on a random water edge, moving toward center
-export function spawnSeaRaider(scene) {
+
+function normalizeSeaEdge(edge = null) {
+    const value = String(edge || "").toLowerCase();
+    if (value === "top" || value === "right" || value === "bottom" || value === "left") {
+        return value;
+    }
+    return null;
+}
+
+function collectSeaEdgeCandidates(edge = null) {
     const nav = Map.navGrid;
-    if (!nav || !nav.length) return;
+    if (!nav || !nav.length) return [];
 
     const h = nav.length;
     const w = nav[0].length;
+    const normalizedEdge = normalizeSeaEdge(edge);
     const candidates = [];
 
-    // Collect all edge tiles that are NOT walkable (water)
+    const pushIfWater = (gx, gy, side) => {
+        if (normalizedEdge && normalizedEdge !== side) return;
+        if (nav[gy]?.[gx] !== 0) return;
+        candidates.push({ gx, gy, edge: side });
+    };
+
     for (let x = 0; x < w; x++) {
-        if (nav[0][x] === 0)        candidates.push([x, 0]);
-        if (nav[h - 1][x] === 0)    candidates.push([x, h - 1]);
+        pushIfWater(x, 0, "top");
+        pushIfWater(x, h - 1, "bottom");
     }
     for (let y = 0; y < h; y++) {
-        if (nav[y][0] === 0)        candidates.push([0, y]);
-        if (nav[y][w - 1] === 0)    candidates.push([w - 1, y]);
+        pushIfWater(0, y, "left");
+        pushIfWater(w - 1, y, "right");
     }
 
-    if (!candidates.length) return;
+    return candidates;
+}
 
-    const [gx, gy] = Phaser.Utils.Array.GetRandom(candidates);
+function applySeaRaiderMods(unit, modifier = null, options = {}) {
+    if (!unit) return null;
 
-    // grid → world
+    const speedMultiplier = Math.max(0.5, Number(options.speedMultiplier ?? modifier?.speedMultiplier ?? 1) || 1);
+    const healthMultiplier = Math.max(0.5, Number(options.healthMultiplier ?? modifier?.healthMultiplier ?? 1) || 1);
+    const damageMultiplier = Math.max(0.5, Number(options.damageMultiplier ?? modifier?.damageMultiplier ?? 1) || 1);
+
+    unit.moveSpeedMultiplier = speedMultiplier;
+    unit.hordeModifierKey = options.modifierKey ?? modifier?.key ?? null;
+    unit.hordeModifierLabel = options.modifierLabel ?? modifier?.label ?? null;
+    unit.hordeEnemyTypeLabel = options.enemyTypeLabel ?? modifier?.enemyTypeLabel ?? "Raiders";
+
+    if (Number.isFinite(unit.maxHealth)) {
+        unit.maxHealth = Math.max(1, Math.round(unit.maxHealth * healthMultiplier));
+        unit.health = Math.min(unit.maxHealth, Math.max(1, Math.round((unit.health ?? unit.maxHealth) * healthMultiplier)));
+    }
+
+    if (unit.weapon) {
+        unit.weapon = {
+            ...unit.weapon,
+            baseDmg: Math.max(1, Math.round(Number(unit.weapon.baseDmg ?? 0) * damageMultiplier)),
+            critDmg: Math.max(1, Math.round(Number(unit.weapon.critDmg ?? 0) * damageMultiplier)),
+        };
+    }
+
+    return {
+        speedMultiplier,
+        healthMultiplier,
+        damageMultiplier,
+    };
+}
+
+function attachSeaRaiderIcon(scene, raider) {
+    const iconScene = scene ?? ZoomMixer.scene;
+    if (!iconScene || !raider?.active) return;
+
+    const iconKey = "enemyIcon";
+    if (!iconScene.textures.exists(iconKey)) {
+        const g = iconScene.add.graphics();
+        g.fillStyle(0xff0000, 1).fillCircle(6, 6, 5);
+        g.lineStyle(1, 0x000000, 1).strokeCircle(6, 6, 5);
+        g.generateTexture(iconKey, 12, 12);
+        g.destroy();
+    }
+
+    const icon = ZoomMixer.createZoomInvariantIcon(
+        iconKey,
+        "Sea Raider",
+        raider.x,
+        raider.y,
+        { baseScale: 0.9 }
+    );
+    icon.setTint(0xff4444);
+
+    const updateCb = () => {
+        if (!raider.active || !icon.active) {
+            iconScene.events.off("update", updateCb);
+            if (icon.active) icon.destroy();
+            return;
+        }
+        icon.setPosition(raider.x, raider.y);
+    };
+
+    iconScene.events.on("update", updateCb);
+}
+
+function spawnSingleSeaRaider(scene, options = {}) {
+    const nav = Map.navGrid;
+    if (!scene || !nav || !nav.length) return null;
+
+    const rng = scene?.rng ?? Math.random;
+    let candidates = collectSeaEdgeCandidates(options.edge);
+    if (!candidates.length && options.edge) {
+        candidates = collectSeaEdgeCandidates(null);
+    }
+    if (!candidates.length) return null;
+
+    const candidate = candidates[Math.floor(rng() * candidates.length)];
+    const gx = candidate.gx;
+    const gy = candidate.gy;
     const startX = gx * SQUARESIZE + SQUARESIZE / 2;
     const startY = gy * SQUARESIZE + SQUARESIZE / 2;
+    const targetPoint = options.targetPoint ?? {
+        x: (WORLD_DIMENSIONX * SQUARESIZE) / 2,
+        y: (WORLD_DIMENSIONY * SQUARESIZE) / 2,
+    };
 
-    const centerX = (WORLD_DIMENSIONX * SQUARESIZE) / 2;
-    const centerY = (WORLD_DIMENSIONY * SQUARESIZE) / 2;
-
-    // Build a proper Raider unit so it plugs into the class-based system
-    const raider = new Raider(gx, gy, 0); // team 0 = enemy
+    const raider = new Raider(gx, gy, options.teamNumber ?? 0);
+    const appliedMods = applySeaRaiderMods(raider, options.modifier, options);
 
     raider.isSeaRaider = true;
-    raider.isSwimming  = true;
+    raider.isSwimming = true;
+    raider.isNightHordeEnemy = !!options.nightHordeId;
+    raider.nightHordeId = options.nightHordeId ?? null;
+    raider.hordeIndex = options.hordeIndex ?? null;
+    raider.seaSpawnEdge = candidate.edge;
+    raider.swimTargetX = Number(targetPoint?.x ?? startX);
+    raider.swimTargetY = Number(targetPoint?.y ?? startY);
 
-    const dir = new Phaser.Math.Vector2(centerX - startX, centerY - startY).normalize();
+    const dir = new Phaser.Math.Vector2(raider.swimTargetX - startX, raider.swimTargetY - startY);
+    if (dir.lengthSq() <= 0.001) dir.set(0, 1);
+    dir.normalize();
     raider.swimDirX = dir.x;
     raider.swimDirY = dir.y;
 
-    // low swim speed; Player.update will keep this going
-    const swimSpeed = 40;
+    const fallbackSpeed = Math.round(220 * Math.max(1, Number(appliedMods?.speedMultiplier ?? 1) || 1));
+    const swimSpeed = Math.max(160, Number(options.swimSpeed ?? 0) || fallbackSpeed);
+    raider.swimSpeed = swimSpeed;
     raider.body.setVelocity(dir.x * swimSpeed, dir.y * swimSpeed);
 
-    // 🔴 Create a minimap / overview icon for this enemy
-    if (ZoomMixer.scene) {
-        const s = ZoomMixer.scene;   // this is the Phaser.Scene, not the ZoomMixer instance
+    attachSeaRaiderIcon(scene, raider);
+    return raider;
+}
 
-        const iconKey = "enemyIcon";
-        if (!s.textures.exists(iconKey)) {
-            const g = s.add.graphics();
-            g.fillStyle(0xff0000, 1).fillCircle(6, 6, 5);      // red dot
-            g.lineStyle(1, 0x000000, 1).strokeCircle(6, 6, 5); // black outline
-            g.generateTexture(iconKey, 12, 12);
-            g.destroy();
-        }
-
-        const icon = ZoomMixer.createZoomInvariantIcon(
-            iconKey,
-            "Sea Raider",
-            raider.x,
-            raider.y,
-            { baseScale: 0.9 }
-        );
-        icon.setTint(0xff4444);
-
-        // Follow the raider in world space
-        const updateCb = () => {
-            if (!raider.active || !icon.active) {
-                s.events.off("update", updateCb);
-                if (icon.active) icon.destroy();
-                return;
-            }
-            icon.setPosition(raider.x, raider.y);
-        };
-
-        s.events.on("update", updateCb);
+export function spawnSeaRaider(scene, options = {}) {
+    const count = Math.max(1, Math.floor(Number(options?.count ?? 1) || 1));
+    if (count === 1) {
+        return spawnSingleSeaRaider(scene, options);
     }
 
-
-    return raider;
+    const spawned = [];
+    for (let i = 0; i < count; i++) {
+        const unit = spawnSingleSeaRaider(scene, options);
+        if (unit) spawned.push(unit);
+    }
+    return spawned;
 }

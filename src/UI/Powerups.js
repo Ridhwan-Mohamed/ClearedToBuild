@@ -202,16 +202,6 @@ export function openPowerupScreen(scene) {
 
         card.on("pointerdown", () => {
             const teamId = "1";
-            const hand = getCardHand(teamId);
-
-            // If full, show swap UI, do NOT apply yet
-            if (hand.length >= 5) {
-                openSwapOverlay(scene, uiContainer, pu, teamId, () => {
-                    closePowerupScreen(scene, uiContainer);
-                });
-                return;
-            }
-
             addCardToHand(pu, teamId);
             scene.events.emit("cards:updated");
             closePowerupScreen(scene, uiContainer);
@@ -241,7 +231,7 @@ export function openPowerupScreen(scene) {
             const cost = PLAYER_COSTS[type];
             if (scene.checkSufficientFunds(cost)) {
                 const team = '1';
-                if (!House.availableHouse(team)) {
+                if (!Teams.canRecruitPlayer?.(team)) {
                     console.log("Not enough housing!");
                     showAlert(scene, "Not enough Housing!", "#ff0000");
                     return;
@@ -292,8 +282,7 @@ export function openPowerupScreen(scene) {
             const cost = PLAYER_COSTS[type];
             if (scene.checkSufficientFunds(cost)) {
                 const team = Teams.teamLists['1'];
-                const availableHouse = team.houseList.find(h => h.canAcceptPlayer());
-                if (!availableHouse) {
+                if (!Teams.canRecruitPlayer?.("1")) {
                     console.log("Not enough housing!");
                     return;
                 }
@@ -303,7 +292,7 @@ export function openPowerupScreen(scene) {
                 if (roads.length === 0) return;
                 const spawnTile = Phaser.Utils.Array.GetRandom(roads);
                 const player = new playerClasses[type](spawnTile[0], spawnTile[1], 1);
-                availableHouse.assignPlayer(player);
+                House.assignPlayerToHouse(player, "1");
             }
         });
         [bg, preview, name, cost, group].forEach(el => el.setScrollFactor(0));
@@ -336,14 +325,7 @@ function closePowerupScreen(scene, container) {
 }
 
 function getRandomPowerups(count = 3) {
-    const teamId = "1";
-
-    // Cards already in hand – we don't want to offer these again
-    const hand = getCardHand(teamId);
-    const ownedIds = new Set(hand.map(c => c.id));
-
-    // Only consider powerups we don't already have
-    const candidates = POWERUPS.filter(p => !ownedIds.has(p.id));
+    const candidates = POWERUPS.slice();
 
     if (candidates.length === 0) return [];
     if (candidates.length <= count) {
@@ -508,9 +490,6 @@ export function addCardToHand(card, teamNumber = "1") {
 
     if (!team.cardHand) team.cardHand = [];
     const hand = team.cardHand;
-
-    // refuse when full (swap UI handles replacement)
-    if (hand.length >= 5) return false;
 
     // Normal pickup: apply immediately + add to hand
     if (card.apply) card.apply();

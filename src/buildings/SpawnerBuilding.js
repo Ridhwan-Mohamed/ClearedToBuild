@@ -13,6 +13,7 @@ import { TILE_TYPES, SQUARESIZE, BLOCKDEPTH } from "../constants.js";
 import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Teams } from "../Teams.js";
 import { VisibilitySystem } from "../UI/VisibilitySystem.js";
+import { FortGrunt } from "../players/FortGrunt.js";
 
 export class SpawnerBuilding {
   /**
@@ -39,6 +40,11 @@ export class SpawnerBuilding {
     this.maxHp = opts.maxHp ?? 80;
     this.hp = this.maxHp;
     this.contractId = opts.contractId ?? null;
+    this.enemyType = opts.enemyType === "grunt" ? "grunt" : "raider";
+    this.enemyMods = opts.enemyMods ? { ...opts.enemyMods } : null;
+    this.enemyTypeLabel = opts.enemyTypeLabel ?? (this.enemyType === "grunt" ? "Fort Grunts" : "Raiders");
+    this.modifierKey = opts.modifierKey ?? null;
+    this.modifierLabel = opts.modifierLabel ?? null;
 
     this.quotaRemaining = opts.quota ?? 3;
     this.aliveCount = 0;
@@ -173,6 +179,46 @@ export class SpawnerBuilding {
     this.counterText.setText(String(Math.max(0, this.quotaRemaining)));
   }
 
+  _applyEnemyMods(unit) {
+    if (!unit || !this.enemyMods) return;
+
+    const speedMultiplier = Math.max(0.5, Number(this.enemyMods.speedMultiplier ?? 1) || 1);
+    const healthMultiplier = Math.max(0.5, Number(this.enemyMods.healthMultiplier ?? 1) || 1);
+    const damageMultiplier = Math.max(0.5, Number(this.enemyMods.damageMultiplier ?? 1) || 1);
+
+    unit.moveSpeedMultiplier = speedMultiplier;
+    unit.hordeModifierKey = this.modifierKey;
+    unit.hordeModifierLabel = this.modifierLabel;
+    unit.pressureEnemyType = this.enemyType;
+
+    if (Number.isFinite(unit.maxHealth)) {
+      unit.maxHealth = Math.max(1, Math.round(unit.maxHealth * healthMultiplier));
+      unit.health = Math.min(unit.maxHealth, Math.max(1, Math.round((unit.health ?? unit.maxHealth) * healthMultiplier)));
+    }
+
+    if (unit.weapon) {
+      unit.weapon = {
+        ...unit.weapon,
+        baseDmg: Math.max(1, Math.round(Number(unit.weapon.baseDmg ?? 0) * damageMultiplier)),
+        critDmg: Math.max(1, Math.round(Number(unit.weapon.critDmg ?? 0) * damageMultiplier)),
+      };
+    }
+  }
+
+  _spawnEnemy() {
+    const unit = this.enemyType === "grunt"
+      ? new FortGrunt(Math.floor(this.sprite.x / SQUARESIZE), Math.floor(this.sprite.y / SQUARESIZE), 0)
+      : spawnRaiderAtWorld(this.sprite.x, this.sprite.y);
+
+    if (!unit) return false;
+
+    unit.spawner = this;
+    unit.contractId = this.contractId;
+    this._applyEnemyMods(unit);
+    this.scene?.parcelManager?.notifyRaiderSpawned?.(unit.contractId);
+    return true;
+  }
+
   _tick() {
     if (this._destroyed) return;
 
@@ -185,7 +231,7 @@ export class SpawnerBuilding {
 
     // Spawn a Raider (you said existing attack logic will take over).
     // We only need to call into your spawnManager.
-    const spawned = this._spawnRaider();
+    const spawned = this._spawnEnemy();
     if (spawned) {
       this.quotaRemaining -= 1;
       this.aliveCount += 1;

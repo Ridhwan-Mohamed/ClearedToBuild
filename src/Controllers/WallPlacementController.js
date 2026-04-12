@@ -1,4 +1,5 @@
 // WallPlacementController.js
+import Phaser from "phaser";
 import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, UIDEPTH } from "../constants";
 import { Map } from "../map";
 import { buildingManager } from "../Manager/buildingManager";
@@ -12,7 +13,6 @@ import woodWall_edge from "url:../assets/wall/woodWall_edge.png";
 import woodWall_corner from "url:../assets/wall/woodWall_corner.png";
 import stone_door from "url:../assets/wall/stone_door.png";
 import wood_door from "url:../assets/wall/woodWall_door.png";
-import { Player } from "../players/Player";
 import { AudioManager } from "../Manager/AudioManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Map as GameMap } from "../map";
@@ -47,6 +47,11 @@ _initDoorPhysicsOnce() {
   const scene = this.scene;
 
   if (scene.__doorsPhysicsInited) return;
+  if (scene.__doorPostUpdateHandler) {
+    scene.events.off("postupdate", scene.__doorPostUpdateHandler);
+    scene.__doorPostUpdateHandler = null;
+  }
+  scene.doorGroup?.destroy?.(true);
   scene.__doorsPhysicsInited = true;
 
   // ✅ one static group for all doors
@@ -65,11 +70,30 @@ _initDoorPhysicsOnce() {
     scene
   );
 
+  const iterateDoors = (callback) => {
+    const children = scene.doorGroup?.children;
+    if (!children) return;
+
+    if (typeof children.iterate === "function") {
+      children.iterate(callback);
+      return;
+    }
+
+    if (typeof children.getArray === "function") {
+      children.getArray().forEach(callback);
+      return;
+    }
+
+    if (Array.isArray(children.entries)) {
+      children.entries.forEach(callback);
+    }
+  };
+
   // ✅ postupdate: open if touched, else close
-  scene.events.on("postupdate", () => {
+  scene.__doorPostUpdateHandler = () => {
     if (!scene.doorGroup) return;
 
-    scene.doorGroup.children.iterate((door) => {
+    iterateDoors((door) => {
       if (!door || !door.active) return;
 
       const shouldOpen = !!door.__touchedThisFrame;
@@ -96,7 +120,17 @@ _initDoorPhysicsOnce() {
 
       door.__touchedThisFrame = false;
     });
+  };
 
+  scene.events.on("postupdate", scene.__doorPostUpdateHandler);
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    if (scene.__doorPostUpdateHandler) {
+      scene.events.off("postupdate", scene.__doorPostUpdateHandler);
+      scene.__doorPostUpdateHandler = null;
+    }
+    scene.doorGroup?.destroy?.(true);
+    scene.doorGroup = null;
+    scene.__doorsPhysicsInited = false;
   });
 }
 

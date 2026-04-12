@@ -12,9 +12,10 @@ const BUTTON_STYLES = {
   sell: { fill: 0x92400e, text: "#fcd34d", glow: 0xfde68a },
   wood: { fill: 0x166534, text: "#86efac", glow: 0xbbf7d0 },
   stone: { fill: 0x475569, text: "#cbd5e1", glow: 0xe2e8f0 },
+  seed: { fill: 0x92400e, text: "#fde68a", glow: 0xfef3c7 },
+  berryGather: { fill: 0x7c3aed, text: "#e9d5ff", glow: 0xf5d0fe },
   workSelected: { fill: 0x92400e, text: "#fbbf24", glow: 0xfde68a },
   makeWater: { fill: 0x0f4c81, text: "#93c5fd", glow: 0xbfdbfe },
-  defendTown: { fill: 0x0f766e, text: "#99f6e4", glow: 0xccfbf1 },
   attackFort: { fill: 0x991b1b, text: "#fca5a5", glow: 0xfecaca },
   hold: { fill: 0x5b21b6, text: "#ddd6fe", glow: 0xe9d5ff },
 };
@@ -107,39 +108,21 @@ export class SelectionCommandBar {
         showAlert(this.scene, `Sold ${result.sold} troop${result.sold === 1 ? "" : "s"} for $${result.money}`, "#fcd34d");
       }),
       wood: this._makeButton("wood", "GATHER WOOD", (snapshot) => {
-        const troops = this._getActionTroops(snapshot);
-        const hasParcel = OrderRunner.hasActiveGatherParcel("wood", this.scene);
-        if (!hasParcel) {
-          showAlert(this.scene, OrderRunner.getGatherParcelMissingMessage("wood"), "#fecaca");
-          return;
-        }
-        const ok = OrderRunner.issueGatherTypeOrder(troops, "wood", this.scene);
-        if (!ok) {
-          showAlert(this.scene, "Select only foragers to use this", "#fecaca");
-          return;
-        }
-        this._dismissForCurrentSelection(snapshot?.troops);
-        showAlert(this.scene, "Selected foragers will prioritize wood", "#a7f3d0");
+        this._issueGatherCommand(snapshot, "wood", "Selected foragers will prioritize wood", "#a7f3d0");
       }),
       stone: this._makeButton("stone", "GATHER STONE", (snapshot) => {
-        const troops = this._getActionTroops(snapshot);
-        const hasParcel = OrderRunner.hasActiveGatherParcel("stone", this.scene);
-        if (!hasParcel) {
-          showAlert(this.scene, OrderRunner.getGatherParcelMissingMessage("stone"), "#fecaca");
-          return;
-        }
-        const ok = OrderRunner.issueGatherTypeOrder(troops, "stone", this.scene);
-        if (!ok) {
-          showAlert(this.scene, "Select only foragers to use this", "#fecaca");
-          return;
-        }
-        this._dismissForCurrentSelection(snapshot?.troops);
-        showAlert(this.scene, "Selected foragers will prioritize stone", "#bfdbfe");
+        this._issueGatherCommand(snapshot, "stone", "Selected foragers will prioritize stone", "#bfdbfe");
+      }),
+      seed: this._makeButton("seed", "GATHER SEEDS", (snapshot) => {
+        this._issueGatherCommand(snapshot, "seed", "Selected foragers will gather seeds from farm bushes", "#fde68a");
+      }),
+      berryGather: this._makeButton("berryGather", "GATHER BERRIES", (snapshot) => {
+        this._issueGatherCommand(snapshot, "berry", "Selected foragers will gather berries from farm bushes", "#e9d5ff");
       }),
       workSelected: this._makeButton("workSelected", "WORK SELECTED", (snapshot) => {
         const ok = OrderRunner.issueWorkQueuedOrder(this._getActionTroops(snapshot));
         if (!ok) {
-          showAlert(this.scene, "No queued trees or rocks to lock onto", "#ff9999");
+          showAlert(this.scene, "No queued resource nodes to lock onto", "#ff9999");
         } else {
           this._dismissForCurrentSelection(snapshot?.troops);
           showAlert(this.scene, "Assigned selected foragers to queued resource targets", "#a7f3d0");
@@ -153,11 +136,6 @@ export class SelectionCommandBar {
         }
         this._dismissForCurrentSelection(snapshot?.troops);
         showAlert(this.scene, "Selected firemen will keep oven water and fuel balanced", "#93c5fd");
-      }),
-      defendTown: this._makeButton("defendTown", "DEFEND TOWN", (snapshot) => {
-        const ok = OrderRunner.issueDefendTownOrder(this._getActionTroops(snapshot));
-        if (ok) this._dismissForCurrentSelection(snapshot?.troops);
-        showAlert(this.scene, ok ? "Selected fighters are defending town" : "Select only fighters to use this", ok ? "#99f6e4" : "#fecaca");
       }),
       attackFort: this._makeButton("attackFort", "ATTACK FORT", (snapshot) => {
         const ok = OrderRunner.issueAttackFortOrder(this._getActionTroops(snapshot));
@@ -213,13 +191,14 @@ export class SelectionCommandBar {
     }
     layoutKeys.push("return", "cancel", "auto", "sleep", "berry", "sell");
     if (profile.allForagers) {
-      layoutKeys.push("wood", "stone", "workSelected");
+      if (OrderRunner.isGatherCommandAvailable("wood", this.scene)) layoutKeys.push("wood");
+      if (OrderRunner.isGatherCommandAvailable("stone", this.scene)) layoutKeys.push("stone");
+      if (OrderRunner.isGatherCommandAvailable("seed", this.scene)) layoutKeys.push("seed");
+      if (OrderRunner.isGatherCommandAvailable("berry", this.scene)) layoutKeys.push("berryGather");
+      layoutKeys.push("workSelected");
     }
     if (profile.allFiremen) {
       layoutKeys.push("makeWater");
-    }
-    if (profile.allCombatants) {
-      layoutKeys.push("defendTown");
     }
     if (profile.allGunslingers) {
       layoutKeys.push("hold");
@@ -421,9 +400,9 @@ export class SelectionCommandBar {
   }
 
   _isButtonActive(key, profile) {
-    if (key === "wood" || key === "stone") {
+    if (key === "wood" || key === "stone" || key === "seed" || key === "berryGather") {
       if (!profile.allForagers) return false;
-      const resourceType = key === "wood" ? "wood" : "stone";
+      const resourceType = this._gatherButtonResourceType(key);
       return profile.troops.length > 0 && profile.troops.every(troop =>
         troop?.currentOrder?.kind === "gather_type" &&
         troop.currentOrder?.resourceType === resourceType
@@ -458,10 +437,16 @@ export class SelectionCommandBar {
       return required <= 0 || available < required;
     }
     if (key === "wood") {
-      return !OrderRunner.hasActiveGatherParcel("wood", this.scene);
+      return !OrderRunner.isGatherCommandAvailable("wood", this.scene);
     }
     if (key === "stone") {
-      return !OrderRunner.hasActiveGatherParcel("stone", this.scene);
+      return !OrderRunner.isGatherCommandAvailable("stone", this.scene);
+    }
+    if (key === "seed") {
+      return !OrderRunner.isGatherCommandAvailable("seed", this.scene);
+    }
+    if (key === "berryGather") {
+      return !OrderRunner.isGatherCommandAvailable("berry", this.scene);
     }
     return false;
   }
@@ -528,5 +513,27 @@ export class SelectionCommandBar {
     this.disappearingTween?.remove();
     this.isVisible = false;
     this.container?.setAlpha(0)?.setVisible(false)?.setScale(0.96);
+  }
+
+  _gatherButtonResourceType(key) {
+    if (key === "berryGather") return "berry";
+    return key;
+  }
+
+  _issueGatherCommand(snapshot, resourceType, successMessage, color) {
+    const troops = this._getActionTroops(snapshot);
+    if (!OrderRunner.hasActiveGatherParcel(resourceType, this.scene) || !OrderRunner.hasGatherableNodes(resourceType)) {
+      showAlert(this.scene, OrderRunner.getGatherUnavailableMessage(resourceType, this.scene), "#fecaca");
+      return;
+    }
+
+    const ok = OrderRunner.issueGatherTypeOrder(troops, resourceType, this.scene);
+    if (!ok) {
+      showAlert(this.scene, "Select only foragers to use this", "#fecaca");
+      return;
+    }
+
+    this._dismissForCurrentSelection(snapshot?.troops);
+    showAlert(this.scene, successMessage, color);
   }
 }

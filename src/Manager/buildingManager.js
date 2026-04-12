@@ -679,102 +679,10 @@ export class buildingManager{
         return false;
     }
 
-    static findBuildApproachBlock(x, y, type, troop, tStartX = null, tStartY = null) {
-        const candidates = [];
-
-        // Top-left of block footprint
-        const startX = x;
-        const startY = y;
-
-        const { navMesh, navGrid } = Player._getNavForTroop(troop)
-
-        // 1) Collect all walkable perimeter tiles (as before)
-        for (let dy = -1; dy <= type.lenY; dy++) {
-            for (let dx = -1; dx <= type.lenX; dx++) {
-                const tx = startX + dx;
-                const ty = startY + dy;
-
-                const isInsideBlock = dx >= 0 && dx < type.lenX && dy >= 0 && dy < type.lenY;
-                if (isInsideBlock) continue;
-
-                if (tx < 0 || ty < 0 || ty >= navGrid.length || tx >= navGrid[0].length) continue;
-                if (!navGrid[ty][tx]) continue; // Not walkable
-
-                const worldX = tx * SQUARESIZE + SQUARESIZE / 2;
-                const worldY = ty * SQUARESIZE + SQUARESIZE / 2;
-                let dist;
-                if (troop) {
-                    dist = Phaser.Math.Distance.Between(troop.x, troop.y, worldX, worldY);
-                } else {
-                    dist = Phaser.Math.Distance.Between(
-                        tStartX * SQUARESIZE + SQUARESIZE / 2,
-                        tStartY * SQUARESIZE + SQUARESIZE / 2,
-                        worldX,
-                        worldY
-                    );
-                }
-                candidates.push({ tx, ty, dist });
-            }
-        }
-
-        // 2) Resolve starting world position (troop or explicit)
-        if (tStartX == null || tStartY == null) {
-            let troopX = Math.floor(troop.body.x / SQUARESIZE);
-            let troopY = Math.floor(troop.body.y / SQUARESIZE);
-            tStartX = troop.body.x;
-            tStartY = troop.body.y;
-
-            if (!navGrid[troopY]?.[troopX]) {
-                const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                if (newX === -1) {
-                    console.log("No valid start tile nearby");
-                    return null;
-                } else {
-                    tStartX = newX * SQUARESIZE + SQUARESIZE / 2;
-                    tStartY = newY * SQUARESIZE + SQUARESIZE / 2;
-                    console.log("New valid tile:", newX, newY);
-                }
-            }
-        } else {
-            tStartX = tStartX * SQUARESIZE + SQUARESIZE / 2;
-            tStartY = tStartY * SQUARESIZE + SQUARESIZE / 2;
-        }
-
-        // 🔥 3) Prefer "door" tile: bottom-center of the block
-        //    Imagine door on bottom edge in y, centered in x.
-        const doorDx = Math.floor(type.lenX / 2);          // center in X
-        const doorTx = startX + doorDx;
-        const doorTy = startY + type.lenY;                 // just below bottom edge
-
-        if (
-            doorTx >= 0 && doorTy >= 0 &&
-            doorTy < navGrid.length &&
-            doorTx < navGrid[0].length &&
-            navGrid[doorTy][doorTx]            // must be walkable
-        ) {
-            const doorWorldX = doorTx * SQUARESIZE + SQUARESIZE / 2;
-            const doorWorldY = doorTy * SQUARESIZE + SQUARESIZE / 2;
-
-            // inside findBuildApproachBlock, where you compute doorTx/doorTy
-            const doorPath = Player.pathTo(troop, doorTx, doorTy, true);
-            if (doorPath && doorPath.length > 0) {
-                return { tx: doorTx, ty: doorTy, path: doorPath };
-            }
-
-        }
-
-        // 4) Fallback: previous behaviour, closest perimeter candidate
-        candidates.sort((a, b) => a.dist - b.dist);
-
-        for (const candidate of candidates) {
-            const path = Player.pathTo(troop, candidate.tx, candidate.ty, true);
-            if (path && path.length > 0) {
-                return { tx: candidate.tx, ty: candidate.ty, path };
-            }
-        }
-
-
-        return null; // ❌ No valid path found
+    static findBuildApproachBlock(x, y, type, troop, tStartX = null, tStartY = null, task = null) {
+        // Construction should be reachable from any valid neighboring perimeter tile,
+        // not a house-style "door" anchor on the bottom edge.
+        return this.findApproachAnyPerimeter(x, y, type, troop, tStartX, tStartY, task);
     }
 
     static _assignedPerimeterDestKeys(task, troop) {
@@ -1097,6 +1005,7 @@ export class buildingManager{
                 isTownTower: ownerTeam === 1,
                 isStarterTownTower: false,
                 isFortObjective: ownerTeam !== 1,
+                grantBuildPermit: ownerTeam === 1,
             });
         }else if(task.type == TILE_TYPES.turret){
             new Turret(task.x, task.y, ownerTeam);

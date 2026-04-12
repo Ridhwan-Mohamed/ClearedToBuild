@@ -7,7 +7,6 @@ import { StorageManager } from '../Manager/StorageManager.js';
 import { NameGenerator } from './NameGenerator.js';
 import { waterSourcesQuadTree } from '../mainMenu.js';
 import { ZoomMixer } from '../UI/ZoomMixer.js';
-import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { AudioManager } from '../Manager/AudioManager.js';
@@ -70,6 +69,7 @@ export class Farmer {
         farmer.waterBucket = {count: 0};
         farmer.oldState = null;
         farmer.pendingFarmSpot = null;
+        farmer.pendingStorageDeliveryReservation = null;
         attachDirectionalSix(farmer, {
             animPrefix: 'farmer',
             defaultDirection: 'down',
@@ -215,7 +215,6 @@ export class Farmer {
 
         const storage = task.storage;
         storage.addItem(troop.carrying.item, troop.carrying.count);
-        DailyNeedsTracker.updateUIItems(troop.carrying.item, troop.carrying.count);
 
         // Cleanup
         troop.carrying = null;
@@ -250,6 +249,7 @@ export class Farmer {
 
         // Clear references
         if (farmer.task) {farmer.task.assigned--; farmer.task = null;}
+        StorageManager.releaseDeliveryReservation(farmer);
         if (farmer.carrying) farmer.carrying = null;
 
         if (farmer.visionId != null) {

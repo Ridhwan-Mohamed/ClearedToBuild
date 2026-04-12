@@ -6,10 +6,52 @@ import { recalculateDestroyTasksFromPoint, spawnSeaRaider } from "../Manager/spa
 import { AudioManager } from "../Manager/AudioManager";
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 
+const DAWN_START = 6;
+const DAY_START = 7;
+const DUSK_START = 16;
 const NIGHT_START = 18;
-const NIGHT_END = 6;
+const NIGHT_END = DAWN_START;
 const CROP_GROWTH_INTERVAL_HOURS = 8;
-const CROP_GROWTH_START_HOUR = 6;
+const CROP_GROWTH_START_HOUR = DAWN_START;
+
+const PHASE_DEFS = {
+    dawn: {
+        key: "dawn",
+        label: "DAWN",
+        shortLabel: "Dawn",
+        color: 0x9be7ff,
+        textColor: "#dff6ff",
+        help: "Tower income, permits, and queued village rewards.\nParcel buying stays open.",
+        actionText: "Income / permits / rewards",
+    },
+    day: {
+        key: "day",
+        label: "DAY",
+        shortLabel: "Day",
+        color: 0x7ee787,
+        textColor: "#e8ffe8",
+        help: "Build, gather, and expand.\nParcel buying is open.",
+        actionText: "Build / gather / expand",
+    },
+    dusk: {
+        key: "dusk",
+        label: "DUSK",
+        shortLabel: "Dusk",
+        color: 0xffb86b,
+        textColor: "#fff1db",
+        help: "Final prep before the coastal assault.\nParcel buying stays open.",
+        actionText: "Prep / expand / defend",
+    },
+    night: {
+        key: "night",
+        label: "NIGHT",
+        shortLabel: "Night",
+        color: 0xf87171,
+        textColor: "#ffe4e4",
+        help: "Survive the horde until dawn.\nParcels stay usable all night.",
+        actionText: "Defend / expand / survive",
+    },
+};
 
 export class Clock {
 
@@ -28,7 +70,7 @@ export class Clock {
         this.lastSend = null;
         this.wasNight = false; // <== track night state
 
-        this.minuteStep = 0.5;
+        this.minuteStep = 0.3;
         this.ticksPerMinute = 1;
         this.tickCount = 0;
 
@@ -54,6 +96,66 @@ export class Clock {
 
         this.externalText = null;
 
+    }
+
+    getHourFloat() {
+        return Number(this.hours) + Number(this.minutes) / 60;
+    }
+
+    getPhaseKey() {
+        const hourFloat = this.getHourFloat();
+        if (hourFloat >= NIGHT_START || hourFloat < DAWN_START) return "night";
+        if (hourFloat < DAY_START) return "dawn";
+        if (hourFloat < DUSK_START) return "day";
+        return "dusk";
+    }
+
+    getPhaseInfo() {
+        return PHASE_DEFS[this.getPhaseKey()] || PHASE_DEFS.day;
+    }
+
+    canBuyParcels() {
+        return true;
+    }
+
+    formatClockFaceTime() {
+        const hour12 = this.hours % 12 === 0 ? 12 : this.hours % 12;
+        const ampm = this.hours < 12 ? 'AM' : 'PM';
+        const minutesStr = String(Math.round(this.minutes)).padStart(2, '0');
+        return `${hour12}:${minutesStr} ${ampm}`;
+    }
+
+    formatTimeWithDay() {
+        return `Day ${this.day} - ${this.formatClockFaceTime()}`;
+    }
+
+    _minutesUntilHour(targetHour) {
+        const current = this.getHourFloat() * 60;
+        let target = Number(targetHour) * 60;
+        while (target <= current) target += 24 * 60;
+        return Math.max(0, Math.round(target - current));
+    }
+
+    static formatMinutesAsClock(totalMinutes) {
+        const mins = Math.max(0, Math.round(totalMinutes));
+        const hh = Math.floor(mins / 60);
+        const mm = mins % 60;
+        if (hh <= 0) return `${mm}m`;
+        return `${hh}h ${String(mm).padStart(2, "0")}m`;
+    }
+
+    getPhaseCountdownText() {
+        const phase = this.getPhaseKey();
+        if (phase === "dawn") {
+            return `Day opens in ${Clock.formatMinutesAsClock(this._minutesUntilHour(DAY_START))}`;
+        }
+        if (phase === "day") {
+            return `Dusk in ${Clock.formatMinutesAsClock(this._minutesUntilHour(DUSK_START))}`;
+        }
+        if (phase === "dusk") {
+            return `Night in ${Clock.formatMinutesAsClock(this._minutesUntilHour(NIGHT_START))}`;
+        }
+        return `Survive ${Clock.formatMinutesAsClock(this._minutesUntilHour(DAWN_START))}`;
     }
 
     update(stepCount = 1) {
@@ -95,11 +197,19 @@ export class Clock {
     }
 
     isNight() {
-        return this.hours >= NIGHT_START || this.hours < NIGHT_END;
+        return this.getPhaseKey() === "night";
     }
 
     isDayStart(){
-        return this.hours == NIGHT_END && this.minutes == 0
+        return this.hours == DAWN_START && this.minutes == 0
+    }
+
+    isDayPhaseStart() {
+        return this.hours == DAY_START && this.minutes == 0
+    }
+
+    isDuskStart() {
+        return this.hours == DUSK_START && this.minutes == 0
     }
 
     isNightStart(){
@@ -114,27 +224,29 @@ export class Clock {
 
     events() {
         const dayStart = this.isDayStart();
+        const dayPhaseStart = this.isDayPhaseStart();
+        const duskStart = this.isDuskStart();
         const nightStart = this.isNightStart();
         const cropGrowthTick = this.isCropGrowthTick();
 
+        if (duskStart) {
+            this.scene?.handleDuskStart?.();
+            this.scene?.handlePhaseChanged?.("dusk", this.getPhaseInfo());
+        }
+
         if (nightStart) {
-            // ✅ No enemies until Day 3
             AudioManager.setIsNight(true);
             this.scene?.handleNightStart?.();
-        }
-        else if (this.isNight()) {
-            // keep your later-per-hour spawning disabled for now (or remove)
+            this.scene?.handlePhaseChanged?.("night", this.getPhaseInfo());
         }
         else if (dayStart /*&& !this.powerupScreenShown*/) {
             AudioManager.setIsNight(false);
             this.powerupScreenShown = true;
             DailyNeedsTracker.consumeResources();
             this.scene?.handleDayStart?.();
-            // // Daily popup pause is opt-in; default flow keeps gameplay running.
-            // if (this.scene?.enableDailyPowerupPopup) {
-            //     openPowerupScreen(this.scene);
-            //     this.pause();
-            // }
+            this.scene?.handlePhaseChanged?.("dawn", this.getPhaseInfo());
+        } else if (dayPhaseStart) {
+            this.scene?.handlePhaseChanged?.("day", this.getPhaseInfo());
         }
 
         if (cropGrowthTick) {
@@ -145,14 +257,6 @@ export class Clock {
         }
     }
 
-    formatTimeWithDay() {
-        const hour12 = this.hours % 12 === 0 ? 12 : this.hours % 12;
-        const ampm = this.hours < 12 ? 'AM' : 'PM';
-        const minutesStr = String(Math.round(this.minutes)).padStart(2, '0');
-        return `Day ${this.day} — ${hour12}:${minutesStr} ${ampm}`;
-    }
-
-    // Clock.js
     updateLighting() {
         let alpha = 0;
         const hourFloat = this.hours + this.minutes / 60;
@@ -181,5 +285,9 @@ export class Clock {
     resume() {
         this.paused = false;
     }
-}
 
+    setDay(day = 1) {
+        this.day = Math.max(1, Math.floor(Number(day) || 1));
+        this.externalText?.setText?.(this.formatTimeWithDay());
+    }
+}

@@ -146,6 +146,9 @@ export class CombatSpacingCoordinator {
         const currentTarget = opts.currentTarget ?? this.getTroopFocusTarget(troop);
         const anchor = opts.anchor ?? troop;
         const priorityFn = typeof opts.priorityFn === "function" ? opts.priorityFn : null;
+        const assignmentPriorityFn = typeof opts.assignmentPriorityFn === "function"
+            ? opts.assignmentPriorityFn
+            : null;
         const teamNumber = troop.body?.team ?? 1;
 
         const viable = targets.filter(target =>
@@ -160,6 +163,7 @@ export class CombatSpacingCoordinator {
 
         for (const target of viable) {
             const priorityScore = Number(priorityFn?.(target) ?? 0);
+            const assignmentPriorityScore = Number(assignmentPriorityFn?.(target) ?? 0);
             const pressureScore = this.getAssignmentPressure(teamNumber, target);
             const anchorScore = worldDistance(anchor, target);
             const troopScore = worldDistance(troop, target) * 0.2;
@@ -167,6 +171,7 @@ export class CombatSpacingCoordinator {
 
             const score =
                 priorityScore * 100000 +
+                assignmentPriorityScore * 10000 +
                 pressureScore +
                 anchorScore +
                 troopScore +

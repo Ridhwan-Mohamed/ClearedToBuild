@@ -35,7 +35,7 @@ export const STARTER_DECKS = Object.freeze([
     summary: "Heavier seeds, food, and water for a forgiving early economy.",
     tradeoff: "You start with the lightest building stockpile.",
     resources: Object.freeze({
-      money: 1180,
+      money: 420,
       seeds: 18,
       berries: 10,
       wood: 6,
@@ -58,10 +58,10 @@ export const STARTER_DECKS = Object.freeze([
     summary: "Front-loads wood, stone, and build speed for an aggressive town setup.",
     tradeoff: "Less cash and fewer comfort resources at the start.",
     resources: Object.freeze({
-      money: 1040,
-      seeds: 6,
+      money: 320,
+      seeds: 9,
       berries: 4,
-      wood: 14,
+      wood: 10,
       stone: 10,
       food: 10,
       water: 9,
@@ -81,8 +81,8 @@ export const STARTER_DECKS = Object.freeze([
     summary: "More cash and berry pressure with quicker cooking and utility movement.",
     tradeoff: "Your farm setup is the thinnest of the three starts.",
     resources: Object.freeze({
-      money: 1320,
-      seeds: 4,
+      money: 500,
+      seeds: 7,
       berries: 14,
       wood: 8,
       stone: 5,

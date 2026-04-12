@@ -32,6 +32,19 @@ export class tillManager {
 
         if (!cropData || cropData.growthStage < MAX_CROP_GROWTH_STAGE) return;
 
+        const reservedDropoff =
+            StorageManager.getDeliveryReservation(sprite, UI_ITEM_TYPES.crop) ||
+            StorageManager.reserveDeliverySpace(sprite, UI_ITEM_TYPES.crop, 1);
+
+        if (!reservedDropoff) {
+            if (typeof sprite.task.assigned === "number" && sprite.task.assigned > 0) {
+                sprite.task.assigned -= 1;
+            }
+            sprite.task = null;
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+            return;
+        }
+
         // Reward and reset
         Teams.resetCrop(cropData);
         this.scene.updateMoney(10);
@@ -39,7 +52,9 @@ export class tillManager {
         AudioManager.playCropHarvest();
         Teams.removeFromStateArray(sprite.body.team, "TeamFarmSpots", sprite.task);
         sprite.task = null;
-        StorageManager.tryCreateStorageDeliveryTask(sprite);
+        if (!StorageManager.tryCreateStorageDeliveryTask(sprite)) {
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+        }
     }
 
     static beginTilling(sprite) {

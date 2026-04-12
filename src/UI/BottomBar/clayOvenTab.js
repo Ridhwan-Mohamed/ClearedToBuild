@@ -19,6 +19,9 @@ export default class ClayOvenTab {
     this.selected = null;
     this.cardByOven = new Map();
     this._onWheel = null;
+    this._destroyed = false;
+    this._listDirty = false;
+    this._listRefreshQueued = false;
     this.root = this.build();
     this.bindScrollInput();
 
@@ -27,6 +30,9 @@ export default class ClayOvenTab {
 
     this._onOvenUpdated = (oven) => {
       if (!oven || oven.teamNumber !== this.team) return;
+      if (!this.cardByOven.has(oven)) {
+        this._scheduleListRefresh();
+      }
       if (this.scene.uiBottomBar?.currentPage !== "ovens") return;
       this.updateCard(oven);
       if (this.selected === oven) this.detail?.setOven?.(oven);
@@ -34,14 +40,11 @@ export default class ClayOvenTab {
 
     this._onOvenAdded = (oven) => {
       if (!oven || oven.teamNumber !== this.team) return;
-      const idx = (Teams.teamLists[this.team]?.ovenList || []).indexOf(oven);
-      const row = this.createCard(oven, idx >= 0 ? idx : this.cardByOven.size);
-      this.listBody.add(row, { expand: true });
-      this.cardByOven.set(oven, row);
-      this.scroll.layout();
+      this._scheduleListRefresh();
     };
 
     this._onOvenRemoved = (oven) => {
+      if (this._destroyed) return;
       const team = Teams.teamLists[this.team];
       if (team) {
         for (const key of ["ovenJobs", "ovenFuelJobs", "ovenPickupJobs", "ovenDeliveryItems", "ovenFuelDeliveryItems"]) {
@@ -52,12 +55,13 @@ export default class ClayOvenTab {
       if (row) {
         row.destroy();
         this.cardByOven.delete(oven);
-        this.scroll.layout();
+        this._safeScrollLayout();
       }
       if (this.selected === oven) {
         this.selected = null;
         this.detail?.setOven?.(null);
       }
+      this._scheduleListRefresh();
     };
 
     this._onResize = () => { if (this.jobPopup) this.positionJobPopup(this.jobPopup); };
@@ -76,6 +80,7 @@ export default class ClayOvenTab {
   }
 
   destroy() {
+    this._destroyed = true;
     this.scene.events.off("update", this._update);
     this.scene.events.off("oven:updated", this._onOvenUpdated);
     this.scene.events.off("oven:added", this._onOvenAdded);
@@ -84,6 +89,46 @@ export default class ClayOvenTab {
     if (this._onWheel) this.scene.input.off("wheel", this._onWheel);
     this.closeJobEditor?.();
     this.root?.destroy();
+  }
+
+  _scheduleListRefresh() {
+    this._listDirty = true;
+    if (
+      this._destroyed ||
+      this._listRefreshQueued ||
+      this.scene?.uiBottomBar?.currentPage !== "ovens" ||
+      !this._isUiAlive()
+    ) {
+      return;
+    }
+
+    this._listRefreshQueued = true;
+    this.scene.time.delayedCall(0, () => {
+      this._listRefreshQueued = false;
+      if (!this._isUiAlive()) return;
+      if (!this._listDirty) return;
+      this.rebuildList();
+    });
+  }
+
+  _isUiAlive() {
+    return !!(
+      !this._destroyed &&
+      this.scene?.sys &&
+      this.root?.scene === this.scene &&
+      this.listBody?.scene === this.scene &&
+      this.scroll?.scene === this.scene
+    );
+  }
+
+  _safeScrollLayout() {
+    if (!this._isUiAlive()) return false;
+    try {
+      this.scroll.layout();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   rr(w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) {
@@ -426,14 +471,22 @@ export default class ClayOvenTab {
   }
 
   rebuildList() {
+    if (!this._isUiAlive()) return false;
     this.cardByOven.clear();
     this.listBody.clear(true);
-    (Teams.teamLists[this.team]?.ovenList || []).forEach((oven, idx) => {
-      const row = this.createCard(oven, idx);
-      this.listBody.add(row, { expand: true });
-      this.cardByOven.set(oven, row);
-    });
-    this.scroll.layout();
+    try {
+      (Teams.teamLists[this.team]?.ovenList || []).forEach((oven, idx) => {
+        const row = this.createCard(oven, idx);
+        if (!row) return;
+        this.listBody.add(row, { expand: true });
+        this.cardByOven.set(oven, row);
+        this.updateCard(oven);
+      });
+      this._listDirty = false;
+      return this._safeScrollLayout();
+    } catch {
+      return false;
+    }
   }
 
   createCard(oven, idx) {
@@ -476,7 +529,6 @@ export default class ClayOvenTab {
     row.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.selectOven(oven); this.centerCameraOnOven(oven); });
     row.on("pointerover", () => bg.setFillStyle(0x13354a, 0.9));
     row.on("pointerout", () => bg.setFillStyle(0x102a3b, 0.78));
-    this.updateCard(oven);
     return row;
   }
 
@@ -518,6 +570,7 @@ export default class ClayOvenTab {
   }
 
   onShow() {
+    this.rebuildList();
     const ovens = Teams.teamLists[this.team]?.ovenList || [];
     if (!this.selected || !ovens.includes(this.selected)) this.selected = ovens[0] || null;
     this.detail?.setOven?.(this.selected);
@@ -525,7 +578,10 @@ export default class ClayOvenTab {
   }
 
   selectOven(oven) { this.selected = oven; this.detail?.setOven?.(oven); }
-  selectFromWorld(oven) { this.selectOven(oven); }
+  selectFromWorld(oven) {
+    if (oven && !this.cardByOven.has(oven)) this.rebuildList();
+    this.selectOven(oven);
+  }
   centerCameraOnOven(oven) {
     if (!oven?.sprite) return;
     const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;

@@ -12,7 +12,9 @@ import { Gunslinger } from "../players/Gunslinger";
 import { Blademaster } from "../players/Blademaster";
 import { Brawler } from "../players/Brawler";
 import { StorageManager } from "../Manager/StorageManager";
+import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "./StoreUnlockSystem";
 
 const TEAM_ID = "1";
 const NO_HOUSE_FALLBACK_MONEY = 500;
@@ -26,6 +28,11 @@ const PLAYER_REWARDS = [
   { key: "blademaster", name: "Blademaster", tint: 0xaa33ee, ctor: Blademaster },
   { key: "brawler", name: "Brawler", tint: 0xffd712, ctor: Brawler },
 ];
+
+const PLAYER_REWARD_UNLOCKS = Object.freeze({
+  gunslinger: STORE_UNLOCK_KEYS.gunslinger,
+  blademaster: STORE_UNLOCK_KEYS.blademaster,
+});
 
 const CHEST_REWARDS = [
   {
@@ -134,6 +141,14 @@ function randomCards(count = 3) {
   const pool = POWERUP_CARDS.slice();
   Phaser.Utils.Array.Shuffle(pool);
   return pool.slice(0, Math.min(count, pool.length));
+}
+
+function getAvailablePlayerRewards() {
+  const filtered = PLAYER_REWARDS.filter((reward) => {
+    const unlockKey = PLAYER_REWARD_UNLOCKS[reward.key];
+    return !unlockKey || hasStoreUnlock(unlockKey);
+  });
+  return filtered.length ? filtered : PLAYER_REWARDS.slice();
 }
 
 function chestTooltip(scene, x, y, chestDef) {
@@ -290,16 +305,6 @@ function openSwapOverlay(scene, incomingCard, onDone) {
 }
 
 function grantCardReward(scene, card, onDone) {
-  const hand = getCardHand(TEAM_ID);
-
-  if (hand.length >= 5) {
-    openSwapOverlay(scene, card, (selected) => {
-      if (!selected) return;
-      onDone?.();
-    });
-    return;
-  }
-
   addCardToHand(card, TEAM_ID);
   scene.events.emit("cards:updated");
   onDone?.();
@@ -376,75 +381,32 @@ function buildCardReward(scene, meta, ctx, completeReward) {
 function buildPlayerReward(scene, meta, ctx, completeReward) {
   const center = getFortCenter(meta);
   const y = center.y;
+  const spacing = 165;
+  const options = Phaser.Utils.Array.Shuffle(getAvailablePlayerRewards().slice()).slice(0, 3);
+  const startX = center.x - ((options.length - 1) * spacing) / 2;
 
-  const title = worldify(scene, scene.add.text(center.x, y - 110, "PLAYER REWARD", {
+  const title = worldify(scene, scene.add.text(center.x, y - 118, "PLAYER REWARD", {
     fontSize: "16px",
     color: "#ffffff",
     fontFamily: "Bungee",
     fontStyle: "bold"
   }).setOrigin(0.5).setDepth(10015));
 
-  const hint = worldify(scene, scene.add.text(center.x, y - 90, "Click arrows to pick class, then confirm", {
+  const hint = worldify(scene, scene.add.text(center.x, y - 96, "Pick 1 of 3 recruits", {
     fontSize: "12px",
     color: "#cccccc",
     fontFamily: "Bungee"
   }).setOrigin(0.5).setDepth(10015));
 
-  let index = 0;
+  const grantRecruit = (def) => {
+    if (!Teams.canRecruitPlayer?.(TEAM_ID)) {
+      scene.updateMoney?.(NO_HOUSE_FALLBACK_MONEY);
+      showAlert(scene, `Housing full: +$${NO_HOUSE_FALLBACK_MONEY}`, "#ffcc88");
+      completeReward();
+      return;
+    }
 
-  const preview = worldify(scene, scene.add.sprite(center.x, y, "player", 0)
-    .setDepth(10010)
-    .setScale(2.2)
-    .setInteractive({ useHandCursor: true }));
-
-  const left = worldify(scene, scene.add.text(center.x - 72, y, "<", {
-    fontSize: "30px",
-    color: "#ffffff",
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10015).setInteractive({ useHandCursor: true }));
-
-  const right = worldify(scene, scene.add.text(center.x + 72, y, ">", {
-    fontSize: "30px",
-    color: "#ffffff",
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10015).setInteractive({ useHandCursor: true }));
-
-  const name = worldify(scene, scene.add.text(center.x, y + 42, PLAYER_REWARDS[index].name, {
-    fontSize: "15px",
-    color: "#ffffff",
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10015));
-
-  const confirmBg = worldify(scene, scene.add.rectangle(center.x, y + 75, 170, 32, 0x123312, 0.9)
-    .setStrokeStyle(1, 0xaaffaa, 0.8)
-    .setDepth(10014)
-    .setInteractive({ useHandCursor: true }));
-
-  const confirmText = worldify(scene, scene.add.text(center.x, y + 75, "Confirm Recruit", {
-    fontSize: "14px",
-    color: "#e7ffe7",
-    fontFamily: "Bungee"
-  }).setOrigin(0.5).setDepth(10015));
-
-  const refresh = () => {
-    const def = PLAYER_REWARDS[index];
-    name.setText(def.name);
-    preview.setTint(def.tint);
-  };
-
-  const cycle = (dir) => {
-    index = (index + dir + PLAYER_REWARDS.length) % PLAYER_REWARDS.length;
-    refresh();
-  };
-
-  left.on("pointerdown", () => cycle(-1));
-  right.on("pointerdown", () => cycle(1));
-  preview.on("pointerdown", () => cycle(1));
-
-  confirmBg.on("pointerdown", () => {
-    const def = PLAYER_REWARDS[index];
     const troop = new def.ctor(center.gx, center.gy, 1);
-
     const assigned = House.assignPlayerToHouse(troop, TEAM_ID);
     if (!assigned) {
       troop.destroySelf?.() ?? safeDestroy(troop);
@@ -453,14 +415,69 @@ function buildPlayerReward(scene, meta, ctx, completeReward) {
     } else {
       showAlert(scene, `Recruited: ${def.name}`, "#aaffaa");
     }
-
     completeReward();
+  };
+
+  const created = [title, hint];
+
+  options.forEach((def, index) => {
+    const x = startX + index * spacing;
+    const cardBg = worldify(scene, scene.add.rectangle(x, y + 6, 136, 176, 0x181a29, 0.9)
+      .setStrokeStyle(2, def.tint, 0.9)
+      .setDepth(10010)
+      .setInteractive({ useHandCursor: true }));
+
+    const glow = worldify(scene, scene.add.rectangle(x, y + 6, 128, 168, def.tint, 0.09)
+      .setDepth(10009));
+
+    const previewBg = worldify(scene, scene.add.rectangle(x, y - 28, 78, 78, 0x0f172a, 0.96)
+      .setStrokeStyle(1, 0xffffff, 0.18)
+      .setDepth(10010));
+
+    const preview = worldify(scene, scene.add.sprite(x, y - 28, "player", 0)
+      .setDepth(10011)
+      .setScale(1.8)
+      .setTint(def.tint));
+
+    const name = worldify(scene, scene.add.text(x, y + 34, def.name, {
+      fontSize: "14px",
+      color: "#ffffff",
+      fontFamily: "Bungee",
+      align: "center",
+      wordWrap: { width: 116 },
+    }).setOrigin(0.5).setDepth(10011));
+
+    const caption = worldify(scene, scene.add.text(x, y + 78, "Recruit 1 unit", {
+      fontSize: "11px",
+      color: "#d7e0ec",
+      fontFamily: "Bungee",
+      align: "center",
+    }).setOrigin(0.5).setDepth(10011));
+
+    const buttonBg = worldify(scene, scene.add.rectangle(x, y + 118, 98, 26, 0x16351d, 0.92)
+      .setStrokeStyle(1, 0xa7f3d0, 0.65)
+      .setDepth(10010));
+
+    const buttonText = worldify(scene, scene.add.text(x, y + 118, "Recruit", {
+      fontSize: "12px",
+      color: "#edfff0",
+      fontFamily: "Bungee",
+    }).setOrigin(0.5).setDepth(10011));
+
+    const setHover = (hovered) => {
+      cardBg.setFillStyle(hovered ? 0x20263a : 0x181a29, hovered ? 0.98 : 0.9);
+      glow.setAlpha(hovered ? 0.18 : 0.09);
+    };
+
+    cardBg.on("pointerover", () => setHover(true));
+    cardBg.on("pointerout", () => setHover(false));
+    cardBg.on("pointerdown", () => grantRecruit(def));
+
+    created.push(cardBg, glow, previewBg, preview, name, caption, buttonBg, buttonText);
   });
 
-  refresh();
-
   ctx.destroyers.push(() => {
-    [title, hint, preview, left, right, name, confirmBg, confirmText].forEach(safeDestroy);
+    created.forEach(safeDestroy);
   });
 }
 

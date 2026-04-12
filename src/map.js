@@ -18,7 +18,7 @@ import { VisibilitySystem } from "./UI/VisibilitySystem";
 import { AudioManager } from "./Manager/AudioManager";
 import { WallPlacementController } from "./Controllers/WallPlacementController";
 import { Wall } from "./buildings/Wall";
-import { UI_ITEM_TYPES } from "./UI/UIConstants";
+import { StorageManager } from "./Manager/StorageManager";
 import { TowerBuilding } from "./buildings/Tower";
 import { OrderRunner } from "./orders/OrderRunner";
 
@@ -58,6 +58,8 @@ export class Map{
     static cameraBounds;
     static worldPines = [];
     static worldStones = [];
+    static worldSeedBushes = [];
+    static worldBerryBushes = [];
     static worldSpawners = [];
 
 
@@ -67,6 +69,52 @@ export class Map{
         Map.worldLayer = Map.scene.add.layer();
         Map.worldLayer.setName?.("worldLayer");
         Map.worldStaticLayer = Map.scene.add.layer();   // NEW: buildings/trees/rocks/placing ghosts etc.
+    }
+
+    static resetRuntimeState() {
+        try { this.placingItem?.destroy?.(); } catch {}
+        this.placingItem = null;
+        this.isPlacing = false;
+
+        try { this.graphics?.destroy?.(); } catch {}
+        this.graphics = null;
+
+        try { this.barrier?.clear?.(true, true); } catch {}
+        try { this.barrier?.destroy?.(); } catch {}
+        this.barrier = null;
+
+        try { this.structureBarrier?.clear?.(true, true); } catch {}
+        try { this.structureBarrier?.destroy?.(); } catch {}
+        this.structureBarrier = null;
+
+        try { this.worldLayer?.removeAll?.(true); } catch {}
+        try { this.worldLayer?.destroy?.(true); } catch {}
+        this.worldLayer = null;
+
+        try { this.worldStaticLayer?.removeAll?.(true); } catch {}
+        try { this.worldStaticLayer?.destroy?.(true); } catch {}
+        this.worldStaticLayer = null;
+
+        this.grid = [];
+        this.navGrid = [];
+        this.navMesh = null;
+        this.regionSystem = null;
+        this.regionDrawer = null;
+        this.enemyNavMesh = null;
+        this.enemyNavGrid = [];
+        this.enemyRegionSystem = null;
+        this.enemyRegionDrawer = null;
+        this.imageData = null;
+        this.blocks = [];
+        this.cropDict = {};
+        this.waterBlocks = [];
+        this.renderCache = [];
+        this.cameraBounds = null;
+        this.worldPines = [];
+        this.worldStones = [];
+        this.worldSeedBushes = [];
+        this.worldBerryBushes = [];
+        this.worldSpawners = [];
     }
 
     static initGrid(){ // precompute oriented frames + minimal base/top pairing
@@ -149,7 +197,14 @@ export class Map{
                 const gridX = Math.floor(x / SQUARESIZE) - Math.floor(lenX / 2);
                 const gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
                 // pass both dimensions into checkBlockPosition
-                const tintColor = this.checkBlockPosition(gridX, gridY, lenX, lenY);
+                const tintColor = this.checkBlockPosition(
+                    gridX,
+                    gridY,
+                    lenX,
+                    lenY,
+                    this.placingItem,
+                    item?.block ? { padding: 1, protectFarmSpots: true } : {}
+                );
                 this.placingItem.setTint(tintColor);
                 this.placingItem.setPosition(x, y);
             }
@@ -307,8 +362,9 @@ export class Map{
         if (Array.isArray(val)) {
             // block if ANY element blocks (covers 2-floor weirdness + nested pairs)
             for (const v of val) {
-                return this._tileIsBlocking(v);
+                if (this._tileIsBlocking(v)) return true;
             }
+            return false;
         }
         const name = TILE_MAP(val);
         if (!name) return false;
@@ -326,28 +382,101 @@ export class Map{
         return this._tileIsBlocking(cell);
     }
 
-    // New array-aware placement check (used for building previews)
-    static checkBlockPosition(posX, posY, lenX, lenY, previewItem = this.placingItem){
+    static _cellHasProtectedFarmSpot(x, y, teamNumber = 1) {
+        const row = this.grid?.[y];
+        if (!row || row[x] == null) return false;
+
+        const team =
+            Teams.teamLists?.[`${teamNumber}`] ??
+            Teams.teamLists?.[teamNumber];
+        if (!team) return false;
+
+        const floorVal = this.grabDepth(row[x], FLOORDEPTH);
+        if (TILE_MAP(floorVal) === "crops") return true;
+        if (Teams.getCropAt?.(x, y, teamNumber)) return true;
+
+        if (team.tileList?.some((spot) => spot?.x === x && spot?.y === y)) return true;
+        if (team.TeamFarmSpots?.some((spot) => spot?.x === x && spot?.y === y)) return true;
+
+        return false;
+    }
+
+    static _cellHasPlacementConflict(x, y, options = {}) {
+        const {
+            protectFarmSpots = false,
+            treatOutOfBoundsAsBlocked = true,
+        } = options;
+
+        const row = this.grid?.[y];
+        if (!row || row[x] == null) return treatOutOfBoundsAsBlocked;
+
+        if (this._cellIsBlocking(x, y)) return true;
+        if (protectFarmSpots && this._cellHasProtectedFarmSpot(x, y)) return true;
+
+        return false;
+    }
+
+    static _placementIsBlocked(posX, posY, lenX, lenY, options = {}) {
+        const padding = Math.max(0, options?.padding ?? 0);
+
         for (let y = posY; y < posY + lenY; y++) {
             for (let x = posX; x < posX + lenX; x++) {
-                if (this._cellIsBlocking(x, y)) {
-                    if (previewItem) previewItem.blocked = true;
-                    return Phaser.Display.Color.GetColor(200, 49, 19); // red
+                if (this._cellHasPlacementConflict(x, y, options)) return true;
+            }
+        }
+
+        if (padding <= 0) return false;
+
+        for (let y = posY - padding; y < posY + lenY + padding; y++) {
+            for (let x = posX - padding; x < posX + lenX + padding; x++) {
+                const insideFootprint =
+                    x >= posX &&
+                    x < posX + lenX &&
+                    y >= posY &&
+                    y < posY + lenY;
+                if (insideFootprint) continue;
+
+                if (
+                    this._cellHasPlacementConflict(x, y, {
+                        ...options,
+                        treatOutOfBoundsAsBlocked: false,
+                    })
+                ) {
+                    return true;
                 }
             }
         }
-        if (previewItem) previewItem.blocked = false;
-        return Phaser.Display.Color.GetColor(14, 209, 69); // green
-        }
 
-        // (Optional) make the generator check consistent with the new rules
-        static checkBlockPositionGen(posX, posY, lenX, lenY){
-        for (let y = posY; y < posY + lenY; y++) {
-            for (let x = posX; x < posX + lenX; x++) {
-            if (this._cellIsBlocking(x, y)) return true;
-            }
-        }
         return false;
+    }
+
+    static _shouldSkipManagedTopRender(typeName) {
+        return (
+            typeName === "house1" ||
+            typeName === "house2" ||
+            typeName === "storage" ||
+            typeName === "clayOven" ||
+            typeName === "tower" ||
+            typeName === "turret" ||
+            typeName === "catapult" ||
+            typeName === "prison" ||
+            typeName === "bank"
+        );
+    }
+
+    // New array-aware placement check (used for building previews)
+    static checkBlockPosition(posX, posY, lenX, lenY, previewItem = this.placingItem, options = {}) {
+        const blocked = this._placementIsBlocked(posX, posY, lenX, lenY, options);
+        if (previewItem) previewItem.blocked = blocked;
+        if (blocked) {
+            return Phaser.Display.Color.GetColor(200, 49, 19); // red
+        }
+        return Phaser.Display.Color.GetColor(14, 209, 69); // green
+    }
+
+    // (Optional) make the generator check consistent with the new rules
+    static checkBlockPositionGen(posX, posY, lenX, lenY, options = {}) {
+        return this._placementIsBlocked(posX, posY, lenX, lenY, options);
     }
 
     static checkSpreadPosition(posX, posY, endX, endY){
@@ -573,28 +702,26 @@ export class Map{
             if(tileType == TILE_TYPES.spawn) buildingArray.splice(i, 1);
         }
         const scene = this.scene;
-        const startCfg = scene?.startCfg ?? scene?.draftStartCfg;  // pick whichever you actually store
-        const s = startCfg?.supplies;
+        const startCfg = scene?.startCfg ?? scene?.draftStartCfg;
+        const starterResources = startCfg?.resources ?? startCfg?.supplies;
 
-        if (s) {
+        if (starterResources) {
             const team1 = Teams.teamLists["1"];
-            const storage = team1?.storageList?.[0];
-            if (storage) {
-                // nuke defaults created in StorageBuilding constructor
-                storage.storageItems = Array(storage.capacity).fill(null);
+            const storages = Array.isArray(team1?.storageList) ? team1.storageList : [];
+            if (storages.length) {
+                storages.forEach((storage) => storage?.clearStoredInventory?.(false));
 
-                // map startCfg keys -> UI item types used by StorageBuilding
-                const add = (type, amount) => {
-                const n = Math.max(0, Math.floor(amount ?? 0));
-                if (n > 0) storage.addItem(type, n);
+                const addStarterItems = (itemType, amount) => {
+                    const n = Math.max(0, Math.floor(Number(amount) || 0));
+                    if (n > 0) StorageManager.grantItemToTeam("1", itemType, n, scene);
                 };
 
-                add(UI_ITEM_TYPES.seedCrop,   s.seeds);
-                add(UI_ITEM_TYPES.seedBerry,  s.berries);
-                add(UI_ITEM_TYPES.food,       s.food);
-                add(UI_ITEM_TYPES.wood,       s.wood);
-                add(UI_ITEM_TYPES.stone,      s.stone);
-                add(UI_ITEM_TYPES.clean_water, s.water ?? s.clean_water);
+                addStarterItems("seedCrop", starterResources.seeds);
+                addStarterItems("seedBerry", starterResources.berries);
+                addStarterItems("food", starterResources.food);
+                addStarterItems("wood", starterResources.wood);
+                addStarterItems("stone", starterResources.stone);
+                addStarterItems("clean_water", starterResources.water ?? starterResources.clean_water);
             }
         }
         // map.js — after the draw loop inside drawBuildings(), add:
@@ -1216,8 +1343,12 @@ export class Map{
         }
 
         const drawOne = (val, layerIndex = 0) => {
+            if (val == null) return null;
             const name = TILE_MAP(val);
+            if (!name) return null;
+            if (layerIndex === 1 && this._shouldSkipManagedTopRender(name)) return null;
             const def  = TILE_TYPES[name];
+            if (!def) return null;
             const cx = x * SQUARESIZE + SQUARESIZE / 2;
             const cy = y * SQUARESIZE + SQUARESIZE / 2;
             let node;

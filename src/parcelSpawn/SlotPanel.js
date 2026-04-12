@@ -4,6 +4,7 @@ import { ForestPage } from "./pages/ForestPage.js";
 import { RockPage } from "./pages/RockPage.js";
 import { PressurePage } from "./pages/PressurePage.js";
 import { MarketPage } from "./pages/MarketPage.js";
+import { showAlert } from "../constants.js";
 import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
 
 export class SlotPanel {
@@ -28,8 +29,10 @@ export class SlotPanel {
     this._overviewPressureObjects = [];
     this._overviewMenu = "GRID"; // GRID | PRESSURE
     this.mode = "detailed";
+    this._detailHovered = false;
 
     this._buildFrame();
+    this._buildDetailedProxy();
     this._buildGrid();
     this._buildOverviewGrid();
     this.setMode("detailed");
@@ -48,6 +51,55 @@ export class SlotPanel {
     }).setOrigin(0.5, 0);
     this.header.setScrollFactor(1);
     this.container.add(this.header);
+  }
+
+  _buildDetailedProxy() {
+    this.detailProxyGlow = this.scene.add.rectangle(0, 0, 144, 56, 0x9ee6ff, 0.10)
+      .setOrigin(0.5)
+      .setScrollFactor(1)
+      .setVisible(false);
+    this.detailProxyBadge = this.scene.add.rectangle(0, 0, 128, 42, 0x113048, 0.88)
+      .setOrigin(0.5)
+      .setStrokeStyle(2, 0xb7ecff, 0.46)
+      .setScrollFactor(1)
+      .setVisible(false);
+    this.detailProxyLabel = this.scene.add.text(0, 0, this._directionLabel(), {
+      fontFamily: "Bungee",
+      fontSize: "18px",
+      color: "#e9f7ff",
+      stroke: "#04101a",
+      strokeThickness: 4,
+      align: "center",
+    }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+    this.detailHitZone = this.scene.add.zone(0, 0, this.W, this.H)
+      .setOrigin(0.5)
+      .setScrollFactor(1)
+      .setInteractive({ useHandCursor: true });
+
+    this.detailHitZone.on("pointerover", (_pointer, _localX, _localY, event) => {
+      if (this.mode === "overview" || !this.container.visible) return;
+      event?.stopPropagation?.();
+      this._setDetailedProxyHovered(true);
+      this.scene?.uiScene?.contractHud?.setExternalHover?.(this.id, true);
+    });
+    this.detailHitZone.on("pointerout", (_pointer, event) => {
+      if (this.mode === "overview") return;
+      event?.stopPropagation?.();
+      this._setDetailedProxyHovered(false);
+      this.scene?.uiScene?.contractHud?.setExternalHover?.(this.id, false);
+    });
+    this.detailHitZone.on("pointerdown", (_pointer, _localX, _localY, event) => {
+      if (this.mode === "overview" || !this.container.visible) return;
+      event?.stopPropagation?.();
+      this._setDetailedProxyHovered(true);
+    });
+    this.detailHitZone.on("pointerup", (_pointer, _localX, _localY, event) => {
+      if (this.mode === "overview" || !this.container.visible) return;
+      event?.stopPropagation?.();
+      this._handleDetailedProxyClick();
+    });
+
+    this.container.add([this.detailProxyGlow, this.detailProxyBadge, this.detailProxyLabel, this.detailHitZone]);
   }
 
   _drawFrameTheme(pressureMode) {
@@ -70,10 +122,73 @@ export class SlotPanel {
   }
 
   _titleForSlot() {
+    if (this.id === "N") return "Contract (North)";
     if (this.id === "W") return "Contract (West)";
     if (this.id === "E") return "Contract (East)";
     if (this.id === "S") return "Contract (South)";
     return "Contract";
+  }
+
+  _directionLabel() {
+    if (this.id === "N") return "NORTH";
+    if (this.id === "W") return "WEST";
+    if (this.id === "E") return "EAST";
+    if (this.id === "S") return "SOUTH";
+    return "CONTRACT";
+  }
+
+  _setDetailedProxyHovered(hovered) {
+    this._detailHovered = !!hovered;
+    this._refreshDetailedProxyVisual();
+  }
+
+  _refreshDetailedProxyVisual() {
+    const isDetailed = this.mode !== "overview";
+    const visible = isDetailed && this.container.visible;
+    const isPressure = !!this._pressureMode;
+    const hovered = !!this._detailHovered;
+
+    this.header?.setVisible(false);
+    this.detailProxyGlow?.setVisible(visible);
+    this.detailProxyBadge?.setVisible(visible);
+    this.detailProxyLabel?.setVisible(visible);
+    if (this.detailHitZone?.input) {
+      this.detailHitZone.input.enabled = visible;
+    }
+
+    if (!visible) {
+      this.frameG?.setAlpha?.(1);
+      return;
+    }
+
+    const frameAlpha = hovered ? 0.42 : isPressure ? 0.34 : 0.22;
+    this.frameG?.setAlpha?.(frameAlpha);
+    this.detailProxyLabel?.setText?.(this._directionLabel());
+
+    const badgeFill = isPressure ? 0x4e1717 : hovered ? 0x173e57 : 0x113048;
+    const badgeStroke = isPressure ? 0xffb0b0 : 0xb7ecff;
+    const badgeStrokeAlpha = hovered ? 0.82 : 0.46;
+    const badgeScale = hovered ? 1.06 : 1;
+    const glowAlpha = hovered ? (isPressure ? 0.20 : 0.18) : (isPressure ? 0.14 : 0.08);
+
+    this.scene.tweens.killTweensOf([this.detailProxyGlow, this.detailProxyBadge, this.detailProxyLabel]);
+    this.detailProxyBadge?.setFillStyle?.(badgeFill, hovered ? 0.96 : 0.88);
+    this.detailProxyBadge?.setStrokeStyle?.(hovered ? 3 : 2, badgeStroke, badgeStrokeAlpha);
+    this.detailProxyGlow?.setFillStyle?.(isPressure ? 0xffb0b0 : 0x9ee6ff, glowAlpha);
+    this.detailProxyLabel?.setColor?.(hovered ? "#ffffff" : "#e9f7ff");
+
+    this.scene.tweens.add({
+      targets: [this.detailProxyGlow, this.detailProxyBadge, this.detailProxyLabel].filter(Boolean),
+      scaleX: badgeScale,
+      scaleY: badgeScale,
+      duration: 120,
+      ease: "Sine.easeOut",
+    });
+  }
+
+  _handleDetailedProxyClick() {
+    if (this.mode === "overview") return;
+    this.scene?.uiScene?.contractHud?.focusSlot?.(this.id);
   }
 
   _buildGrid() {
@@ -219,7 +334,12 @@ export class SlotPanel {
   }
 
   _refreshOverviewGridCosts() {
+    const canBuy = this._canBuyContracts();
     for (const card of this._overviewCards) {
+      if (!canBuy) {
+        card.costText.setText("LOCK\nDAY");
+        continue;
+      }
       if (card.def.type === "PRESSURE") {
         card.costText.setText("PICK\nLEVEL");
         continue;
@@ -293,14 +413,23 @@ export class SlotPanel {
   }
 
   _refreshOverviewPressureCosts() {
+    const canBuy = this._canBuyContracts();
     for (const card of this._overviewPressureCards) {
       if (!card?.costText || card.def?.close) continue;
+      if (!canBuy) {
+        card.costText.setText("LOCK");
+        continue;
+      }
       const amount = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
       card.costText.setText(formatPermitCostText(amount));
     }
   }
 
   _openOverviewPressureMenu() {
+    if (!this._canBuyContracts()) {
+      this._showParcelLockedMessage();
+      return;
+    }
     this._overviewMenu = "PRESSURE";
     this._hideOverviewStatus();
     this._refreshOverviewPressureCosts();
@@ -340,7 +469,7 @@ export class SlotPanel {
     const isOverview = this.mode === "overview";
     if (!isOverview) this._overviewMenu = "GRID";
 
-    this.header?.setVisible(!isOverview);
+    this.header?.setVisible(false);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
 
@@ -362,8 +491,9 @@ export class SlotPanel {
         this._hideOverviewStatus();
         this.overviewGridObjects?.forEach(o => o.setVisible(false));
         this._overviewPressureObjects?.forEach(o => o.setVisible(false));
-        this._pressureText?.setVisible(true);
+        this._pressureText?.setVisible(false);
       }
+      this._refreshDetailedProxyVisual();
       return;
     }
 
@@ -380,9 +510,15 @@ export class SlotPanel {
       this.gridObjects?.forEach(o => o.setVisible(false));
       if (this._page?.container) this._page.container.setVisible(false);
     }
+
+    this._refreshDetailedProxyVisual();
   }
 
   open(type) {
+    if (!this._canBuyContracts()) {
+      this._showParcelLockedMessage();
+      return;
+    }
     this._clearPage();
 
     // Hide grid buttons while a page is open
@@ -415,7 +551,8 @@ export class SlotPanel {
       this.gridObjects.forEach(o => o.setVisible(false));
       this._syncOverviewVisibility();
     } else {
-      this.gridObjects.forEach(o => o.setVisible(!this._pressureMode));
+      this.gridObjects.forEach(o => o.setVisible(false));
+      this._refreshDetailedProxyVisual();
     }
     this._state = "GRID";
   }
@@ -423,6 +560,28 @@ export class SlotPanel {
   resetToGrid() {
     this.clearPressureState();
     this.back();
+  }
+
+  resetUiState() {
+    this._closeOverviewPressureMenu();
+    this._hideOverviewStatus();
+    this._clearPage();
+    this._state = "GRID";
+    this._refreshOverviewGridCosts();
+    this._refreshOverviewPressureCosts();
+    if (!this._pressureMode) {
+      if (this.mode === "overview") this._syncOverviewVisibility();
+      else this.gridObjects?.forEach(o => o.setVisible(false));
+    }
+    this._refreshDetailedProxyVisual();
+  }
+
+  _canBuyContracts() {
+    return this.scene?.clock?.canBuyParcels?.() ?? true;
+  }
+
+  _showParcelLockedMessage() {
+    showAlert(this.scene, "Parcel contracts stay open during every phase.", "#a7f3d0");
   }
 
   _clearPage() {
@@ -442,6 +601,10 @@ export class SlotPanel {
       return;
     }
     if (this._pressureMode) return;
+    if (!this._canBuyContracts()) {
+      this._showParcelLockedMessage();
+      return;
+    }
     this._closeOverviewPressureMenu();
 
     const type = payload.type;
@@ -504,7 +667,7 @@ export class SlotPanel {
     this._pressureText.setVisible(false);
   }
 
-  setPressureCountdown({ remainingText, spawners, enemies, enemyType }) {
+  setPressureCountdown({ remainingText, spawners, enemies, enemyType, modifierLabel = null }) {
     this._ensurePressureText();
     this._pressureMode = true;
     this._overviewMenu = "GRID";
@@ -520,19 +683,27 @@ export class SlotPanel {
       this._pressureText.setVisible(false);
       this._showOverviewStatus(
         remainingText,
-        `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}\n👹 ${enemies} RAIDER${enemies === 1 ? "" : "S"}`
+        [
+          `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}`,
+          `👹 ${enemies} ${String(enemyType || "Raiders").toUpperCase()}`,
+          modifierLabel ? `✨ ${String(modifierLabel).toUpperCase()}` : null,
+        ].filter(Boolean).join("\n")
       );
       return;
     }
 
     this._hideOverviewStatus();
+    this._pressureText.setVisible(false);
+    this._refreshDetailedProxyVisual();
+    return;
     this._pressureText.setVisible(true);
     this._pressureText.setText([
       "🚨 INCOMING RAID 🚨",
       `${remainingText}`,
       `🧨 Spawners ${spawners}  👹 Enemies ${enemies}`,
       `⚔️ ${enemyType} squad in ${this._titleForSlot()}`,
-    ].join("\n"));
+      modifierLabel ? `✨ ${modifierLabel}` : null,
+    ].filter(Boolean).join("\n"));
     return;
 
     // Hide normal UI while pressure is active
@@ -546,7 +717,7 @@ export class SlotPanel {
     );
   }
 
-  setPressureLive({ spawners, enemies, enemyType }) {
+  setPressureLive({ spawners, enemies, enemyType, modifierLabel = null }) {
     this._ensurePressureText();
     this._pressureMode = true;
     this._overviewMenu = "GRID";
@@ -562,18 +733,26 @@ export class SlotPanel {
       this._pressureText.setVisible(false);
       this._showOverviewStatus(
         "LIVE",
-        `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}\n👹 ${enemies} RAIDER${enemies === 1 ? "" : "S"}`
+        [
+          `🧨 ${spawners} SPAWNER${spawners === 1 ? "" : "S"}`,
+          `👹 ${enemies} ${String(enemyType || "Raiders").toUpperCase()}`,
+          modifierLabel ? `✨ ${String(modifierLabel).toUpperCase()}` : null,
+        ].filter(Boolean).join("\n")
       );
       return;
     }
 
     this._hideOverviewStatus();
+    this._pressureText.setVisible(false);
+    this._refreshDetailedProxyVisual();
+    return;
     this._pressureText.setVisible(true);
     this._pressureText.setText([
       "⚠️ RAID ACTIVE ⚠️",
       `🧨 Spawners ${spawners}  👹 Enemies ${enemies}`,
       `⚔️ ${enemyType} assault in ${this._titleForSlot()}`,
-    ].join("\n"));
+      modifierLabel ? `✨ ${modifierLabel}` : null,
+    ].filter(Boolean).join("\n"));
     return;
 
     this.gridObjects?.forEach(o => o.setVisible(false));
@@ -601,9 +780,10 @@ export class SlotPanel {
     } else {
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
-      this.gridObjects?.forEach(o => o.setVisible(true));
-      if (this._page?.container) this._page.container.setVisible(true);
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
     }
+    this._refreshDetailedProxyVisual();
   }
 
   setVisible(v) {
@@ -613,6 +793,11 @@ export class SlotPanel {
       this._refreshOverviewPressureCosts();
     }
     this.container.setVisible(v);
+    if (!v) {
+      this._detailHovered = false;
+      this.scene?.uiScene?.contractHud?.setExternalHover?.(this.id, false);
+    }
+    this._refreshDetailedProxyVisual();
 
     if (v && !was) {
       // if we're being shown after being hidden, open tween

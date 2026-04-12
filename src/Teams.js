@@ -6,6 +6,11 @@ import { POWERUP_CARDS } from "./Cards/PowerupCards";
 
 export class Teams {
     static teamLists = {};
+    static houseCapacityPerBuilding = 2;
+
+    static resetAll() {
+      this.teamLists = {};
+    }
 
     static _cropNeedsWater(crop) {
       return !!(
@@ -116,6 +121,7 @@ export class Teams {
         ovenFuelJobs: [],
         ovenFuelDeliveryItems: [],
         storageDeliveryItems: [],
+        storageDeliveryReservations: [],
         townTowerList: [],
         stateLists: {},
         cardHand: [],
@@ -133,6 +139,89 @@ export class Teams {
       }
     
       Teams.teamLists[teamNumber] = list;
+    }
+
+    static getTeam(teamNumber) {
+      return Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber] ?? null;
+    }
+
+    static getHousingStatus(teamNumber) {
+      const team = this.getTeam(teamNumber);
+      const players = Array.isArray(team?.playerList)
+        ? team.playerList.filter((player) => player?.active !== false)
+        : [];
+      const houses = Array.isArray(team?.houseList)
+        ? team.houseList.filter((house) => house?.sprite?.active !== false)
+        : [];
+
+      const capacity = houses.reduce(
+        (sum, house) => sum + Math.max(0, Number(house?.capacity ?? this.houseCapacityPerBuilding)),
+        0
+      );
+      const homelessPlayers = players.filter((player) => !player?.home);
+      const homelessCount = homelessPlayers.length;
+      const freeBeds = Math.max(0, capacity - players.length);
+
+      let descriptor = "Stable";
+      if (players.length <= 0) {
+        descriptor = "Empty";
+      } else if (homelessCount > 0) {
+        descriptor = "Homeless";
+      } else if (freeBeds <= 0) {
+        descriptor = "Full";
+      } else if (freeBeds === 1) {
+        descriptor = "Tight";
+      } else {
+        descriptor = "Stable";
+      }
+
+      return {
+        players,
+        houses,
+        playerCount: players.length,
+        capacity,
+        homelessPlayers,
+        homelessCount,
+        freeBeds,
+        descriptor,
+      };
+    }
+
+    static assignHomelessPlayersToHouses(teamNumber) {
+      const team = this.getTeam(teamNumber);
+      if (!team) return 0;
+
+      const { homelessPlayers } = this.getHousingStatus(teamNumber);
+      let assigned = 0;
+
+      for (const player of homelessPlayers) {
+        const house = team.houseList?.find((candidate) => candidate?.canAcceptPlayer?.());
+        if (!house) break;
+        if (house.assignPlayer?.(player)) {
+          assigned += 1;
+        }
+      }
+
+      return assigned;
+    }
+
+    static canRecruitPlayer(teamNumber) {
+      const { homelessCount, freeBeds } = this.getHousingStatus(teamNumber);
+      return homelessCount <= 0 && freeBeds > 0;
+    }
+
+    static getHousePermitCost(teamNumber) {
+      const { homelessCount } = this.getHousingStatus(teamNumber);
+      return homelessCount >= this.houseCapacityPerBuilding ? 0 : 1;
+    }
+
+    static getHouseBuildCost(teamNumber) {
+      const cost = { wood: 4, stone: 4 };
+      const permitCost = this.getHousePermitCost(teamNumber);
+      if (permitCost > 0) {
+        cost.permits = permitCost;
+      }
+      return cost;
     }
   
     static addPlayer(teamNumber, player) {

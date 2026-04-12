@@ -28,6 +28,47 @@ export class DailyNeedsTracker {
         this.uiElements = [];
     }
 
+    static _canMutateText(node) {
+        if (!node || node.active === false) return false;
+        if (node.scene?.sys?.isActive && node.scene.sys.isActive() === false) return false;
+        if ("canvas" in node && (!node.canvas || !node.context)) return false;
+        if (node.frame?.source && !node.frame.source.image) return false;
+        return true;
+    }
+
+    static _mutateText(node, fn) {
+        if (!this._canMutateText(node)) return false;
+        try {
+            fn(node);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    static _resolveTrackedResource(item, count = 0) {
+        const type = item?.name || item;
+        if (type === UI_ITEM_TYPES.food.name || type === UI_ITEM_TYPES.clean_water.name) {
+            return {
+                type,
+                amount: Math.max(0, Number(count) || 0),
+            };
+        }
+
+        // Some stored harvestables contribute toward the shared food supply HUD.
+        if (item?.food && Number(item?.foodValue || 0) > 0) {
+            return {
+                type: UI_ITEM_TYPES.food.name,
+                amount: Math.max(0, Number(count) || 0) * Math.max(1, Number(item.foodValue || 1)),
+            };
+        }
+
+        return {
+            type,
+            amount: Math.max(0, Number(count) || 0),
+        };
+    }
+
     static updateUIItems(item, count, decrease = false) {
         if (!this.scene) return;
 
@@ -35,23 +76,26 @@ export class DailyNeedsTracker {
         const team = Teams.teamLists["1"];
         const troopCount = team?.playerList?.length || 0;
 
-        // signed delta (positive for gain, negative for loss)
-        const delta = decrease ? -count : count;
-
-        const type = item.name || item;
+        const resolved = this._resolveTrackedResource(item, count);
+        const type = resolved.type;
+        const delta = decrease ? -resolved.amount : resolved.amount;
 
         // Helper for colorized food/water text
         const updateNeedText = (textObj, have, need) => {
             const color = have >= need ? "#00ff00" : "#ff3333";
-            textObj.setColor(color);
-            textObj.setText(`${have}/${need}`);
+            return this._mutateText(textObj, (node) => {
+                node.setColor(color);
+                node.setText(`${have}/${need}`);
+            });
         };
 
         switch (type) {
             case UI_ITEM_TYPES.clean_water.name: {
                 s.cleanWaterAmnt = Math.max(0, (s.cleanWaterAmnt ?? 0) + delta);
                 if (s.waterText) {
-                    updateNeedText(s.waterText, s.cleanWaterAmnt, troopCount);
+                    if (!updateNeedText(s.waterText, s.cleanWaterAmnt, troopCount)) {
+                        s.waterText = null;
+                    }
                 }
                 break;
             }
@@ -59,7 +103,9 @@ export class DailyNeedsTracker {
             case UI_ITEM_TYPES.food.name: {
                 s.foodAmnt = Math.max(0, (s.foodAmnt ?? 0) + delta);
                 if (s.foodText) {
-                    updateNeedText(s.foodText, s.foodAmnt, troopCount);
+                    if (!updateNeedText(s.foodText, s.foodAmnt, troopCount)) {
+                        s.foodText = null;
+                    }
                 }
                 break;
             }
@@ -67,7 +113,9 @@ export class DailyNeedsTracker {
             case UI_ITEM_TYPES.wood.name: {
                 s.woodAmnt = Math.max(0, (s.woodAmnt ?? 0) + delta);
                 if (s.woodText) {
-                    s.woodText.setText(`${s.woodAmnt}`);
+                    if (!this._mutateText(s.woodText, (node) => node.setText(`${s.woodAmnt}`))) {
+                        s.woodText = null;
+                    }
                 }
                 break;
             }
@@ -75,7 +123,9 @@ export class DailyNeedsTracker {
             case UI_ITEM_TYPES.stone.name: {
                 s.stoneAmnt = Math.max(0, (s.stoneAmnt ?? 0) + delta);
                 if (s.stoneText) {
-                    s.stoneText.setText(`${s.stoneAmnt}`);
+                    if (!this._mutateText(s.stoneText, (node) => node.setText(`${s.stoneAmnt}`))) {
+                        s.stoneText = null;
+                    }
                 }
                 break;
             }
@@ -202,10 +252,7 @@ export class DailyNeedsTracker {
     }
 
     static AddResources(item, amount) {
-        if (!item?.food || !amount) return;
-
-        const delta = item.foodValue * amount;
-        // Reuse the same path as everything else so UI stays in sync
-        this.updateUIItems(item, delta, false);
+        if (!item || !amount) return;
+        this.updateUIItems(item, amount, false);
     }
 }

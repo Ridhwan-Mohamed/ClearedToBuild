@@ -96,6 +96,7 @@ export class Gunslinger {
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
         sprite.destroySelf = () => Gunslinger.destroy(sprite);
+        OrderRunner.issueDefendTownOrder([sprite]);
 
         // --- destroy target gate: range + LOS ---
         sprite._getDestroyTarget = () => {
@@ -177,6 +178,7 @@ export class Gunslinger {
     }
 
     static update(troop) {
+        OrderRunner.ensureCombatAutoOrder(troop);
         if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
 

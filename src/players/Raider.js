@@ -9,6 +9,7 @@ import { pickRaidApproachForPOI, recalculateDestroyTasksFromPoint } from "../Man
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner"
 import { ZoomMixer } from "../UI/ZoomMixer";
 import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
+import { InterruptController } from "../ai/scheduler/InterruptController";
 import raiderWalkDown from 'url:../assets/players/raider/raider_walk_down.png';
 import raiderWalkDownLeft from 'url:../assets/players/raider/raider_walk_down_left.png';
 import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_right.png';
@@ -21,6 +22,7 @@ export class Raider {
     static speed   = 80;  // a bit quick
     static stamina = 0;   // no stamina drain
     static tint   = 0xff0000; // default red tint for enemies (can be overridden per raider if you want)
+    static awareness = 128;
 
     static preload(scene) {
         scene.load.spritesheet('raider_walk_down', raiderWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -90,6 +92,17 @@ export class Raider {
         }
 
         if(troop.task){
+            const retaliationTarget = troop._raiderRetaliationTarget;
+            if (retaliationTarget?.active && retaliationTarget?.body?.team === 1) {
+                InterruptController.interruptTroop(troop, "raider_retaliate_fighter", CONTROL_STATES.TRACK_TARGET);
+                troop._raiderRetaliationTarget = null;
+                troop.forcedTarget = retaliationTarget;
+                troop.roam = false;
+                Player._syncTrackToTarget(troop, retaliationTarget);
+                Player._chaseOrBreachTarget?.(troop, retaliationTarget, true);
+            } else if (retaliationTarget && !retaliationTarget?.active) {
+                troop._raiderRetaliationTarget = null;
+            }
             return false;
         }
         // -------------------------
@@ -114,9 +127,23 @@ export class Raider {
             troop.currentPath = null;
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             } else {
-            const speed = 100;
-            const dx = troop.swimDirX || 0;
-            const dy = troop.swimDirY || 0;
+            let dx = troop.swimDirX || 0;
+            let dy = troop.swimDirY || 0;
+            const targetX = Number.isFinite(troop.swimTargetX) ? troop.swimTargetX : null;
+            const targetY = Number.isFinite(troop.swimTargetY) ? troop.swimTargetY : null;
+            if (targetX != null && targetY != null) {
+                const vecX = targetX - troop.x;
+                const vecY = targetY - troop.y;
+                const dist = Math.hypot(vecX, vecY);
+                if (dist > 0.001) {
+                    dx = vecX / dist;
+                    dy = vecY / dist;
+                    troop.swimDirX = dx;
+                    troop.swimDirY = dy;
+                }
+            }
+            const baseSpeed = Math.max(100, 100 * Math.max(1, Number(troop.moveSpeedMultiplier ?? 1) || 1));
+            const speed = Math.max(baseSpeed, Number(troop.swimSpeed ?? 0) || 0);
             troop.body.setVelocity(dx * speed, dy * speed);
             }
 
@@ -127,6 +154,19 @@ export class Raider {
         // -------------------------
         // 2) Land behaviour: fight nearby TEAM 1 units first
         // -------------------------
+        const nearbyPriorityTarget = Raider._findNearbyUnitTarget(troop);
+        if (nearbyPriorityTarget) {
+            troop._raiderRetaliationTarget = null;
+            troop.forcedTarget = nearbyPriorityTarget;
+            troop.roam = false;
+            const movedTile = Player._syncTrackToTarget(troop, nearbyPriorityTarget);
+            if (troop.state !== CONTROL_STATES.ATTACK_MODE) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+            }
+            Player._chaseOrBreachTarget?.(troop, nearbyPriorityTarget, movedTile || !troop.currentPath?.length);
+            return false;
+        }
+
         Player.updateTracking(troop);
         if (troop.track && troop.track[0] && troop.track[0].team === 1) {
             return false; // chase/attack handled elsewhere
@@ -344,6 +384,40 @@ export class Raider {
         return false;
     }
 
+    static _findNearbyUnitTarget(troop) {
+        const radius = Math.max(
+            Number(troop?.awareness ?? troop?.type?.awareness ?? Raider.awareness ?? 0),
+            Number(troop?.weapon?.range ?? 0) * 2.5
+        );
+        if (!(radius > 0) || !Player.scene?.physics?.overlapCirc) return null;
+
+        const neighbours = Player.scene.physics.overlapCirc(troop.x, troop.y, radius) || [];
+        const regionSystem = Map.enemyRegionSystem;
+        const candidates = [];
+
+        neighbours.forEach(body => {
+            if (!body || body === troop.body || body.team !== 1 || body.dontTrack) return;
+            const target = body.gameObject;
+            if (!target?.active || !target?.body) return;
+            if (regionSystem?.canReachWorldToWorld && !regionSystem.canReachWorldToWorld(troop.x, troop.y, target.x, target.y)) {
+                return;
+            }
+
+            candidates.push(target);
+        });
+
+        if (!candidates.length) return null;
+
+        candidates.sort((a, b) => {
+            const aPriority = Player._isFighterUnit?.(a) ? 1 : 0;
+            const bPriority = Player._isFighterUnit?.(b) ? 1 : 0;
+            if (aPriority !== bPriority) return aPriority - bPriority;
+            return Phaser.Math.Distance.Between(troop.x, troop.y, a.x, a.y) - Phaser.Math.Distance.Between(troop.x, troop.y, b.x, b.y);
+        });
+
+        return candidates[0] || null;
+    }
+
     static _ensureSiegePlanner() {
         if (!Map.siegePlanner) {
             Map.siegePlanner = new SiegePlanner({
@@ -502,6 +576,7 @@ export class Raider {
         // ✅ count kill toward the parcel contract (updates ⚔ text + completion)
         if (!silentStageCleanup) {
             scene?.parcelManager?.notifyRaiderKilled?.(troop.contractId);
+            scene?.registerRunEnemyDefeat?.(troop, opts);
         }
 
         const team = Teams.teamLists["0"];

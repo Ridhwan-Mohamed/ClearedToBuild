@@ -4,6 +4,7 @@
 export const StageState = {
   stageIndex: 1,      // 1..STAGES_PER_SEASON within a season
   seasonIndex: 1,
+  startDay: 1,
   STAGES_PER_SEASON: 5,
   endlessMode: true,
   fortObjectiveEnabled: false,
@@ -62,14 +63,42 @@ export const StageState = {
     };
   },
 
+  getConfiguredStartDay(override = null) {
+    const src = override ?? this.START_OVERRIDE ?? {};
+    const explicitDay = Math.floor(Number(src.day ?? src.dayIndex) || 0);
+    if (explicitDay >= 1) return explicitDay;
+
+    const stage = Math.max(1, Math.floor(Number(src.stageIndex ?? this.stageIndex ?? 1) || 1));
+    return stage <= 1 ? 1 : stage + 1;
+  },
+
+  getCompletedHordesForStart(override = null) {
+    return Math.max(0, this.getConfiguredStartDay(override) - 2);
+  },
+
   startEndlessRun(override = null) {
     const src = override ?? this.START_OVERRIDE ?? {};
     this.endlessMode = true;
     this.fortObjectiveEnabled = false;
     this.seasonIndex = Math.max(1, Math.floor(Number(src.seasonIndex ?? 1) || 1));
     this.stageIndex = Math.max(1, Math.floor(Number(src.stageIndex ?? 1) || 1));
+    this.startDay = this.getConfiguredStartDay(src);
     this.resetFortState();
-    return { seasonIndex: this.seasonIndex, stageIndex: this.stageIndex };
+    return {
+      seasonIndex: this.seasonIndex,
+      stageIndex: this.stageIndex,
+      day: this.startDay,
+      completedHordes: this.getCompletedHordesForStart(src),
+    };
+  },
+
+  resetForMenu() {
+    this.endlessMode = true;
+    this.fortObjectiveEnabled = false;
+    this.seasonIndex = 1;
+    this.stageIndex = 1;
+    this.startDay = 1;
+    this.resetFortState();
   },
 
   advanceHorde(meta = {}) {
@@ -100,6 +129,7 @@ export const StageState = {
 
     this.seasonIndex = season;
     this.stageIndex = stage;
+    this.startDay = this.getConfiguredStartDay(src);
 
     // Fresh objective state for forced start points.
     this.resetFortState();

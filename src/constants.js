@@ -726,16 +726,28 @@ export function handleGridXY(x,y,itemX,itemY){
     return [finalX,finalY]
 }
 
-export function showAlert(scene, message, color = '#ffffff', duration = 1000) {
-    const alert = scene.add.text(
-        scene.cameras.main.width / 2, 0, message,
+export function showAlert(scene, message, color = '#ffffff', duration = 1400) {
+    const uiScene = scene?.uiScene
+        || scene?.scene?.get?.('GameUIScene')
+        || scene;
+
+    if (uiScene && uiScene !== scene && typeof uiScene.showAlertMessage === 'function') {
+        return uiScene.showAlertMessage(message, color, duration);
+    }
+
+    if (uiScene && typeof uiScene.showAlertMessage === 'function') {
+        return uiScene.showAlertMessage(message, color, duration);
+    }
+
+    const alert = uiScene.add.text(
+        uiScene.cameras.main.width / 2, 0, message,
         { fontSize: '24px', fill: color, stroke: '#000000', strokeThickness: 3 }
     )
     .setOrigin(0.5, 0)
     .setScrollFactor(0)
     .setDepth(UIDEPTH);
 
-    scene.tweens.add({
+    uiScene.tweens.add({
         targets: alert,
         y: 50,
         alpha: 0,
@@ -743,6 +755,8 @@ export function showAlert(scene, message, color = '#ffffff', duration = 1000) {
         ease: 'Cubic.easeOut',
         onComplete: () => alert.destroy()
     });
+
+    return alert;
 }
 
 export function intDiv(n,d){
@@ -953,9 +967,6 @@ export const PRESSURE_CONTRACT = {
 };
 
 // ---- Contract economy (costs + rewards) ----
-// constants.js
-import { StageState } from "./parcelController/StageState.js"; // <-- adjust path if needed
-
 export const CONTRACT_ECON = {
   STAGE_MULT: 0.25,
 

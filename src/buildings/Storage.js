@@ -6,9 +6,11 @@ import { StorageUI } from '../UI/StorageUI.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { buildingManager } from '../Manager/buildingManager.js';
+import { StorageManager } from '../Manager/StorageManager.js';
 
 export class StorageBuilding {
     static scene;
+    static defaultCapacity = 8;
 
     constructor(x, y, teamNumber) {
         this.teamNumber = teamNumber;
@@ -64,14 +66,8 @@ export class StorageBuilding {
 
         this.sprite.buildingRef = this;
 
-        // Store item counts (max 10 total)
-        this.capacity = 16;
-        this.storageItems = Array(16).fill(null);
-        this.addItem(UI_ITEM_TYPES.clean_water, 15);
-        this.addItem(UI_ITEM_TYPES.food, 15);
-        this.addItem(UI_ITEM_TYPES.wood, 4);
-        this.addItem(UI_ITEM_TYPES.stone, 10);
-        this.addItem(UI_ITEM_TYPES.seedCrop, 10);
+        this.capacity = StorageBuilding.defaultCapacity;
+        this.storageItems = Array(this.capacity).fill(null);
         StorageUI.refreshStatus?.(this);
 
         // Register into the team
@@ -97,6 +93,20 @@ export class StorageBuilding {
 
     get totalStored() {
         return this.storageItems.filter(slot => slot && slot.item && slot.item.name !== 'empty').length;
+    }
+
+    clearStoredInventory(applyLossToHud = false) {
+        for (const slot of this.storageItems) {
+            if (!slot?.item || slot.amount <= 0) continue;
+            if (applyLossToHud) {
+                DailyNeedsTracker.updateUIItems(slot.item, slot.amount, true);
+            }
+        }
+
+        this.storageItems = Array(this.capacity).fill(null);
+        this.reservedPickup = {};
+        StorageUI.refreshMinor?.(this);
+        StorageUI.refreshStatus?.(this);
     }
 
     getTotalCount() {
@@ -183,6 +193,7 @@ export class StorageBuilding {
 
         const players = Array.isArray(team.playerList) ? team.playerList : [];
         const tasks = Array.isArray(team.storageDeliveryItems) ? team.storageDeliveryItems : [];
+        const pendingReservations = Array.isArray(team.storageDeliveryReservations) ? team.storageDeliveryReservations : [];
         const reservations = [];
 
         for (const task of tasks) {
@@ -199,6 +210,14 @@ export class StorageBuilding {
 
             if (actualAssigned > 0) {
                 reservations.push({ item: task.item, amount: actualAssigned });
+            }
+        }
+
+        for (const reservation of pendingReservations) {
+            if (!reservation || reservation.storage !== storage || !reservation.item) continue;
+            const amount = Math.max(0, Number(reservation.amount) || 0);
+            if (amount > 0) {
+                reservations.push({ item: reservation.item, amount });
             }
         }
 
@@ -597,10 +616,15 @@ export class StorageBuilding {
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
 
+        this.clearStoredInventory(true);
+
         if (this.collider) {
             Map.structureBarrier?.remove(this.collider, true, true);
             this.collider = null;
         }
+
+        Teams.removeFromStateArray(this.teamNumber, 'storageList', this);
+        StorageManager.handleStorageDestroyed?.(this);
 
         this.sprite?.destroy();
         if (this.healthBarBg) this.healthBarBg.destroy();
@@ -608,7 +632,6 @@ export class StorageBuilding {
         StorageUI.hideStatus?.(this);
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
-        Teams.removeFromStateArray(this.teamNumber, 'storageList', this);
         StorageBuilding.scene?.events?.emit?.("storage:removed", this);
     }
 }

@@ -1,4 +1,5 @@
 import { CONTROL_STATES, PARCEL, SQUARESIZE, TILE_TYPES, showAlert } from "../constants";
+import Phaser from "phaser";
 import { Teams } from "../Teams";
 import { Player } from "../players/Player";
 import { StorageManager } from "../Manager/StorageManager";
@@ -77,7 +78,23 @@ export class OrderRunner {
   static getGatherContractType(resourceType) {
     if (resourceType === "wood") return "FOREST";
     if (resourceType === "stone") return "ROCK";
+    if (resourceType === "seed" || resourceType === "berry") return "FARM";
     return null;
+  }
+
+  static _resourceNodesForType(resourceType) {
+    switch (resourceType) {
+      case "wood":
+        return Map.worldPines || [];
+      case "stone":
+        return Map.worldStones || [];
+      case "seed":
+        return Map.worldSeedBushes || [];
+      case "berry":
+        return Map.worldBerryBushes || [];
+      default:
+        return [];
+    }
   }
 
   static hasActiveGatherParcel(resourceType, scene = Player.scene) {
@@ -101,13 +118,42 @@ export class OrderRunner {
     if (resourceType === "stone") {
       return "No active rock parcel. Buy a rock parcel first.";
     }
+    if (resourceType === "seed" || resourceType === "berry") {
+      return "No active farm parcel. Buy a farm parcel first.";
+    }
     return "No matching resource parcel is active.";
+  }
+
+  static getGatherUnavailableMessage(resourceType, scene = Player.scene) {
+    if (!this.hasActiveGatherParcel(resourceType, scene)) {
+      return this.getGatherParcelMissingMessage(resourceType);
+    }
+    if (resourceType === "seed") {
+      return "No seed bushes are available on the active farm parcel.";
+    }
+    if (resourceType === "berry") {
+      return "No berry bushes are available on the active farm parcel.";
+    }
+    return `No ${resourceType} targets are available right now.`;
+  }
+
+  static hasGatherableNodes(resourceType) {
+    const nodes = this._resourceNodesForType(resourceType);
+    return nodes.some((node) =>
+      this._nodeActive(node) &&
+      this._nodeResourceKind(node) === resourceType &&
+      Math.max(0, Number(node?.health ?? node?.task?.remaining ?? 0)) > 0
+    );
+  }
+
+  static isGatherCommandAvailable(resourceType, scene = Player.scene) {
+    return this.hasActiveGatherParcel(resourceType, scene) && this.hasGatherableNodes(resourceType);
   }
 
   static issueGatherTypeOrder(troops, resourceType, scene = Player.scene) {
     const selection = this.getSelectionProfile(troops);
     if (!selection.allForagers) return false;
-    if (!this.hasActiveGatherParcel(resourceType, scene)) return false;
+    if (!this.isGatherCommandAvailable(resourceType, scene)) return false;
 
     const orderId = this._nextId();
     for (const troop of selection.troops) {
@@ -195,7 +241,7 @@ export class OrderRunner {
 
   static issueWorkQueuedOrder(troops, teamNumber = 1) {
     const queued = (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || [])
-      .filter(task => task?.forageType === "block" && !task.directOrderId);
+      .filter(task => (task?.forageType === "block" || task?.forageType === "seed") && !task.directOrderId);
     if (!queued.length) return false;
     return this.issueGatherSetOrder(troops, queued);
   }
@@ -291,8 +337,23 @@ export class OrderRunner {
     if (!selection.hasSelection) return false;
     this.clearPendingGatherPlacement();
 
+    const fighters = [];
+    const workers = [];
+
     for (const troop of selection.troops) {
       this._clearTroopOrder(troop, { interrupt: true, targetState: CONTROL_STATES.TRACK_MODE });
+      if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
+        fighters.push(troop);
+      } else {
+        workers.push(troop);
+      }
+    }
+
+    if (fighters.length) {
+      this.issueDefendTownOrder(fighters);
+    }
+
+    for (const troop of workers) {
       Scheduler.stepUnit(troop);
     }
     return true;
@@ -305,10 +366,14 @@ export class OrderRunner {
 
     if (selection.allSleepingLike) {
       let changed = 0;
+      const wokeFighters = [];
       for (const troop of selection.troops) {
         this._clearTroopOrder(troop, { interrupt: false, targetState: CONTROL_STATES.TRACK_MODE });
         if (troop.state === CONTROL_STATES.SLEEP_MODE) {
           StaminaManager.wakeUp(troop);
+          if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
+            wokeFighters.push(troop);
+          }
           changed += 1;
           continue;
         }
@@ -317,8 +382,14 @@ export class OrderRunner {
           troop.currentPath = [];
           troop.body?.setVelocity?.(0, 0);
           Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+          if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
+            wokeFighters.push(troop);
+          }
           changed += 1;
         }
+      }
+      if (wokeFighters.length) {
+        this.issueDefendTownOrder(wokeFighters);
       }
       return { ok: changed > 0, mode: "wake", changed, failed: 0 };
     }
@@ -430,6 +501,34 @@ export class OrderRunner {
     return true;
   }
 
+  static ensureCombatAutoOrder(troop) {
+    if (!troop?.active || troop.body?.team !== 1 || !Player._isFighterUnit?.(troop)) return false;
+    if (troop.currentOrder) return false;
+    if (troop.forcedTarget || troop.track || troop.task || troop.timer) return false;
+    if (
+      troop.state === CONTROL_STATES.SLEEP_MODE ||
+      troop.state === CONTROL_STATES.GO_HOME_MODE ||
+      troop.state === CONTROL_STATES.FLEE_MODE ||
+      troop.state === CONTROL_STATES.HEADING_TO_GUARD
+    ) {
+      return false;
+    }
+
+    if (troop.state === CONTROL_STATES.BACK_TO_TOWN) {
+      if (troop.currentPath?.length) return false;
+      Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+    }
+
+    if (
+      troop.state !== CONTROL_STATES.TRACK_MODE &&
+      troop.state !== CONTROL_STATES.USER_MODE
+    ) {
+      return false;
+    }
+
+    return this.issueDefendTownOrder([troop]);
+  }
+
   static issueHoldOrder(troops) {
     const selection = this.getSelectionProfile(troops);
     if (!selection.allGunslingers) return false;
@@ -510,6 +609,7 @@ export class OrderRunner {
     if (troop.currentPath?.length) return true;
 
     if (
+      troop.state === CONTROL_STATES.SEED_MODE ||
       troop.state === CONTROL_STATES.GET_BLOCK_RESOURCE ||
       troop.state === CONTROL_STATES.SEND_TO_STORAGE ||
       troop.state === CONTROL_STATES.GET_FROM_STORAGE
@@ -558,7 +658,8 @@ export class OrderRunner {
     for (const task of available) {
       task.directOrderId = order.id;
       task.workerCapacity = task.workerCapacity ?? 1;
-      const assigned = Manager.assignTaskToTroop(troop, task, CONTROL_STATES.GET_BLOCK_RESOURCE);
+      const state = task?.forageType === "seed" ? CONTROL_STATES.SEED_MODE : CONTROL_STATES.GET_BLOCK_RESOURCE;
+      const assigned = Manager.assignTaskToTroop(troop, task, state);
       if (assigned) return true;
     }
 
@@ -730,37 +831,25 @@ export class OrderRunner {
   static _findDefendTownThreat(troop, townCenter) {
     const regionSystem = Map.regionSystem;
     const enemies = Teams.teamLists?.["0"]?.playerList || [];
-    const mainIsland = {
-      minx: PARCEL.MAIN_ORIGIN.x,
-      miny: PARCEL.MAIN_ORIGIN.y,
-      maxx: PARCEL.MAIN_ORIGIN.x + PARCEL.SIZE - 1,
-      maxy: PARCEL.MAIN_ORIGIN.y + PARCEL.SIZE - 1,
-    };
-    const isOnPlayerIsland = (enemy) => {
-      if (!enemy?.active) return false;
-      const gx = Math.floor(enemy.x / SQUARESIZE);
-      const gy = Math.floor(enemy.y / SQUARESIZE);
-      return (
-        gx >= mainIsland.minx &&
-        gx <= mainIsland.maxx &&
-        gy >= mainIsland.miny &&
-        gy <= mainIsland.maxy
-      );
-    };
-    const canReachTown = (enemy) => {
+    const currentTarget = troop.forcedTarget || troop.track?.[0]?.gameObject || null;
+    const canReachThreat = (enemy) => {
       if (!enemy?.active) return false;
       if (!enemy.body || enemy.body.team === troop.body?.team) return false;
       if (!regionSystem?.canReachWorldToWorld) return true;
-      return regionSystem.canReachWorldToWorld(townCenter.x, townCenter.y, enemy.x, enemy.y);
+      return (
+        regionSystem.canReachWorldToWorld(townCenter.x, townCenter.y, enemy.x, enemy.y) ||
+        regionSystem.canReachWorldToWorld(troop.x, troop.y, enemy.x, enemy.y)
+      );
     };
 
     return CombatSpacingCoordinator.chooseBestEnemyTarget(
       troop,
-      enemies.filter(enemy => isOnPlayerIsland(enemy) && canReachTown(enemy)),
+      enemies.filter(enemy => canReachThreat(enemy)),
       {
         anchor: townCenter,
-        currentTarget: troop.forcedTarget || troop.track?.[0]?.gameObject || null,
-        priorityFn: (enemy) => this._combatThreatPriority(enemy),
+        currentTarget,
+        priorityFn: (enemy) => this._combatThreatPriority(enemy, townCenter),
+        assignmentPriorityFn: (enemy) => this._defendTownCoveragePriority(troop, enemy, currentTarget),
       }
     );
   }
@@ -783,12 +872,46 @@ export class OrderRunner {
     );
   }
 
-  static _combatThreatPriority(enemy) {
+  static _resolveFriendlyTarget(enemy) {
+    const forcedTarget = enemy?.forcedTarget;
+    if (forcedTarget?.active && forcedTarget?.body?.team === 1) return forcedTarget;
+    const tracked = enemy?.track?.[0]?.gameObject;
+    if (tracked?.active && tracked?.body?.team === 1) return tracked;
+    return null;
+  }
+
+  static _combatThreatPriority(enemy, townCenter = null) {
+    const pressuredFriendly = this._resolveFriendlyTarget(enemy);
+    if (pressuredFriendly) {
+      return Player._isFighterUnit?.(pressuredFriendly) ? 1 : 0;
+    }
+
     const breakingTown =
       enemy?.state === CONTROL_STATES.DESTROY_MODE ||
       enemy?.state === CONTROL_STATES.DESTROY_MODE_T ||
       enemy?.state === CONTROL_STATES.SIEGE_MODE;
-    return breakingTown ? 0 : 1;
+    if (breakingTown) return 2;
+
+    if (townCenter) {
+      const distanceToTown = Phaser.Math.Distance.Between(townCenter.x, townCenter.y, enemy.x, enemy.y);
+      if (distanceToTown <= SQUARESIZE * 10) return 3;
+    }
+
+    return 4;
+  }
+
+  static _defendTownCoveragePriority(troop, enemy, currentTarget = null) {
+    if (!troop?.active || !enemy?.active) return 1;
+
+    const teamNumber = troop.body?.team ?? 1;
+    const counts = CombatSpacingCoordinator.getTargetAssignmentCounts(teamNumber, enemy);
+    let accountedFor = Number(counts?.total ?? 0);
+
+    if (enemy === currentTarget) {
+      accountedFor = Math.max(0, accountedFor - 1);
+    }
+
+    return accountedFor > 0 ? 1 : 0;
   }
 
   static _trackCombatTarget(troop, target) {
@@ -826,6 +949,7 @@ export class OrderRunner {
   }
 
   static _clearCombatTargeting(troop) {
+    Player.resetRoamState?.(troop);
     troop.forcedTarget = null;
     troop.track = null;
     CombatSpacingCoordinator.clearTroopFocus(troop);
@@ -899,7 +1023,7 @@ export class OrderRunner {
   }
 
   static _collectTasksForResourceType(resourceType, teamNumber) {
-    const nodes = resourceType === "wood" ? (Map.worldPines || []) : (Map.worldStones || []);
+    const nodes = this._resourceNodesForType(resourceType);
     const tasks = [];
     for (const node of nodes) {
       if (!this._nodeActive(node)) continue;
@@ -938,7 +1062,7 @@ export class OrderRunner {
   }
 
   static _nodesForArea(order) {
-    const nodes = order.resourceType === "wood" ? (Map.worldPines || []) : (Map.worldStones || []);
+    const nodes = this._resourceNodesForType(order.resourceType);
     const radiusPx = (order.radiusTiles ?? this.DEFAULT_AREA_RADIUS_TILES) * SQUARESIZE;
     const radiusSq = radiusPx * radiusPx;
     const center = order.center || { x: 0, y: 0 };
@@ -958,7 +1082,7 @@ export class OrderRunner {
     const seen = new Set();
 
     for (const queued of Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []) {
-      if (queued?.forageType !== "block") continue;
+      if (queued?.forageType !== "block" && queued?.forageType !== "seed") continue;
       if (seen.has(queued)) continue;
       seen.add(queued);
       tasks.push(queued);
@@ -975,7 +1099,12 @@ export class OrderRunner {
   }
 
   static _allResourceNodes() {
-    return [...(Map.worldPines || []), ...(Map.worldStones || [])];
+    return [
+      ...(Map.worldPines || []),
+      ...(Map.worldStones || []),
+      ...(Map.worldSeedBushes || []),
+      ...(Map.worldBerryBushes || []),
+    ];
   }
 
   static _orderHasBusyTroops(orderId, excludeTroopId = null) {
@@ -987,6 +1116,7 @@ export class OrderRunner {
         troop.timer ||
         StorageManager.isCarrying(troop) ||
         troop.currentPath?.length ||
+        troop.state === CONTROL_STATES.SEED_MODE ||
         troop.state === CONTROL_STATES.GET_BLOCK_RESOURCE ||
         troop.state === CONTROL_STATES.SEND_TO_STORAGE ||
         troop.state === CONTROL_STATES.GET_FROM_STORAGE
@@ -995,7 +1125,7 @@ export class OrderRunner {
   }
 
   static _taskUsable(task) {
-    if (!task || task.forageType !== "block") return false;
+    if (!task || (task.forageType !== "block" && task.forageType !== "seed")) return false;
     if (!task.value) return false;
     if (typeof task.remaining === "number" && task.remaining <= 0) return false;
     if (!this._nodeActive(task.value)) return false;
@@ -1489,14 +1619,22 @@ export class OrderRunner {
     if (node?.resourceKind) return node.resourceKind;
     if (node?.resourceTileType?.name === "pine") return "wood";
     if (node?.resourceTileType?.name === "rock") return "stone";
+    if (node?.resourceTileType?.name === "seedBush") return "seed";
+    if (node?.resourceTileType?.name === "berryBush") return "berry";
     if (node?.task?.type?.name === "pine") return "wood";
     if (node?.task?.type?.name === "rock") return "stone";
+    if (node?.task?.type?.name === "seedBush") return "seed";
+    if (node?.task?.type?.name === "berryBush") return "berry";
     return null;
   }
 
   static _taskKey(task) {
     if (!task) return null;
-    const kind = task.type?.name === "pine" ? "wood" : task.type?.name === "rock" ? "stone" : this._nodeResourceKind(task.value);
+    const kind = this._nodeResourceKind(task.value) ||
+      (task.type?.name === "pine" ? "wood" : null) ||
+      (task.type?.name === "rock" ? "stone" : null) ||
+      (task.type?.name === "seedBush" ? "seed" : null) ||
+      (task.type?.name === "berryBush" ? "berry" : null);
     return `${kind || "resource"}:${task.x},${task.y}`;
   }
 

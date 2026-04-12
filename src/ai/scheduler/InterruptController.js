@@ -1,6 +1,7 @@
 import { Teams } from "../../Teams";
 import { CONTROL_STATES } from "../../constants";
 import { CombatSpacingCoordinator } from "../CombatSpacingCoordinator";
+import { StorageManager } from "../../Manager/StorageManager";
 
 export class InterruptController {
     static interruptTroop(troop, reason = "generic_interrupt", targetState = null) {
@@ -122,6 +123,9 @@ export class InterruptController {
         if (troop.isFarmer && troop.pendingFarmSpot?.reservedBy === troop) {
             troop.pendingFarmSpot.reservedBy = null;
             troop.pendingFarmSpot = null;
+        }
+        if (!troop.carrying) {
+            StorageManager.releaseDeliveryReservation(troop);
         }
     }
 }

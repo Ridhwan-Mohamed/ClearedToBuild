@@ -15,6 +15,7 @@ import foragerWalkDownRight from 'url:../assets/players/forager/forager_walk_dow
 import foragerWalkUp from 'url:../assets/players/forager/forager_walk_up.png';
 import foragerWalkUpLeft from 'url:../assets/players/forager/forager_walk_up_left.png';
 import foragerWalkUpRight from 'url:../assets/players/forager/forager_walk_up_right.png';
+import foragerPickup from 'url:../assets/players/forager/forager_pickup.png';
 import stoneAxe from 'url:../assets/players/forager/stone_axe.png';
 import stonePickaxe from 'url:../assets/players/forager/stone_pickaxe.png';
 import goldAxe from 'url:../assets/players/forager/gold_axe.png';
@@ -32,6 +33,7 @@ export class Forager {
         scene.load.spritesheet('forager_walk_up', foragerWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('forager_walk_up_left', foragerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('forager_walk_up_right', foragerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.image('forager_pickup', foragerPickup);
         scene.load.image('forager_stone_axe', stoneAxe);
         scene.load.image('forager_stone_pickaxe', stonePickaxe);
         scene.load.image('forager_gold_axe', goldAxe);
@@ -64,6 +66,7 @@ export class Forager {
         sprite.idle = 'idle';
         sprite.action = 'action';
         sprite.swim = 'swim';
+        sprite.pickupPose = 'forager_pickup';
         attachDirectionalSix(sprite, {
             animPrefix: 'forager',
             defaultDirection: 'down',

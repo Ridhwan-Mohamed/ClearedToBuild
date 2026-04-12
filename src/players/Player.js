@@ -57,6 +57,18 @@ export class Player {
     static CARRY_ICON_OFFSET_Y = 28;
     static CARRY_ICON_SIZE     = 18;
     static HIGHLIGHT_RING_OFFSET_Y = 10;
+
+    static resetRuntimeState(scene = null) {
+        this.scene = scene ?? null;
+        this.count = 0;
+        this.troops = [];
+        this.selected = [];
+
+        if (this.characters?.clear) {
+            try { this.characters.clear(true, true); } catch {}
+        }
+        this.characters = null;
+    }
     
     static init(scene){
         this.scene = scene;
@@ -137,6 +149,7 @@ export class Player {
         }
 
         player.home = null;
+        house.scene?.events?.emit?.("housing:updated", house.team);
 
         if (house.isHovered && house.occupants?.length) {
             house.updateIcons?.();
@@ -465,6 +478,20 @@ export class Player {
         return true;
     }
 
+    static _clearRoamResetTimer(troop) {
+        if (!troop?._roamResetTimer) return;
+        troop._roamResetTimer.remove(false);
+        troop._roamResetTimer = null;
+    }
+
+    static resetRoamState(troop) {
+        if (!troop) return;
+        this._clearRoamResetTimer(troop);
+        troop.roam = false;
+        troop._combatRoamDest = null;
+        CombatSpacingCoordinator.clearRoamReservation(troop);
+    }
+
     static _getPathArrivalRadius(sprite, currentSpeed = null) {
         const scene = sprite?.scene ?? this.scene;
         const speed = Number.isFinite(currentSpeed)
@@ -698,6 +725,7 @@ export class Player {
                 sprite.stamina = Math.max(0, stamina - drain);
             }
         }
+        currentSpeed *= Math.max(0.5, Number(sprite.moveSpeedMultiplier ?? 1) || 1);
         currentSpeed *= this.getMovementSlowFactor(sprite);
 
         if(sprite.body.team == 1){
@@ -720,9 +748,21 @@ export class Player {
                     return;
                 }
                 if (sprite.roam && !sprite.task) {
+                    this._clearRoamResetTimer(sprite);
                     const roamDuration = Phaser.Math.Between(1000, 4000);
-                    sprite.scene.time.delayedCall(roamDuration, () => {
-                        sprite.roam = false;
+                    sprite._roamResetTimer = sprite.scene.time.delayedCall(roamDuration, () => {
+                        if (sprite?._roamResetTimer) {
+                            sprite._roamResetTimer = null;
+                        }
+                        if (!sprite?.active) return;
+                        if (
+                            !sprite.currentPath?.length &&
+                            !sprite.task &&
+                            !sprite.track &&
+                            sprite.state === CONTROL_STATES.TRACK_MODE
+                        ) {
+                            this.resetRoamState(sprite);
+                        }
                     });
                 }
                 sprite.body.setVelocity(0, 0);
@@ -1319,6 +1359,7 @@ export class Player {
       
     static roam(troop) {
         // start roaming
+        this._clearRoamResetTimer(troop);
         troop.roam = true;
         const { navMesh, navGrid } = Player._getNavForTroop(troop);
         let px = troop.x;
@@ -1461,6 +1502,7 @@ export class Player {
         }
         CombatSpacingCoordinator.clearTroopFocus(troop);
         troop.forcedTarget = null;
+        this.resetRoamState(troop);
         if (troop.track && troop.state === CONTROL_STATES.TRACK_TARGET) {
             troop.track = null;
             troop.currentPath?.splice?.(0);
@@ -1696,6 +1738,7 @@ export class Player {
             // No threat nearby → drop out of flee if we were fleeing
             if (!closest) {
                 if (troop.state === CONTROL_STATES.FLEE_MODE) {
+                    this.resetRoamState(troop);
                     Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
                 }
                 return;
@@ -1757,6 +1800,7 @@ export class Player {
                 InterruptController.interruptTroop(troop, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
             }
             CombatSpacingCoordinator.clearTroopFocus(troop);
+            this.resetRoamState(troop);
             troop.track = null;
             if (troop.state === CONTROL_STATES.TRACK_TARGET) {
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -1765,6 +1809,7 @@ export class Player {
         }
         if (!hasTrackedEnemy && troop.state === CONTROL_STATES.TRACK_TARGET && !troop.track) {
             CombatSpacingCoordinator.clearTroopFocus(troop);
+            this.resetRoamState(troop);
             troop.currentPath?.splice?.(0);
             troop.body?.setVelocity?.(0, 0);
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -1938,7 +1983,8 @@ export class Player {
         }
 
         const speedBase = troop?.type?.speed ?? troop.speed ?? 90;
-        const swimSpeed = Math.max(60, speedBase * 0.85 * this.getMovementSlowFactor(troop));
+        const speedMultiplier = Math.max(0.5, Number(troop?.moveSpeedMultiplier ?? 1) || 1);
+        const swimSpeed = Math.max(60, speedBase * 0.85 * speedMultiplier * this.getMovementSlowFactor(troop));
         const inv = dist > 0.001 ? 1 / dist : 0;
         const vx = dx * inv * swimSpeed;
         const vy = dy * inv * swimSpeed;

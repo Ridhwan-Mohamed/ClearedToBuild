@@ -252,6 +252,8 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
     id: "boss_unlock_placeholder",
     title: "New Unlock",
     description: "A new boss reward has been unlocked.",
+    badgeLabel: "BOSS REWARD UNLOCKED",
+    subLabel: "NEW STORE ITEM",
     accentColor: DEFAULT_ACCENT_COLOR,
     glowColor: DEFAULT_GLOW_COLOR,
     panelColor: DEFAULT_PANEL_COLOR,
@@ -338,7 +340,7 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
   const topStrip = hostScene.add.rectangle(0, -184, 696, 10, accentColor, 1);
   const badgeBg = hostScene.add.rectangle(0, -145, 272, 34, accentColor, 0.96);
   const badgeText = hostScene.add
-    .text(0, -145, "BOSS REWARD UNLOCKED", {
+    .text(0, -145, rewardDef.badgeLabel, {
       fontSize: "14px",
       fontFamily: "Bungee",
       color: "#1a1407",
@@ -370,7 +372,7 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
     .setOrigin(0.5);
   const divider = hostScene.add.rectangle(0, 38, 540, 2, accentColor, 0.45);
   const subLabel = hostScene.add
-    .text(0, 56, "NEW STORE ITEM", {
+    .text(0, 56, rewardDef.subLabel, {
       fontSize: "12px",
       fontFamily: "Bungee",
       color: toColorHex(accentColor, DEFAULT_ACCENT_COLOR),

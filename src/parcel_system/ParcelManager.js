@@ -34,6 +34,12 @@ export class ParcelManager {
     };
   }
 
+  _notifyExpansionParcelClaimed(type, slotId, id) {
+    const normalized = String(type || "").toUpperCase();
+    if (!normalized || normalized === "PRESSURE" || normalized === "MILITIA") return;
+    this.scene?.registerRunParcelClaim?.(normalized, { slotId, contractId: id });
+  }
+
   startForest(slotId)  { return this._startResource(slotId, "FOREST"); }
   startRock(slotId)    { return this._startResource(slotId, "ROCK"); }
   startPressure(slotId, difficulty = 1, opts = {}) { return this._startPressure(slotId, difficulty, opts); }
@@ -99,6 +105,7 @@ export class ParcelManager {
 
     inst.spawn();
     this._refreshAfterParcelPaint();
+    this._notifyExpansionParcelClaimed("MARKET", slotId, id);
 
     // hide slot UI while active
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
@@ -131,6 +138,7 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
     inst.spawn();
     this._refreshAfterParcelPaint();
+    this._notifyExpansionParcelClaimed(type, slotId, id);
 
     // Hide the slot UI while a contract is active (no outline during play)
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
@@ -160,6 +168,9 @@ export class ParcelManager {
       difficulty,
       pressureSource: opts.source ?? "manual",
       pressureOwnerTower: opts.ownerTower ?? null,
+      pressureModifierKey: opts.modifierKey ?? opts.modifier?.key ?? null,
+      pressureModifier: opts.modifier ?? null,
+      pressureHordeIndex: opts.hordeIndex ?? null,
     });
 
 
@@ -258,7 +269,7 @@ export class ParcelManager {
     if (pressureIds.size) {
       const troops = (Player.troops || []).slice();
       for (const troop of troops) {
-        if (!troop?.active || !troop?.isRaider) continue;
+        if (!troop?.active || (!troop?.isRaider && !troop?.isFortGrunt)) continue;
         if (!pressureIds.has(troop.contractId)) continue;
         troop.contractId = null;
         troop.spawner = null;
@@ -311,7 +322,7 @@ export class ParcelManager {
     const troops = (Player.troops || []).slice();
     let removed = 0;
     for (const troop of troops) {
-      if (!troop?.active || !troop?.isRaider) continue;
+      if (!troop?.active || (!troop?.isRaider && !troop?.isFortGrunt)) continue;
       if (!pressureIds.has(troop.contractId)) continue;
       try {
         troop.destroySelf?.({ silentStageCleanup: true });
@@ -327,20 +338,36 @@ export class ParcelManager {
     let removed = 0;
     for (const troop of troops) {
       if (!troop?.active || !troop?.isFortGrunt) continue;
-      try { troop.destroySelf?.(); } catch {}
+      try { troop.destroySelf?.({ silentStageCleanup: true }); } catch {}
       removed++;
     }
     return removed;
   }
 
-  spawnSpawnerBuilding({ gx, gy, contractId, plannedEnemies, spawnIntervalMs }) {
-    // ✅ SpawnerBuilding handles map write + blocking internally now
+  spawnSpawnerBuilding(args = {}) {
+    const {
+      gx,
+      gy,
+      contractId,
+      plannedEnemies,
+      spawnIntervalMs,
+      enemyType = "raider",
+      enemyMods = null,
+      enemyTypeLabel = null,
+      modifierKey = null,
+      modifierLabel = null,
+    } = args;
+
     const sp = new SpawnerBuilding(this.scene, gx, gy, {
       quota: plannedEnemies,
       intervalMs: spawnIntervalMs,
       textureKey: TILE_TYPES.spawn.value,
-      // contractId (optional) if you later want to tag kills/spawns
       contractId,
+      enemyType,
+      enemyMods,
+      enemyTypeLabel,
+      modifierKey,
+      modifierLabel,
     });
     return sp;
   }

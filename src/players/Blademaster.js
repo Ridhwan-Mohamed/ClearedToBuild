@@ -98,11 +98,13 @@ export class Blademaster {
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
         sprite.destroySelf = () => Blademaster.destroy(sprite);
+        OrderRunner.issueDefendTownOrder([sprite]);
 
         return sprite;
     }
 
     static update(troop) {
+        OrderRunner.ensureCombatAutoOrder(troop);
         if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;

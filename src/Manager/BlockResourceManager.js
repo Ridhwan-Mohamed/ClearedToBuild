@@ -7,6 +7,7 @@ import { StorageManager } from "./StorageManager"
 import { VisibilitySystem } from "../UI/VisibilitySystem"
 import { Map } from "../map"
 import { AudioManager } from "./AudioManager"
+import { seedManager } from "./seedManager"
 import { updateDirectionalAnimationFromVelocity } from "../players/PlayerDirectionalAnimator"
 import { ORDER_KINDS } from "../orders/OrderTypes"
 import { OrderRunner } from "../orders/OrderRunner"
@@ -101,13 +102,71 @@ export class blockResourceManager{
         sprite.gatherSwingTween = tween;
     }
 
+    static _getGatherAudioMaterial(task) {
+        const resourceKind = task?.value?.resourceKind || task?.type?.resourceKind || task?.resource?.name;
+        if (task?.type === TILE_TYPES.pine || resourceKind === "wood") return "wood";
+        if (task?.type === TILE_TYPES.rock || resourceKind === "stone") return "rock";
+        return null;
+    }
+
+    static _getGatherDuration(task) {
+        const explicit = Number(task?.type?.gatherDuration || 0);
+        if (explicit > 0) return explicit;
+
+        const material = this._getGatherAudioMaterial(task);
+        if (material === "rock") return this.rockBreakDuration;
+        if (material === "wood") return this.woodBreakDuration;
+        return 850;
+    }
+
+    static _startGatherPresentation(sprite, task, duration) {
+        if (!sprite?.active || !task) return;
+        if (task?.type?.gatherMode === "pickup" && sprite.pickupPose) {
+            const target = this._getTaskTargetWorld(task);
+            updateDirectionalAnimationFromVelocity(
+                sprite,
+                target.x - sprite.x,
+                target.y - sprite.y,
+                true
+            );
+            Player.setPoseLock(sprite, sprite.pickupPose);
+            return;
+        }
+
+        this._playGatherSwing(sprite, task, duration);
+    }
+
+    static _stopGatherPresentation(sprite) {
+        if (!sprite) return;
+        this._clearGatherSwing(sprite);
+        if (sprite.poseLock?.textureKey && sprite.pickupPose && sprite.poseLock.textureKey === sprite.pickupPose) {
+            Player.clearPoseLock(sprite, sprite.idle);
+        }
+    }
+
+    static _stopHarvestLoops(sprite) {
+        if (!sprite) return;
+        AudioManager.setHarvestActive(sprite, "wood", false);
+        AudioManager.setHarvestActive(sprite, "rock", false);
+    }
+
+    static _setHarvestLoop(sprite, task, isActive) {
+        const material = this._getGatherAudioMaterial(task);
+        if (!material) {
+            if (!isActive) this._stopHarvestLoops(sprite);
+            return;
+        }
+        AudioManager.setHarvestActive(sprite, material, isActive);
+    }
+
     static ensureTaskForNode(nodeOrTask, { teamNumber = 1, queue = false, directOrderId = undefined } = {}) {
         if (!nodeOrTask) return null;
 
-        let task = nodeOrTask?.forageType === "block" ? nodeOrTask : nodeOrTask.task;
+        let task = this._isResourceTask(nodeOrTask) ? nodeOrTask : nodeOrTask.task;
         const node = task?.value || nodeOrTask;
         const tileType = node?.resourceTileType || task?.type;
         if (!tileType) return null;
+        const forageType = this._getForageTypeForTile(tileType);
 
         if (!task) {
             task = {
@@ -118,7 +177,7 @@ export class blockResourceManager{
                 value: node,
                 assigned: 0,
                 remaining: Number(node.health ?? 1),
-                forageType: "block",
+                forageType,
                 workerCapacity: 1,
             };
             node.task = task;
@@ -127,7 +186,7 @@ export class blockResourceManager{
         task.type = tileType;
         task.resource = task.resource || tileType.resource;
         task.value = node;
-        task.forageType = "block";
+        task.forageType = forageType;
         task.workerCapacity = Math.max(1, Number(task.workerCapacity || 1));
         task.remaining = Number(node.health ?? task.remaining ?? 1);
 
@@ -160,8 +219,22 @@ export class blockResourceManager{
         return taskOrValue?.value || taskOrValue?.task?.value || taskOrValue || null;
     }
 
+    static _getForageTypeForTile(tileType) {
+        return tileType?.gatherMode === "pickup" ? "seed" : "block";
+    }
+
+    static _stateForTask(task) {
+        return task?.forageType === "seed"
+            ? CONTROL_STATES.SEED_MODE
+            : CONTROL_STATES.GET_BLOCK_RESOURCE;
+    }
+
+    static _isResourceTask(task) {
+        return !!(task && (task.forageType === "block" || task.forageType === "seed"));
+    }
+
     static _taskMatchesNode(task, node) {
-        return !!(task && node && task.forageType === "block" && task.value === node);
+        return !!(task && node && this._isResourceTask(task) && task.value === node);
     }
 
     static _isGatherOrder(order) {
@@ -177,7 +250,7 @@ export class blockResourceManager{
     }
 
     static _isBlockTaskUsable(task) {
-        if (!task || task.forageType !== "block") return false;
+        if (!this._isResourceTask(task)) return false;
         const node = task.value;
         if (!node) return false;
         const nodeActive = !!(
@@ -192,10 +265,14 @@ export class blockResourceManager{
     static _queuedAssignableBlockTasksForTroop(troop) {
         const teamNumber = troop?.body?.team;
         return (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []).filter(task =>
-            task?.forageType === "block" &&
+            this._isResourceTask(task) &&
             !task.directOrderId &&
             this._isBlockTaskUsable(task) &&
-            Manager._troopEligibleForTask(troop, task, CONTROL_STATES.GET_BLOCK_RESOURCE)
+            Manager._troopEligibleForTask(
+                troop,
+                task,
+                this._stateForTask(task)
+            )
         );
     }
 
@@ -235,15 +312,8 @@ export class blockResourceManager{
             troop.timer = null;
         }
 
-        this._clearGatherSwing(troop);
-        if (activeTask?.type === TILE_TYPES.pine) {
-            AudioManager.setHarvestActive(troop, "wood", false);
-        } else if (activeTask?.type === TILE_TYPES.rock) {
-            AudioManager.setHarvestActive(troop, "rock", false);
-        } else {
-            AudioManager.setHarvestActive(troop, "wood", false);
-            AudioManager.setHarvestActive(troop, "rock", false);
-        }
+        this._stopGatherPresentation(troop);
+        this._stopHarvestLoops(troop);
 
         if (removeFromQueue && activeTask) {
             Teams.removeFromStateArray(troop.body.team, "foragerQueue", activeTask);
@@ -284,8 +354,12 @@ export class blockResourceManager{
         }
 
         const queued = this._queuedAssignableBlockTasksForTroop(troop);
-        if (queued.length && Manager.assignOneTroopToAction(troop, queued, CONTROL_STATES.GET_BLOCK_RESOURCE)) {
-            return true;
+        if (queued.length) {
+            for (const queuedTask of queued) {
+                if (Manager.assignTaskToTroop(troop, queuedTask, this._stateForTask(queuedTask))) {
+                    return true;
+                }
+            }
         }
 
         if (this._shouldReturnTroopToTown(troop)) {
@@ -299,7 +373,7 @@ export class blockResourceManager{
     }
 
     static _queuedBlockTasks(teamNumber) {
-        return (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []).filter(task => task?.forageType === "block");
+        return (Teams.teamLists?.[`${teamNumber}`]?.foragerQueue || []).filter(task => this._isResourceTask(task));
     }
 
     static countOutstandingManualClickTasks(teamNumber, taskOrValue) {
@@ -324,7 +398,7 @@ export class blockResourceManager{
         const node = this._nodeForTaskOrValue(taskOrValue);
         if (!node) return false;
 
-        if (node.task && node.task.forageType === "block" && !node.task.manualClick) {
+        if (node.task && this._isResourceTask(node.task) && !node.task.manualClick) {
             return true;
         }
 
@@ -362,7 +436,7 @@ export class blockResourceManager{
             value: node,
             assigned: 0,
             remaining: 1,
-            forageType: "block",
+            forageType: this._getForageTypeForTile(tileType),
             workerCapacity: 1,
             manualClick: true,
             eligibleTroopIds: this._normalizeEligibleTroopIds(eligibleTroopIds),
@@ -401,9 +475,8 @@ export class blockResourceManager{
                     troop.timer.remove(false);
                     troop.timer = null;
                 }
-                this._clearGatherSwing(troop);
-                const isWoodJob = task.type === TILE_TYPES.pine;
-                AudioManager.setHarvestActive(troop, isWoodJob ? "wood" : "rock", false);
+                this._stopGatherPresentation(troop);
+                this._setHarvestLoop(troop, task, false);
                 task.assigned = Math.max(0, Number(task.assigned || 0) - 1);
                 troop.task = null;
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -416,16 +489,17 @@ export class blockResourceManager{
 
     static assingTroopsToGetBlockResources(teamNumber){
         let blockList = (Teams.teamLists[`${teamNumber}`].foragerQueue || [])
-            .filter(task => task?.forageType === 'block' && !task.directOrderId);
+            .filter(task => this._isResourceTask(task) && !task.directOrderId);
         const force = Player.selected.length? true : false;
         const troops = Player.selected.length
             ? Player.selected.filter(troop => troop?.isForager)
             : Teams.teamLists[`${teamNumber}`].foragerList ;
-        Manager.assignTroopsToAction(troops, blockList, CONTROL_STATES.GET_BLOCK_RESOURCE, force);
+        Manager.assignTroopsToAction(troops, blockList, CONTROL_STATES.TRACK_MODE, force);
     }
 
     static assignTroopToGetBlockResource(troop, task){
-        Manager.assignOneTroopToAction(troop, task, CONTROL_STATES.GET_BLOCK_RESOURCE);
+        if (!troop || !task) return false;
+        return Manager.assignTaskToTroop(troop, task, this._stateForTask(task));
     }
 
     static beginFarmingBlockResource(sprite) {
@@ -446,17 +520,21 @@ export class blockResourceManager{
             return;
         }
 
+        if (task?.type?.gatherMode === "pickup" || task?.value?.resourceTileType?.gatherMode === "pickup") {
+            Teams.movePlayerState(sprite, CONTROL_STATES.SEED_MODE);
+            seedManager.beginSeeding(sprite);
+            return;
+        }
+
         if (!sprite.timer) {
-            const isWoodJob = sprite.task.type == TILE_TYPES.pine;
-            AudioManager.setHarvestActive(sprite, isWoodJob ? "wood" : "rock", true);
-            const duration = sprite.task.type == TILE_TYPES.pine ? this.woodBreakDuration : this.rockBreakDuration;
-            this._playGatherSwing(sprite, sprite.task, duration);
+            const duration = this._getGatherDuration(sprite.task);
+            this._setHarvestLoop(sprite, sprite.task, true);
+            this._startGatherPresentation(sprite, sprite.task, duration);
             sprite.timer = this.scene.time.delayedCall(duration, () => {
                 if (!sprite.active || sprite.state != CONTROL_STATES.GET_BLOCK_RESOURCE) {
                     // job interrupted
-                    const isWoodJob = sprite.task?.type == TILE_TYPES.pine;
-                    this._clearGatherSwing(sprite);
-                    AudioManager.setHarvestActive(sprite, isWoodJob ? "wood" : "rock", false);
+                    this._stopGatherPresentation(sprite);
+                    this._setHarvestLoop(sprite, sprite.task, false);
                     sprite.timer = null;
                     return;
                 }
@@ -471,7 +549,7 @@ export class blockResourceManager{
                     return;
                 }
 
-                this._clearGatherSwing(sprite);
+                this._stopGatherPresentation(sprite);
                 const node = task.value;
                 const isManualClick = !!task.manualClick;
                 const nextHealth = Math.max(0, Number(node?.health ?? task.remaining ?? 1) - 1);
@@ -525,7 +603,10 @@ export class blockResourceManager{
                     buildingManager.removeBuildingFromArray(task.x, task.y);
                     VisibilitySystem.onOccluderChangedRect(task.x, task.y, task.type.lenX, task.type.lenY, /*isBlock=*/false);
                 }
-                AudioManager.playBlockBreak(isWoodJob ? "wood" : "rock");
+                const material = this._getGatherAudioMaterial(task);
+                if (material) {
+                    AudioManager.playBlockBreak(material);
+                }
                 StorageManager.addCarriedItem(sprite, task.resource);
                 sprite.timer = null;
                 if (isManualClick || task.remaining <= 0) {
@@ -534,8 +615,7 @@ export class blockResourceManager{
                         task.value.task = null;
                     }
                 }
-                const finishedWoodJob = task.type == TILE_TYPES.pine;
-                AudioManager.setHarvestActive(sprite, finishedWoodJob ? "wood" : "rock", false);
+                this._setHarvestLoop(sprite, task, false);
                 this.syncNodeFlash(sprite.body.team, task.value);
                 this._clearTroopBlockTask(sprite, task, {
                     removeFromQueue: false,
@@ -578,7 +658,7 @@ export class blockResourceManager{
 
         const parcelTasks = new Set();
         for (const task of team.foragerQueue || []) {
-            if (task?.forageType !== "block") continue;
+            if (!this._isResourceTask(task)) continue;
             if (!matchesNode(task.value)) continue;
             parcelTasks.add(task);
         }
@@ -586,7 +666,7 @@ export class blockResourceManager{
         const affectedTroops = new Set();
         for (const troop of team.foragerList || []) {
             if (!troop?.active) continue;
-            const troopTask = troop.task?.forageType === "block" ? troop.task : null;
+            const troopTask = this._isResourceTask(troop.task) ? troop.task : null;
             if (troopTask && (parcelTasks.has(troopTask) || matchesNode(troopTask.value))) {
                 parcelTasks.add(troopTask);
                 affectedTroops.add(troop);
@@ -608,7 +688,7 @@ export class blockResourceManager{
         }
 
         for (const troop of affectedTroops) {
-            const task = troop.task?.forageType === "block" ? troop.task : null;
+            const task = this._isResourceTask(troop.task) ? troop.task : null;
             this._clearTroopBlockTask(troop, task, {
                 removeFromQueue: true,
                 clearNodeTask: true,
@@ -623,7 +703,7 @@ export class blockResourceManager{
         if (!team) return;
 
         // Accept either a task object or a sprite/value that has .task
-        const task = taskOrValue?.forageType === 'block'
+        const task = this._isResourceTask(taskOrValue)
             ? taskOrValue
             : (taskOrValue?.task || null);
 

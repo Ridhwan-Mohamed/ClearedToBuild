@@ -11,6 +11,15 @@ import { AudioManager } from "./AudioManager";
 export class seedManager {
     static scene;
 
+    static _isWorldPickupTask(task) {
+        return !!(task?.value?.resourceTileType?.gatherMode === "pickup");
+    }
+
+    static _getPickupDuration(task) {
+        const duration = Number(task?.type?.gatherDuration || task?.value?.resourceTileType?.gatherDuration || 0);
+        return duration > 0 ? duration : 1000;
+    }
+
     static assignSeedsToTroops(teamNumber) {
         const force = Player.selected.length? true : false;
         const troops = Player.selected.length? Player.selected : Teams.teamLists[`${teamNumber}`].foragerList;
@@ -24,18 +33,20 @@ export class seedManager {
             sprite.task = null;
             return;
         }
-        if (sprite.isFarmer && sprite.plantPose) {
+        if (this._isWorldPickupTask(task) && sprite.pickupPose) {
+            Player.setPoseLock(sprite, sprite.pickupPose);
+        } else if (sprite.isFarmer && sprite.plantPose) {
             Player.setPoseLock(sprite, sprite.plantPose);
         } else {
             sprite.play('action')
         }
-        sprite.timer = this.scene.time.delayedCall(1000, () => {
+        sprite.timer = this.scene.time.delayedCall(this._getPickupDuration(task), () => {
             if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) {
-                Player.clearPoseLock(sprite);
+                Player.clearPoseLock(sprite, sprite.idle);
                 sprite.timer = null;
                 return;
             }
-            Teams.removeFromStateArray(1, "foragerQueue", sprite.task);
+            Teams.removeFromStateArray(sprite.body.team, "foragerQueue", sprite.task);
             if (sprite) {
                 this.onSeedingDone(sprite);
             }
@@ -44,6 +55,36 @@ export class seedManager {
     }    
 
     static onSeedingDone(sprite) {
+        if (this._isWorldPickupTask(sprite.task)) {
+            const task = sprite.task;
+            const node = task?.value;
+            const itemType = task?.resource || node?.resourceTileType?.resource || null;
+
+            if (itemType) {
+                StorageManager.addCarriedItem(sprite, itemType);
+                AudioManager.playPickup();
+            }
+
+            task.assigned = Math.max(0, Number(task?.assigned || 0) - 1);
+            if (node?.task === task) {
+                node.task = null;
+            }
+            node?.stopFlash?.();
+            if (typeof node?.applyBlockDamage === "function") {
+                node.applyBlockDamage(0);
+            } else {
+                node?.destroy?.();
+            }
+
+            sprite.task = null;
+            Player.clearPoseLock(sprite, sprite.idle);
+
+            if (!StorageManager.tryCreateStorageDeliveryTask(sprite)) {
+                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+            }
+            return;
+        }
+
         let x = sprite.task.x;
         let y = sprite.task.y;
         // Determine item type

@@ -113,6 +113,9 @@ export default class StorageTab {
   build() {
     const scene = this.scene;
     const CONTENT_H = 112;
+    const listWidth = Math.max(230, Math.floor(scene.scale.width * 0.38) - 28);
+    const detailWidth = Math.max(360, scene.scale.width - listWidth - 42);
+    this.listWidth = listWidth;
     const root = scene.rexUI.add.sizer({
       height: CONTENT_H,
       orientation: "x",
@@ -121,18 +124,18 @@ export default class StorageTab {
     root.setMinSize(0, CONTENT_H);
 
     this.detail = this.buildDetailPanel();
-    this.detail.panel?.setMinSize?.(0, CONTENT_H);
+    this.detail.panel?.setMinSize?.(detailWidth, CONTENT_H);
     const detailSizer = scene.rexUI.add.sizer({
       orientation: "y",
       height: CONTENT_H,
     }).add(this.detail.panel, { proportion: 1, expand: true });
-    detailSizer.setMinSize(0, CONTENT_H);
+    detailSizer.setMinSize(detailWidth, CONTENT_H);
     root.add(detailSizer, { proportion: 1, expand: true });
 
     this.listBody = scene.rexUI.add.sizer({ orientation: "y", space: { item: 8 } });
 
     this.scroll = scene.rexUI.add.scrollablePanel({
-      width: Math.floor(scene.scale.width * (2 / 3)) - 48,
+      width: listWidth,
       height: CONTENT_H,
       scrollMode: 0,
       scrollDetectionMode: 'rectBounds',
@@ -152,7 +155,7 @@ export default class StorageTab {
     });
     this.scroll.setMinSize(0, CONTENT_H);
 
-    root.add(this.scroll, { proportion: 2, expand: true });
+    root.add(this.scroll, { proportion: 1, expand: true });
     this.rebuildList();
     root.layout();
     return root;
@@ -238,11 +241,11 @@ export default class StorageTab {
 
       const button = (label, fill = 0x305f78, stroke = 0xa9ebff) => {
         const bg = panelBg(0, 0, 12, fill, 0.96, stroke, 0.18);
-        const labelText = text(label, { fontSize: compact ? 11 : 12 });
+        const labelText = text(label, { fontSize: compact ? 10 : 11 });
         const btn = scene.rexUI.add.label({
           background: bg,
           text: labelText,
-          space: { left: compact ? 10 : 12, right: compact ? 10 : 12, top: compact ? 6 : 8, bottom: compact ? 6 : 8 }
+          space: { left: compact ? 8 : 10, right: compact ? 8 : 10, top: compact ? 4 : 6, bottom: compact ? 4 : 6 }
         });
         btn.labelText = labelText;
         btn.setInteractive({ useHandCursor: true });
@@ -258,22 +261,30 @@ export default class StorageTab {
 
       const title = text("Storage", { fontSize: 15 });
       const sub = text("-", { fontSize: 11, color: "#b0b0b0" });
-      const storageHpBar = makeHpBarWithText(compact ? 220 : 240, 16);
-
-      const cellSize = compact ? 32 : 36;
-      const previewSize = compact ? 60 : 68;
-      const descWrap = compact ? 145 : 188;
-      const leftPaneWidth = cellSize * 4 + 34;
+      const slotCount = StorageBuilding.defaultCapacity || 8;
+      const gridColumns = 4;
+      const gridRows = Math.max(1, Math.ceil(slotCount / gridColumns));
+      const contentWidth = Math.max(330, (this.detailWidth || 380) - 18);
+      const contentGap = compact ? 8 : 10;
+      const leftPaneWidth = Math.max(188, Math.floor(contentWidth * 0.64));
+      const rightPaneWidth = Math.max(132, contentWidth - leftPaneWidth - contentGap);
+      const hpWidth = Math.max(170, contentWidth - 108);
+      const storageHpBar = makeHpBarWithText(hpWidth, 16);
+      const cellGap = compact ? 4 : 6;
+      const maxCellByWidth = Math.floor((leftPaneWidth - 18 - cellGap * (gridColumns - 1)) / gridColumns);
+      const cellSize = Phaser.Math.Clamp(maxCellByWidth, compact ? 28 : 30, compact ? 32 : 34);
+      const previewSize = Phaser.Math.Clamp(Math.floor(rightPaneWidth * 0.42), compact ? 44 : 48, compact ? 54 : 60);
+      const descWrap = Math.max(110, rightPaneWidth - 14);
 
       let currentStorage = null;
       let selectedSlotIndex = null;
 
       const gridSizer = scene.rexUI.add.gridSizer({
-        column: 4,
-        row: 4,
+        column: gridColumns,
+        row: gridRows,
         columnProportions: 1,
         rowProportions: 1,
-        space: { column: 6, row: 6, left: 2, right: 2, top: 2, bottom: 2 },
+        space: { column: cellGap, row: cellGap, left: 2, right: 2, top: 2, bottom: 2 },
       });
 
       const makeCell = () => {
@@ -333,20 +344,20 @@ export default class StorageTab {
       };
 
       const cells = [];
-      for (let i = 0; i < 16; i++) {
+      for (let i = 0; i < slotCount; i++) {
         const cell = makeCell();
-        gridSizer.add(cell, { column: i % 4, row: Math.floor(i / 4), expand: false });
+        gridSizer.add(cell, { column: i % gridColumns, row: Math.floor(i / gridColumns), expand: false });
         cells.push(cell);
       }
 
       const inventoryPanel = scene.rexUI.add.sizer({
         orientation: "y",
         width: leftPaneWidth,
-        space: { left: 8, right: 8, top: 8, bottom: 8, item: 6 }
+        space: { left: 8, right: 8, top: 6, bottom: 6, item: 4 }
       })
         .addBackground(panelBg(leftPaneWidth, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
-        .add(text("Stored Items", { fontSize: compact ? 10 : 11, color: "#9fdfff" }), { expand: false, align: "left" })
-        .add(gridSizer, { expand: false, align: "center" });
+        .add(gridSizer, { proportion: 1, expand: true, align: "center" });
+      inventoryPanel.setMinSize(leftPaneWidth, 0);
 
       const previewSlot = scene.rexUI.add.overlapSizer({ width: previewSize, height: previewSize });
       const previewBg = panelBg(previewSize, previewSize, 18, 0x102637, 0.96, 0x8fe6ff, 0.16);
@@ -360,14 +371,14 @@ export default class StorageTab {
       previewSlot.add(previewEmpty, { align: "center" });
       previewSlot.add(previewCount, { align: "right-bottom", padding: { right: 8, bottom: 6 } });
 
-      const detailTitle = text("No Slot Selected", { fontSize: compact ? 11 : 12 });
-      const detailMeta = text("Choose a filled slot on the left to inspect it.", {
-        fontSize: compact ? 8 : 9,
+      const detailTitle = text("No Slot Selected", { fontSize: compact ? 10 : 11 });
+      const detailMeta = text("Pick a filled slot to inspect it.", {
+        fontSize: compact ? 7 : 8,
         color: "#9fdfff",
         wordWrap: { width: descWrap }
       });
       const detailDesc = text("", {
-        fontSize: compact ? 8 : 9,
+        fontSize: compact ? 7 : 8,
         color: "#d9eef8",
         wordWrap: { width: descWrap }
       });
@@ -381,22 +392,22 @@ export default class StorageTab {
         .add(detailDesc, { expand: false, align: "left" });
 
       const detailBody = scene.rexUI.add.sizer({
-        orientation: "x",
-        space: { item: compact ? 8 : 10 }
+        orientation: "y",
+        space: { item: compact ? 5 : 6 }
       })
         .add(previewSlot, { proportion: 0, expand: false, align: "center" })
-        .add(detailCopy, { proportion: 1, expand: true, align: "center" });
+        .add(detailCopy, { proportion: 1, expand: true, align: "left" });
 
       const detailPanel = scene.rexUI.add.sizer({
         orientation: "y",
-        space: { left: 10, right: 10, top: 8, bottom: 8, item: 6 }
+        space: { left: 8, right: 8, top: 6, bottom: 6, item: 4 }
       })
         .addBackground(panelBg(0, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
-        .add(text("Slot Detail", { fontSize: compact ? 10 : 11, color: "#9fdfff" }), { expand: false, align: "left" })
-        .add(detailBody, { proportion: 0, expand: true, align: "center" });
+        .add(detailBody, { proportion: 1, expand: true, align: "center" });
+      detailPanel.setMinSize(rightPaneWidth, 0);
 
       const sellSummary = text("Select a filled slot to sell items.", {
-        fontSize: compact ? 8 : 9,
+        fontSize: compact ? 7 : 8,
         color: "#cfe8f4",
         wordWrap: { width: descWrap }
       });
@@ -408,7 +419,7 @@ export default class StorageTab {
 
       const actionsRow = scene.rexUI.add.sizer({
         orientation: "x",
-        space: { item: 6 }
+        space: { item: 4 }
       })
         .add(sellOneBtn, { proportion: 1, expand: true })
         .add(sellStackBtn, { proportion: 1, expand: true });
@@ -417,7 +428,7 @@ export default class StorageTab {
         .add(sellSummary, { expand: false, align: "left" })
         .add(actionsRow, { expand: false, align: "left" });
 
-      const fixBtn = button("Fix", 0x2f7d32, 0x95f5a6).setMinSize(110, compact ? 34 : 36);
+      const fixBtn = button("Fix", 0x2f7d32, 0x95f5a6).setMinSize(92, compact ? 28 : 30);
       fixBtn.on("pointerup", () => {
         const storage = this.selected;
         if (!storage) return;
@@ -426,9 +437,9 @@ export default class StorageTab {
 
       const contentRow = scene.rexUI.add.sizer({
         orientation: "x",
-        space: { item: 12 }
+        space: { item: contentGap }
       })
-        .add(inventoryPanel, { proportion: 0, expand: false, align: "top" })
+        .add(inventoryPanel, { proportion: 2, expand: true, align: "top" })
         .add(detailPanel, { proportion: 1, expand: true, align: "top" });
 
       const titleCol = scene.rexUI.add.sizer({
@@ -440,7 +451,7 @@ export default class StorageTab {
 
       const headerRow = scene.rexUI.add.sizer({
         orientation: "x",
-        space: { item: 8 }
+        space: { item: 6 }
       })
         .add(titleCol, { proportion: 1, align: "left", expand: true })
         .add(fixBtn, { proportion: 0, align: "right", expand: false });
@@ -457,7 +468,7 @@ export default class StorageTab {
           previewCount.setVisible(false);
           previewEmpty.setVisible(true);
           detailTitle.setText("No Slot Selected");
-          detailMeta.setText("Choose a filled slot on the left to inspect it.");
+          detailMeta.setText("Pick a filled slot to inspect it.");
           detailDesc.setText("");
           sellSummary.setText("Select a filled slot to sell items.");
           sellOneBtn.labelText.setText("Sell 1");
@@ -516,7 +527,7 @@ export default class StorageTab {
         storageHpBar.setValue(storage.health ?? 0, storage.maxHealth ?? 1);
         const projected = this.getProjectedSlots(storage);
 
-        for (let i = 0; i < 16; i++) {
+        for (let i = 0; i < slotCount; i++) {
           const slot = storage.storageItems?.[i] || null;
           const projectedSlot = projected?.[i] || null;
           const key = UI_ITEM_TYPES[slot?.item?.name || "empty"]?.icon || null;
@@ -564,10 +575,10 @@ export default class StorageTab {
           });
       });
 
-      const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 6 } })
+      const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 4 } })
         .add(headerRow, 0, "left", 0, true)
         .add(storageHpBar, 0, "left", 0, false)
-        .add(contentRow, { proportion: 0, expand: true });
+        .add(contentRow, { proportion: 1, expand: true });
 
       return { panel, setStorage, cells };
     }
@@ -930,7 +941,7 @@ export default class StorageTab {
       .add.roundRectangle(0, 0, 0, 0, 6, 0xffffff, 0.08)
       .setStrokeStyle(1, 0xffffff, 0.15);
 
-    const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
+    const fullWidth = Math.max(220, (this.listWidth ?? Math.floor(scene.scale.width * 0.5)) - 24);
 
     // helper: HP bar (no text)
     const makeHpBar = (width, height) => {

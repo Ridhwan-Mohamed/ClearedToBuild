@@ -128,6 +128,32 @@ export class VisibilitySystem {
     }
   }
 
+  static reset() {
+    if (this._resizeHandler && this.scene?.scale) {
+      this.scene.scale.off("resize", this._resizeHandler);
+    }
+
+    this.scene = null;
+    this.requestedViewRect = null;
+    this.viewRect = null;
+    this._resizeHandler = null;
+    this.uiCam = null;
+    this.overviewMode = false;
+    this.ambient = 1.0;
+    this.lightSources = [];
+    this.visionBubbles = [];
+    this._lightChunks.clear();
+    this._visionChunks.clear();
+
+    if (this.viewRT) {
+      try { this.viewRT.destroy(true); } catch {}
+    }
+    this.viewRT = null;
+    this._fog = new Float32Array(0);
+    this._light = new Float32Array(0);
+    this._cap = 0;
+  }
+
   // ===== Public API =====
 
   // Called by your map reDraw: define current view rect (tile coords)

@@ -23,6 +23,10 @@ export const STORAGE_SELL_PRICES = Object.freeze({
 export class StorageManager {
     static scene;
 
+    static _getTeam(teamNumber) {
+        return Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber] ?? null;
+    }
+
     static getStorageSellPrice(itemOrName) {
         const name = typeof itemOrName === "string" ? itemOrName : itemOrName?.name;
         return STORAGE_SELL_PRICES[name] ?? 0;
@@ -41,7 +45,7 @@ export class StorageManager {
     }
 
     static pruneTeamDeliveryTasks(teamNumber) {
-        const team = Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber];
+        const team = this._getTeam(teamNumber);
         if (!team) return [];
 
         const players = Array.isArray(team.playerList) ? team.playerList : [];
@@ -70,8 +74,52 @@ export class StorageManager {
         return team.storageDeliveryItems;
     }
 
+    static handleStorageDestroyed(storage) {
+        const teamNumber = storage?.teamNumber;
+        const team = this._getTeam(teamNumber);
+        if (!team || !storage) return;
+
+        const players = Array.isArray(team.playerList) ? team.playerList : [];
+
+        team.storageDeliveryItems = (team.storageDeliveryItems || []).filter((task) => task?.storage && task.storage !== storage);
+        team.storageDeliveryReservations = (team.storageDeliveryReservations || []).filter((reservation) => reservation?.storage && reservation.storage !== storage);
+
+        for (const troop of players) {
+            if (!troop || troop.active === false) continue;
+            const task = troop.task;
+            const targetsStorage = task?.storage === storage;
+            const hadReservation = troop.pendingStorageDeliveryReservation?.storage === storage;
+            if (!targetsStorage && !hadReservation) continue;
+
+            if (targetsStorage && task.taskType === "storagePickup" && task.item) {
+                storage.releasePickup?.(task.item, 1);
+            }
+
+            troop.pendingStorageDeliveryReservation = null;
+
+            if (targetsStorage) {
+                troop.task = null;
+                troop.currentPath = [];
+                troop.setVelocity?.(0, 0);
+            }
+
+            if (targetsStorage && (
+                troop.state === CONTROL_STATES.SEND_TO_STORAGE ||
+                troop.state === CONTROL_STATES.GET_FROM_STORAGE
+            )) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
+
+            if (troop.carrying) {
+                this.tryCreateStorageDeliveryTask(troop);
+            }
+        }
+
+        this.pruneTeamDeliveryTasks(teamNumber);
+    }
+
     static grantItemToTeam(teamNumber, itemType, amount, scene = this.scene) {
-        const team = Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber];
+        const team = this._getTeam(teamNumber);
         const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
         const requested = Math.max(0, Math.floor(Number(amount) || 0));
         if (!team || !itemDef || requested <= 0) return 0;
@@ -88,9 +136,7 @@ export class StorageManager {
         }
 
         const added = requested - remaining;
-        if (added > 0) {
-            DailyNeedsTracker.updateUIItems(itemDef, added, false);
-        } else if (!storages.length && scene) {
+        if (!storages.length && scene) {
             DailyNeedsTracker.updateUIItems(itemDef, requested, false);
             return requested;
         }
@@ -98,19 +144,114 @@ export class StorageManager {
         return added;
     }
 
+    static getDeliveryReservation(troop, itemType = null) {
+        const reservation = troop?.pendingStorageDeliveryReservation || null;
+        if (!reservation) return null;
+
+        const itemName = typeof itemType === "string" ? itemType : itemType?.name;
+        if (itemName && reservation.item?.name !== itemName) {
+            return null;
+        }
+
+        return reservation;
+    }
+
+    static canReserveDeliverySpace(teamNumber, itemType, preferredStorage = null) {
+        const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
+        if (!itemDef) return false;
+        return !!StorageBuilding.canAcceptItem(itemDef, teamNumber, preferredStorage);
+    }
+
+    static reserveDeliverySpace(troop, itemType, amount = 1, preferredStorage = null) {
+        if (!troop?.body?.team) return null;
+
+        const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
+        if (!itemDef) return null;
+
+        const stale = this.getDeliveryReservation(troop);
+        if (stale && stale.item?.name !== itemDef.name) {
+            this.releaseDeliveryReservation(troop);
+        }
+
+        const existing = this.getDeliveryReservation(troop, itemDef);
+        if (existing) return existing;
+
+        const result = StorageBuilding.canAcceptItem(itemDef, troop.body.team, preferredStorage);
+        if (!result?.storage) return null;
+
+        const team = this._getTeam(troop.body.team);
+        if (!team) return null;
+
+        const reservation = {
+            troopId: troop.id,
+            storage: result.storage,
+            index: result.idx,
+            item: itemDef,
+            amount: Math.max(1, Math.floor(Number(amount) || 1)),
+            createdAt: Date.now(),
+        };
+
+        if (!Array.isArray(team.storageDeliveryReservations)) {
+            team.storageDeliveryReservations = [];
+        }
+        team.storageDeliveryReservations.push(reservation);
+        troop.pendingStorageDeliveryReservation = reservation;
+        return reservation;
+    }
+
+    static releaseDeliveryReservation(troopOrReservation, { clearTroopRef = true } = {}) {
+        const troopRef = troopOrReservation?.pendingStorageDeliveryReservation ? troopOrReservation : null;
+        const reservation = troopOrReservation?.storage
+            ? troopOrReservation
+            : troopRef?.pendingStorageDeliveryReservation || null;
+        if (!reservation) return false;
+
+        const teamNumber = troopRef?.body?.team ?? reservation.storage?.teamNumber;
+        const team = this._getTeam(teamNumber);
+        if (team && Array.isArray(team.storageDeliveryReservations)) {
+            const idx = team.storageDeliveryReservations.indexOf(reservation);
+            if (idx !== -1) {
+                team.storageDeliveryReservations.splice(idx, 1);
+            }
+        }
+
+        if (clearTroopRef && troopRef?.pendingStorageDeliveryReservation === reservation) {
+            troopRef.pendingStorageDeliveryReservation = null;
+        }
+
+        return true;
+    }
+
     static tryCreateStorageDeliveryTask(troop) {
         const carryEntry = troop.carrying;
         if (!carryEntry?.name) return false;
 
         const teamNumber = troop.body.team;
-        const team = Teams.teamLists?.[teamNumber];
+        const team = this._getTeam(teamNumber);
         if (!team) return false;
 
         this.pruneTeamDeliveryTasks(teamNumber);
 
-        const result = StorageBuilding.canAcceptItem(carryEntry, teamNumber);
-        if (!result) return false;
-        const { storage, idx, remaining } = result;
+        const staleReservation = this.getDeliveryReservation(troop);
+        if (staleReservation && staleReservation.item?.name !== carryEntry.name) {
+            this.releaseDeliveryReservation(troop);
+        }
+
+        const reserved = this.getDeliveryReservation(troop, carryEntry);
+        let storage = reserved?.storage ?? null;
+        let idx = reserved?.index ?? null;
+        let remaining = 1;
+
+        if (!storage || !team.storageList?.includes(storage)) {
+            if (reserved) {
+                this.releaseDeliveryReservation(troop);
+            }
+            const result = StorageBuilding.canAcceptItem(carryEntry, teamNumber);
+            if (!result) return false;
+            storage = result.storage;
+            idx = result.idx;
+            remaining = result.remaining;
+        }
 
         let task = team.storageDeliveryItems.find(existing =>
             existing.storage === storage && existing.item?.name === carryEntry.name
@@ -135,7 +276,11 @@ export class StorageManager {
             team.storageDeliveryItems.push(task);
         }
 
-        return Manager.assignTaskToTroop(troop, task, CONTROL_STATES.SEND_TO_STORAGE);
+        const assigned = Manager.assignTaskToTroop(troop, task, CONTROL_STATES.SEND_TO_STORAGE);
+        if (assigned && reserved) {
+            this.releaseDeliveryReservation(troop);
+        }
+        return assigned;
     }
 
     static tryCreateStoragePickupTask(troop, itemType) {
@@ -210,7 +355,6 @@ export class StorageManager {
 
         if (success) {
             this.removeCarriedItem(troop);
-            DailyNeedsTracker.updateUIItems(carried, 1);
         }
 
         // Clean up task

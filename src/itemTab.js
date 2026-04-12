@@ -25,6 +25,8 @@ import grass_overhang_corner from 'url:./assets/terrain/grass/grass_overhang_cor
 import grass_edge_water from 'url:./assets/terrain/grass/grass_edge_water.png'
 import grass_corner_water from 'url:./assets/terrain/grass/grass_corner_water.png'
 import grass_inner_corner_water from 'url:./assets/terrain/grass/grass_inner_corner_water.png'
+import berryBush from 'url:./assets/terrain/grass/berryBush.png'
+import seedBush from 'url:./assets/terrain/grass/seedBush.png'
 import water_interior from 'url:./assets/terrain/water/water_interior.png'
 import playerImg from 'url:./assets/Players/playerImg.png'
 import playerSwim from 'url:./assets/Players/playerSwim.png'
@@ -125,6 +127,8 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('grass_edge_water', grass_edge_water);
         scene.load.image('grass_corner_water', grass_corner_water);
         scene.load.image('grass_inner_corner_water', grass_inner_corner_water);
+        scene.load.image('berryBush', berryBush);
+        scene.load.image('seedBush', seedBush);
         scene.load.image('dirt_interior', dirt_interior);
         scene.load.image('dirt_edge_grass', dirt_edge_grass);
         scene.load.image('dirt_corner_grass', dirt_corner_grass);

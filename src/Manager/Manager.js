@@ -7,8 +7,22 @@ import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 export class Manager {
     static scene;
 
+    static _troopEligibleForState(troop, state) {
+        if (!troop) return false;
+
+        switch (state) {
+            case CONTROL_STATES.BUILD_MODE_T:
+            case CONTROL_STATES.BUILD_MODE_B:
+            case CONTROL_STATES.FIX_BUILDING:
+                return !!troop.isBuilder;
+            default:
+                return true;
+        }
+    }
+
     static _troopEligibleForTask(troop, task, state) {
         if (!troop || !task) return false;
+        if (!this._troopEligibleForState(troop, state)) return false;
         if (Array.isArray(task.eligibleTroopIds) && task.eligibleTroopIds.length) {
             return task.eligibleTroopIds.includes(troop.id);
         }
@@ -76,13 +90,14 @@ export class Manager {
                         approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                     }else if(this.blockType(state)){
                         if (
+                            state === CONTROL_STATES.BUILD_MODE_B ||
                             state === CONTROL_STATES.DESTROY_MODE ||
                             state === CONTROL_STATES.FIX_BUILDING ||
                             state === CONTROL_STATES.GET_BLOCK_RESOURCE
                         ) {
                             approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
                         } else {
-                            approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                            approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
                         }
                     }
                     if(approachTile){
@@ -152,13 +167,14 @@ export class Manager {
                     approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
                 }else if(this.blockType(state)){
                     if (
+                        state === CONTROL_STATES.BUILD_MODE_B ||
                         state === CONTROL_STATES.DESTROY_MODE ||
                         state === CONTROL_STATES.FIX_BUILDING ||
                         state === CONTROL_STATES.GET_BLOCK_RESOURCE
                     ) {
                         approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
                     } else {
-                        approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                        approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
                     }
                 }
                 if(approachTile){
@@ -228,13 +244,14 @@ export class Manager {
                 approachTile = buildingManager.findBuildApproachTile(task.x, task.y, troop)
             }else if(this.blockType(state)){
                 if (
+                    state === CONTROL_STATES.BUILD_MODE_B ||
                     state === CONTROL_STATES.DESTROY_MODE ||
                     state === CONTROL_STATES.FIX_BUILDING ||
                     state === CONTROL_STATES.GET_BLOCK_RESOURCE
                 ) {
                     approachTile = buildingManager.findApproachAnyPerimeter(task.x, task.y, task.type, troop, null, null, task);
                 } else {
-                    approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop)
+                    approachTile = buildingManager.findBuildApproachBlock(task.x, task.y, task.type, troop, null, null, task)
                 }
             }
             if(approachTile){

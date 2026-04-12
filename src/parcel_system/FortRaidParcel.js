@@ -580,7 +580,7 @@ export function clearNorthFort({ scene, map, meta } = {}) {
     });
 
     toRemove.forEach((troop) => {
-      try { troop.destroySelf?.(); } catch {}
+      try { troop.destroySelf?.({ silentStageCleanup: true }); } catch {}
     });
   }
 

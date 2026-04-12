@@ -536,4 +536,24 @@ export class AudioManager {
   static _clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
   }
+
+  static stopAll() {
+    const stopMap = (map) => {
+      for (const sound of map.values()) {
+        if (!sound) continue;
+        try { sound._phxFadeTween?.stop?.(); } catch {}
+        try { sound.stop?.(); } catch {}
+        try { sound.destroy?.(); } catch {}
+      }
+      map.clear();
+    };
+
+    stopMap(this.ambience);
+    stopMap(this.loops);
+
+    this.lastMix = null;
+    this.constructionWorkers.clear();
+    this.woodCutters.clear();
+    this.rockCutters.clear();
+  }
 }

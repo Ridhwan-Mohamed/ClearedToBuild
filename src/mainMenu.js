@@ -1,6 +1,6 @@
 import logo from 'url:../public/logo.png'
 import logoMini from 'url:../public/logoMini.png'
-import { TILE_MAP, TILE_TYPES, UIDEPTH, colorFor, create2DArray, PARCEL } from './constants';
+import { TILE_MAP, TILE_TYPES, UIDEPTH, colorFor, create2DArray, PARCEL, showAlert } from './constants';
 import { generateTown, buildingArray, townBounds, townRoads } from './town.js';
 import { Map } from './map.js';
 import { Teams } from './Teams.js';
@@ -27,10 +27,87 @@ import { ParcelManager } from './parcel_system/ParcelManager.js';
 import { buildPolysFromGridMap } from './lib/navmesh/map-parsers/build-polys-from-grid-map.js';
 import { StageState } from './parcelController/StageState.js';
 import { paintOverviewTexture } from './UI/OverviewStylePainter.js';
+import { getRunStoreUnlockKeys, grantHordeUnlockCatchup } from './parcel_system/HordeUnlockTrack.js';
+import { resetStoreUnlocks } from './parcel_system/StoreUnlockSystem.js';
 export var waterSourcesQuadTree;
 
 export class MainMenu {
     static scene = null;
+    static _pendingRestartReveal = null;
+
+    static queueRestartReveal(opts = {}) {
+        MainMenu._pendingRestartReveal = {
+            color: opts.color ?? 0x64b9ff,
+            fadeOutDuration: Math.max(220, Number(opts.fadeOutDuration) || 720),
+        };
+    }
+
+    static _consumeRestartReveal() {
+        const reveal = MainMenu._pendingRestartReveal;
+        MainMenu._pendingRestartReveal = null;
+        return reveal;
+    }
+
+    static _getOverlayScene(scene, opts = {}) {
+        if (!scene) return null;
+        const uiScene = scene.uiScene || scene.scene?.get?.('GameUIScene') || null;
+        const uiActive = !!uiScene?.sys?.isActive?.();
+        if (opts.requireActive) {
+            return uiActive ? uiScene : null;
+        }
+        return uiActive ? uiScene : scene;
+    }
+
+    static _createStartButton(overlayScene, x, y) {
+        const buttonWidth = Phaser.Math.Clamp(Math.round(overlayScene.scale.width * 0.19), 260, 360);
+        const buttonHeight = Phaser.Math.Clamp(Math.round(overlayScene.scale.height * 0.09), 82, 102);
+        const radius = Math.round(buttonHeight * 0.42);
+
+        const root = overlayScene.add.container(x, y);
+        const glow = overlayScene.add.ellipse(0, 12, buttonWidth * 1.08, buttonHeight * 1.18, 0x8de7ff, 0.16);
+
+        const shadow = overlayScene.add.graphics();
+        shadow.fillStyle(0x071a28, 0.30);
+        shadow.fillRoundedRect(-buttonWidth / 2, (-buttonHeight / 2) + 7, buttonWidth, buttonHeight, radius);
+
+        const panel = overlayScene.add.graphics();
+        panel.fillStyle(0x205f97, 0.96);
+        panel.fillRoundedRect(-buttonWidth / 2, -buttonHeight / 2, buttonWidth, buttonHeight, radius);
+        panel.fillStyle(0xffffff, 0.08);
+        panel.fillRoundedRect(
+            (-buttonWidth / 2) + 12,
+            (-buttonHeight / 2) + 10,
+            buttonWidth - 24,
+            Math.max(18, Math.round(buttonHeight * 0.34)),
+            Math.max(8, radius - 10),
+        );
+        panel.lineStyle(3, 0xffffff, 0.16);
+        panel.strokeRoundedRect(-buttonWidth / 2, -buttonHeight / 2, buttonWidth, buttonHeight, radius);
+
+        const hit = overlayScene.add
+            .rectangle(0, 0, buttonWidth, buttonHeight, 0xffffff, 0.001)
+            .setInteractive({ useHandCursor: true });
+
+        const buttonArt = overlayScene.add.image(0, -6, 'startBtn').setOrigin(0.5);
+        const baseArtScale = Phaser.Math.Clamp((buttonWidth * 0.76) / Math.max(buttonArt.width || 1, 1), 1.55, 2.35);
+        buttonArt.setScale(baseArtScale);
+
+        const buttonHint = overlayScene.add.text(0, Math.round(buttonHeight * 0.27), 'Click To Begin', {
+            fontSize: '14px',
+            color: '#effaff',
+            fontFamily: 'Bungee',
+            stroke: '#0a1723',
+            strokeThickness: 3,
+        }).setOrigin(0.5).setAlpha(0.82);
+
+        root.add([glow, shadow, panel, hit, buttonArt, buttonHint]);
+        root.buttonHit = hit;
+        root.buttonGlow = glow;
+        root.buttonArt = buttonArt;
+        root.buttonHint = buttonHint;
+        root._artBaseScale = baseArtScale;
+        return root;
+    }
 
     static _getDraftCameraPose(scene, overlayScene = scene) {
         const tex = scene?.textures?.get?.('worldMap');
@@ -110,7 +187,7 @@ export class MainMenu {
         const scene = MainMenu.scene;
         if (!scene) return;
 
-        const overlayScene = scene.uiScene || scene;
+        const overlayScene = MainMenu._getOverlayScene(scene) || scene;
         const cam = scene.cameras.main;
         const duration = opts.immediate ? 0 : (show ? 520 : 360);
         const pose = show
@@ -221,7 +298,6 @@ export class MainMenu {
     /** Bind the live Phaser scene so static methods can use it */
     static attach(scene) {
         MainMenu.scene = scene;
-        console.log(worldMap)
         scene.load.image('logo', logo);
         scene.load.image('worldMap', worldMap)
         scene.load.image('townIcon', townIcon)
@@ -233,11 +309,32 @@ export class MainMenu {
     /** Build the preview/selection UI in screen space (on UI camera) */
     static startMenuPhase() {
         const scene = MainMenu.scene;
-        const overlayScene = scene.uiScene || scene;
+        if (!scene) return;
+
+        const overlayScene = MainMenu._getOverlayScene(scene, { requireActive: true });
+        if (!overlayScene) {
+            scene._pendingMenuPhase = true;
+            return;
+        }
+        scene._pendingMenuPhase = false;
+
         const centerX = overlayScene.scale.width / 2;
         const centerY = overlayScene.scale.height / 2;
         const cam = scene.cameras.main;
         const draftPose = MainMenu._getDraftCameraPose(scene, overlayScene);
+        const reveal = MainMenu._consumeRestartReveal();
+        const logoScale = Phaser.Math.Clamp(Math.min(overlayScene.scale.width / 1600, overlayScene.scale.height / 900), 0.94, 1.18);
+
+        scene.menu?.destroy?.();
+        scene.menu = null;
+        scene.logo = null;
+        scene.startButton = null;
+        scene.versionText = null;
+        scene._menuRevealFx?.destroy?.(true);
+        scene._menuRevealFx = null;
+
+        overlayScene.cameras?.main?.setScroll?.(0, 0);
+        overlayScene.cameras?.main?.setZoom?.(1);
 
         if (draftPose) {
             cam.roundPixels = true;
@@ -247,22 +344,94 @@ export class MainMenu {
 
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
-        const logo = overlayScene.add.image(centerX, centerY, 'logo').setOrigin(0.5);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.6', {
+        const logo = overlayScene.add.image(centerX, centerY - 10, 'logo').setOrigin(0.5).setScale(logoScale);
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.7', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);
-
         // Keep refs on world scene for existing handoff/fade code.
         scene.menu = menu;
         scene.logo = logo;
         scene.versionText = versionText;
 
-        const startButton = overlayScene.add.image(centerX, centerY + 260, 'startBtn')
-            .setOrigin(0.5)
-            .setInteractive({ cursor: 'pointer' });
+        const startButton = MainMenu._createStartButton(overlayScene, centerX, centerY + 252);
         menu.add(startButton);
         scene.startButton = startButton;
+
+        if (reveal) {
+            const revealFx = overlayScene.add.container(0, 0).setDepth(10040).setScrollFactor(0);
+            const blueCover = overlayScene.add.rectangle(
+                0,
+                0,
+                overlayScene.scale.width,
+                overlayScene.scale.height,
+                reveal.color,
+                1
+            ).setOrigin(0);
+            const glowA = overlayScene.add.circle(overlayScene.scale.width * 0.24, overlayScene.scale.height * 0.28, 180, 0xffffff, 0.08);
+            const glowB = overlayScene.add.circle(overlayScene.scale.width * 0.74, overlayScene.scale.height * 0.62, 220, 0xdbeafe, 0.07);
+            revealFx.add([blueCover, glowA, glowB]);
+            scene._menuRevealFx = revealFx;
+
+            menu.setAlpha(0);
+            logo.setY(centerY + 6).setScale(logoScale * 0.92);
+            startButton.setY(centerY + 280).setScale(0.92);
+            versionText.setY(overlayScene.scale.height - 8).setAlpha(0);
+
+            overlayScene.tweens.add({
+                targets: menu,
+                alpha: 1,
+                duration: 260,
+                delay: 120,
+                ease: 'Quad.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: logo,
+                y: centerY - 10,
+                scaleX: logoScale,
+                scaleY: logoScale,
+                duration: 560,
+                delay: 160,
+                ease: 'Back.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: startButton,
+                y: centerY + 252,
+                scaleX: 1,
+                scaleY: 1,
+                duration: 520,
+                delay: 240,
+                ease: 'Back.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: versionText,
+                y: overlayScene.scale.height - 20,
+                alpha: 1,
+                duration: 320,
+                delay: 320,
+                ease: 'Quad.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: [glowA, glowB],
+                alpha: 0,
+                scaleX: 1.16,
+                scaleY: 1.16,
+                duration: reveal.fadeOutDuration,
+                ease: 'Sine.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: blueCover,
+                alpha: 0,
+                duration: reveal.fadeOutDuration,
+                ease: 'Cubic.easeInOut',
+                onComplete: () => {
+                    if (scene._menuRevealFx === revealFx) {
+                        scene._menuRevealFx = null;
+                    }
+                    revealFx.destroy(true);
+                }
+            });
+        }
 
         // Wiggle animation
         overlayScene.tweens.add({
@@ -276,9 +445,9 @@ export class MainMenu {
 
         // Make button pulse a little
         overlayScene.tweens.add({
-            targets: startButton,
-            alpha: 0.25,
-            duration: 600,
+            targets: startButton.buttonGlow,
+            alpha: 0.10,
+            duration: 760,
             yoyo: true,
             repeat: -1
         });
@@ -286,7 +455,7 @@ export class MainMenu {
         // Float
         overlayScene.tweens.add({
         targets: logo,
-        y: centerY - 10,
+        y: centerY - 18,
         duration: 1200,
         yoyo: true,
         repeat: -1,
@@ -306,7 +475,8 @@ export class MainMenu {
         // Pulse
         overlayScene.tweens.add({
         targets: logo,
-        scale: { from: 1, to: 1.05 },
+        scaleX: { from: logoScale, to: logoScale * 1.05 },
+        scaleY: { from: logoScale, to: logoScale * 1.05 },
         duration: 1200,
         yoyo: true,
         repeat: -1,
@@ -314,10 +484,48 @@ export class MainMenu {
         });
 
 
-        startButton.on('pointerdown', () => {
-            startButton.disableInteractive();
+        startButton.buttonHit.on('pointerover', () => {
+            overlayScene.tweens.add({
+                targets: startButton.buttonGlow,
+                alpha: 0.24,
+                scaleX: 1.08,
+                scaleY: 1.1,
+                duration: 140,
+                ease: 'Quad.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: startButton.buttonArt,
+                scaleX: startButton._artBaseScale * 1.04,
+                scaleY: startButton._artBaseScale * 1.04,
+                duration: 140,
+                ease: 'Quad.easeOut',
+            });
+        });
+
+        startButton.buttonHit.on('pointerout', () => {
+            overlayScene.tweens.add({
+                targets: startButton.buttonGlow,
+                alpha: 0.16,
+                scaleX: 1,
+                scaleY: 1,
+                duration: 140,
+                ease: 'Quad.easeOut',
+            });
+            overlayScene.tweens.add({
+                targets: startButton.buttonArt,
+                scaleX: startButton._artBaseScale,
+                scaleY: startButton._artBaseScale,
+                duration: 140,
+                ease: 'Quad.easeOut',
+            });
+        });
+
+        startButton.buttonHit.on('pointerdown', () => {
+            startButton.buttonHit.disableInteractive();
             overlayScene.tweens.killTweensOf(logo);
             overlayScene.tweens.killTweensOf(startButton);
+            overlayScene.tweens.killTweensOf(startButton.buttonGlow);
+            overlayScene.tweens.killTweensOf(startButton.buttonArt);
             overlayScene.tweens.killTweensOf(versionText);
             overlayScene.tweens.add({
                 targets: versionText,
@@ -330,13 +538,13 @@ export class MainMenu {
             overlayScene.tweens.add({
                 targets: logo,
                 y: 72,
-                scale: 0.22,
+                scale: logoScale * 0.22,
                 duration: 1140,
                 alpha: 0,
                 ease: 'Cubic.easeInOut',
                 onComplete: () => {
                     logo.destroy();
-                    scene.time.delayedCall(140, () => {
+                    overlayScene.time.delayedCall(140, () => {
                         MainMenu.buildMapSelectPhase({ fromStartMenu: true });
                     });
                 }
@@ -346,8 +554,8 @@ export class MainMenu {
             overlayScene.tweens.add({
                 targets: startButton,
                 alpha: 0,
-                scaleX: 0.92,
-                scaleY: 0.92,
+                scaleX: 0.9,
+                scaleY: 0.9,
                 duration: 320,
                 onComplete: () => startButton.destroy()
             });
@@ -356,7 +564,7 @@ export class MainMenu {
 
     static buildMapSelectPhase(opts = {}){
         const scene = MainMenu.scene;
-        const overlayScene = scene.uiScene || scene;
+        const overlayScene = MainMenu._getOverlayScene(scene) || scene;
         const logoMiniY = Phaser.Math.Clamp(Math.round(overlayScene.scale.height * 0.11), 62, 132);
         const logoMini = overlayScene.add
             .image(overlayScene.scale.width / 2, logoMiniY, 'logoMini')
@@ -586,7 +794,7 @@ export class MainMenu {
         scene.isMainMenuPreview = true;
 
         // Build draft UI on UI scene so world camera zoom does not scale it.
-        const draftScene = scene.uiScene || scene.scene.get('GameUIScene') || scene;
+        const draftScene = MainMenu._getOverlayScene(scene) || scene;
         draftScene.menuPreview = scene.menuPreview;
         draftScene.fullRepaintPreview = scene.fullRepaintPreview?.bind(scene);
         draftScene.draftMenu?.destroy?.();
@@ -780,9 +988,10 @@ export class MainMenu {
 
     static beginLoadingAndHandOff(startCfg) {
         const scene = MainMenu.scene;
-        const overlayScene = scene.uiScene || scene;
+        const overlayScene = MainMenu._getOverlayScene(scene) || scene;
         const t1 = Teams.teamLists && Teams.teamLists["1"];
         const kitResources = startCfg?.resources ?? MainMenu.selectedStartKit?.resources ?? t1?.startKit?.resources;
+        const starterSupplies = startCfg?.resources ?? startCfg?.supplies ?? kitResources ?? null;
         const kitCards = Array.isArray(startCfg?.cards?.picked)
             ? startCfg.cards.picked.slice(0, 3)
             : (Array.isArray(MainMenu.selectedStartKit?.cards)
@@ -793,15 +1002,9 @@ export class MainMenu {
             // team name
             if (t1) t1.name = startCfg.teamName;
 
-            // supplies + starting cash
+            // Starting cash is applied here; actual supplies come from storage seeding.
             const startResources = startCfg.resources ?? startCfg.supplies ?? {};
-            scene.money          = startResources.money ?? startCfg.money?.amount ?? scene.money;
-            scene.seeds          = startResources.seeds ?? 0;
-            scene.berries        = startResources.berries ?? 0;
-            scene.woodAmnt       = startResources.wood ?? 0;
-            scene.stoneAmnt      = startResources.stone ?? 0;
-            scene.foodAmnt       = startResources.food ?? 0;
-            scene.cleanWaterAmnt = startResources.water ?? 0;
+            scene.money = startResources.money ?? startCfg.money?.amount ?? scene.money;
 
             // cards: you’ll want to map ids back to your real card objects
             // (keep this simple for now—if your cards are already objects with apply(), you can store them directly)
@@ -811,17 +1014,20 @@ export class MainMenu {
             // buildings are already written into gridData + buildingArray during the draft preview
         }
 
-        scene.permits = 2;
+        scene.permits = 0;
+
+        if (starterSupplies) {
+            scene.seeds = 0;
+            scene.berries = 0;
+            scene.woodAmnt = 0;
+            scene.stoneAmnt = 0;
+            scene.foodAmnt = 0;
+            scene.cleanWaterAmnt = 0;
+        }
         
-        // Apply the chosen starting kit (resources + starting cards) to Team 1
+        // Apply the chosen starting kit cards to Team 1
         if (kitResources) {
-            scene.money          = kitResources.money ?? scene.money;
-            scene.seeds          = kitResources.seeds ?? scene.seeds;
-            scene.berries        = kitResources.berries ?? scene.berries;
-            scene.woodAmnt       = kitResources.wood ?? scene.woodAmnt;
-            scene.stoneAmnt      = kitResources.stone ?? scene.stoneAmnt;
-            scene.foodAmnt       = kitResources.food ?? scene.foodAmnt;
-            scene.cleanWaterAmnt = kitResources.water ?? scene.cleanWaterAmnt;
+            scene.money = kitResources.money ?? scene.money;
         }
 
         if (t1 && Array.isArray(kitCards)) {
@@ -1077,10 +1283,27 @@ export class MainMenu {
                 blockResourceManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
             };
             // Endless horde run: start clean without a north-fort objective.
-            StageState.startEndlessRun?.();
+            const endlessStart = StageState.startEndlessRun?.() ?? {
+                stageIndex: Math.max(1, Number(StageState.stageIndex || 1)),
+                day: 1,
+                completedHordes: 0,
+            };
+            resetStoreUnlocks(getRunStoreUnlockKeys(), scene);
+            const catchupUnlocks = grantHordeUnlockCatchup(scene, endlessStart.completedHordes);
+            scene.clock?.setDay?.(endlessStart.day ?? 1);
+            if (catchupUnlocks.length) {
+                showAlert(
+                    scene,
+                    `Starting unlocks: ${catchupUnlocks.map((reward) => reward.displayLabel).join(", ")}`,
+                    "#a7f3d0",
+                    2600
+                );
+            }
+            scene.events.emit?.("stage:changed");
+            scene.uiScene?._refreshPhaseClock?.(true);
             scene.overviewOceanWaves?.resize?.();
 
-            const focusPose = MainMenu._getTownFocusPose(scene, scene.uiScene || scene, startCfg?.buildings);
+            const focusPose = MainMenu._getTownFocusPose(scene, MainMenu._getOverlayScene(scene) || scene, startCfg?.buildings);
             playReadyLogoSequence(focusPose);
         };
 

@@ -82,6 +82,7 @@ const UNIT_STORE = [
     name: "Blademaster",
     desc: "Elite sword fighter with heavy hits.",
     cost: { money: 250 },
+    unlockKey: STORE_UNLOCK_KEYS.blademaster,
     iconKey: "icon_blademaster_store",
     previewTexture: "blademaster_walk_down",
     unitClass: Blademaster,
@@ -91,6 +92,7 @@ const UNIT_STORE = [
     name: "Gunslinger",
     desc: "Ranged fighter with high recruit cost.",
     cost: { money: 500 },
+    unlockKey: STORE_UNLOCK_KEYS.gunslinger,
     iconKey: "icon_gunslinger_store",
     previewTexture: "gunslinger_walk_down",
     unitClass: Gunslinger,
@@ -282,8 +284,11 @@ function normalizeTileCost(tile) {
   return {};
 }
 
-function getDefCost(def) {
+function getDefCost(def, scene = null) {
   if (def?.isUnit) return def.cost ?? {};
+  if (def?.key === "house") {
+    return Teams.getHouseBuildCost?.(scene?.teamNumber ?? "1") ?? { wood: 4, stone: 4, permits: 1 };
+  }
   if (def?.cost) return def.cost;
   // walls: use wallTypeName; buildings: tileTypeName
   const tileKey = def.isWall ? def.wallTypeName : def.tileTypeName;
@@ -304,6 +309,13 @@ export default class BuildTab {
     this.pendingDef = null;
     this._placeClickBound = false;
     this.mode = "buildings";
+    this._cardsScrollHooksBound = false;
+    this._placementInputScene = null;
+    this._onCardsPointerUp = null;
+    this._onCardsPointerMove = null;
+    this._onCardsWheel = null;
+    this._onPlacePointerDown = null;
+    this._onPlaceEsc = null;
 
     ensureBuildTabIcons(scene);
 
@@ -319,8 +331,13 @@ export default class BuildTab {
 
     this._onStoreUnlockChanged = () => this.refreshAvailableDefs();
     scene.events.on("store:unlock-changed", this._onStoreUnlockChanged);
+    this._onHousingChanged = () => {
+      if (this.mode === "buildings") this._makeUI();
+    };
+    scene.events.on("housing:updated", this._onHousingChanged);
     scene.events.once("shutdown", () => {
       scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
+      scene.events.off("housing:updated", this._onHousingChanged);
     });
 
     this._makeUI();
@@ -329,17 +346,59 @@ export default class BuildTab {
     this.container.setScrollFactor(0).setDepth(UIDEPTH);
   }
 
+  destroy() {
+    this.scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
+    this.scene.events.off("housing:updated", this._onHousingChanged);
+    if (this._onCardsPointerUp) {
+      this.scene.input.off("pointerup", this._onCardsPointerUp);
+      this._onCardsPointerUp = null;
+    }
+    if (this._onCardsPointerMove) {
+      this.scene.input.off("pointermove", this._onCardsPointerMove);
+      this._onCardsPointerMove = null;
+    }
+    if (this._onCardsWheel) {
+      this.scene.input.off("wheel", this._onCardsWheel);
+      this._onCardsWheel = null;
+    }
+    if (this._placementInputScene?.input && this._onPlacePointerDown) {
+      this._placementInputScene.input.off("pointerdown", this._onPlacePointerDown);
+    }
+    if (this._placementInputScene?.input?.keyboard && this._onPlaceEsc) {
+      this._placementInputScene.input.keyboard.off("keydown-ESC", this._onPlaceEsc);
+    }
+    this._onPlacePointerDown = null;
+    this._onPlaceEsc = null;
+    this._placementInputScene = null;
+    this.view?.removeAll?.(true);
+    this.view?.destroy?.(true);
+    this.view = null;
+    this.container = null;
+    this._cardRefs = [];
+  }
+
   _makeBuildDefs() {
     const defs = [
       { key: "tower", name: "Town Tower", desc: "Core structure. Pays dawn income and permits. Lose if they all fall.", rarity: "rare", iconKey: "icon_town_tower", tileTypeName: "tower" },
-      { key:"house", name:"House", desc:"Adds housing capacity.", rarity:"common", iconKey:"icon_house", tileTypeName:"house1", cost: { permits: 1 } },
+      { key:"house", name:"House", desc:"Adds housing capacity.", rarity:"common", iconKey:"icon_house", tileTypeName:"house1" },
       { key: "storage",  name: "Storage",   desc: "More inventory space.",  rarity: "common", iconKey: "icon_storage",  tileTypeName: "storage",},
       { key: "clayOven", name: "Clay Oven", desc: "Cook food over time.",   rarity: "common", iconKey: "icon_clay_oven",tileTypeName: "clayOven",},
 
       // Walls live here now
       { key: "woodWall",  name: "Wood Wall",  desc: "Cheap defense.", rarity: "common", iconKey: "icon_wood_wall",  wallTypeName: "woodWall",  isWall: true },
-      { key: "stoneWall", name: "Stone Wall", desc: "Tough defense.", rarity: "rare",   iconKey: "icon_stone_wall", wallTypeName: "wall", isWall: true },
     ];
+
+    if (hasStoreUnlock(STORE_UNLOCK_KEYS.stoneWall)) {
+      defs.push({
+        key: "stoneWall",
+        name: "Stone Wall",
+        desc: "Tough defense.",
+        rarity: "rare",
+        iconKey: "icon_stone_wall",
+        wallTypeName: "wall",
+        isWall: true,
+      });
+    }
 
     if (hasStoreUnlock(STORE_UNLOCK_KEYS.turret)) {
       defs.splice(3, 0, {
@@ -367,7 +426,7 @@ export default class BuildTab {
   }
 
   _makeUnitDefs() {
-    return UNIT_STORE.map((unit) => ({
+    return UNIT_STORE.filter((unit) => !unit.unlockKey || hasStoreUnlock(unit.unlockKey)).map((unit) => ({
       key: unit.key,
       name: unit.name,
       desc: unit.desc,
@@ -500,7 +559,7 @@ export default class BuildTab {
       }).setOrigin(0.5);
 
       // ✅ Cost from TILE_TYPES via your helper
-      const costObj = getDefCost(def);
+      const costObj = getDefCost(def, scene);
       const cost = scene.add.text(x, y + 68, fmtCost(costObj), {
         fontSize: "12px",
         fontFamily: "Bungee",
@@ -561,18 +620,20 @@ export default class BuildTab {
     if (this._cardsScrollHooksBound) return;
     this._cardsScrollHooksBound = true;
 
-    scene.input.on("pointerup", () => { this._cardsDragging = false; });
+    this._onCardsPointerUp = () => { this._cardsDragging = false; };
+    scene.input.on("pointerup", this._onCardsPointerUp);
 
-    scene.input.on("pointermove", (p) => {
+    this._onCardsPointerMove = (p) => {
       if (!this._cardsDragging) return;
       const dx = p.x - this._cardsDragStartX;
       this._cardsScrollX = this._cardsScrollStart + dx;
       this._clampCardsScroll();
-    });
+    };
+    scene.input.on("pointermove", this._onCardsPointerMove);
 
     // Mouse wheel / trackpad scroll:
     // translate whichever axis the device gives us into horizontal card motion.
-    scene.input.on("wheel", (pointer, gameObjects, dx, dy) => {
+    this._onCardsWheel = (pointer, gameObjects, dx, dy) => {
       // only if mouse is over the viewport area
       const { left, top, w, h } = this._cardsViewport || {};
       if (left == null) return;
@@ -590,7 +651,8 @@ export default class BuildTab {
 
       this._cardsScrollX -= dominantDelta * 0.8;
       this._clampCardsScroll();
-    });
+    };
+    scene.input.on("wheel", this._onCardsWheel);
   }
 
   _setMode(mode) {
@@ -610,14 +672,18 @@ export default class BuildTab {
   _recruitUnit(def) {
     const team = "1";
     const costObj = def.cost ?? {};
+    const housing = Teams.getHousingStatus?.(team);
 
     if (!hasResources(this.scene, costObj)) {
       showAlert(this.scene, "Not enough money", "#ff5555");
       return;
     }
 
-    if (!House.availableHouse(team)) {
-      showAlert(this.scene, "Not enough housing", "#ff5555");
+    if (!Teams.canRecruitPlayer?.(team)) {
+      const message = housing?.homelessCount > 0
+        ? "House your homeless players first"
+        : "Not enough housing";
+      showAlert(this.scene, message, "#ff5555");
       return;
     }
 
@@ -713,7 +779,8 @@ export default class BuildTab {
     this._placeClickBound = true;
 
     const inputScene = this.scene.worldScene ?? this.scene;
-    inputScene.input.on("pointerdown", (pointer) => {
+    this._placementInputScene = inputScene;
+    this._onPlacePointerDown = (pointer) => {
       if (!this.pendingDef || this.pendingDef.isWall) return;
       const tile = TILE_TYPES[this.pendingDef.tileTypeName];
       if (!tile) return;
@@ -751,7 +818,7 @@ export default class BuildTab {
         gridY = Math.floor(y / SQUARESIZE) - Math.floor(lenY / 2);
       }
 
-      const costObj = getDefCost(this.pendingDef);
+      const costObj = getDefCost(this.pendingDef, this.scene);
 
       if (!hasResources(this.scene, costObj)) {
         showAlert(this.scene, "Not enough resources or permits", "#ff5555");
@@ -787,13 +854,15 @@ export default class BuildTab {
       GameMap.placeItem(gridX * SQUARESIZE, gridY * SQUARESIZE, tile);
       this._clearSelection(true);
       showAlert(this.scene, "Built!", "#aaffaa");
-    });
+    };
+    inputScene.input.on("pointerdown", this._onPlacePointerDown);
 
-    inputScene.input.keyboard.on("keydown-ESC", () => {
+    this._onPlaceEsc = () => {
       if (!this.pendingDef) return;
       if (this.pendingDef.isWall && this.scene.wallPlacer?.active) return;
       this._clearSelection(true);
-    });
+    };
+    inputScene.input.keyboard.on("keydown-ESC", this._onPlaceEsc);
   }
 
   onShow() {}

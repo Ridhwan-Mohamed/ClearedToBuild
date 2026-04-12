@@ -47,6 +47,7 @@ export class TowerBuilding {
     this.isFortObjective = !!opts.isFortObjective;
     this.isTownTower = !!opts.isTownTower || (!!team && !this.isFortObjective && !this.isPressureTower);
     this.isStarterTownTower = !!opts.isStarterTownTower;
+    this.grantBuildPermit = !!opts.grantBuildPermit;
     this.pressureSlotId = opts.pressureSlotId ?? null; // "N"|"W"|"E"|"S"
     if (this.isFortObjective) {
       StageState.registerFortTower(this);
@@ -123,6 +124,11 @@ export class TowerBuilding {
       Teams.teamLists[team].buildings.push([x, y, TILE_TYPES.tower, this.sprite]);
       const stats = this.scene?._townTowerStats || (this.scene._townTowerStats = { built: 0, destroyed: 0 });
       stats.built += 1;
+
+      if (this.grantBuildPermit && this.team === 1) {
+        this.scene?.updatePermits?.(1);
+        showGhostText(this.scene, this.sprite.x, this.sprite.y - 14, "+1 Permit", this.team, 0, 0, "#9be7ff");
+      }
     }
 
     // Click enemy structure to toggle a fighter destruction task (team 1 queues)
@@ -166,6 +172,9 @@ export class TowerBuilding {
     this.sprite.buildingRef = this;
 
     // Make sure it occupies tiles / blocks nav like other buildings
+    if (this.isTownTower) {
+      Map.drawRoadAround?.(x, y, tileType, team);
+    }
     Map.addBlockItem?.(x, y, tileType);
 
     this.sprite.on("pointerover", () => {

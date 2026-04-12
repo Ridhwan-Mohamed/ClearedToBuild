@@ -61,14 +61,8 @@ function getPriceTable(pricesMaybe) {
   return { ...DEFAULT_SUPPLY_PRICES };
 }
 
-function getHeldCardIds(teamNumber) {
-  const hand = getCardHand(String(teamNumber)) ?? [];
-  return new Set(hand.map(card => card?.id).filter(Boolean));
-}
-
 function getEligibleShipCards(teamNumber, excludeIds = []) {
-  const blocked = getHeldCardIds(teamNumber);
-  excludeIds.forEach(id => id && blocked.add(id));
+  const blocked = new Set(excludeIds.filter(Boolean));
   return POWERUP_CARDS.filter(card => card?.id && !blocked.has(card.id));
 }
 
@@ -386,23 +380,11 @@ function createHoverMenu(scene) {
         return;
       }
 
-      const hand = getCardHand(String(s.teamNumber)) ?? [];
-      if (hand.some(card => card?.id === good.card?.id)) {
-        showAlert(scene, "That card is already in hand", "#ff5555");
-        flash(buy.r, buy.t, false);
-        return;
-      }
-      if (hand.length >= 5) {
-        showAlert(scene, "Card hand full", "#ff5555");
-        flash(buy.r, buy.t, false);
-        return;
-      }
-
       spend(scene, totalCost);
       const added = addCardToHand(good.card, String(s.teamNumber));
       if (!added) {
         spend(scene, -totalCost);
-        showAlert(scene, "Card hand full", "#ff5555");
+        showAlert(scene, "Couldn't add card", "#ff5555");
         flash(buy.r, buy.t, false);
         return;
       }
@@ -558,23 +540,7 @@ export function spawnMarketShip(scene, {
     };
 
     spr.on("pointerover", () => {
-      if (good.kind === "card") {
-        if (good.soldOut) return;
-        const replacement = pickShipCard(teamNumber);
-        if (!replacement) {
-          good.onSoldOut?.();
-          hoverMenu.hidePreview?.();
-          hoverMenu.setVisible(false);
-          return;
-        }
-        if (!good.card || getHeldCardIds(teamNumber).has(good.card.id)) {
-          good.card = replacement;
-          good.label = replacement.name;
-          good.preview?.destroy?.();
-          good.preview = null;
-          spr.setTint(getCardOutlineTint(good.card));
-        }
-      }
+      if (good.kind === "card" && good.soldOut) return;
 
       hoverMenu._hoveringPile = true;
 
@@ -624,7 +590,6 @@ export function spawnMarketShip(scene, {
       duration: 900,
       ease: "Sine.easeIn",
       onComplete: () => {
-        scene.events.off("cards:updated", onCardsUpdated);
         shipGoods.forEach(good => good.preview?.destroy?.());
         hoverMenu.destroy(true);
         container.destroy(true);
@@ -635,30 +600,6 @@ export function spawnMarketShip(scene, {
 
   const leaveTimer = scene.time.delayedCall(durationMs, () => depart(), null, scene);
 
-  const onCardsUpdated = () => {
-    const heldIds = getHeldCardIds(teamNumber);
-    pileSprites.forEach((spr, index) => {
-      const good = shipGoods[index];
-      if (good?.kind !== "card" || good.soldOut) return;
-      if (good.card && !heldIds.has(good.card.id)) return;
-      const replacement = pickShipCard(teamNumber);
-      if (!replacement) {
-        good.card = null;
-        good.onSoldOut?.();
-        return;
-      }
-      good.card = replacement;
-      good.label = replacement.name;
-      good.preview?.destroy?.();
-      good.preview = null;
-      spr.setAlpha(1);
-      spr.setInteractive({ useHandCursor: true });
-      spr.setTint(getCardOutlineTint(replacement));
-    });
-  };
-
-  scene.events.on("cards:updated", onCardsUpdated);
-
   return {
     container,
     hoverMenu,
@@ -666,7 +607,6 @@ export function spawnMarketShip(scene, {
     depart, // <---
     destroy: () => {
       leaveTimer?.remove(false);
-      scene.events.off("cards:updated", onCardsUpdated);
       shipGoods.forEach(good => good.preview?.destroy?.());
       hoverMenu?.destroy(true);
       container?.destroy(true);

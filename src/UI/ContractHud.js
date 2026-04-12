@@ -1,4 +1,4 @@
-import { UIDEPTH, estimatePressureContract } from "../constants.js";
+import { UIDEPTH, estimatePressureContract, showAlert } from "../constants.js";
 import { PRESSURE } from "../parcel_system/ParcelConfig.js";
 import { StageState } from "../parcelController/StageState.js";
 import { Teams } from "../Teams.js";
@@ -59,8 +59,8 @@ const CONTRACT_DEFS = {
     title: "Farm Contract",
     color: 0x15803d,
     lines: (scene) => [
-      "Fertile land parcel.",
-      "More crop space off-island.",
+      "Wild hedge parcel.",
+      "Seed and berry bushes grow there.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("FARM"))}`,
     ],
@@ -140,8 +140,43 @@ export class ContractHud {
     this._refreshPopup();
   }
 
+  focusSlot(slotId) {
+    if (!this._hudVisible || !slotId) return false;
+    const status = this._getSlotStatus(slotId);
+    if (!status) return false;
+    if (status.kind === "locked-empty") {
+      this._showParcelLockedMessage();
+      return false;
+    }
+    if (status.kind === "empty") {
+      this._openChooser(slotId);
+      return true;
+    }
+    this._openSummary(slotId);
+    return true;
+  }
+
+  setExternalHover(slotId, hovered = false) {
+    const slot = this.squares.get(slotId);
+    if (!slot) return;
+    slot.externalHovered = !!hovered;
+    this._applySquareVisual(slotId, this._getSlotStatus(slotId));
+  }
+
   _getWorldNowMs() {
     return Number(this.world?.getSimulationNow?.() ?? this.world?.simNowMs ?? 0);
+  }
+
+  _getPhaseInfo() {
+    return this.world?.clock?.getPhaseInfo?.() ?? null;
+  }
+
+  _canBuyContracts() {
+    return this.world?.clock?.canBuyParcels?.() ?? true;
+  }
+
+  _showParcelLockedMessage() {
+    showAlert(this.scene, "Parcel contracts stay open during every phase.", "#a7f3d0");
   }
 
   _getNorthFortArrival() {
@@ -339,7 +374,17 @@ export class ContractHud {
 
       group.add([frame, label, icon, timer, zone]);
       this.root.add(group);
-      this.squares.set(slotId, { group, label, frame, icon, timer, zone, hovered: false, pressed: false });
+      this.squares.set(slotId, {
+        group,
+        label,
+        frame,
+        icon,
+        timer,
+        zone,
+        hovered: false,
+        pressed: false,
+        externalHovered: false,
+      });
       icon.setText(defaultIconText);
       timer.setText(defaultTimerText);
     }
@@ -391,12 +436,15 @@ export class ContractHud {
   }
 
   _layout() {
-    const startX = 40;
-    const topY = 90;
+    const stackX = 54;
+    const xpBottom = Math.round(
+      (this.scene?.townXpHud?.y ?? 72) + ((this.scene?.townXpHud?.panelHeight ?? 60) / 2)
+    );
+    const topY = Math.max(132, xpBottom + 16);
     const gap = 94;
 
     SLOT_ORDER.forEach((slotId, index) => {
-      const x = startX;
+      const x = stackX;
       const y = topY + index * gap;
       const slot = this.squares.get(slotId);
       if (!slot) return;
@@ -429,12 +477,13 @@ export class ContractHud {
     if (!slot || !status) return;
 
     const fillAlpha = status.fillAlpha ?? 0.94;
-    const strokeAlpha = slot.pressed ? 0.95 : slot.hovered ? 0.78 : 0.55;
+    const isHovered = !!(slot.hovered || slot.externalHovered);
+    const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.78 : 0.55;
     const iconColor = status.iconColor ?? "#ffffff";
 
     slot.frame.clear();
     if (fillAlpha > 0) {
-      const boostedFill = slot.hovered ? Math.min(fillAlpha + 0.08, 1) : fillAlpha;
+      const boostedFill = isHovered ? Math.min(fillAlpha + 0.08, 1) : fillAlpha;
       slot.frame.fillStyle(status.fillColor ?? 0x111827, boostedFill);
       slot.frame.fillRoundedRect(-28, 6, 56, 56, 12);
     }
@@ -490,6 +539,18 @@ export class ContractHud {
       };
     }
 
+      if (!this._canBuyContracts()) {
+        return {
+          kind: "locked-empty",
+          iconText: "🔒",
+          timerText: "LOCK",
+          fillColor: 0x1f2937,
+          strokeColor: 0xfbbf24,
+          iconSize: 24,
+          fillAlpha: 0.18,
+        };
+      }
+
       return {
         kind: "empty",
         iconText: "+",
@@ -509,7 +570,60 @@ export class ContractHud {
   }
 
   _getIncomingPressure(slotId) {
-    return this.world?.towerPressureController?.getSlotPressureInfo?.(slotId) ?? null;
+    return this.world?.towerPressureController?.getSlotPressureInfo?.(slotId)
+      ?? null;
+  }
+
+  _getPressureSummaryLines(info, { live = false, contract = null } = {}) {
+    const skull = "\u{1F480}";
+    const difficulty = Math.max(1, Number(info?.difficulty || 1));
+    const enemyTypeLabel = String(info?.enemyTypeLabel || "Raiders");
+    const lines = [];
+
+    if (live) {
+      lines.push("Status: LIVE");
+    } else if (info?.remainingText) {
+      lines.push(`ETA: ${info.remainingText}`);
+    }
+
+    if (Number.isFinite(info?.hordeIndex) && Number(info.hordeIndex) > 0) {
+      lines.push(`Horde: ${info.hordeIndex}`);
+    }
+
+    lines.push(`Difficulty: ${skull.repeat(difficulty)}`);
+
+    if (info?.modifierLabel) {
+      lines.push(`Modifier: ${info.modifierLabel}`);
+    }
+
+    if (live) {
+      const totalSpawners = Math.max(1, Number(info?.spawners || contract?.spawners?.length || 1));
+      const activeSpawners = Math.max(
+        0,
+        Number(
+          info?.activeSpawners
+          || (contract?.spawners || []).filter((s) => s?.building && !s.building._destroyed).length
+        )
+      );
+      const totalEnemies = Math.max(
+        0,
+        Number(info?.enemies || contract?.totalPlannedEnemies || 0)
+      );
+      const aliveEnemies = Math.max(
+        0,
+        Number(info?.aliveEnemies || (Number(contract?.spawned || 0) - Number(contract?.killed || 0)))
+      );
+      const killedEnemies = Math.max(0, Number(contract?.killed || 0));
+
+      lines.push(`Spawners Active: ${activeSpawners}/${totalSpawners}`);
+      lines.push(`${enemyTypeLabel} Alive: ${aliveEnemies}/${totalEnemies}`);
+      lines.push(`Destroyed: ${killedEnemies}/${totalEnemies}`);
+      return lines;
+    }
+
+    lines.push(`Spawners: ${Math.max(1, Number(info?.spawners || 1))}`);
+    lines.push(`${enemyTypeLabel}: ${Math.max(0, Number(info?.enemies || 0))}`);
+    return lines;
   }
 
   _getFortSummaryLines() {
@@ -612,6 +726,10 @@ export class ContractHud {
     }
 
     const status = this._getSlotStatus(slotId);
+    if (status.kind === "locked-empty") {
+      this._showParcelLockedMessage();
+      return;
+    }
     if (status.kind === "empty") {
       this._openChooser(slotId);
       return;
@@ -705,6 +823,11 @@ export class ContractHud {
     }
 
     const currentStatus = this._getSlotStatus(this.popupState.slotId);
+    if ((this.popupState.view === "chooser" || this.popupState.view === "detail") && !this._canBuyContracts()) {
+      this.closePopup(false);
+      return;
+    }
+
     if (this.popupState.view === "chooser" || this.popupState.view === "detail") {
       if (currentStatus.kind !== "empty") {
         this.popupState.view = currentStatus.kind;
@@ -744,12 +867,7 @@ export class ContractHud {
       const info = status.incoming;
       this.popupTitle.setText(`${skull} ${slotLabel} Pressure`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText([
-        `ETA: ${info.remainingText}`,
-        `Difficulty: ${skull.repeat(info.difficulty)}`,
-        `Spawners: ${info.spawners}`,
-        `Raiders: ${info.enemies}`,
-      ].join("\n"));
+      this.popupBody.setText(this._getPressureSummaryLines(info).join("\n"));
     } else if (status.kind === "pressure-live") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
@@ -765,12 +883,19 @@ export class ContractHud {
       const aliveRaiders = Math.max(0, Number(inst?.spawned || 0) - Number(inst?.killed || 0));
       this.popupTitle.setText(`${skull} ${slotLabel} Pressure`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText([
-        `Difficulty: ${skull.repeat(inst?.difficulty || 1)}`,
-        `Spawners Active: ${activeSpawners}/${totalSpawners}`,
-        `Raiders Alive: ${aliveRaiders}/${totalRaiders}`,
-        `Destroyed: ${inst?.killed || 0}/${totalRaiders}`,
-      ].join("\n"));
+      this.popupBody.setText(this._getPressureSummaryLines({
+        hordeIndex: inst?.pressureHordeIndex ?? null,
+        difficulty: inst?.difficulty || 1,
+        spawners: totalSpawners,
+        activeSpawners,
+        enemies: totalRaiders,
+        aliveEnemies: aliveRaiders,
+        enemyTypeLabel: inst?.enemyTypeLabel || "Raiders",
+        modifierLabel: inst?.pressureModifier?.label || null,
+      }, {
+        live: true,
+        contract: inst,
+      }).join("\n"));
     } else if (status.kind === "active") {
       const inst = status.contract;
       const def = CONTRACT_DEFS[inst?.type] || CONTRACT_DEFS.FOREST;
@@ -927,12 +1052,7 @@ export class ContractHud {
       const info = status.incoming;
       this.popupTitle.setText(`💀 ${slotLabel} Pressure`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText([
-        `ETA: ${info.remainingText}`,
-        `Difficulty: ${"💀".repeat(info.difficulty)}`,
-        `Spawners: ${info.spawners}`,
-        `Raiders: ${info.enemies}`,
-      ].join("\n"));
+      this.popupBody.setText(this._getPressureSummaryLines(info).join("\n"));
     } else if (status.kind === "pressure-live") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
@@ -948,12 +1068,19 @@ export class ContractHud {
       const aliveRaiders = Math.max(0, Number(inst?.spawned || 0) - Number(inst?.killed || 0));
       this.popupTitle.setText(`💀 ${slotLabel} Pressure`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText([
-        `Difficulty: ${"💀".repeat(inst?.difficulty || 1)}`,
-        `Spawners Active: ${activeSpawners}/${totalSpawners}`,
-        `Raiders Alive: ${aliveRaiders}/${totalRaiders}`,
-        `Destroyed: ${inst?.killed || 0}/${totalRaiders}`,
-      ].join("\n"));
+      this.popupBody.setText(this._getPressureSummaryLines({
+        hordeIndex: inst?.pressureHordeIndex ?? null,
+        difficulty: inst?.difficulty || 1,
+        spawners: totalSpawners,
+        activeSpawners,
+        enemies: totalRaiders,
+        aliveEnemies: aliveRaiders,
+        enemyTypeLabel: inst?.enemyTypeLabel || "Raiders",
+        modifierLabel: inst?.pressureModifier?.label || null,
+      }, {
+        live: true,
+        contract: inst,
+      }).join("\n"));
     } else if (status.kind === "active") {
       const inst = status.contract;
       const def = CONTRACT_DEFS[inst?.type] || CONTRACT_DEFS.FOREST;
@@ -994,6 +1121,11 @@ export class ContractHud {
   _commit(slotId, payload) {
     const pm = this.world?.parcelManager;
     if (!pm) return;
+    if (!this._canBuyContracts()) {
+      this._showParcelLockedMessage();
+      this.closePopup(false);
+      return;
+    }
 
     const status = this._getSlotStatus(slotId);
     if (status.kind !== "empty") return;

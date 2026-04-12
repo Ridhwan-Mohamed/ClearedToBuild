@@ -35,7 +35,7 @@ export class FortGrunt {
         grunt.meleeFxKey = 'raider_hands_fx';
         grunt.unitTint = FortGrunt.tint;
         grunt.awareness = FortGrunt.awareness;
-        grunt.destroySelf = () => FortGrunt.destroy(grunt);
+        grunt.destroySelf = (opts = {}) => FortGrunt.destroy(grunt, opts);
         attachDirectionalSix(grunt, {
             animPrefix: 'fortgrunt',
             defaultDirection: 'down',
@@ -120,11 +120,18 @@ export class FortGrunt {
         }
     }
 
-    static destroy(troop) {
+    static destroy(troop, opts = {}) {
         if (!troop || !troop.body) return;
         const scene = troop.scene;
+        const silentStageCleanup = !!opts?.silentStageCleanup;
 
         Player._destroyMiniBars(troop);
+
+        if (!silentStageCleanup) {
+            troop.spawner?.notifyEnemyDied?.();
+            scene?.parcelManager?.notifyRaiderKilled?.(troop.contractId);
+            scene?.registerRunEnemyDefeat?.(troop, opts);
+        }
 
         const team = Teams.teamLists["0"];
         if (team) {

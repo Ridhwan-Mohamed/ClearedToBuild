@@ -1458,6 +1458,65 @@ const TILE_TYPES = {
             }
         }
     },
+    dark_grass: {
+        name: "dark_grass",
+        spread: true,
+        block: false,
+        complex: true,
+        grid: 108,
+        interior: 108,
+        sides: {
+            up: 109,
+            down: 110,
+            left: 111,
+            right: 112
+        },
+        corners: {
+            topLeft: 113,
+            topRight: 114,
+            bottomLeft: 115,
+            bottomRight: 116
+        },
+        innerCorners: {
+            topLeft: 117,
+            topRight: 118,
+            bottomRight: 119,
+            bottomLeft: 120
+        },
+        depth: FLOORDEPTH,
+        assets: {
+            interior: {
+                key: 'darkgrass_interior',
+                sheet: false
+            },
+            edge: {
+                grass: {
+                    key: 'darkgrass_edge_grass',
+                    sheet: false
+                },
+                water: {
+                    key: 'darkgrass_edge_water',
+                    sheet: false
+                },
+                shoreGrass: {
+                    key: 'darkgrass_shore_edge_grass',
+                    sheet: false
+                }
+            },
+            corner: {
+                water: {
+                    key: 'darkgrass_corner_water',
+                    sheet: false
+                }
+            },
+            innerCorner: {
+                water: {
+                    key: 'darkgrass_inner_corner_water',
+                    sheet: false
+                }
+            }
+        }
+    },
     wall: {
         name: "wall",
         interior: 2,
@@ -1541,8 +1600,8 @@ const TILE_TYPES = {
         block: true,
         complex: false,
         grid: 13,
-        lenX: 1,
-        lenY: 1,
+        lenX: 2,
+        lenY: 2,
         price: 200,
         depth: BLOCKDEPTH
     },
@@ -2259,7 +2318,20 @@ const TILE_ARR = [
     [
         'catapult_base',
         'catapult_top'
-    ]
+    ],
+    'darkgrass_interior',
+    'darkgrass_edge',
+    'darkgrass_edge',
+    'darkgrass_edge',
+    'darkgrass_edge',
+    'darkgrass_corner',
+    'darkgrass_corner',
+    'darkgrass_corner',
+    'darkgrass_corner',
+    'darkgrass_inner_corner',
+    'darkgrass_inner_corner',
+    'darkgrass_inner_corner',
+    'darkgrass_inner_corner'
 ];
 function TILE_MAP(val) {
     if (val == 1) return "grass";
@@ -2295,6 +2367,7 @@ function TILE_MAP(val) {
     else if (val >= 93 && val <= 98) return "fort_floor";
     else if (val >= 99 && val <= 106) return "grass";
     else if (val == 107) return "catapult";
+    else if (val >= 108 && val <= 120) return "dark_grass";
     return null;
 }
 function gridPos(x, y) {
@@ -2355,6 +2428,7 @@ const gridColors = {
     woodWall_door: 0x2e1503,
     dirt: 0x4c2b18,
     grass: 0x33cc33,
+    dark_grass: 0x0b6b5c,
     house1: 0x8b0000,
     house2: 0x006400,
     road: 0x555555,
@@ -2365,6 +2439,8 @@ const gridColors = {
     grassRock: 0x33cc33,
     spawn: 0x333333,
     storage: 0x7d4900,
+    tower: 0x2f7fe6,
+    clayOven: 0xb64536,
     pine: 0x006400,
     rock: 0x5a682b,
     catapult: 0x8b5b2b,
@@ -2595,21 +2671,24 @@ const UI_ITEM_TYPES = {
         description: "Water from a unclean source, for farming",
         cooksTo: "clean_water",
         label: "Unclean Water",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 1
     },
     clean_water: {
         name: "clean_water",
         icon: "waterIcon",
         label: "Clean Water",
         description: "Safe drinking water",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 2
     },
     food: {
         name: "food",
         icon: "foodIcon",
         description: "Cooked rations",
         label: "Food",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 3
     },
     rawFood: {
         name: "rawFood",
@@ -2617,21 +2696,24 @@ const UI_ITEM_TYPES = {
         description: "Uncooked rations",
         label: "Raw Food",
         cooksTo: "food",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 2
     },
     wood: {
         name: "wood",
         icon: "woodIcon",
         label: "Wood",
         description: "Basic fuel for ovens",
-        stacks: 5
+        stacks: 5,
+        moneyValue: 1
     },
     stone: {
         name: "stone",
         icon: "stoneIcon",
         label: "Stone",
         description: "Construction material",
-        stacks: 5
+        stacks: 5,
+        moneyValue: 1
     },
     crop: {
         name: "crop",
@@ -2640,23 +2722,26 @@ const UI_ITEM_TYPES = {
         label: "Crop",
         stacks: 10,
         food: true,
-        foodValue: 1
+        foodValue: 1,
+        moneyValue: 2
     },
     seedCrop: {
-        name: 'seedCrop',
+        name: "seedCrop",
         stacks: 10,
         label: "Crop Seed",
-        icon: 'seeds',
+        icon: "seeds",
         food: false,
-        seed: true
+        seed: true,
+        moneyValue: 1
     },
     seedBerry: {
-        name: 'seedBerry',
+        name: "seedBerry",
         label: "Berry Seed",
         stacks: 10,
-        icon: 'berry',
+        icon: "berry",
         food: false,
-        seed: true
+        seed: true,
+        moneyValue: 2
     }
 };
 

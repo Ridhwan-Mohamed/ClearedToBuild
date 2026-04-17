@@ -41,8 +41,11 @@ export class FortGrunt {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'raider_walk_down',
                 down_left: 'raider_walk_down_left',
@@ -50,6 +53,11 @@ export class FortGrunt {
                 up: 'raider_walk_up',
                 up_left: 'raider_walk_up_left',
                 up_right: 'raider_walk_up_right',
+            },
+            swimDirections: {
+                up: 'raider_swim_up',
+                down: 'raider_swim_down',
+                side: 'raider_swim_sidewards',
             }
         });
         ZoomMixer.createPlayerMoniker(grunt);

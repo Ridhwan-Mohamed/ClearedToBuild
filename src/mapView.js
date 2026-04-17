@@ -88,10 +88,11 @@ import { OverviewShoreWaves } from './UI/OverviewShoreWaves.js';
 import { OrderRunner } from './orders/OrderRunner.js';
 import { getBossUnlockReward, openBossUnlockRewardPresentation } from './parcel_system/BossUnlockRewardSystem.js';
 import { getHordeUnlockReward } from './parcel_system/HordeUnlockTrack.js';
-import { hasStoreUnlock, STORE_UNLOCK_KEYS } from './parcel_system/StoreUnlockSystem.js';
+import { hasStoreUnlock, STORE_UNLOCK_KEYS, unlockStoreItem } from './parcel_system/StoreUnlockSystem.js';
 import { createPlayerPortraitAnimations, getPlayerPortraitKey, preloadPlayerPortraits } from './players/playerPortraits.js';
 import { getHordeModifierForIndex } from './parcel_system/HordeModifiers.js';
 import { addCardToHand, getCardHand } from './UI/Powerups.js';
+import { UI_ITEM_TYPES } from './UI/UIConstants.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -206,6 +207,46 @@ export class mapView extends Phaser.Scene {
                 )
             ),
         };
+    }
+
+    _buildMilitiaUnlockReward() {
+        return {
+            id: "town_xp_militia_unlock",
+            unlockKey: STORE_UNLOCK_KEYS.militiaParcel,
+            title: "Militia Parcel Unlocked",
+            description: "Militia parcels are now available in contract slots. Buy temporary 1-day island defense formations from the parcel menu.",
+            displayLabel: "Militia Parcel",
+            badgeLabel: "TOWN LEVEL UNLOCK",
+            subLabel: "NEW PARCEL OPTION",
+            emoji: "🛡",
+            accentColor: 0x7dd3fc,
+            glowColor: 0xdbeafe,
+            panelColor: 0x132238,
+            onGrant: (scene) => {
+                unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, scene);
+            },
+        };
+    }
+
+    _maybeUnlockMilitiaParcelFromTownXp(previousLevel, newLevel) {
+        const prev = Math.max(1, Number(previousLevel || 1));
+        const next = Math.max(prev, Number(newLevel || prev));
+
+        if (prev >= 3 || next < 3) return false;
+        if (hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel)) return false;
+
+        const reward = this._buildMilitiaUnlockReward();
+
+        this._activeBossRewardUI?.destroy?.();
+        this._activeBossRewardUI = openBossUnlockRewardPresentation(this, {
+            reward,
+            onComplete: () => {
+                this._activeBossRewardUI = null;
+                this.parcelSpawnUI?.resetUiState?.();
+            },
+        });
+
+        return true;
     }
 
     _resetRuntimeState() {
@@ -382,18 +423,201 @@ export class mapView extends Phaser.Scene {
     }
 
     _grantTownXpResources(bundle = {}) {
-        if ((bundle.money || 0) > 0) this.updateMoney(Math.max(0, Number(bundle.money || 0)));
-        if ((bundle.permits || 0) > 0) this.updatePermits(Math.max(0, Number(bundle.permits || 0)));
-        if ((bundle.wood || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "wood", Math.max(0, Number(bundle.wood || 0)), this);
-        if ((bundle.stone || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "stone", Math.max(0, Number(bundle.stone || 0)), this);
-        if ((bundle.food || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "food", Math.max(0, Number(bundle.food || 0)), this);
-        if ((bundle.cleanWater || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "clean_water", Math.max(0, Number(bundle.cleanWater || 0)), this);
-        if ((bundle.seeds || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "seedCrop", Math.max(0, Number(bundle.seeds || 0)), this);
-        if ((bundle.berries || 0) > 0) StorageManager.grantItemToTeam(TOWN_XP_TEAM_ID, "seedBerry", Math.max(0, Number(bundle.berries || 0)), this);
+        if ((bundle.money || 0) > 0) {
+            this.updateMoney(Math.max(0, Number(bundle.money || 0)));
+        }
+
+        if ((bundle.permits || 0) > 0) {
+            this.updatePermits(Math.max(0, Number(bundle.permits || 0)));
+        }
+
+        const overflowNotices = [];
+        let totalCompensated = 0;
+
+        const grantStorageItem = (itemKey, amount, label) => {
+            const result = this._grantTownXpStorageItem(
+                itemKey,
+                Math.max(0, Number(amount || 0)),
+                label
+            );
+
+            if (result.overflow > 0) {
+                if (result.compensated > 0) {
+                    totalCompensated += result.compensated;
+                    overflowNotices.push(
+                        `${result.overflow} ${result.label} didn't fit (+$${result.compensated})`
+                    );
+                } else {
+                    overflowNotices.push(
+                        `${result.overflow} ${result.label} didn't fit`
+                    );
+                }
+            }
+        };
+
+        if ((bundle.wood || 0) > 0) {
+            grantStorageItem("wood", bundle.wood, "wood");
+        }
+
+        if ((bundle.stone || 0) > 0) {
+            grantStorageItem("stone", bundle.stone, "stone");
+        }
+
+        if ((bundle.food || 0) > 0) {
+            grantStorageItem("food", bundle.food, "food");
+        }
+
+        if ((bundle.cleanWater || 0) > 0) {
+            grantStorageItem("clean_water", bundle.cleanWater, "water");
+        }
+
+        if ((bundle.seeds || 0) > 0) {
+            grantStorageItem("seedCrop", bundle.seeds, "seeds");
+        }
+
+        if ((bundle.berries || 0) > 0) {
+            grantStorageItem("seedBerry", bundle.berries, "berry seeds");
+        }
+
+        return {
+            overflowNotices,
+            totalCompensated,
+        };
     }
 
     _getAvailableTownXpRecruitDefs() {
         return TOWN_XP_RECRUIT_DEFS.filter((entry) => !entry.unlockKey || hasStoreUnlock(entry.unlockKey));
+    }
+
+    _normalizeTownXpTroopKey(value = "") {
+        const raw = String(value || "").trim().toLowerCase();
+        if (!raw) return null;
+
+        if (raw.startsWith("farmer")) return "farmer";
+        if (raw.startsWith("fireman")) return "fireman";
+        if (raw.startsWith("gunslinger")) return "gunslinger";
+        if (raw.startsWith("forager")) return "forager";
+        if (raw.startsWith("builder")) return "builder";
+        if (raw.startsWith("blademaster")) return "blademaster";
+        if (raw.startsWith("brawler")) return "brawler";
+
+        return raw.replace(/\s+/g, "");
+    }
+
+    _isTownXpCardEligible(card) {
+        if (!card) return false;
+        if (card.type !== "player") return true;
+
+        const troopKey = this._normalizeTownXpTroopKey(card.target || card.id || card.name);
+        if (!troopKey) return true;
+
+        const recruitDef = TOWN_XP_RECRUIT_DEFS.find((entry) => entry.key === troopKey);
+        if (!recruitDef?.unlockKey) return true;
+
+        return hasStoreUnlock(recruitDef.unlockKey);
+    }
+
+    _getAvailableTownXpCardPool() {
+        return POWERUP_CARDS.filter((card) => this._isTownXpCardEligible(card));
+    }
+
+    _getTownXpOverflowUnitValue(itemKey) {
+        const itemDef = UI_ITEM_TYPES?.[itemKey];
+        const value = Number(itemDef?.moneyValue ?? 0);
+        return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    }
+
+    _getProjectedRewardCapacityForItem(teamNumber, itemDef) {
+        if (!itemDef) return 0;
+
+        const storages = Teams.teamLists?.[teamNumber]?.storageList || [];
+        let total = 0;
+
+        for (const storage of storages) {
+            const projected = StorageBuilding._getProjectedSlots?.(storage, teamNumber)
+                ?? StorageBuilding._cloneSlots?.(storage?.storageItems ?? [])
+                ?? [];
+
+            total += StorageBuilding._availableCapacity?.(projected, itemDef) ?? 0;
+        }
+
+        return total;
+    }
+
+    _grantTownXpStorageItem(itemKey, amount, label = null) {
+        const count = Math.max(0, Math.floor(Number(amount) || 0));
+        const itemDef = UI_ITEM_TYPES?.[itemKey];
+        const resolvedLabel = label || itemDef?.label || itemKey;
+
+        if (!itemDef || count <= 0) {
+            return {
+                requested: count,
+                stored: 0,
+                overflow: count,
+                compensated: 0,
+                label: resolvedLabel,
+            };
+        }
+
+        const teamNumber = TOWN_XP_TEAM_ID;
+        const storages = Teams.teamLists?.[teamNumber]?.storageList || [];
+
+        if (!storages.length) {
+            const compensated = count * this._getTownXpOverflowUnitValue(itemKey);
+            if (compensated > 0) this.updateMoney(compensated);
+
+            return {
+                requested: count,
+                stored: 0,
+                overflow: count,
+                compensated,
+                label: resolvedLabel,
+            };
+        }
+
+        // Respect reservations / projected occupancy first.
+        const projectedCapacity = this._getProjectedRewardCapacityForItem(teamNumber, itemDef);
+        const targetToStore = Math.min(count, projectedCapacity);
+
+        let remainingToStore = targetToStore;
+        let stored = 0;
+
+        for (const storage of storages) {
+            if (remainingToStore <= 0) break;
+
+            const before = storage.getItemCount?.(itemDef) ?? 0;
+            storage.addItem?.(itemDef, remainingToStore);
+            const after = storage.getItemCount?.(itemDef) ?? before;
+
+            const accepted = Math.max(0, after - before);
+            stored += accepted;
+            remainingToStore -= accepted;
+        }
+
+        const overflow = Math.max(0, count - stored);
+        const compensated = overflow * this._getTownXpOverflowUnitValue(itemKey);
+
+        if (compensated > 0) {
+            this.updateMoney(compensated);
+        }
+
+        return {
+            requested: count,
+            stored,
+            overflow,
+            compensated,
+            label: resolvedLabel,
+        };
+    }
+
+    _showTownXpOverflowCompensationAlert(result) {
+        if (!result?.overflowNotices?.length) return;
+
+        const text = `Storage full: ${result.overflowNotices.join(", ")}.${result.totalCompensated > 0 ? ` Refunded +$${result.totalCompensated}.` : ""}`;
+
+        this.time?.delayedCall?.(350, () => {
+            showAlert(this, text, "#ffd7a5", 2800);
+        });
     }
 
     _getTownXpRecruitPortraitKey(recruitKey) {
@@ -408,6 +632,107 @@ export class mapView extends Phaser.Scene {
             isBlademaster: recruitKey === "blademaster",
         };
         return getPlayerPortraitKey(stub);
+    }
+
+    _isMilitiaParcelUnlocked() {
+        return hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel);
+    }
+
+    _showMilitiaParcelUnlockPresentation() {
+        if (this._activeMilitiaUnlockUI) return;
+        if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return;
+
+        this.clock.paused = true;
+        this.applySimulationSpeed(true);
+        this._movementLocked = true;
+
+        const cam = this.cameras.main;
+        const depth = (UIDEPTH ?? 10) + 1200;
+
+        const container = this.add.container(0, 0).setDepth(depth);
+        container.setScrollFactor(0);
+
+        const shade = this.add.rectangle(0, 0, cam.width, cam.height, 0x000000, 0.78)
+            .setOrigin(0)
+            .setScrollFactor(0);
+
+        const panel = this.add.rectangle(cam.centerX, cam.centerY, 520, 340, 0x10263a, 0.96)
+            .setStrokeStyle(4, 0xb7ecff, 0.95)
+            .setScrollFactor(0);
+
+        const badge = this.add.text(cam.centerX, cam.centerY - 112, "TOWN LEVEL UNLOCK", {
+            fontSize: "16px",
+            color: "#dbeafe",
+            fontFamily: "Bungee"
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const shield = this.add.text(cam.centerX, cam.centerY - 34, "🛡", {
+            fontSize: "84px",
+            color: "#ffffff",
+            fontFamily: "Arial"
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const title = this.add.text(cam.centerX, cam.centerY + 30, "Militia Parcel Unlocked", {
+            fontSize: "28px",
+            color: "#ffffff",
+            fontFamily: "Bungee",
+            align: "center"
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        const subtitle = this.add.text(
+            cam.centerX,
+            cam.centerY + 78,
+            "You reached Town Level 3.\nMilitia parcels are now available in the parcel menu.",
+            {
+                fontSize: "15px",
+                color: "#dbeafe",
+                fontFamily: "Bungee",
+                align: "center",
+                lineSpacing: 8
+            }
+        ).setOrigin(0.5).setScrollFactor(0);
+
+        const continueBg = this.add.rectangle(cam.centerX, cam.centerY + 138, 220, 48, 0x1d4ed8, 0.95)
+            .setStrokeStyle(2, 0xffffff, 0.9)
+            .setInteractive({ useHandCursor: true })
+            .setScrollFactor(0);
+
+        const continueTx = this.add.text(cam.centerX, cam.centerY + 138, "CONTINUE", {
+            fontSize: "18px",
+            color: "#ffffff",
+            fontFamily: "Bungee"
+        }).setOrigin(0.5).setScrollFactor(0);
+
+        this.tweens.add({
+            targets: shield,
+            scale: { from: 0.9, to: 1.08 },
+            alpha: { from: 0.82, to: 1 },
+            duration: 650,
+            yoyo: true,
+            repeat: -1,
+            ease: "Sine.inOut"
+        });
+
+        const close = () => {
+            if (!this._activeMilitiaUnlockUI) return;
+            this._activeMilitiaUnlockUI.destroy(true);
+            this._activeMilitiaUnlockUI = null;
+            this._movementLocked = false;
+
+            if (!this._townTowerLossInProgress && !this._restartToMainMenuInProgress) {
+                this.clock.paused = false;
+                this.applySimulationSpeed(true);
+            }
+
+            this.parcelSpawnUI?.refreshMilitiaLockState?.();
+        };
+
+        continueBg.on("pointerover", () => continueBg.setFillStyle(0x2563eb, 0.98));
+        continueBg.on("pointerout", () => continueBg.setFillStyle(0x1d4ed8, 0.95));
+        continueBg.on("pointerdown", close);
+
+        container.add([shade, panel, badge, shield, title, subtitle, continueBg, continueTx]);
+        this._activeMilitiaUnlockUI = container;
     }
 
     _createTownXpSupplyOption(kind, level = 1) {
@@ -431,8 +756,9 @@ export class mapView extends Phaser.Scene {
                 accentColor: TOWN_XP_COLORS.cyan,
                 panelColor: 0x153449,
                 grant: () => {
-                    this._grantTownXpResources(reward);
+                    const result = this._grantTownXpResources(reward);
                     showAlert(this, `Town reward: +$${reward.money} and ${reward.permits} permit${reward.permits === 1 ? "" : "s"}`, "#8fe7ff");
+                    this._showTownXpOverflowCompensationAlert(result);
                 },
             };
         }
@@ -458,8 +784,9 @@ export class mapView extends Phaser.Scene {
                 accentColor: TOWN_XP_COLORS.peach,
                 panelColor: 0x2c3347,
                 grant: () => {
-                    this._grantTownXpResources(reward);
+                    const result = this._grantTownXpResources(reward);
                     showAlert(this, `Town reward: +${reward.wood} wood, +${reward.stone} stone, +${reward.seeds} seeds`, "#ffd7a5");
+                    this._showTownXpOverflowCompensationAlert(result);
                 },
             };
         }
@@ -485,8 +812,9 @@ export class mapView extends Phaser.Scene {
                 accentColor: TOWN_XP_COLORS.mint,
                 panelColor: 0x173743,
                 grant: () => {
-                    this._grantTownXpResources(reward);
+                    const result = this._grantTownXpResources(reward);
                     showAlert(this, `Town reward: +${reward.food} food and +${reward.cleanWater} water`, "#a7f3d0");
+                    this._showTownXpOverflowCompensationAlert(result);
                 },
             };
         }
@@ -509,20 +837,23 @@ export class mapView extends Phaser.Scene {
             accentColor: TOWN_XP_COLORS.lilac,
             panelColor: 0x26284a,
             grant: () => {
-                this._grantTownXpResources(reward);
+                const result = this._grantTownXpResources(reward);
                 showAlert(this, `Town reward: +${reward.permits} permits`, "#d8c4ff");
+                this._showTownXpOverflowCompensationAlert(result);
             },
         };
     }
 
     _createTownXpCardOption(level = 1) {
-        const source = POWERUP_CARDS.slice();
+        const source = this._getAvailableTownXpCardPool().slice();
         Phaser.Utils.Array.Shuffle(source);
+
         const card = source[0];
         if (!card) return null;
 
         const outline = String(card.OUTLINE || "").replace("#", "");
         const accentColor = Number.parseInt(outline, 16);
+
         return {
             id: `card:${card.id || level}`,
             badgeLabel: "CARD",
@@ -560,8 +891,14 @@ export class mapView extends Phaser.Scene {
             accentColor: recruit.accentColor ?? TOWN_XP_COLORS.cream,
             panelColor: 0x213248,
             grant: () => {
-                const center = this._getMainIslandCenterGrid();
-                const troop = new recruit.ctor(center.x, center.y, 1);
+                const spawnTile = Teams.getTownSpawnTile?.(TOWN_XP_TEAM_ID);
+                if (!spawnTile) {
+                    const fallbackMoney = 240 + (Math.max(0, level - 1) * 25);
+                    this.updateMoney(fallbackMoney);
+                    showAlert(this, `No town road: +$${fallbackMoney} instead`, "#ffd7a5");
+                    return;
+                }
+                const troop = new recruit.ctor(spawnTile.x, spawnTile.y, 1);
                 const assigned = House.assignPlayerToHouse(troop, TOWN_XP_TEAM_ID);
                 if (!assigned) {
                     troop.destroySelf?.() ?? troop.destroy?.();
@@ -607,6 +944,7 @@ export class mapView extends Phaser.Scene {
         if (!(normalized > 0)) return 0;
 
         const state = this._townXp || (this._townXp = this._createTownXpState());
+        const previousLevel = Math.max(1, Number(state.level || 1));
         state.totalEarned = Math.max(0, Number(state.totalEarned || 0)) + normalized;
         state.xpIntoLevel = Math.max(0, Number(state.xpIntoLevel || 0)) + normalized;
         state.gainSerial = Math.max(0, Number(state.gainSerial || 0)) + 1;
@@ -622,6 +960,11 @@ export class mapView extends Phaser.Scene {
             levelsGained += 1;
         }
 
+        const newLevel = Math.max(1, Number(state.level || 1));
+        if (levelsGained > 0) {
+            this._maybeUnlockMilitiaParcelFromTownXp(previousLevel, newLevel);
+        }
+
         const now = Number(this.time?.now || 0);
         if (levelsGained > 0) {
             state.rewardReadyAt = Math.max(now + 320, Number(state.rewardReadyAt || 0));
@@ -633,6 +976,20 @@ export class mapView extends Phaser.Scene {
             );
         } else if (opts.alert) {
             showAlert(this, `${reason}: +${normalized} XP`, "#8fe7ff", 1100);
+        }
+
+        const militiaJustUnlocked =
+            state.level >= 3
+            && !this._isMilitiaParcelUnlocked();
+
+        if (militiaJustUnlocked) {
+            unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, this);
+            state.rewardReadyAt = Math.max(Number(this.time?.now || 0) + 380, Number(state.rewardReadyAt || 0));
+
+            this.time?.delayedCall?.(420, () => {
+                if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return;
+                this._showMilitiaParcelUnlockPresentation();
+            });
         }
 
         this.events.emit("townxp:changed", this.getTownXpSnapshot());
@@ -4162,9 +4519,6 @@ cancelFarmSelection(exitFarmMode = false) {
     _forceEvacuateFortPlayers(bounds) {
         if (!bounds) return;
 
-        const roads = townRoads['1'] || [];
-        if (!roads.length) return;
-
         const team = Teams.teamLists?.['1'];
         const players = team?.playerList || [];
 
@@ -4177,9 +4531,10 @@ cancelFarmSelection(exitFarmMode = false) {
             const inside = gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
             if (!inside) continue;
 
-            const [tx, ty] = Phaser.Utils.Array.GetRandom(roads);
-            const px = tx * SQUARESIZE + SQUARESIZE / 2;
-            const py = ty * SQUARESIZE + SQUARESIZE / 2;
+            const spawnTile = Teams.getTownSpawnTile?.("1");
+            if (!spawnTile) return;
+            const px = spawnTile.x * SQUARESIZE + SQUARESIZE / 2;
+            const py = spawnTile.y * SQUARESIZE + SQUARESIZE / 2;
 
             troop.setVelocity?.(0, 0);
             if (typeof troop.body.reset === 'function') {

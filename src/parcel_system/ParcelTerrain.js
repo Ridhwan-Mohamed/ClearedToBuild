@@ -109,12 +109,13 @@ export function paintResourceParcel({
   rng,
   setGroundRect,
   setWater,
+  groundType = "dirt",
   // pond controls
   pondTiles = 30,
   edgeBuffer = 2,
 }) {
   // one-shot fill (NO per-tile loops)
-  setGroundRect(origin.x, origin.y, size, size);
+  setGroundRect(origin.x, origin.y, size, size, groundType);
 
   const pond = buildPondCells({ size, rng, edgeBuffer, pondTiles });
   for (const kk of pond) {

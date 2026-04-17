@@ -4,6 +4,7 @@ import { StageState } from "../parcelController/StageState.js";
 import { Teams } from "../Teams.js";
 import { makeButton } from "../parcelSpawn/ui/makeButton.js";
 import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
+import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
 
 const SLOT_ORDER = ["N", "E", "S", "W"];
 const SLOT_LABELS = {
@@ -56,11 +57,11 @@ const CONTRACT_DEFS = {
   },
   FARM: {
     emoji: "🌾",
-    title: "Farm Contract",
+    title: "Field Contract",
     color: 0x15803d,
     lines: (scene) => [
-      "Wild hedge parcel.",
-      "Seed and berry bushes grow there.",
+      "Dark field parcel.",
+      "Mixed seed and berry bushes grow there.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("FARM"))}`,
     ],
@@ -76,9 +77,18 @@ const CONTRACT_DEFS = {
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("MILITIA"))}`,
     ],
   },
+  LOCKED_MILITIA: {
+    emoji: "🔒",
+    title: "Locked",
+    color: 0x374151,
+    lines: () => [
+      "Unlocks at Town XP Level 3.",
+      "Militia parcel is not available yet.",
+    ],
+  },
 };
 
-const BUYABLE_TYPES = ["FOREST", "ROCK", "PRESSURE", "MARKET", "FARM", "MILITIA"];
+const BUYABLE_TYPES = ["FOREST", "ROCK", "PRESSURE", "MARKET", "FARM"];
 
 function fmtMMSS(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -171,6 +181,31 @@ export class ContractHud {
     return this.world?.clock?.getPhaseInfo?.() ?? null;
   }
 
+  _getTownLevel() {
+    return Math.max(1, Number(this.world?.getTownXpSnapshot?.()?.level || 1));
+  }
+
+  _isMilitiaUnlocked() {
+    return hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel);
+  }
+
+  _canAccessMilitia() {
+    return this._isMilitiaUnlocked() && this._getTownLevel() >= 3;
+  }
+
+  _showMilitiaLockedMessage() {
+    showAlert(this.scene, "🔒 Unlocks at Town XP Level 3", "#ffe08a");
+  }
+
+  _getBuyableTypes() {
+    const base = ["FOREST", "ROCK", "PRESSURE", "MARKET", "FARM"];
+    if (this._canAccessMilitia()) {
+      base.push("MILITIA");
+    } else {
+      base.push("LOCKED_MILITIA");
+    }
+    return base;
+  }
   _canBuyContracts() {
     return this.world?.clock?.canBuyParcels?.() ?? true;
   }
@@ -757,6 +792,11 @@ export class ContractHud {
   }
 
   _openDetail(slotId, type) {
+    if (type === "MILITIA" && !this._canAccessMilitia()) {
+      this._showMilitiaLockedMessage();
+      return;
+    }
+
     const animatePopup = !this.popup.visible;
     this.popupState = {
       kind: "slot",
@@ -968,20 +1008,31 @@ export class ContractHud {
       this.popupBody.setPosition(18, 52);
       this.popupBody.setText("Pick a contract to inspect, then buy it here.");
       const buttons = [];
-      BUYABLE_TYPES.forEach((type, index) => {
+      this._getBuyableTypes().forEach((type, index) => {
         const def = CONTRACT_DEFS[type];
         const row = Math.floor(index / 2);
         const col = index % 2;
         const x = 74 + col * 132;
         const y = 108 + row * 40;
-        const cost = getContractPermitCost(type, 1);
+
+        const isLockedMilitia = type === "LOCKED_MILITIA";
+        const cost = isLockedMilitia ? 0 : getContractPermitCost(type, 1);
+
         buttons.push({
           x,
           y,
           w: 120,
           h: 34,
-          label: `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)}`,
-          onClick: () => this._openDetail(slotId, type),
+          label: isLockedMilitia
+            ? `🔒 Level 3`
+            : `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)}`,
+          onClick: () => {
+            if (isLockedMilitia) {
+              this._showMilitiaLockedMessage();
+              return;
+            }
+            this._openDetail(slotId, type);
+          },
         });
       });
       buttons.push({ x: 140, y: 228, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() });
@@ -991,6 +1042,25 @@ export class ContractHud {
 
     if (view === "detail") {
       const type = this.popupState.type;
+      if (type === "MILITIA" && !this._canAccessMilitia()) {
+        this._setPopupTheme({
+          bgColor: 0x374151,
+          bgAlpha: 0.36,
+          strokeColor: 0xfbbf24,
+          titleColor: "#ffffff",
+          bodyColor: "#eef7ff",
+        });
+        this.popupTitle.setText("🔒 Locked");
+        this.popupBody.setPosition(18, 52);
+        this.popupBody.setText([
+          "Unlocks at Town XP Level 3.",
+          "Militia parcel is not available yet.",
+        ].join("\n"));
+        this._addPopupButtons([
+          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._openChooser(slotId) },
+        ]);
+        return;
+      }
       if (type === "PRESSURE") {
         this._setPopupTheme({
           bgColor: 0x7f1d1d,
@@ -1132,6 +1202,10 @@ export class ContractHud {
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
+    if (type === "MILITIA" && !this._canAccessMilitia()) {
+      this._showMilitiaLockedMessage();
+      return;
+    }
     const cost = payload.cost != null
       ? payload.cost
       : getContractPermitCost(type, difficulty);

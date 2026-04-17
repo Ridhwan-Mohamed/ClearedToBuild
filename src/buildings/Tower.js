@@ -282,6 +282,7 @@ export class TowerBuilding {
   onDamaged(damage, currentHealth, maxHealth) {
     this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
     this.health = Math.max(0, currentHealth);
+    buildingManager.queueAutoFixForBuilding(this, this.team);
 
     this.shakeAndFlash();
 

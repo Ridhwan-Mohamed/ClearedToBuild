@@ -237,10 +237,9 @@ export function openPowerupScreen(scene) {
                     return;
                 }
                 scene.updateMoney(-cost);
-                const roads = townRoads['1'] || [];
-                if (roads.length === 0) return;
-                const spawnTile = Phaser.Utils.Array.GetRandom(roads);
-                const player = new playerClasses[type](spawnTile[0], spawnTile[1], 1);
+                const spawnTile = Teams.getTownSpawnTile?.("1");
+                if (!spawnTile) return;
+                const player = new playerClasses[type](spawnTile.x, spawnTile.y, 1);
                 House.assignPlayerToHouse(player, team);
             }
         });
@@ -288,10 +287,9 @@ export function openPowerupScreen(scene) {
                 }
                 scene.updateMoney(-cost);
                 // Get a random road from team 1
-                const roads = townRoads['1'] || [];
-                if (roads.length === 0) return;
-                const spawnTile = Phaser.Utils.Array.GetRandom(roads);
-                const player = new playerClasses[type](spawnTile[0], spawnTile[1], 1);
+                const spawnTile = Teams.getTownSpawnTile?.("1");
+                if (!spawnTile) return;
+                const player = new playerClasses[type](spawnTile.x, spawnTile.y, 1);
                 House.assignPlayerToHouse(player, "1");
             }
         });

@@ -86,7 +86,7 @@ export class ZoomMixer {
     const tex = scene.textures.createCanvas(this.texKey, w, h);
     const ctx = tex.getContext();
 
-    paintOverviewTexture(ctx, grid, colorForType);
+    paintOverviewTexture(ctx, grid, colorForType, null, this._getOverviewMarkers());
     tex.refresh();
     tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
 
@@ -134,10 +134,25 @@ export class ZoomMixer {
         minY: gridY - 1,
         maxX: gridX + lenx,
         maxY: gridY + leny,
-      });
+      }, this._getOverviewMarkers());
       
       tex.refresh();
       tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+
+  _getOverviewMarkers() {
+    const markers = [];
+
+    for (const node of Map.worldSeedBushes || []) {
+      if (node?.active === false) continue;
+      markers.push({ x: node.gridX, y: node.gridY, color: "#f4d23c" });
+    }
+    for (const node of Map.worldBerryBushes || []) {
+      if (node?.active === false) continue;
+      markers.push({ x: node.gridX, y: node.gridY, color: "#9b5cf6" });
+    }
+
+    return markers;
   }
 
   // Zoom to targetZoom around the camera center (no pointer reference)

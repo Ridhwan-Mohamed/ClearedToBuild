@@ -19,7 +19,9 @@ import gunslingerWalkDownRight from 'url:../assets/players/gunslinger/gunslinger
 import gunslingerWalkUp from 'url:../assets/players/gunslinger/gunslinger_walk_up.png';
 import gunslingerWalkUpLeft from 'url:../assets/players/gunslinger/gunslinger_walk_up_left.png';
 import gunslingerWalkUpRight from 'url:../assets/players/gunslinger/gunslinger_walk_up_right.png';
-
+import gunslingerSwimUp from 'url:../assets/players/gunslinger/gunslinger_swim_up.png';
+import gunslingerSwimDown from 'url:../assets/players/gunslinger/gunslinger_swim_down.png';
+import gunslingerSwimSidewards from 'url:../assets/players/gunslinger/gunslinger_swim_sidewards.png';
 
 export class Gunslinger {
 
@@ -33,6 +35,9 @@ export class Gunslinger {
         scene.load.spritesheet('gunslinger_walk_up', gunslingerWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('gunslinger_walk_up_left', gunslingerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('gunslinger_walk_up_right', gunslingerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_swim_up', gunslingerSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_swim_down', gunslingerSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('gunslinger_swim_sidewards', gunslingerSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -70,8 +75,11 @@ export class Gunslinger {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'gunslinger_walk_down',
                 down_left: 'gunslinger_walk_down_left',
@@ -79,6 +87,11 @@ export class Gunslinger {
                 up: 'gunslinger_walk_up',
                 up_left: 'gunslinger_walk_up_left',
                 up_right: 'gunslinger_walk_up_right',
+            },
+            swimDirections: {
+                up: 'gunslinger_swim_up',
+                down: 'gunslinger_swim_down',
+                side: 'gunslinger_swim_sidewards',
             }
         });
 
@@ -193,8 +206,8 @@ export class Gunslinger {
 
         if (troop.task || troop.track) { return; }
 
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
-
         if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);
         }

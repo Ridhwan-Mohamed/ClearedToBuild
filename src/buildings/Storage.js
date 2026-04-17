@@ -16,6 +16,7 @@ export class StorageBuilding {
         this.teamNumber = teamNumber;
 
         const item = TILE_TYPES.storage;
+        this.tileType = item;
         this.sprite = Map.addToWorldStatic(
             StorageBuilding.scene.add.sprite(
                 (x + Math.floor(item.lenX/2)) * SQUARESIZE,
@@ -589,6 +590,7 @@ export class StorageBuilding {
     onDamaged(damage, currentHealth, maxHealth) {
         this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
         this.health = Math.max(0, currentHealth);
+        buildingManager.queueAutoFixForBuilding(this, this.teamNumber);
 
         this.shakeAndFlash();
         const now = StorageBuilding.scene?.time?.now ?? 0;

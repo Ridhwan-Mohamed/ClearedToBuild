@@ -41,11 +41,11 @@ const _LEGACY_BUILDING_META = Object.freeze({
 });
 
 const BUILDING_META = Object.freeze({
-  tower: { emoji: "\u{1F5FC}", label: "Town Tower" },
-  house1: { emoji: "\u{1F3E0}", label: "House" },
-  house2: { emoji: "\u{1F3E0}", label: "House" },
-  storage: { emoji: "\u{1F4E6}", label: "Storage" },
-  clayOven: { emoji: "\u{1F525}", label: "Clay Oven" },
+  tower: { emoji: "\u{1F5FC}", label: "Town Tower", color: "#74baff" },
+  house1: { emoji: "\u{1F3E0}", label: "House", color: "#ff9b77" },
+  house2: { emoji: "\u{1F3E0}", label: "House", color: "#ff9b77" },
+  storage: { emoji: "\u{1F4E6}", label: "Storage", color: "#ffd27d" },
+  clayOven: { emoji: "\u{1F525}", label: "Clay Oven", color: "#ff6958" },
 });
 
 function hexToColorInt(value, fallback = 0xffffff) {
@@ -371,18 +371,19 @@ export class DraftStartMenu {
     }
   }
 
-  _showLayoutTooltip(pointer, text) {
+  _showLayoutTooltip(pointer, text, accentColor = null) {
     const tooltip = this.ui.layoutTooltip;
     if (!tooltip) return;
     tooltip.label.setText(text);
+    tooltip.label.setColor(accentColor || TEXT_LIGHT);
     const pad = Math.round(16 * this.layout.scale);
     const width = Math.max(Math.round(120 * this.layout.scale), Math.round(tooltip.label.width + pad * 2));
     const height = Math.max(Math.round(38 * this.layout.scale), Math.round(tooltip.label.height + pad));
     this._redrawPanel(tooltip.bg, width, height, {
       fillColor: 0x08151e,
       fillAlpha: 0.94,
-      strokeColor: 0xffffff,
-      strokeAlpha: 0.16,
+      strokeColor: accentColor ? hexToColorInt(accentColor, 0xffffff) : 0xffffff,
+      strokeAlpha: accentColor ? 0.26 : 0.16,
       radius: Math.round(18 * this.layout.scale),
       shadowColor: 0x000000,
       shadowAlpha: 0.22,
@@ -460,7 +461,7 @@ export class DraftStartMenu {
         const targetY = point.gridY - (this.selectedPlacedBuildingGrab?.y ?? 0);
         this.preview.setMoveHover(this.selectedPlacedBuilding, this.state, targetX, targetY);
         const meta = this._getBuildingMeta(this.selectedPlacedBuilding?.typeKey);
-        this._showLayoutTooltip(pointer, `${meta.emoji} Move ${meta.label}`);
+        this._showLayoutTooltip(pointer, `${meta.emoji} Move ${meta.label}`, meta.color);
         return;
       }
 
@@ -472,7 +473,7 @@ export class DraftStartMenu {
       }
 
       const meta = this._getBuildingMeta(hovered.typeKey ?? hovered.type?.name);
-      this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label}`);
+      this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label}`, meta.color);
     };
 
     this._boundPointerDown = (pointer) => {
@@ -487,7 +488,7 @@ export class DraftStartMenu {
         if (hitBuilding) {
           this._selectPlacedBuilding(hitBuilding, point.gridX, point.gridY);
           const meta = this._getBuildingMeta(hitBuilding.typeKey ?? hitBuilding.type?.name);
-          this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label} selected`);
+          this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label} selected`, meta.color);
         }
         return;
       }
@@ -499,7 +500,7 @@ export class DraftStartMenu {
         }
         this._selectPlacedBuilding(hitBuilding, point.gridX, point.gridY);
         const meta = this._getBuildingMeta(hitBuilding.typeKey ?? hitBuilding.type?.name);
-        this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label} selected`);
+        this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label} selected`, meta.color);
         return;
       }
 
@@ -1098,23 +1099,24 @@ export class DraftStartMenu {
 
     const legendRefs = [];
     [
-      { key: "tower", emoji: "🗼", label: "Town Tower", types: ["tower"] },
-      { key: "house", emoji: "🏠", label: "House", types: ["house1", "house2"] },
-      { key: "storage", emoji: "📦", label: "Storage", types: ["storage"] },
-      { key: "clayOven", emoji: "🔥", label: "Clay Oven", types: ["clayOven"] },
+      { key: "tower", emoji: "🗼", label: "Town Tower", color: BUILDING_META.tower.color, types: ["tower"] },
+      { key: "house", emoji: "🏠", label: "House", color: BUILDING_META.house1.color, types: ["house1", "house2"] },
+      { key: "storage", emoji: "📦", label: "Storage", color: BUILDING_META.storage.color, types: ["storage"] },
+      { key: "clayOven", emoji: "🔥", label: "Clay Oven", color: BUILDING_META.clayOven.color, types: ["clayOven"] },
     ].forEach((entry, index) => {
       const lineY = -legendHeight / 2 + Math.round((78 + index * 50) * scale);
-      const label = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), lineY, `${entry.emoji} ${entry.label}`, {
+      const marker = scene.add.circle(-legendWidth / 2 + Math.round(30 * scale), lineY, Math.max(4, Math.round(6 * scale)), hexToColorInt(entry.color, 0xffffff), 0.95);
+      const label = scene.add.text(-legendWidth / 2 + Math.round(46 * scale), lineY, `${entry.emoji} ${entry.label}`, {
         fontFamily: "Arial",
         fontSize: this._fontPx(16, 12),
-        color: TEXT_LIGHT,
+        color: entry.color,
       }).setOrigin(0, 0.5);
       const count = scene.add.text(legendWidth / 2 - Math.round(24 * scale), lineY, "x0", {
         fontSize: this._fontPx(13, 10),
-        color: TEXT_WARM,
+        color: entry.color,
       }).setOrigin(1, 0.5);
-      legendRefs.push({ ...entry, label, count });
-      legend.add([label, count]);
+      legendRefs.push({ ...entry, marker, label, count });
+      legend.add([marker, label, count]);
     });
 
     const legendHint = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), legendHeight / 2 - Math.round(24 * scale), "Hover a building to see its type. Click it, then click a new spot to move it.", {

@@ -19,6 +19,11 @@ import { Blademaster } from "../../players/Blademaster";
 import { Gunslinger } from "../../players/Gunslinger";
 import { formatPermitCostText } from "../../permitSystem";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../../parcel_system/StoreUnlockSystem";
+import {
+  BOTTOM_BAR_THEME,
+  makeGlassRoundRect,
+  mixColor,
+} from "./BottomBarTheme";
 
 const RARITY = {
   common: { border: 0x2ecc71, label: "#2ecc71" }, // green
@@ -38,7 +43,7 @@ const UNIT_STORE = [
     desc: "Plants, waters, and tends crops.",
     cost: { money: 100 },
     iconKey: "icon_farmer_store",
-    previewTexture: "farmer_walk_down",
+    portraitTexture: "portrait_farmer_healthy",
     unitClass: Farmer,
   },
   {
@@ -47,7 +52,7 @@ const UNIT_STORE = [
     desc: "Constructs and repairs your structures.",
     cost: { money: 100 },
     iconKey: "icon_builder_store",
-    previewTexture: "builder_walk_down",
+    portraitTexture: "portrait_builder_healthy",
     unitClass: Builder,
   },
   {
@@ -56,7 +61,7 @@ const UNIT_STORE = [
     desc: "Harvests crops and gathers seeds.",
     cost: { money: 100 },
     iconKey: "icon_forager_store",
-    previewTexture: "forager_walk_down",
+    portraitTexture: "portrait_forager_healthy",
     unitClass: Forager,
   },
   {
@@ -65,7 +70,7 @@ const UNIT_STORE = [
     desc: "Runs ovens and keeps water flowing.",
     cost: { money: 100 },
     iconKey: "icon_fireman_store",
-    previewTexture: "fireman_walk_down",
+    portraitTexture: "portrait_fireman_healthy",
     unitClass: Fireman,
   },
   {
@@ -74,7 +79,7 @@ const UNIT_STORE = [
     desc: "Fast melee bruiser for close fights.",
     cost: { money: 75 },
     iconKey: "icon_brawler_store",
-    previewTexture: "brawler_walk_down",
+    portraitTexture: "portrait_brawler_healthy",
     unitClass: Brawler,
   },
   {
@@ -84,7 +89,7 @@ const UNIT_STORE = [
     cost: { money: 250 },
     unlockKey: STORE_UNLOCK_KEYS.blademaster,
     iconKey: "icon_blademaster_store",
-    previewTexture: "blademaster_walk_down",
+    portraitTexture: "portrait_blademaster_healthy",
     unitClass: Blademaster,
   },
   {
@@ -94,7 +99,7 @@ const UNIT_STORE = [
     cost: { money: 500 },
     unlockKey: STORE_UNLOCK_KEYS.gunslinger,
     iconKey: "icon_gunslinger_store",
-    previewTexture: "gunslinger_walk_down",
+    portraitTexture: "portrait_gunslinger_healthy",
     unitClass: Gunslinger,
   },
 ];
@@ -106,7 +111,7 @@ function getUnitRarity(price) {
 }
 
 function buildIconTexture(scene, iconKey, drawFn) {
-  if (scene.textures.exists(iconKey)) return;
+  if (scene.textures.exists(iconKey)) scene.textures.remove(iconKey);
   const rt = scene.make.renderTexture({ width: 64, height: 64, add: false });
   rt.clear();
   drawFn(rt);
@@ -165,10 +170,10 @@ function ensureBuildTabIcons(scene) {
   UNIT_STORE.forEach((unit) => {
     buildIconTexture(scene, unit.iconKey, (rt) => {
       drawCenteredTexture(scene, rt, {
-        key: unit.previewTexture,
-        frame: 1,
-        scale: 2,
-        y: 36,
+        key: unit.portraitTexture,
+        frame: 0,
+        scale: 1.05,
+        y: 34,
         useSprite: true,
       });
     });
@@ -257,11 +262,17 @@ function makeIcon(scene, def, w, h) {
 
   // Placeholder visual + label so you know what to replace.
   const c = scene.rexUI.add.sizer({ orientation: "y", space: { item: 4 } });
-  const box = scene.add.rectangle(0, 0, w, h, 0x333333, 1).setStrokeStyle(1, 0x111111);
+  const box = makeGlassRoundRect(scene, w, h, 16, {
+    fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.04),
+    alpha: 0.9,
+    stroke: 0xffffff,
+    strokeAlpha: 0.12,
+    strokeWidth: 1.5,
+  });
   const label = scene.add.text(0, 0, def.iconKey ?? "icon_missing", {
     fontSize: "10px",
     fontFamily: "Bungee",
-    color: "#aaaaaa",
+    color: BOTTOM_BAR_THEME.textMuted,
     align: "center",
     wordWrap: { width: w }
   }).setOrigin(0.5, 0.5);
@@ -297,6 +308,15 @@ function getDefCost(def, scene = null) {
 
 function getSpecialBuildPlacer(tile) {
   return tile?.name ? SPECIAL_BUILD_PLACERS[tile.name] ?? null : null;
+}
+
+function applyBuildTabToggleVisual(bg, text, active, accent) {
+  bg.setFillStyle(
+    active ? mixColor(accent, 0xffffff, 0.12) : mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.06),
+    active ? 0.94 : 0.82
+  );
+  bg.setStrokeStyle(active ? 2 : 1.5, active ? accent : mixColor(accent, 0x98e7ff, 0.35), active ? 0.52 : 0.16);
+  text.setColor(active ? "#fff9ef" : BOTTOM_BAR_THEME.textSoft);
 }
 
 export default class BuildTab {
@@ -379,7 +399,7 @@ export default class BuildTab {
 
   _makeBuildDefs() {
     const defs = [
-      { key: "tower", name: "Town Tower", desc: "Core structure. Pays dawn income and permits. Lose if they all fall.", rarity: "rare", iconKey: "icon_town_tower", tileTypeName: "tower" },
+      { key: "tower", name: "Town Tower", desc: "Pays income and expansion permits at dawn.", rarity: "rare", iconKey: "icon_town_tower", tileTypeName: "tower" },
       { key:"house", name:"House", desc:"Adds housing capacity.", rarity:"common", iconKey:"icon_house", tileTypeName:"house1" },
       { key: "storage",  name: "Storage",   desc: "More inventory space.",  rarity: "common", iconKey: "icon_storage",  tileTypeName: "storage",},
       { key: "clayOven", name: "Clay Oven", desc: "Cook food over time.",   rarity: "common", iconKey: "icon_clay_oven",tileTypeName: "clayOven",},
@@ -455,48 +475,64 @@ export default class BuildTab {
     const topY = -126;
 
     const toggleY = topY + 18;
-    const buildToggleBg = scene.add.rectangle(centerX - 70, toggleY, 112, 28, this.mode === "buildings" ? 0x8d3a69 : 0x2d2d2d, 0.95)
-      .setStrokeStyle(2, this.mode === "buildings" ? 0xff92c9 : 0x666666)
+    const buildToggleBg = makeGlassRoundRect(scene, 112, 30, 15, {
+      fill: 0x1a4258,
+      alpha: 0.82,
+      stroke: 0xff97c2,
+      strokeAlpha: 0.18,
+      strokeWidth: 1.5,
+    }).setPosition(centerX - 70, toggleY)
       .setInteractive({ useHandCursor: true });
     const buildToggleText = scene.add.text(centerX - 70, toggleY, "Buildings", {
       fontSize: "12px",
       fontFamily: "Bungee",
-      color: this.mode === "buildings" ? "#ffe7f4" : "#bbbbbb",
+      color: this.mode === "buildings" ? "#ffe7f4" : BOTTOM_BAR_THEME.textSoft,
+      stroke: "#081621",
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
-    const unitToggleBg = scene.add.rectangle(centerX + 70, toggleY, 112, 28, this.mode === "units" ? 0x8d3a69 : 0x2d2d2d, 0.95)
-      .setStrokeStyle(2, this.mode === "units" ? 0xff92c9 : 0x666666)
+    const unitToggleBg = makeGlassRoundRect(scene, 112, 30, 15, {
+      fill: 0x1a4258,
+      alpha: 0.82,
+      stroke: 0x98e7ff,
+      strokeAlpha: 0.18,
+      strokeWidth: 1.5,
+    }).setPosition(centerX + 70, toggleY)
       .setInteractive({ useHandCursor: true });
     const unitToggleText = scene.add.text(centerX + 70, toggleY, "Units", {
       fontSize: "12px",
       fontFamily: "Bungee",
-      color: this.mode === "units" ? "#ffe7f4" : "#bbbbbb",
+      color: this.mode === "units" ? "#ffe7f4" : BOTTOM_BAR_THEME.textSoft,
+      stroke: "#081621",
+      strokeThickness: 2,
     }).setOrigin(0.5);
 
     buildToggleBg.on("pointerdown", () => this._setMode("buildings"));
     buildToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("buildings"));
     unitToggleBg.on("pointerdown", () => this._setMode("units"));
     unitToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("units"));
+    applyBuildTabToggleVisual(buildToggleBg, buildToggleText, this.mode === "buildings", 0xff97c2);
+    applyBuildTabToggleVisual(unitToggleBg, unitToggleText, this.mode === "units", 0x98e7ff);
 
     this.view.add([buildToggleBg, buildToggleText, unitToggleBg, unitToggleText]);
 
     // ----- Card layout constants -----
-    const CARD_W = 140;
-    const CARD_H = 154;
-    const ICON_W = 92;
-    const ICON_H = 62;
+    const CARD_W = 272;
+    const CARD_H = 136;
+    const ICON_W = 76;
+    const ICON_H = 76;
 
-    const gap = 24;
+    const gap = 18;
 
     // ----- Scroller viewport (masked) -----
     // width: leave margin so it looks like CardsTab and doesn't touch edges
-    const viewportW = scene.scale.width - 140;
-    const viewportH = CARD_H + 12;
+    const viewportW = scene.scale.width - 32;
+    const viewportH = CARD_H + 18;
     const viewportY = topY + 38;
     const viewportX = centerX;
 
     // Hit area (dragging works anywhere in the viewport)
-    const viewportHit = scene.add.rectangle(viewportX, viewportY, viewportW, viewportH, 0x000000, 0)
+    const viewportHit = scene.add.rectangle(viewportX, viewportY, viewportW, viewportH, 0x000000, 0.001)
       .setOrigin(0.5, 0)
       .setInteractive({ useHandCursor: true });
 
@@ -508,12 +544,19 @@ export default class BuildTab {
     const cardsContainer = scene.add.container(left, top);
 
     // Optional visual lane so the horizontal scroller area is obvious
-    const viewportFrame = scene.add.rectangle(viewportX, viewportY, viewportW, viewportH, 0x000000, 0)
-      .setOrigin(0.5, 0)
-      .setStrokeStyle(1, 0x666666, 0.5);
+    const viewportFrame = makeGlassRoundRect(scene, viewportW, viewportH, 24, {
+      fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+      alpha: 0.74,
+      stroke: 0x98e7ff,
+      strokeAlpha: 0.16,
+      strokeWidth: 1.5,
+    }).setOrigin(0.5, 0);
+    viewportFrame.setPosition(viewportX, viewportY);
+    const viewportGlow = scene.add.rectangle(viewportX, viewportY + 16, viewportW - 24, 18, 0xffffff, 0.08)
+      .setOrigin(0.5, 0);
 
     // Add to view
-    this.view.add([viewportHit, cardsContainer, viewportFrame]);
+    this.view.add([viewportFrame, viewportGlow, viewportHit, cardsContainer]);
 
     // Store for scrolling helpers
     this._cardsContainer = cardsContainer;
@@ -525,53 +568,96 @@ export default class BuildTab {
     let xCursor = 0;
 
     // card center Y inside viewport
-    const cardCenterY = 8 + CARD_H / 2;
+    const cardCenterY = 10 + CARD_H / 2;
 
     this._getCurrentDefs().forEach((def) => {
       const rarity = RARITY[def.rarity] ?? RARITY.common;
 
       const x = xCursor + CARD_W / 2;
       const y = cardCenterY;
-
-      const bg = scene.add.rectangle(x, y, CARD_W, CARD_H, 0x1e1e1e, 0.95)
-        .setStrokeStyle(2, rarity.border)
-        .setInteractive({ useHandCursor: true });
-
       const icon = makeIcon(scene, def, ICON_W, ICON_H);
-      icon.x = x;
-      icon.y = y - 34;
-
-      const name = scene.add.text(x, y + 20, def.name, {
-        fontSize: "14px",
+      const iconAura = scene.add.ellipse(0, 0, 84, 84, rarity.border, 0.16).setOrigin(0.5);
+      const name = scene.add.text(0, 0, def.name, {
+        fontSize: "16px",
         fontFamily: "Bungee",
-        color: rarity.label,
+        color: BOTTOM_BAR_THEME.text,
         fontStyle: "bold",
-        align: "center",
-        wordWrap: { width: CARD_W - 16 }
-      }).setOrigin(0.5);
+        stroke: "#081621",
+        strokeThickness: 3,
+        align: "left",
+        wordWrap: { width: CARD_W - 124 }
+      }).setOrigin(0, 0);
 
-      const desc = scene.add.text(x, y + 44, def.desc ?? "", {
-        fontSize: "10px",
+      const desc = scene.add.text(0, 0, def.desc ?? "", {
+        fontSize: "11px",
         fontFamily: "Bungee",
-        color: "#bbbbbb",
-        align: "center",
-        wordWrap: { width: CARD_W - 16 }
-      }).setOrigin(0.5);
+        color: BOTTOM_BAR_THEME.textMuted,
+        stroke: "#081621",
+        strokeThickness: 2,
+        align: "left",
+        lineSpacing: 2,
+        wordWrap: { width: CARD_W - 124 }
+      }).setOrigin(0, 0);
 
       // ✅ Cost from TILE_TYPES via your helper
       const costObj = getDefCost(def, scene);
-      const cost = scene.add.text(x, y + 68, fmtCost(costObj), {
-        fontSize: "12px",
+      const cost = scene.add.text(0, 0, fmtCost(costObj), {
+        fontSize: "11px",
         fontFamily: "Bungee",
-        color: "#dddddd",
-        align: "center",
-      }).setOrigin(0.5);
+        color: "#fff0bf",
+        stroke: "#5a2c00",
+        strokeThickness: 2,
+        align: "left",
+        wordWrap: { width: CARD_W - 124 }
+      }).setOrigin(0, 0);
+      const cardGlow = scene.add.rectangle(0, 0, CARD_W - 10, CARD_H - 10, rarity.border, 0.1)
+        .setOrigin(0.5)
+        .setAlpha(0.14)
+        .setScale(0.94);
+      const cardBg = makeGlassRoundRect(scene, CARD_W, CARD_H, 22, {
+        fill: mixColor(BOTTOM_BAR_THEME.cardFill, rarity.border, 0.12),
+        alpha: 0.94,
+        stroke: rarity.border,
+        strokeAlpha: 0.34,
+        strokeWidth: 2,
+      });
+      const cardShine = scene.add.rectangle(0, -CARD_H / 2 + 18, CARD_W - 28, 18, 0xffffff, 0.08).setOrigin(0.5);
+      iconAura.setPosition(-CARD_W / 2 + 56, 0);
+      icon.setPosition(-CARD_W / 2 + 56, 0);
+      name.setPosition(-CARD_W / 2 + 102, -CARD_H / 2 + 22);
+      desc.setPosition(-CARD_W / 2 + 102, -8);
+      cost.setPosition(-CARD_W / 2 + 102, CARD_H / 2 - 28);
+      const hit = scene.add.zone(0, 0, CARD_W, CARD_H).setInteractive({ useHandCursor: true });
+      const card = scene.add.container(x, y, [cardGlow, cardBg, cardShine, iconAura, icon, name, desc, cost, hit]);
 
-      bg.on("pointerdown", () => this._select(def.key));
+      hit.on("pointerdown", () => this._select(def.key));
 
-      this._cardRefs.push({ def, bg });
+      const cardRef = {
+        def,
+        bg: cardBg,
+        glow: cardGlow,
+        iconAura,
+        name,
+        desc,
+        cost,
+        card,
+        baseY: y,
+        hit,
+        hovered: false,
+      };
 
-      cardsContainer.add([bg, icon, name, desc, cost]);
+      hit.on("pointerover", () => {
+        cardRef.hovered = true;
+        this._applyCardVisual(cardRef, this.activeKey === def.key);
+      });
+      hit.on("pointerout", () => {
+        cardRef.hovered = false;
+        this._applyCardVisual(cardRef, this.activeKey === def.key);
+      });
+
+      this._cardRefs.push(cardRef);
+      this._applyCardVisual(cardRef, this.activeKey === def.key);
+      cardsContainer.add(card);
 
       xCursor += CARD_W + gap;
     });
@@ -687,14 +773,13 @@ export default class BuildTab {
       return;
     }
 
-    const roads = townRoads[team] || [];
-    if (!roads.length) {
+    const spawnTile = Teams.getTownSpawnTile?.(team);
+    if (!spawnTile) {
       showAlert(this.scene, "No town road to spawn from", "#ff5555");
       return;
     }
 
-    const spawnTile = Phaser.Utils.Array.GetRandom(roads);
-    const player = new def.unitClass(spawnTile[0], spawnTile[1], 1);
+    const player = new def.unitClass(spawnTile.x, spawnTile.y, 1);
     House.assignPlayerToHouse(player, team);
     spendResources(this.scene, costObj);
     showAlert(this.scene, `${def.name} recruited!`, "#ffb4dd");
@@ -722,9 +807,8 @@ export default class BuildTab {
     this.activeKey = key;
     this.pendingDef = def;
 
-    this._cardRefs.forEach(({ def: d, bg }) => {
-      const rarity = RARITY[d.rarity] ?? RARITY.common;
-      bg.setStrokeStyle(d.key === key ? 4 : 2, d.key === key ? 0xffff00 : rarity.border);
+    this._cardRefs.forEach((ref) => {
+      this._applyCardVisual(ref, ref.def.key === key);
     });
 
     if (def.isWall) {
@@ -754,9 +838,8 @@ export default class BuildTab {
     this.activeKey = null;
     this.pendingDef = null;
 
-    this._cardRefs.forEach(({ def: d, bg }) => {
-      const rarity = RARITY[d.rarity] ?? RARITY.common;
-      bg.setStrokeStyle(2, rarity.border);
+    this._cardRefs.forEach((ref) => {
+      this._applyCardVisual(ref, false);
     });
 
     if (this.scene.wallPlacer?.active) this.scene.wallPlacer.stop?.();
@@ -867,4 +950,33 @@ export default class BuildTab {
 
   onShow() {}
   hide() {}
+
+  _applyCardVisual(ref, selected) {
+    if (!ref?.bg || !ref?.card) return;
+    const rarity = RARITY[ref.def?.rarity] ?? RARITY.common;
+    const hovered = !!ref.hovered;
+    const accent = selected ? mixColor(rarity.border, 0xffffff, 0.16) : rarity.border;
+
+    ref.bg.setFillStyle(
+      mixColor(BOTTOM_BAR_THEME.cardFill, rarity.border, selected ? 0.2 : hovered ? 0.16 : 0.12),
+      selected ? 0.98 : hovered ? 0.96 : 0.94
+    );
+    ref.bg.setStrokeStyle(selected ? 3 : hovered ? 2.5 : 2, accent, selected ? 0.86 : hovered ? 0.54 : 0.34);
+    ref.iconAura?.setFillStyle(rarity.border, selected ? 0.24 : hovered ? 0.2 : 0.16);
+    ref.name?.setColor(selected ? "#fffdf4" : BOTTOM_BAR_THEME.text);
+    ref.desc?.setColor(hovered || selected ? BOTTOM_BAR_THEME.textSoft : BOTTOM_BAR_THEME.textMuted);
+    ref.cost?.setColor(selected ? "#fff4c9" : "#fff0bf");
+    ref.glow?.setFillStyle(rarity.border, selected ? 0.26 : hovered ? 0.2 : 0.14);
+    ref.glow?.setScale(selected ? 1.02 : hovered ? 0.99 : 0.94);
+
+    this.scene.tweens.killTweensOf(ref.card);
+    this.scene.tweens.add({
+      targets: ref.card,
+      y: selected ? ref.baseY - 6 : hovered ? ref.baseY - 4 : ref.baseY,
+      scaleX: selected ? 1.025 : hovered ? 1.012 : 1,
+      scaleY: selected ? 1.025 : hovered ? 1.012 : 1,
+      duration: 130,
+      ease: "Quad.easeOut",
+    });
+  }
 }

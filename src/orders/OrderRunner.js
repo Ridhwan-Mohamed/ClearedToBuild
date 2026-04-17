@@ -119,7 +119,7 @@ export class OrderRunner {
       return "No active rock parcel. Buy a rock parcel first.";
     }
     if (resourceType === "seed" || resourceType === "berry") {
-      return "No active farm parcel. Buy a farm parcel first.";
+      return "No active field parcel. Buy a field parcel first.";
     }
     return "No matching resource parcel is active.";
   }
@@ -129,10 +129,10 @@ export class OrderRunner {
       return this.getGatherParcelMissingMessage(resourceType);
     }
     if (resourceType === "seed") {
-      return "No seed bushes are available on the active farm parcel.";
+      return "No seed bushes are available on the active field parcel.";
     }
     if (resourceType === "berry") {
-      return "No berry bushes are available on the active farm parcel.";
+      return "No berry bushes are available on the active field parcel.";
     }
     return `No ${resourceType} targets are available right now.`;
   }
@@ -622,6 +622,14 @@ export class OrderRunner {
       return true;
     }
 
+    if (order.shuttingDown) {
+      if (this._parkGatherTroopInTown(troop)) {
+        return true;
+      }
+      this._finishGatherOrder(troop);
+      return false;
+    }
+
     const candidates = this._resolveGatherCandidates(order, troop.body.team);
     if (!candidates.length) {
       if (order.kind === ORDER_KINDS.GATHER_TYPE) {
@@ -759,23 +767,7 @@ export class OrderRunner {
   }
 
   static _getTownCenterWorld(teamNumber = 1) {
-    const center = Teams.teamLists?.[`${teamNumber}`]?.center;
-    if (Array.isArray(center) && center.length >= 2) {
-      return {
-        x: center[0] * SQUARESIZE + SQUARESIZE / 2,
-        y: center[1] * SQUARESIZE + SQUARESIZE / 2,
-      };
-    }
-
-    const roads = Teams.teamLists?.[`${teamNumber}`]?.roads || [];
-    if (roads.length) {
-      const [x, y] = roads[0];
-      return {
-        x: x * SQUARESIZE + SQUARESIZE / 2,
-        y: y * SQUARESIZE + SQUARESIZE / 2,
-      };
-    }
-    return null;
+    return Teams.getTownCenterRoadWorld?.(teamNumber) || null;
   }
 
   static _stepDefendTownOrder(troop, order) {
@@ -1176,6 +1168,14 @@ export class OrderRunner {
 
     if (this._tryRecoverFiremanCarry(troop)) {
       return true;
+    }
+
+    if (order.shuttingDown) {
+      if (this._parkGatherTroopInTown(troop)) {
+        return true;
+      }
+      this._clearTroopOrder(troop, { interrupt: false, targetState: CONTROL_STATES.TRACK_MODE });
+      return false;
     }
 
     if (order.kind === ORDER_KINDS.MAKE_WATER) {

@@ -21,6 +21,9 @@ import firemanWalkDownRight from 'url:../assets/players/fireman/fireman_walk_dow
 import firemanWalkUp from 'url:../assets/players/fireman/fireman_walk_up.png';
 import firemanWalkUpLeft from 'url:../assets/players/fireman/fireman_walk_up_left.png';
 import firemanWalkUpRight from 'url:../assets/players/fireman/fireman_walk_up_right.png';
+import firemanSwimUp from 'url:../assets/players/fireman/fireman_swim_up.png';
+import firemanSwimDown from 'url:../assets/players/fireman/fireman_swim_down.png';
+import firemanSwimSidewards from 'url:../assets/players/fireman/fireman_swim_sidewards.png';
 
 const MAX_CARRY = 1;
 
@@ -36,6 +39,9 @@ export class Fireman {
         scene.load.spritesheet('fireman_walk_up', firemanWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('fireman_walk_up_left', firemanWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('fireman_walk_up_right', firemanWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_swim_up', firemanSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_swim_down', firemanSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('fireman_swim_sidewards', firemanSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -69,8 +75,11 @@ export class Fireman {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'fireman_walk_down',
                 down_left: 'fireman_walk_down_left',
@@ -78,6 +87,11 @@ export class Fireman {
                 up: 'fireman_walk_up',
                 up_left: 'fireman_walk_up_left',
                 up_right: 'fireman_walk_up_right',
+            },
+            swimDirections: {
+                up: 'fireman_swim_up',
+                down: 'fireman_swim_down',
+                side: 'fireman_swim_sidewards',
             }
         });
         sprite.name = NameGenerator.generate();
@@ -112,11 +126,11 @@ export class Fireman {
             return;
         }
 
-        // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (OrderRunner.stepUnit(troop)) return;
         if (troop.task) return;
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
-
+        
         if (!troop.task && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
         }

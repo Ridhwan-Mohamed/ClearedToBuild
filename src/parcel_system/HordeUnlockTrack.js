@@ -42,27 +42,6 @@ const HORDE_UNLOCKS = Object.freeze([
     },
   },
   {
-    hordeIndex: 3,
-    unlockKey: STORE_UNLOCK_KEYS.turret,
-    title: "Turret Unlocked",
-    description: "Builders can now construct Turrets from the store. Set up automated firing lanes before the pressure ramps harder.",
-    displayLabel: "Turret",
-    badgeLabel: "HORDE UNLOCKED",
-    subLabel: "NEW BUILD IN STORE",
-    accentColor: 0xf4ca67,
-    glowColor: 0xffefb6,
-    panelColor: 0x111a2c,
-    compositeArt: {
-      textureKey: "horde_unlock_turret_composite",
-      width: 96,
-      height: 96,
-      parts: [
-        { key: "image7", x: 48, y: 60, scale: 1.15 },
-        { key: "image7a", x: 48, y: 30, scale: 1.15 },
-      ],
-    },
-  },
-  {
     hordeIndex: 4,
     unlockKey: STORE_UNLOCK_KEYS.stoneWall,
     title: "Stone Walls Unlocked",
@@ -82,27 +61,7 @@ const HORDE_UNLOCKS = Object.freeze([
       ],
     },
   },
-  {
-    hordeIndex: 5,
-    unlockKey: STORE_UNLOCK_KEYS.catapult,
-    title: "Catapult Unlocked",
-    description: "Catapults have been added to the store. Your builders can now field long-range siege support.",
-    displayLabel: "Catapult",
-    badgeLabel: "HORDE UNLOCKED",
-    subLabel: "NEW BUILD IN STORE",
-    accentColor: 0xff9b64,
-    glowColor: 0xffd6aa,
-    panelColor: 0x1a1625,
-    compositeArt: {
-      textureKey: "horde_unlock_catapult_composite",
-      width: 96,
-      height: 96,
-      parts: [
-        { key: "catapult_base", x: 48, y: 56, scale: 1.1 },
-        { key: "catapult_top", x: 48, y: 44, scale: 1.1, frame: 1, useSprite: true },
-      ],
-    },
-  },
+
 ]);
 
 function cloneReward(reward) {

@@ -5,15 +5,21 @@ import StorageTab from "./storageTab";
 import CardsTab from "./CardsTab";   
 import HousesTab from "./HousesTab"
 import BuildTab from "./BuildTab";
+import {
+  BOTTOM_BAR_THEME,
+  makeGlassRoundRect,
+  mixColor,
+  setHoverLiftState,
+} from "./BottomBarTheme";
 
-const COLOR_DARK = 0x260e04;
-const COLOR_FUNCTIONS = 0x800080;  // Purple
-const COLOR_PLAYERS   = 0x008000;  // Green
-const COLOR_OVENS     = 0xff0000;  // Red
-const COLOR_STORAGE   = 0x8B4513;  // Brown
-const COLOR_CARDS     = 0xFFD700;  // gold for cards
-const COLOR_BROWNISH  = 0x2d251e;  // brown for house
-const COLOR_BUILD     = 0xc84c8f;  // pink for store/build tab
+const COLOR_DARK = 0x0f3144;
+const COLOR_FUNCTIONS = 0x8f7cff;
+const COLOR_PLAYERS   = 0x57d68d;
+const COLOR_OVENS     = 0xff8a65;
+const COLOR_STORAGE   = 0xffc97a;
+const COLOR_CARDS     = 0xffdd73;
+const COLOR_BROWNISH  = 0xa78bfa;
+const COLOR_BUILD     = 0xff97c2;
 
 // after EXPANDED/COLLAPSED:
 const COLLAPSED = 32;     // how much of the bar stays visible when hidden
@@ -35,6 +41,7 @@ export function CreateBottomBar(scene) {
   const tabs = tabPage.tabs;
   const pages = tabPage.pages;
   const toggleBtn = tabPage.toggleBtn;
+  syncTabButtonAnchors(tabs, toggleBtn);
 
   let expanded = START_OPEN;
   let tween = null;
@@ -62,6 +69,7 @@ export function CreateBottomBar(scene) {
     ui.setMinSize(width, EXPANDED);
     ui.setPosition(width / 2, Phaser.Math.Linear(collapsedY, expandedY, progress));
     ui.layout();
+    syncTabButtonAnchors(tabs, toggleBtn);
     scene.uiBottomBar.expandedY = expandedY;
     scene.uiBottomBar.collapsedY = collapsedY;
   };
@@ -128,6 +136,7 @@ export function CreateBottomBar(scene) {
     if (key === 'players') scene.playerTab?.onShow?.();
     if (key === 'houses')  scene.housesTab?.onShow?.();
     if (key === 'build') scene.buildTab?.onShow?.();
+    updateTabButtonStyles(tabs, key);
   };
   const onSpaceToggle = () => toggleBottomBar();
 
@@ -178,6 +187,7 @@ export function CreateBottomBar(scene) {
   // default page
   pages.swapPage('functions');
   tabs.setValue?.('functions');
+  updateTabButtonStyles(tabs, 'functions');
 
   // (optional) spacebar toggle
   scene.input.keyboard.on('keydown-SPACE', onSpaceToggle);
@@ -232,8 +242,24 @@ var CreateTabPage = function (scene) {
     orientation: 'y',
     space: { left: 0, right: 0, top: 0, bottom: 0, item: 0 }
   });
+  sizer.addBackground(
+    makeGlassRoundRect(scene, 0, 0, 24, {
+      fill: BOTTOM_BAR_THEME.shellFill,
+      alpha: BOTTOM_BAR_THEME.shellAlpha,
+      stroke: BOTTOM_BAR_THEME.shellStroke,
+      strokeAlpha: BOTTOM_BAR_THEME.shellStrokeAlpha,
+    })
+  );
 
   const topRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 6 } });
+  topRow.addBackground(
+    makeGlassRoundRect(scene, 0, 0, 18, {
+      fill: mixColor(BOTTOM_BAR_THEME.shellFill, 0xffffff, 0.08),
+      alpha: 0.78,
+      stroke: BOTTOM_BAR_THEME.shellStroke,
+      strokeAlpha: 0.12,
+    })
+  );
 
   const tabs = CreateButtons(scene);
   const toggleBtn = CreateToggleLabel(scene, '▲', 44);
@@ -252,10 +278,9 @@ var CreateTabPage = function (scene) {
 
 var CreateButtons = function (scene) {
   const TAB_W = 50;
-
-  return scene.rexUI.add.buttons({
+  const tabs = scene.rexUI.add.buttons({
     orientation: 'x',
-    space: { left : 0 },
+    space: { left : 4, item: 6 },
     buttons: [
       CreateLabel(scene, 'Functions', COLOR_FUNCTIONS, TAB_W).setName('functions'),
       CreateLabel(scene, 'Store', COLOR_BUILD, TAB_W).setName('build'),
@@ -267,57 +292,100 @@ var CreateButtons = function (scene) {
     ],
     buttonsType: 'radio'
   });
+  (tabs.buttons || []).forEach((button) => {
+    button.hovered = false;
+    button.baseY = button.y;
+    button.on('pointerover', () => {
+      button.hovered = true;
+      applyTabLabelVisual(button, button.__selected === true);
+    });
+    button.on('pointerout', () => {
+      button.hovered = false;
+      applyTabLabelVisual(button, button.__selected === true);
+    });
+    applyTabLabelVisual(button, false);
+  });
+  return tabs;
 };
 
 var CreateLabel = function (scene, text, color, width) {
-  return scene.rexUI.add.label({
+  const label = scene.rexUI.add.label({
     width,
-    height: 32,
-    background: scene.rexUI.add.roundRectangle(
-      0, 0, 0, 0,               // auto size
-      { tl: 6, tr: 6, bl: 0, br: 0 },  // radius only top-left & top-right
-      0x222222                  // dark gray background fill
-    )
-    .setStrokeStyle(1, 0x000000), // subtle outline if you want
+    height: 34,
+    background: makeGlassRoundRect(
+      scene,
+      0,
+      0,
+      14,
+      {
+        fill: BOTTOM_BAR_THEME.tabIdleFill,
+        alpha: BOTTOM_BAR_THEME.tabIdleAlpha,
+        stroke: color,
+        strokeAlpha: 0.14,
+        strokeWidth: 1.5,
+      }
+    ),
 
     text: scene.add.text(0, 0, text, {
-      fontSize: 16,
-      color: Phaser.Display.Color.IntegerToColor(color).rgba, // colored text
+      fontSize: 14,
+      fontFamily: "Bungee",
+      color: BOTTOM_BAR_THEME.text,
       fontStyle: 'bold',
-      stroke: '#000000',         // white outline for contrast
-      strokeThickness: 3,
+      stroke: '#08202d',
+      strokeThickness: 2,
     }),
 
-    space: { left: 12, right: 8, top: 4, bottom: 4 }
+    space: { left: 12, right: 12, top: 6, bottom: 6 }
   });
+  label.accentColor = color;
+  label.__selected = false;
+  return label;
 };
 
 var CreateToggleLabel = function (scene, text, width = 44) {
-  return scene.rexUI.add.label({
+  const label = scene.rexUI.add.label({
     width,
-    height: 32,
-    background: scene.rexUI.add.roundRectangle(
-      0, 0, 0, 0,
-      { tl: 6, tr: 6, bl: 0, br: 0 },
-      0x222222
-    ).setStrokeStyle(1, 0x000000),
-
-    text: scene.add.text(0, 0, text, {
-      fontSize: 16,
-      color: '#ffffff',
-      fontStyle: 'bold',
-      stroke: '#000000',
-      strokeThickness: 3,
+    height: 34,
+    background: makeGlassRoundRect(scene, 0, 0, 14, {
+      fill: mixColor(BOTTOM_BAR_THEME.shellFill, 0xffffff, 0.08),
+      alpha: 0.84,
+      stroke: BOTTOM_BAR_THEME.shellStroke,
+      strokeAlpha: 0.18,
+      strokeWidth: 1.5,
     }),
 
-    space: { left: 16, right: 8, top: 4, bottom: 4 }
+    text: scene.add.text(0, 0, text, {
+      fontSize: 15,
+      fontFamily: "Bungee",
+      color: BOTTOM_BAR_THEME.text,
+      fontStyle: 'bold',
+      stroke: '#08202d',
+      strokeThickness: 2,
+    }),
+
+    space: { left: 14, right: 14, top: 6, bottom: 6 }
   });
+  label.baseY = label.y;
+  label.on('pointerover', () => {
+    label.baseY ??= label.y;
+    setHoverLiftState(scene, label, true, { baseY: label.baseY, hoverLift: 0, hoverScale: 1.04, moveY: false });
+  });
+  label.on('pointerout', () => {
+    label.baseY ??= label.y;
+    setHoverLiftState(scene, label, false, { baseY: label.baseY, hoverLift: 0, hoverScale: 1.04, moveY: false });
+  });
+  return label;
 };
 
 var CreatePages = function (scene) {
     const pages = scene.rexUI.add.pages({ fadeDuration: 500 })
-        .addBackground(scene.rexUI.add.roundRectangle(0,0,0,0,0, COLOR_DARK, 0.85))
-        .add(new FunctionTab(scene, 0, 0, scene.scale.width, 100).getContainer(), { key: 'functions', expand: true });
+        .addBackground(makeGlassRoundRect(scene, 0, 0, 22, {
+          fill: COLOR_DARK,
+          alpha: 0.72,
+          stroke: BOTTOM_BAR_THEME.shellStroke,
+          strokeAlpha: 0.10,
+        }))
+        .add(new FunctionTab(scene, 0, 0, scene.scale.width, EXPANDED - 34).getContainer(), { key: 'functions', expand: true });
 
     const playerTab = new PlayerTab(scene);
     pages.add(playerTab.view, { key: 'players', expand: true });
@@ -353,6 +421,47 @@ var CreatePages = function (scene) {
 
     return pages;
 };
+
+function applyTabLabelVisual(label, selected) {
+  if (!label) return;
+  const bg = label.getElement?.('background') || label.background;
+  const text = label.getElement?.('text') || label.text;
+  const accent = label.accentColor ?? 0xffffff;
+  const hovered = !!label.hovered;
+
+  label.__selected = selected;
+  bg?.setFillStyle(
+    selected ? mixColor(accent, 0xffffff, 0.18) : (hovered ? BOTTOM_BAR_THEME.tabHoverFill : BOTTOM_BAR_THEME.tabIdleFill),
+    selected ? BOTTOM_BAR_THEME.tabSelectedAlpha : (hovered ? BOTTOM_BAR_THEME.tabHoverAlpha : BOTTOM_BAR_THEME.tabIdleAlpha)
+  );
+  bg?.setStrokeStyle(
+    selected ? 2 : 1.5,
+    selected ? accent : mixColor(accent, BOTTOM_BAR_THEME.shellStroke, 0.35),
+    selected ? 0.56 : (hovered ? 0.26 : 0.14)
+  );
+  if (text?.setColor) {
+    text.setColor(selected ? BOTTOM_BAR_THEME.text : Phaser.Display.Color.IntegerToColor(accent).rgba);
+  }
+  setHoverLiftState(label.scene, label, selected || hovered, {
+    baseY: label.baseY ?? label.y ?? 0,
+    hoverLift: 0,
+    hoverScale: selected ? 1.04 : 1.02,
+    moveY: false,
+  });
+}
+
+function updateTabButtonStyles(tabs, activeKey) {
+  (tabs?.buttons || []).forEach((button) => {
+    applyTabLabelVisual(button, button?.name === activeKey);
+  });
+}
+
+function syncTabButtonAnchors(tabs, toggleBtn) {
+  (tabs?.buttons || []).forEach((button) => {
+    button.baseY = button.y;
+  });
+  if (toggleBtn) toggleBtn.baseY = toggleBtn.y;
+}
 
 var CreatePage = function (scene, title, color) {
     return scene.rexUI.add.textArea({

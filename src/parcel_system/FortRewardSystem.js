@@ -406,7 +406,15 @@ function buildPlayerReward(scene, meta, ctx, completeReward) {
       return;
     }
 
-    const troop = new def.ctor(center.gx, center.gy, 1);
+    const spawnTile = Teams.getTownSpawnTile?.(TEAM_ID);
+    if (!spawnTile) {
+      scene.updateMoney?.(NO_HOUSE_FALLBACK_MONEY);
+      showAlert(scene, `No town road: +$${NO_HOUSE_FALLBACK_MONEY}`, "#ffcc88");
+      completeReward();
+      return;
+    }
+
+    const troop = new def.ctor(spawnTile.x, spawnTile.y, 1);
     const assigned = House.assignPlayerToHouse(troop, TEAM_ID);
     if (!assigned) {
       troop.destroySelf?.() ?? safeDestroy(troop);

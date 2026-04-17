@@ -72,6 +72,33 @@ export const TILE_TYPES = {
     }
   },
 
+  dark_grass : {
+    name: "dark_grass",
+    spread: true,
+    block: false,
+    complex: true,
+    grid: 108,
+    interior: 108,
+    sides: { up: 109, down: 110, left: 111, right: 112 },
+    corners: { topLeft: 113, topRight: 114, bottomLeft: 115, bottomRight: 116 },
+    innerCorners: { topLeft: 117, topRight: 118, bottomRight: 119, bottomLeft: 120 },
+    depth: FLOORDEPTH,
+    assets: {
+      interior: { key: 'darkgrass_interior', sheet: false },
+      edge: {
+        grass: { key: 'darkgrass_edge_grass', sheet: false },
+        water: { key: 'darkgrass_edge_water', sheet: false },
+        shoreGrass: { key: 'darkgrass_shore_edge_grass', sheet: false },
+      },
+      corner: {
+        water: { key: 'darkgrass_corner_water', sheet: false }
+      },
+      innerCorner: {
+        water: { key: 'darkgrass_inner_corner_water', sheet: false }
+      }
+    }
+  },
+
   wall: {
     name: "wall",
     interior: 2,
@@ -128,7 +155,7 @@ export const TILE_TYPES = {
     block: true,
     complex: false,
     grid: 13,
-    lenX: 1, lenY: 1,
+    lenX: 2, lenY: 2,
     price: 200,
     depth: BLOCKDEPTH
   },
@@ -647,6 +674,19 @@ export const TILE_ARR = [
   'grass_corner',         // 105
   'grass_corner',         // 106
   ['catapult_base', 'catapult_top'], // 107 catapult
+  'darkgrass_interior',   // 108
+  'darkgrass_edge',       // 109
+  'darkgrass_edge',       // 110
+  'darkgrass_edge',       // 111
+  'darkgrass_edge',       // 112
+  'darkgrass_corner',     // 113
+  'darkgrass_corner',     // 114
+  'darkgrass_corner',     // 115
+  'darkgrass_corner',     // 116
+  'darkgrass_inner_corner', // 117
+  'darkgrass_inner_corner', // 118
+  'darkgrass_inner_corner', // 119
+  'darkgrass_inner_corner', // 120
 ];
 
 // --- TILE_MAP (full) ---
@@ -692,6 +732,7 @@ export function TILE_MAP(val){
   else if (val >= 93 && val <= 98) return "fort_floor";
   else if (val >= 99 && val <= 106) return "grass";
   else if (val == 107) return "catapult";
+  else if (val >= 108 && val <= 120) return "dark_grass";
 
   return null;
 }
@@ -781,6 +822,7 @@ export const gridColors = {
     woodWall_door: 0x2e1503,
     dirt:   0x4c2b18,
     grass:  0x33cc33,
+    dark_grass: 0x0b6b5c,
     house1: 0x8b0000,
     house2: 0x006400,
     road:   0x555555,
@@ -791,6 +833,8 @@ export const gridColors = {
     grassRock: 0x33cc33,
     spawn:  0x333333,
     storage:0x7d4900,
+    tower: 0x2f7fe6,
+    clayOven: 0xb64536,
     pine: 0x006400,
     rock: 0x5a682b,
     catapult: 0x8b5b2b,

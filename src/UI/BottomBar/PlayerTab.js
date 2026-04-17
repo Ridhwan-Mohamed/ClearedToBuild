@@ -1,3 +1,4 @@
+import Phaser from "phaser";
 import { House } from "../../buildings/House.js";
 import { showAlert, CONTROL_STATES } from "../../constants";
 import { StaminaManager } from "../../Manager/staminaManager.js";
@@ -8,17 +9,24 @@ import {
     getPlayerPortraitKey,
 } from "../../players/playerPortraits.js";
 import { Teams } from "../../Teams.js";
+import {
+    BOTTOM_BAR_THEME,
+    makeGlassRoundRect,
+    mixColor,
+    setHoverLiftState,
+} from "./BottomBarTheme";
 
 
 export default class PlayerTab {
   constructor(scene) {
     this.scene = scene;
     this.selected = null;
-    this.rows = new Map(); // sprite.id -> { row, hpBar, stBar, nameText, bg }
-    this.refreshEvt = null;
-    this._onWheel = null;
-    this.BAR_SEG_UNIT = 25;
-    this.BAR_SEG_GAP  = 1;
+        this.rows = new Map(); // sprite.id -> { row, hpBar, stBar, nameText, bg }
+        this.refreshEvt = null;
+        this._onWheel = null;
+        this._rowBaseY = new WeakMap();
+        this.BAR_SEG_UNIT = 25;
+        this.BAR_SEG_GAP  = 1;
 
     // ---- config ----
     this.W = Math.floor(scene.scale.width - 40); // will be constrained by bottom bar
@@ -81,13 +89,30 @@ export default class PlayerTab {
             height: 180,
             scrollMode: 0,
             scrollDetectionMode: 'rectBounds',
-            background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.25),
+            background: makeGlassRoundRect(scene, 0, 0, 16, {
+                fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+                alpha: 0.74,
+                stroke: 0x98e7ff,
+                strokeAlpha: 0.12,
+            }),
             panel: { child: this.listBody, mask: { padding: 1 } },
             sliderY: scene.rexUI.add.slider({
             height: 160,
             orientation: 'y',
-            track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
-            thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x888888),
+            track: makeGlassRoundRect(scene, 10, 0, 5, {
+                fill: 0x0b2230,
+                alpha: 0.82,
+                stroke: 0x98e7ff,
+                strokeAlpha: 0.08,
+                strokeWidth: 1,
+            }),
+            thumb: makeGlassRoundRect(scene, 10, 28, 5, {
+                fill: 0x72d8ff,
+                alpha: 0.86,
+                stroke: 0xffffff,
+                strokeAlpha: 0.18,
+                strokeWidth: 1,
+            }),
             }),
             scrollerY: {
                 pointerOutRelease: true,
@@ -124,11 +149,17 @@ export default class PlayerTab {
         const BAR_H = 14;
 
         // ---------- helpers ----------
-        const rr = (w, h, r, color) =>
-            scene.rexUI.add.roundRectangle(0, 0, w, h, r, color);
+        const rr = (w, h, r, color, alpha = 1) =>
+            scene.rexUI.add.roundRectangle(0, 0, w, h, r, color, alpha);
 
         const makeSegmentedBar = (width, height, fillColor) => {
-        const bg = rr(width, height, 4, 0x353535);
+        const bg = makeGlassRoundRect(scene, width, height, 4, {
+            fill: 0x08121a,
+            alpha: 0.92,
+            stroke: 0x98e7ff,
+            strokeAlpha: 0.06,
+            strokeWidth: 1,
+        });
         const g  = scene.add.graphics();
         const c  = scene.add.container(0, 0, [bg, g]);
         c.setSize(width, height);
@@ -178,18 +209,26 @@ export default class PlayerTab {
 
         // Detail panel rows now:
         const hpBar = makeSegmentedBar(BAR_W, BAR_H, 0xFF5A70);
-        const hpVal = scene.add.text(0, 0, '0/0', { fontSize: 12, color: '#EDEDED' });
+        const hpVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
         const stBar = makeSegmentedBar(BAR_W, BAR_H, 0x69D6FF);
-        const stVal = scene.add.text(0, 0, '0/0', { fontSize: 12, color: '#EDEDED' });
+        const stVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
         function makeButton(labelText, onClick) {
             const label = scene.rexUI.add.label({
-                background: rr(0, 36, 10, 0x2a5bd8),
+                background: makeGlassRoundRect(scene, 0, 36, 10, {
+                    fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0x7acfff, 0.2),
+                    alpha: 0.9,
+                    stroke: 0x7acfff,
+                    strokeAlpha: 0.2,
+                    strokeWidth: 1.5,
+                }),
                 text: scene.add.text(0, 0, labelText, {
                     fontFamily: 'Bungee',
-                    fontSize: 14,
-                    color: '#ffffff'
+                    fontSize: 13,
+                    color: '#ffffff',
+                    stroke: '#081621',
+                    strokeThickness: 2,
                 }),
                 space: { left: 14, right: 14, top: 8, bottom: 8 }
             });
@@ -199,12 +238,16 @@ export default class PlayerTab {
                 .setInteractive({ useHandCursor: true })
                 .on('pointerup', () => onClick?.())
                 .on('pointerover', () => {
+                    label.__baseY ??= label.y;
+                    setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
                     // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('pointer');
                     }
                 })
                 .on('pointerout', () => {
+                    label.__baseY ??= label.y;
+                    setHoverLiftState(scene, label, false, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
                     // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('default');
@@ -216,11 +259,19 @@ export default class PlayerTab {
 
         function makeSellButton(onClick) {
             const label = scene.rexUI.add.label({
-                background: rr(0, 36, 10, 0x9c27b0),
+                background: makeGlassRoundRect(scene, 0, 36, 10, {
+                    fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffd07d, 0.2),
+                    alpha: 0.92,
+                    stroke: 0xffd07d,
+                    strokeAlpha: 0.2,
+                    strokeWidth: 1.5,
+                }),
                 text: scene.add.text(0, 0, 'Sell', {
                     fontFamily: 'Bungee',
-                    fontSize: 14,
-                    color: '#ffffff'
+                    fontSize: 13,
+                    color: '#fff8e5',
+                    stroke: '#5a2c00',
+                    strokeThickness: 2,
                 }),
                 space: { left: 14, right: 14, top: 8, bottom: 8 }
             });
@@ -230,12 +281,16 @@ export default class PlayerTab {
                 .setInteractive({ useHandCursor: true })
                 .on('pointerup', () => onClick?.())
                 .on('pointerover', () => {
+                    label.__baseY ??= label.y;
+                    setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
                     // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('pointer');
                     }
                 })
                 .on('pointerout', () => {
+                    label.__baseY ??= label.y;
+                    setHoverLiftState(scene, label, false, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
                     // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('default');
@@ -257,7 +312,7 @@ export default class PlayerTab {
         const detailsText = scene.add.text(
             0, 0,
             `Name: ${name}\nType: ${type}\nTeam: ${team}\nWeapon: ${weapon}`,
-            { fontFamily: 'Bungee', fontSize: 16, color: '#EDEDED' }
+            { fontFamily: 'Bungee', fontSize: 15, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 }
         );
 
         header.add(portrait,    0, 'center', 0, false);
@@ -268,7 +323,7 @@ export default class PlayerTab {
 
         const hpRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
         hpRow.add(
-            scene.add.text(0, 0, 'HP', { fontSize: 12, color: '#B0B0B0' }),
+            scene.add.text(0, 0, 'HP', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
             0, 'center', { right: 4 }, false
         );
         hpRow.add(hpBar, 0, 'center', 0, false);
@@ -276,7 +331,7 @@ export default class PlayerTab {
 
         const stRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
         stRow.add(
-            scene.add.text(0, 0, 'ST', { fontSize: 12, color: '#B0B0B0' }),
+            scene.add.text(0, 0, 'ST', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
             0, 'center', { right: 4 }, false
         );
         stRow.add(stBar, 0, 'center', 0, false);
@@ -338,7 +393,12 @@ export default class PlayerTab {
         const panel = scene.rexUI.add.sizer({
             orientation: 'y',
             space: { left: 8, right: 8, top: 6, bottom: 6, item: 8 }
-        });
+        }).addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
+            fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.06),
+            alpha: 0.82,
+            stroke: 0xa6e9ff,
+            strokeAlpha: 0.16,
+        }));
 
         panel.add(header,     0, 'left', 0, true);
         panel.add(barsCol,    0, 'left', 0, true);
@@ -540,21 +600,30 @@ export default class PlayerTab {
     createRow(sprite) {
         const scene = this.scene;
 
-        const bg = scene.rexUI.add.roundRectangle(
-            0, 0, 0, 0, 6,
-            sprite.unitTint ?? 0x666666,
-            0.15
-        ).setStrokeStyle(2, sprite.unitTint ?? 0x888888);
+        const accent = sprite.unitTint ?? 0x96d9ff;
+        const bg = makeGlassRoundRect(scene, 0, 0, 14, {
+            fill: mixColor(BOTTOM_BAR_THEME.cardFill, accent, 0.08),
+            alpha: 0.88,
+            stroke: accent,
+            strokeAlpha: 0.12,
+            strokeWidth: 1.5,
+        });
 
         const name = scene.add.text(
             0, 0,
             sprite.name || 'Unnamed',
-            { fontSize: '13px', color: '#ffffff' }
+            { fontFamily: 'Bungee', fontSize: '12px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 }
         );
 
         // helper for mini bars
         function makeMiniSegBar(width, height, fillColor, ui) {
-        const bg = scene.add.rectangle(0,0,width,height,0x222222).setOrigin(0,0.5);
+        const bg = makeGlassRoundRect(scene, width, height, 4, {
+            fill: 0x08121a,
+            alpha: 0.92,
+            stroke: 0x98e7ff,
+            strokeAlpha: 0.05,
+            strokeWidth: 1,
+        }).setOrigin(0,0.5);
         const g  = scene.add.graphics();
         const c  = scene.add.container(0,0,[bg,g]);
         c.setSize(width, height);
@@ -614,8 +683,13 @@ export default class PlayerTab {
             space: { left: 6, right: 6, top: 4, bottom: 4 },
         })
             .addBackground(
-                scene.rexUI.add.roundRectangle(0, 0, 0, 0, 4, 0x000000, 0)
-                    .setStrokeStyle(1, 0xffffff, 0.9)
+                makeGlassRoundRect(scene, 0, 0, 10, {
+                    fill: mixColor(BOTTOM_BAR_THEME.panelSoftFill, 0xffffff, 0.04),
+                    alpha: 0.82,
+                    stroke: 0xffffff,
+                    strokeAlpha: 0.08,
+                    strokeWidth: 1,
+                })
             )
             .add(bars, 0, 'center', 0, false);
 
@@ -632,7 +706,20 @@ export default class PlayerTab {
         row.setMinSize(fullWidth, 6);
 
         // row.setMinSize(this.RIGHT_W - 20, this.ROW_H);
-        row.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.select(sprite));
+        row.setInteractive({ useHandCursor: true })
+            .on('pointerdown', () => this.select(sprite))
+            .on('pointerover', () => {
+                const data = row.userData;
+                if (!data) return;
+                data.hovered = true;
+                this.updateRowVisual(data);
+            })
+            .on('pointerout', () => {
+                const data = row.userData;
+                if (!data) return;
+                data.hovered = false;
+                this.updateRowVisual(data);
+            });
 
         // store refs on row
         row.userData = {
@@ -642,7 +729,11 @@ export default class PlayerTab {
             nameText: name,
             bg,
             row,
+            hovered: false,
         };
+
+        this._rowBaseY.set(row, row.y);
+        this.updateRowVisual(row.userData);
 
         // initial bar widths
         this.updateRowBars(row.userData);
@@ -654,9 +745,8 @@ export default class PlayerTab {
     select(sprite) {
         this.selected = sprite;
         // highlight selected row
-        for (const { bg, sprite: s } of this.rows.values()) {
-            bg.setAlpha(s === sprite ? 1 : 0.6);
-            bg.setStrokeStyle(2, s === sprite ? 0xffffff : (s.unitTint ?? 0x888888), 1);
+        for (const data of this.rows.values()) {
+            this.updateRowVisual(data);
         }
 
         // 🔥 keep world mini bars open for selected unit
@@ -822,6 +912,25 @@ export default class PlayerTab {
 
         hpBar.setValues?.(s.health ?? 0, maxHP);
         stBar.setValues?.(s.stamina ?? 0, maxST);
+    }
+
+    updateRowVisual(data) {
+        if (!data?.bg || !data?.row) return;
+        const selected = this.selected === data.sprite;
+        const hovered = !!data.hovered;
+        const accent = selected ? 0xffd8a2 : (data.sprite?.unitTint ?? 0x96d9ff);
+        data.bg.setFillStyle(
+            mixColor(BOTTOM_BAR_THEME.cardFill, accent, selected ? 0.16 : hovered ? 0.12 : 0.08),
+            selected ? 0.94 : hovered ? 0.9 : 0.88
+        );
+        data.bg.setStrokeStyle(selected ? 2.5 : hovered ? 2 : 1.5, accent, selected ? 0.34 : hovered ? 0.22 : 0.12);
+        data.nameText?.setColor(selected ? "#fff8eb" : BOTTOM_BAR_THEME.text);
+        setHoverLiftState(this.scene, data.row, selected || hovered, {
+            baseY: this._rowBaseY.get(data.row) ?? data.row.y,
+            hoverLift: 0,
+            hoverScale: selected ? 1.012 : 1.008,
+            moveY: false,
+        });
     }
 
     typeOf(s) {

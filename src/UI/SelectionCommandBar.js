@@ -114,10 +114,10 @@ export class SelectionCommandBar {
         this._issueGatherCommand(snapshot, "stone", "Selected foragers will prioritize stone", "#bfdbfe");
       }),
       seed: this._makeButton("seed", "GATHER SEEDS", (snapshot) => {
-        this._issueGatherCommand(snapshot, "seed", "Selected foragers will gather seeds from farm bushes", "#fde68a");
+        this._issueGatherCommand(snapshot, "seed", "Selected foragers will gather seeds from the field", "#fde68a");
       }),
       berryGather: this._makeButton("berryGather", "GATHER BERRIES", (snapshot) => {
-        this._issueGatherCommand(snapshot, "berry", "Selected foragers will gather berries from farm bushes", "#e9d5ff");
+        this._issueGatherCommand(snapshot, "berry", "Selected foragers will gather berries from the field", "#e9d5ff");
       }),
       workSelected: this._makeButton("workSelected", "WORK SELECTED", (snapshot) => {
         const ok = OrderRunner.issueWorkQueuedOrder(this._getActionTroops(snapshot));
@@ -190,16 +190,6 @@ export class SelectionCommandBar {
       layoutKeys.push("details");
     }
     layoutKeys.push("return", "cancel", "auto", "sleep", "berry", "sell");
-    if (profile.allForagers) {
-      if (OrderRunner.isGatherCommandAvailable("wood", this.scene)) layoutKeys.push("wood");
-      if (OrderRunner.isGatherCommandAvailable("stone", this.scene)) layoutKeys.push("stone");
-      if (OrderRunner.isGatherCommandAvailable("seed", this.scene)) layoutKeys.push("seed");
-      if (OrderRunner.isGatherCommandAvailable("berry", this.scene)) layoutKeys.push("berryGather");
-      layoutKeys.push("workSelected");
-    }
-    if (profile.allFiremen) {
-      layoutKeys.push("makeWater");
-    }
     if (profile.allGunslingers) {
       layoutKeys.push("hold");
     }

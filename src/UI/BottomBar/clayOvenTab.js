@@ -1,7 +1,5 @@
-import { showAlert, TILE_TYPES, UIDEPTH } from "../../constants";
 import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
-import { buildingManager } from "../../Manager/buildingManager.js";
 
 export default class ClayOvenTab {
   static ensureBlankTexture(scene) {
@@ -64,11 +62,9 @@ export default class ClayOvenTab {
       this._scheduleListRefresh();
     };
 
-    this._onResize = () => { if (this.jobPopup) this.positionJobPopup(this.jobPopup); };
     scene.events.on("oven:updated", this._onOvenUpdated);
     scene.events.on("oven:added", this._onOvenAdded);
     scene.events.on("oven:removed", this._onOvenRemoved);
-    scene.scale.on("resize", this._onResize);
   }
 
   get view() { return this.root; }
@@ -76,7 +72,6 @@ export default class ClayOvenTab {
   hide() {
     this.selected = null;
     this.detail?.setOven?.(null);
-    this.closeJobEditor?.();
   }
 
   destroy() {
@@ -85,9 +80,7 @@ export default class ClayOvenTab {
     this.scene.events.off("oven:updated", this._onOvenUpdated);
     this.scene.events.off("oven:added", this._onOvenAdded);
     this.scene.events.off("oven:removed", this._onOvenRemoved);
-    this.scene.scale.off("resize", this._onResize);
     if (this._onWheel) this.scene.input.off("wheel", this._onWheel);
-    this.closeJobEditor?.();
     this.root?.destroy();
   }
 
@@ -317,11 +310,11 @@ export default class ClayOvenTab {
   buildDetailPanel() {
     const compact = this.scene.scale.width < 1080;
     const contentWidth = Math.max(220, (this.detailWidth || 360) - 54);
-    let queueColumnWidth = Math.max(156, Math.floor(contentWidth * 0.36));
-    let burnerWidth = contentWidth - queueColumnWidth - 10;
+    let statusColumnWidth = Math.max(156, Math.floor(contentWidth * 0.36));
+    let burnerWidth = contentWidth - statusColumnWidth - 10;
     if (burnerWidth < 210) {
       burnerWidth = Math.floor((contentWidth - 10) * 0.58);
-      queueColumnWidth = contentWidth - burnerWidth - 10;
+      statusColumnWidth = contentWidth - burnerWidth - 10;
     }
 
     const burnerBg = this.panelBg(0, 0, 15, 0x1f4a64, 0.46, 0x9ce7ff, 0.16);
@@ -331,27 +324,14 @@ export default class ClayOvenTab {
     const input = this.slot(compact ? 54 : 58);
     const output = this.slot(compact ? 54 : 58);
     const progress = this.bar(Math.max(98, burnerWidth - 172), 12);
-    const burnerStatus = this.txt("Click the left tray to queue cooking. Click the right tray to request pickup.", {
+    const burnerStatus = this.txt("Read-only status. Automation handles cooking, fuel, and output hauling.", {
       fontSize: compact ? 9 : 10, color: "#d9f5ff", wordWrap: { width: Math.max(110, burnerWidth - 176) }
     });
     const pickup = this.pill("No pickup queued", 0x17354a, 0x93dfff, "#d7f5ff");
-    const refuelBtn = this.button("Queue Fuel");
-    const fixBtn = this.button("Fix", 0x387344, 0xb4ffd1);
-    const cookBubble = this.buildQueueBubble("Cook Request", 0x16384d, 0x6dd3ff, queueColumnWidth);
-    const fuelBubble = this.buildQueueBubble("Fuel Request", 0x2a2517, 0xffcf88, queueColumnWidth);
-    const actionButtonWidth = Math.max(118, Math.floor((contentWidth - 10) / 2));
-    refuelBtn.setMinSize(actionButtonWidth, 38);
-    fixBtn.setMinSize(actionButtonWidth, 38);
+    const cookBubble = this.buildStatusBubble("Cook Status", 0x16384d, 0x6dd3ff, statusColumnWidth);
+    const fuelBubble = this.buildStatusBubble("Fuel Status", 0x2a2517, 0xffcf88, statusColumnWidth);
     fuel.setMinSize(96, 0);
 
-    input.setInteractive({ useHandCursor: true }).on("pointerup", () => { if (this.selected) this.openJobEditor(this.selected); });
-    output.setInteractive({ useHandCursor: true }).on("pointerup", () => { if (this.selected) this.queueOvenOutputPickup(this.selected); });
-    refuelBtn.on("pointerup", () => { if (this.selected) this.openRefuelEditor(this.selected); });
-    fixBtn.on("pointerup", () => { if (this.selected) buildingManager.requestBuildingFix(this.selected, this.team, []); });
-
-    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 10 } })
-      .add(refuelBtn, { proportion: 1, expand: true })
-      .add(fixBtn, { proportion: 1, expand: true });
     const burnerMid = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 5 } })
       .add(this.txt("Burner Lane", { fontSize: compact ? 10 : 11, color: "#effcff" }), { expand: false })
       .add(progress, { expand: false })
@@ -377,13 +357,12 @@ export default class ClayOvenTab {
     const panel = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 4, right: 4, top: 2, bottom: 2, item: 6 } })
       .add(title, { expand: false, align: "left" })
       .add(statRow, { expand: true })
-      .add(actionRow, { expand: true })
       .add(workRow, { expand: true });
 
     panel.setMinSize(contentWidth, 0);
     burnerCard.setMinSize(burnerWidth, 0);
-    cookBubble.box.setMinSize(queueColumnWidth, 0);
-    fuelBubble.box.setMinSize(queueColumnWidth, 0);
+    cookBubble.box.setMinSize(statusColumnWidth, 0);
+    fuelBubble.box.setMinSize(statusColumnWidth, 0);
 
     const setOven = (oven) => {
       if (!oven) {
@@ -395,10 +374,8 @@ export default class ClayOvenTab {
         progress.setValue(0, "", 0x49cf73);
         burnerStatus.setText("");
         pickup.setValue("", 0x17354a, 0x93dfff, "#d7f5ff");
-        cookBubble.set("", "", null, 0, false, null);
-        fuelBubble.set("", "", null, 0, false, null);
-        refuelBtn.setEnabledState(false);
-        fixBtn.setEnabledState(false);
+        cookBubble.set("", "", null, 0);
+        fuelBubble.set("", "", null, 0);
         panel.layout();
         return;
       }
@@ -416,55 +393,60 @@ export default class ClayOvenTab {
       fuel.setValue(`Fuel ${oven?.fuel || 0}`, 0x2c2817, 0xffcf88, "#ffe8b2");
       input.setItem(slot?.item || null, slot?.amount || 0, "Cook");
       output.setItem(out?.item || null, out?.amount || 0, "Out");
-      refuelBtn.setEnabledState(true);
-      fixBtn.setEnabledState(true);
       progress.setValue(pct, slot ? (pct > 0 ? `${Math.round(pct * 100)}%` : "Queued") : "Idle", 0x49cf73);
-      burnerStatus.setText(slot ? `${slot.item?.label || slot.item?.name || "Item"} is in the burner.` : "Click the left tray to queue cooking. Click the right tray to request pickup.");
+      burnerStatus.setText(
+        slot
+          ? `${slot.item?.label || slot.item?.name || "Item"} is in the burner. Automation is handling the rest.`
+          : "Burner idle. Automation will supply inputs, fuel, and pickup when work exists."
+      );
       pickup.setValue(
-        pickupJob ? `Pickup queued | ${pickupJob.amount} ready` : (out?.amount > 0 ? "Output ready | click tray to queue pickup" : "No pickup queued"),
+        pickupJob ? `Pickup queued | ${pickupJob.amount} ready` : (out?.amount > 0 ? "Output ready for auto pickup" : "No pickup queued"),
         out?.amount > 0 ? 0x24453a : 0x17354a,
         out?.amount > 0 ? 0x8bf0c3 : 0x93dfff,
         out?.amount > 0 ? "#e5fff6" : "#d7f5ff"
       );
-      cookBubble.set(cookJob ? `${cookJob.item?.label || cookJob.item?.name} x${cookJob.target}` : "Cook Request", cookJob ? `${cookJob.remaining}/${cookJob.target} left${cookJob.assigned > 0 ? ` | ${cookJob.assigned} assigned` : ""}` : "No cook request queued. Click the left tray to add one.", cookJob?.item || null, cookJob?.target || 0, !!cookJob, () => this.cancelOvenJob(cookJob));
-      fuelBubble.set(fuelJob ? `Wood x${fuelJob.target}` : "Fuel Request", fuelJob ? `${fuelJob.remaining}/${fuelJob.target} wood left${fuelJob.assigned > 0 ? ` | ${fuelJob.assigned} assigned` : ""}` : "No fuel request queued. Use Queue Fuel to call for wood.", UI_ITEM_TYPES.wood, fuelJob?.target || 0, !!fuelJob, () => this.cancelFuelJob(fuelJob));
+      cookBubble.set(
+        cookJob ? `${cookJob.item?.label || cookJob.item?.name} x${cookJob.target}` : "Cook Status",
+        cookJob ? `${cookJob.remaining}/${cookJob.target} left${cookJob.assigned > 0 ? ` | ${cookJob.assigned} assigned` : ""}` : "No cook request active.",
+        cookJob?.item || null,
+        cookJob?.target || 0
+      );
+      fuelBubble.set(
+        fuelJob ? `Wood x${fuelJob.target}` : "Fuel Status",
+        fuelJob ? `${fuelJob.remaining}/${fuelJob.target} wood left${fuelJob.assigned > 0 ? ` | ${fuelJob.assigned} assigned` : ""}` : "No fuel request active.",
+        fuelJob ? UI_ITEM_TYPES.wood : null,
+        fuelJob?.target || 0
+      );
       panel.layout();
     };
 
     return { panel, setOven };
   }
 
-  buildQueueBubble(name, fill, stroke, widthOverride = null) {
+  buildStatusBubble(name, fill, stroke, widthOverride = null) {
     const compact = this.scene.scale.width < 1080 || (widthOverride || 0) < 220;
     const contentWidth = widthOverride || Math.max(300, (this.detailWidth || 360) - 34);
     const bg = this.panelBg(0, 0, 14, fill, 0.44, stroke, 0.16);
     const icon = this.slot(compact ? 36 : 42);
     const title = this.txt(name, { fontSize: compact ? 11 : 12, color: "#f3fcff" });
-    const cancelWidth = Math.max(82, Math.min(102, Math.floor(contentWidth * 0.3)));
-    const body = this.txt("No request queued.", { fontSize: compact ? 9 : 10, color: "#e3f8ff", wordWrap: { width: Math.max(104, contentWidth - cancelWidth - 76) } });
-    const cancel = this.button("Cancel", 0x7a2d41, 0xffb4c3);
-    cancel.setMinSize(cancelWidth, compact ? 30 : 32);
+    const body = this.txt("No request queued.", { fontSize: compact ? 9 : 10, color: "#e3f8ff", wordWrap: { width: Math.max(104, contentWidth - 76) } });
     const textCol = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: compact ? 2 : 4 } })
       .add(title, { expand: false })
       .add(body, { expand: false });
     const box = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 10, right: 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 8 : 10 } })
       .addBackground(bg)
       .add(icon, { expand: false })
-      .add(textCol, { proportion: 1, expand: true })
-      .add(cancel, { expand: false });
+      .add(textCol, { proportion: 1, expand: true });
     box.setMinSize(contentWidth, 0);
     return {
       box,
-      set: (nextTitle, nextBody, item, amount, canCancel, onCancel) => {
+      set: (nextTitle, nextBody, item, amount) => {
         title.setText(nextTitle);
         body.setText(nextBody);
         const emptyHint = item
           ? ""
-          : ((nextTitle || nextBody) ? (name === "Fuel Request" ? "Fuel" : "Cook") : "");
+          : ((nextTitle || nextBody) ? (name === "Fuel Status" ? "Fuel" : "Cook") : "");
         icon.setItem(item, amount, emptyHint);
-        cancel.removeAllListeners("pointerup");
-        cancel.on("pointerup", () => { if (canCancel) onCancel?.(); });
-        cancel.setEnabledState(canCancel);
         box.layout();
       }
     };
@@ -558,17 +540,6 @@ export default class ClayOvenTab {
     row.userData.hp.setValue((oven.health || 0) / Math.max(1, oven.maxHealth || 1), "", 0x49cf73);
   }
 
-  queueOvenOutputPickup(oven) {
-    if (!oven) return;
-    const team = Teams.teamLists[this.team];
-    const slot = oven.outputSlots?.[0];
-    if (!team || !slot?.item || slot.amount <= 0) return showAlert(this.scene, "Nothing to pick up in that tray.");
-    const existing = (team.ovenPickupJobs || []).find((j) => j.oven === oven && j.outputidx === 0 && j.taskType === "ovenPickup" && j.amount > j.assigned);
-    if (existing) return showAlert(this.scene, "Pickup is already queued for this tray.");
-    (team.ovenPickupJobs || (team.ovenPickupJobs = [])).push({ oven, outputidx: 0, x: oven.x, y: oven.y, type: TILE_TYPES.clayOven, assigned: 0, amount: slot.amount, taskType: "ovenPickup" });
-    this.scene.events.emit("oven:updated", oven);
-  }
-
   onShow() {
     this.rebuildList();
     const ovens = Teams.teamLists[this.team]?.ovenList || [];
@@ -586,198 +557,6 @@ export default class ClayOvenTab {
     if (!oven?.sprite) return;
     const cam = this.scene.worldScene?.cameras?.main || this.scene.cameras.main;
     cam.centerOn(oven.sprite.x, oven.sprite.y);
-  }
-
-  openJobEditor(oven) {
-    if (!oven) return;
-    this.closeJobEditor?.();
-    const existing = this.cookJob(oven);
-    const cookables = Object.values(UI_ITEM_TYPES).filter((item) => item.cooksTo);
-    const keys = cookables.map((item) => item.name);
-    let itemKey = existing?.item?.name || cookables[0]?.name;
-    let amount = Math.max(1, existing?.remaining || 1);
-    const current = oven.cookingSlots?.[0];
-    const currentItem = current?.item?.name || null;
-    const currentAmt = current?.amount || 0;
-    const capFor = (key) => Math.max(0, (UI_ITEM_TYPES[key]?.stacks || 1) - (currentItem === key ? currentAmt : 0));
-    if (capFor(itemKey) <= 0 && !existing) {
-      showAlert(this.scene, "That burner is already full.");
-      return;
-    }
-    const popupBg = this.panelBg(0, 0, 14, 0x102738, 0.98, 0x8fe6ff, 0.18);
-    const title = this.txt("Queue Burner Job", { fontSize: 13 });
-    const itemText = this.txt(UI_ITEM_TYPES[itemKey]?.label || itemKey, { fontSize: 12, color: "#dff6ff" });
-    const amtText = this.txt(String(amount), { fontSize: 14 });
-    const change = this.button("Change Item");
-    const dec = this.button("-", 0x21394a, 0x8fe6ff);
-    const inc = this.button("+", 0x21394a, 0x8fe6ff);
-    const start = this.button(existing ? "Update Job" : "Start Job", 0x2f6b4a, 0xb4ffd1);
-    const end = this.button("Cancel Job", 0x7a2d41, 0xffb4c3);
-    const close = this.button("Close", 0x4a5661, 0xc9d6df);
-    dec.setMinSize(34, 34); inc.setMinSize(34, 34); end.setEnabledState(!!existing);
-    change.on("pointerup", () => {
-      const i = keys.indexOf(itemKey);
-      itemKey = keys[(i + 1) % keys.length];
-      itemText.setText(UI_ITEM_TYPES[itemKey]?.label || itemKey);
-      const cap = capFor(itemKey);
-      amount = cap > 0 ? Math.min(cap, amount) : 1;
-      amtText.setText(String(amount));
-    });
-    dec.on("pointerup", () => { amount = Math.max(1, amount - 1); amtText.setText(String(amount)); });
-    inc.on("pointerup", () => {
-      const cap = capFor(itemKey);
-      amount = cap > 0 ? Math.min(cap, amount + 1) : 1;
-      amtText.setText(String(amount));
-    });
-    start.on("pointerup", () => { this.startOvenJob(oven, itemKey, amount); this.closeJobEditor(); });
-    end.on("pointerup", () => { const live = this.cookJob(oven); if (live) this.cancelOvenJob(live); this.closeJobEditor(); });
-    close.on("pointerup", () => this.closeJobEditor());
-    const qtyRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
-      .add(this.txt("Qty", { fontSize: 11, color: "#a7cbdc" }), { expand: false, align: "center" })
-      .add(dec, { expand: false, align: "center" })
-      .add(amtText, { expand: false, align: "center" })
-      .add(inc, { expand: false, align: "center" });
-    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
-      .add(start, { proportion: 1, expand: true })
-      .add(end, { proportion: 1, expand: true })
-      .add(close, { proportion: 1, expand: true });
-    const toolbar = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: 12, bottom: 12, item: 10 } })
-      .add(title, { expand: false, align: "left" })
-      .add(itemText, { expand: false, align: "left" })
-      .add(change, { expand: true })
-      .add(qtyRow, { expand: false, align: "left" })
-      .add(actionRow, { expand: true });
-    const popup = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 8, right: 8, top: 8, bottom: 8 } })
-      .addBackground(popupBg)
-      .add(toolbar, { proportion: 1, expand: true });
-    popup.setMinSize(360, 0);
-    this.showPopup(popup);
-  }
-
-  openRefuelEditor(oven) {
-    if (!oven) return;
-    this.closeJobEditor?.();
-    const existing = this.fuelJob(oven);
-    let amount = Math.max(1, existing?.remaining || 5);
-    const popupBg = this.panelBg(0, 0, 14, 0x102738, 0.98, 0x8fe6ff, 0.18);
-    const amtText = this.txt(String(amount), { fontSize: 14 });
-    const dec = this.button("-", 0x21394a, 0x8fe6ff);
-    const inc = this.button("+", 0x21394a, 0x8fe6ff);
-    const start = this.button(existing ? "Update Fuel" : "Start Fuel", 0x2f6b4a, 0xb4ffd1);
-    const end = this.button("Cancel Fuel", 0x7a2d41, 0xffb4c3);
-    const close = this.button("Close", 0x4a5661, 0xc9d6df);
-    dec.setMinSize(34, 34); inc.setMinSize(34, 34); end.setEnabledState(!!existing);
-    dec.on("pointerup", () => { amount = Math.max(1, amount - 1); amtText.setText(String(amount)); });
-    inc.on("pointerup", () => { amount = Math.min(99, amount + 1); amtText.setText(String(amount)); });
-    start.on("pointerup", () => { this.startRefuelJob(oven, amount); this.closeJobEditor(); });
-    end.on("pointerup", () => { const live = this.fuelJob(oven); if (live) this.cancelFuelJob(live); this.closeJobEditor(); });
-    close.on("pointerup", () => this.closeJobEditor());
-    const amountRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
-      .add(this.txt("Wood", { fontSize: 11, color: "#a7cbdc" }), { expand: false, align: "center" })
-      .add(dec, { expand: false, align: "center" })
-      .add(amtText, { expand: false, align: "center" })
-      .add(inc, { expand: false, align: "center" });
-    const actionRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
-      .add(start, { proportion: 1, expand: true })
-      .add(end, { proportion: 1, expand: true })
-      .add(close, { proportion: 1, expand: true });
-    const toolbar = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: 12, bottom: 12, item: 10 } })
-      .add(this.txt("Queue Fuel Delivery", { fontSize: 13 }), { expand: false, align: "left" })
-      .add(this.txt("Request wood for this oven.", { fontSize: 11, color: "#abd0e0" }), { expand: false, align: "left" })
-      .add(amountRow, { expand: false, align: "left" })
-      .add(actionRow, { expand: true });
-    const popup = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 8, right: 8, top: 8, bottom: 8 } })
-      .addBackground(popupBg)
-      .add(toolbar, { proportion: 1, expand: true });
-    popup.setMinSize(350, 0);
-    this.showPopup(popup);
-  }
-
-  showPopup(popup) {
-    this.jobPopup = popup;
-    this.scene.add.existing(popup);
-    popup.setDepth(UIDEPTH + 100).layout();
-    this.positionJobPopup(popup);
-    this.jobBlocker?.destroy();
-    this.jobBlocker = this.scene.add.rectangle(0, 0, this.scene.scale.width, this.scene.scale.height, 0x000000, 0.01)
-      .setOrigin(0).setDepth(UIDEPTH + 99).setInteractive()
-      .on("pointerup", (pointer) => {
-        const bounds = popup.getBounds();
-        if (!Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) this.closeJobEditor();
-      });
-    this.closeJobEditor = () => {
-      this.jobBlocker?.destroy(); this.jobBlocker = null;
-      if (this.jobPopup?.scene) this.jobPopup.destroy();
-      this.jobPopup = null;
-    };
-  }
-
-  positionJobPopup(popup) {
-    const pad = 12;
-    popup.layout();
-    const pw = popup.width || popup.getBounds().width;
-    const ph = popup.height || popup.getBounds().height;
-    const bounds = this.detailScroll?.getBounds?.();
-    const preferredX = bounds ? bounds.centerX : this.scene.scale.width / 2;
-    const preferredY = bounds ? bounds.y + 18 + ph / 2 : this.scene.scale.height / 2;
-    const x = Phaser.Math.Clamp(preferredX, pad + pw / 2, this.scene.scale.width - pad - pw / 2);
-    const y = Phaser.Math.Clamp(preferredY, pad + ph / 2, this.scene.scale.height - pad - ph / 2);
-    popup.setPosition(x, y);
-  }
-
-  startOvenJob(oven, itemKey, amount) {
-    const item = UI_ITEM_TYPES[itemKey];
-    if (!item?.cooksTo) return;
-    const current = oven.cookingSlots?.[0];
-    const inSlot = current?.item?.name === itemKey ? current.amount : 0;
-    const capacity = Math.max(0, (item.stacks || 1) - inSlot);
-    if (capacity <= 0) {
-      showAlert(this.scene, "That burner is already full.");
-      return;
-    }
-    const target = Math.max(1, Math.min(capacity, amount));
-    const team = Teams.teamLists[this.team];
-    const existing = this.cookJob(oven);
-    if (existing) this.cancelOvenJob(existing, true);
-    team.ovenJobs.push({ oven, inputidx: 0, item, target, delivered: 0, remaining: target, assigned: 0, canceled: false, x: oven.x, y: oven.y });
-    this.scene.events.emit("oven:updated", oven);
-  }
-
-  cancelOvenJob(job, silent = false) {
-    if (!job) return;
-    const team = Teams.teamLists[this.team];
-    job.canceled = true;
-    const arr = team.ovenDeliveryItems || (team.ovenDeliveryItems = []);
-    for (let i = arr.length - 1; i >= 0; i--) {
-      const task = arr[i];
-      if (task.oven === job.oven && task.inputidx === job.inputidx && task.item?.name === job.item?.name) arr.splice(i, 1);
-    }
-    const idx = team.ovenJobs.indexOf(job);
-    if (idx !== -1) team.ovenJobs.splice(idx, 1);
-    if (!silent) this.scene.events.emit("oven:updated", job.oven);
-  }
-
-  startRefuelJob(oven, amount) {
-    const team = Teams.teamLists[this.team];
-    const target = Math.max(1, Math.min(99, amount | 0));
-    const existing = this.fuelJob(oven);
-    if (existing) this.cancelFuelJob(existing, true);
-    team.ovenFuelJobs.push({ oven, target, delivered: 0, remaining: target, assigned: 0, canceled: false, x: oven.x, y: oven.y });
-    this.scene.events.emit("oven:updated", oven);
-  }
-
-  cancelFuelJob(job, silent = false) {
-    if (!job) return;
-    const team = Teams.teamLists[this.team];
-    job.canceled = true;
-    const arr = team.ovenFuelDeliveryItems || (team.ovenFuelDeliveryItems = []);
-    for (let i = arr.length - 1; i >= 0; i--) {
-      const task = arr[i];
-      if (task.job === job || task.oven === job.oven) arr.splice(i, 1);
-    }
-    const idx = team.ovenFuelJobs.indexOf(job);
-    if (idx !== -1) team.ovenFuelJobs.splice(idx, 1);
-    if (!silent) this.scene.events.emit("oven:updated", job.oven);
   }
 
   update() {

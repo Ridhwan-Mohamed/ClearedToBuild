@@ -345,7 +345,7 @@ export class MainMenu {
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         const logo = overlayScene.add.image(centerX, centerY - 10, 'logo').setOrigin(0.5).setScale(logoScale);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.7', {
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.8', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);
@@ -1160,13 +1160,11 @@ export class MainMenu {
             Map.mapFromData(scene.gridData);
             // existing
             Map.navMesh = new NavMesh(polys);
-            Map.navMesh._nextPolyId = Math.max(...Map.navMesh.navPolygons.map(p => p.id)) + 1;
             scene.navMeshUpdater = new NavMeshUpdater(Map.navMesh, scene, {
                 toggleKey: "M",
                 fillColor: 0x00ff00,
                 fillAlpha: 0.20,
             });
-            scene.navMeshUpdater.setupAddAndRemove();
             PathRegistry.init(Map.navMesh);
             buildingManager.NavMeshUpdater = scene.navMeshUpdater;
 
@@ -1183,14 +1181,12 @@ export class MainMenu {
                 }));
 
             Map.enemyNavMesh = new NavMesh(enemyPolys);
-            Map.enemyNavMesh._nextPolyId = Math.max(...Map.enemyNavMesh.navPolygons.map(p => p.id)) + 1;
 
             scene.enemyNavMeshUpdater = new NavMeshUpdater(Map.enemyNavMesh, scene, {
                 toggleKey: "N",
                 fillColor: 0xff0000,
                 fillAlpha: 0.18,
             });
-            scene.enemyNavMeshUpdater.setupAddAndRemove();
 
             // Give PathRegistry a second registry keyed to enemy mesh
             PathRegistry.init(Map.enemyNavMesh);
@@ -1245,21 +1241,9 @@ export class MainMenu {
                 const enemyNavMeshPolys = buildPolysFromGridMap(Map.enemyNavGrid, SQUARESIZE, SQUARESIZE, undefined, 0);
                 Map.enemyNavMesh = new NavMesh(enemyNavMeshPolys);
 
-                // after Map.navMesh = new NavMesh(navMeshPolys);
-                Map.navMesh._nextPolyId = Math.max(...Map.navMesh.navPolygons.map(p => p.id)) + 1;
-                console.log(Map.navMesh._nextPolyId);
-
-                // after Map.enemyNavMesh = new NavMesh(enemyNavMeshPolys);
-                Map.enemyNavMesh._nextPolyId = Math.max(...Map.enemyNavMesh.navPolygons.map(p => p.id)) + 1;
-                console.log(Map.enemyNavMesh._nextPolyId);
-
                 // recreate updaters
                 this.navMeshUpdater = new NavMeshUpdater(Map.navMesh, this, { toggleKey: "M" });
                 this.enemyNavMeshUpdater = new NavMeshUpdater(Map.enemyNavMesh, this, { toggleKey: "N" });
-
-                // ✅ CRITICAL: re-apply the monkey patch methods
-                this.navMeshUpdater.setupAddAndRemove();
-                this.enemyNavMeshUpdater.setupAddAndRemove();
 
                 // after rebuilding Map.navMesh / Map.enemyNavMesh and recreating updaters
                 this.navMeshUpdater?.clearDebug();

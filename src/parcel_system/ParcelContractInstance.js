@@ -12,9 +12,15 @@ import { FarmBushNode } from "../buildings/FarmBushNode";
 
 function fmtMMSS(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  const ss = String(s % 60).padStart(2, "0");
-  return `${mm}:${ss}`;
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+
+  if (hh > 0) {
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
 function randInt(rng, a, b) {
@@ -37,6 +43,7 @@ export class ParcelContractInstance {
     pressureModifierKey = null,
     pressureModifier = null,
     pressureHordeIndex = null,
+    militiaConfig = null,
   }) {
     this.id = id;
     this.type = type;
@@ -49,6 +56,7 @@ export class ParcelContractInstance {
 
     this.map = map ?? GameMap;
 
+    this.militiaConfig = militiaConfig ? { ...militiaConfig } : null;
     this.pm = parcelManager;
     this.difficulty = difficulty || 1;
     this.pressureSource = pressureSource;
@@ -93,6 +101,7 @@ export class ParcelContractInstance {
 
   _updateTimerText() {
     if (!this.timerText) return;
+    const label = this.type === "FARM" ? "FIELD" : this.type;
 
     if (this.type === "PRESSURE") {
       this.timerText.setText(`FIGHT ${this.killed}/${this.totalPlannedEnemies}`);
@@ -103,9 +112,14 @@ export class ParcelContractInstance {
       this.timerText.setText(`MARKET ${fmtMMSS(remaining)}`);
       return;
     }
+    if (this.type === "MILITIA") {
+      const remaining = this.expireAt ? (this.expireAt - Date.now()) : 0;
+      this.timerText.setText(`MILITIA ${fmtMMSS(remaining)}`);
+      return;
+    }
 
     const remaining = this.expireAt ? (this.expireAt - this._getSimulationNowMs()) : 0;
-    this.timerText.setText(`${this.type} ${fmtMMSS(remaining)}`);
+    this.timerText.setText(`${label} ${fmtMMSS(remaining)}`);
   }
 
   _startUITick() {
@@ -200,37 +214,152 @@ export class ParcelContractInstance {
 
   _spawnFarmBushes() {
     FarmBushNode.init(this.scene);
+    const candidates = [];
+    const minX = this.origin.x + 1;
+    const minY = this.origin.y + 1;
+    const maxX = this.origin.x + PARCEL_SIZE - 2;
+    const maxY = this.origin.y + PARCEL_SIZE - 2;
 
-    const layout = {
-      seed: [
-        [4, 5], [7, 5], [10, 6], [5, 8],
-        [8, 8], [11, 10], [6, 12], [9, 13],
-      ],
-      berry: [
-        [14, 5], [17, 5], [20, 6], [15, 8],
-        [18, 8], [21, 10], [16, 12], [19, 13],
-      ],
-    };
-
-    for (const [kind, offsets] of Object.entries(layout)) {
-      for (const [ox, oy] of offsets) {
-        const gx = this.origin.x + ox;
-        const gy = this.origin.y + oy;
+    for (let gy = minY; gy <= maxY; gy++) {
+      for (let gx = minX; gx <= maxX; gx++) {
         const cell = GameMap.grid?.[gy]?.[gx];
         if (cell == null) continue;
 
-        const top = Array.isArray(cell) ? cell[cell.length - 1] : cell;
-        if (TILE_MAP(top) === "water") continue;
+        const floor = Array.isArray(cell) ? cell[0] : cell;
+        if (floor !== TILE_TYPES.dark_grass?.interior) continue;
 
-        try {
-          const obj = new FarmBushNode(gx, gy, kind);
-          obj.contractId = this.id;
-          obj.slotId = this.slotId;
-          this.placedObjects.push(obj);
-        } catch (e) {
-          // Ignore a bad bush spawn and keep laying out the parcel.
-        }
+        candidates.push([gx, gy]);
       }
+    }
+
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+
+    const targetCount = Math.min(18, candidates.length);
+    for (let i = 0; i < targetCount; i++) {
+      const [gx, gy] = candidates[i];
+      const kind = i % 2 === 0 ? "seed" : "berry";
+
+      try {
+        const obj = new FarmBushNode(gx, gy, kind);
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+        this.placedObjects.push(obj);
+      } catch (e) {
+        // Ignore a bad bush spawn and keep laying out the parcel.
+      }
+    }
+  }
+
+  _paintMilitiaIslands() {
+    // Fill full parcel with water first.
+    paintWaterRect({
+      origin: this.origin,
+      size: PARCEL_SIZE,
+      setWaterRect: (x, y, w, h) => this.map.setWaterRect?.(x, y, w, h),
+    });
+
+    const islandSize = 2;
+    const islandGap = 3; // between islands
+    const nearMainGap = 1; // exactly what you asked for
+
+    const islands = [];
+
+    if (this.slotId === "S") {
+      const y = this.origin.y + nearMainGap;
+      const startX = this.origin.x + 6;
+      islands.push(
+        { x: startX, y, w: islandSize, h: islandSize },
+        { x: startX + islandSize + islandGap, y, w: islandSize, h: islandSize },
+        { x: startX + (islandSize + islandGap) * 2, y, w: islandSize, h: islandSize },
+      );
+    } else if (this.slotId === "N") {
+      const y = this.origin.y + PARCEL_SIZE - nearMainGap - islandSize;
+      const startX = this.origin.x + 6;
+      islands.push(
+        { x: startX, y, w: islandSize, h: islandSize },
+        { x: startX + islandSize + islandGap, y, w: islandSize, h: islandSize },
+        { x: startX + (islandSize + islandGap) * 2, y, w: islandSize, h: islandSize },
+      );
+    } else if (this.slotId === "E") {
+      const x = this.origin.x + nearMainGap;
+      const startY = this.origin.y + 6;
+      islands.push(
+        { x, y: startY, w: islandSize, h: islandSize },
+        { x, y: startY + islandSize + islandGap, w: islandSize, h: islandSize },
+        { x, y: startY + (islandSize + islandGap) * 2, w: islandSize, h: islandSize },
+      );
+    } else {
+      const x = this.origin.x + PARCEL_SIZE - nearMainGap - islandSize;
+      const startY = this.origin.y + 6;
+      islands.push(
+        { x, y: startY, w: islandSize, h: islandSize },
+        { x, y: startY + islandSize + islandGap, w: islandSize, h: islandSize },
+        { x, y: startY + (islandSize + islandGap) * 2, w: islandSize, h: islandSize },
+      );
+    }
+
+    for (const island of islands) {
+      this._paintMilitiaGrassIsland(island);
+    }
+
+    return islands;
+  }
+
+  _setFloorTileValue(gx, gy, val) {
+    if (!this.map?.grid?.[gy] || this.map.grid[gy][gx] == null) return;
+    const cell = this.map.grid[gy][gx];
+    if (Array.isArray(cell)) {
+      this.map.grid[gy][gx][0] = val;
+    } else {
+      this.map.grid[gy][gx] = val;
+    }
+
+    if (this.map.navGrid?.[gy]) this.map.navGrid[gy][gx] = 1;
+    if (this.map.enemyNavGrid?.[gy]) this.map.enemyNavGrid[gy][gx] = 1;
+
+    this.map._refreshRenderCacheAround?.(gx, gy);
+    this.map.drawGridValue?.(gx, gy);
+  }
+
+  _paintMilitiaGrassIsland(island) {
+    if (!island) return;
+    const corners = TILE_TYPES.grass?.corners;
+    if (!corners || island.w !== 2 || island.h !== 2) {
+      this.map.fillGroundRect?.(island.x, island.y, island.w, island.h, "grass");
+      return;
+    }
+
+    // Militia islands are intentionally 2x2: one correctly oriented grass corner per tile.
+    this._setFloorTileValue(island.x, island.y, corners.topLeft);
+    this._setFloorTileValue(island.x + 1, island.y, corners.topRight);
+    this._setFloorTileValue(island.x, island.y + 1, corners.bottomLeft);
+    this._setFloorTileValue(island.x + 1, island.y + 1, corners.bottomRight);
+  }
+
+  _placeMilitiaDefense(kind, gx, gy) {
+    const tileType = kind === "catapult" ? TILE_TYPES.catapult : TILE_TYPES.turret;
+    const obj = GameMap.handleLoadNonSpread(gx, gy, tileType);
+    if (!obj) return null;
+
+    obj.contractId = this.id;
+    obj.slotId = this.slotId;
+    this.placedObjects.push(obj);
+    return obj;
+  }
+
+  _spawnMilitiaFormation() {
+    const layout = Array.isArray(this.militiaConfig?.layout) && this.militiaConfig.layout.length === 3
+      ? this.militiaConfig.layout
+      : ["turret", "turret", "turret"];
+
+    const islands = this._paintMilitiaIslands();
+
+    for (let i = 0; i < Math.min(3, islands.length); i++) {
+      const island = islands[i];
+      this._placeMilitiaDefense(layout[i], island.x, island.y);
     }
   }
 
@@ -247,6 +376,7 @@ export class ParcelContractInstance {
         rng: this.rng,
         setGroundRect,
         setWater,
+        groundType: "dirt",
         pondTiles: this.type === "FOREST" ? 32 : 26,
         edgeBuffer: 2,
       });
@@ -266,7 +396,16 @@ export class ParcelContractInstance {
     }
 
     if (this.type === "FARM") {
-      setGroundRect(this.origin.x, this.origin.y, PARCEL_SIZE, PARCEL_SIZE, "grass");
+      paintResourceParcel({
+        origin: this.origin,
+        size: PARCEL_SIZE,
+        rng: this.rng,
+        setGroundRect,
+        setWater,
+        groundType: "dark_grass",
+        pondTiles: 28,
+        edgeBuffer: 2,
+      });
       this._spawnFarmBushes();
 
       const ms = RESOURCE_CONTRACT_MS.FARM ?? RESOURCE_CONTRACT_MS.FOREST;
@@ -296,6 +435,17 @@ export class ParcelContractInstance {
       this.spawnerCount = pressureData.spawnerCount;
 
       this._startUITick();
+      return;
+    }
+
+    if (this.type === "MILITIA") {
+      const ms = 24 * 60 * 60 * 1000; // 1 real-world day
+
+      this._spawnMilitiaFormation();
+      this.expireAt = Date.now() + ms;
+
+      this._startUITick();
+      this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
       return;
     }
 

@@ -161,5 +161,6 @@ export class FarmBushNode {
     removeFromArray(GameMap[this.resourceTileType.worldListKey], this);
     GameMap.removeFromWorldStatic(this.sprite, true);
     this.sprite = null;
+    FarmBushNode.scene?.zoomMixer?.updateOverviewCell?.(this.gridX, this.gridY, GameMap.grid);
   }
 }

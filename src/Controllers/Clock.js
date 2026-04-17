@@ -261,16 +261,17 @@ export class Clock {
         let alpha = 0;
         const hourFloat = this.hours + this.minutes / 60;
         let nightHour = hourFloat;
+        const maxDarkness = 0.72;
         if (nightHour < 6) nightHour += 24;
 
         if (nightHour >= 20 && nightHour <= 28) {
-            alpha = 0.9;                      // this is DARKNESS amount
+            alpha = maxDarkness;              // darkness amount
         } else if (nightHour >= 18 && nightHour < 20) {
             const t = (nightHour - 18) / 2;   // dusk ramp
-            alpha = t * 0.9;
+            alpha = t * maxDarkness;
         } else if (nightHour > 28 && nightHour <= 30) {
             const t = 1 - (nightHour - 28) / 2; // dawn ramp
-            alpha = t * 0.9;
+            alpha = t * maxDarkness;
         }
 
         // ✅ VisibilitySystem expects a light floor (BRIGHTNESS), not darkness.

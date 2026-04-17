@@ -72,8 +72,13 @@ export class Manager {
         if (!this.blockType(state)) {
             return null;
         }
-        if (state === CONTROL_STATES.GET_FROM_STORAGE) {
-            return buildingManager.findFrontDoorApproachBlock(task.x, task.y, task.type, troop);
+        if (
+            state === CONTROL_STATES.GET_FROM_STORAGE ||
+            state === CONTROL_STATES.SEND_TO_STORAGE ||
+            state === CONTROL_STATES.GET_FROM_OVEN ||
+            state === CONTROL_STATES.SEND_TO_OVEN
+        ) {
+            return buildingManager.findInteractionApproachBlock(task.x, task.y, task.type, troop, null, null, task);
         }
         if (
             state === CONTROL_STATES.BUILD_MODE_B ||

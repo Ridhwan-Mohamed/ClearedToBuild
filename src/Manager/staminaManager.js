@@ -32,7 +32,8 @@ export class StaminaManager {
         Player.clearPoseLock(troop, troop.idle);
 
         const { x, y } = troop.home;
-        const approach = buildingManager.findBuildApproachBlock(x, y, TILE_TYPES.house1, troop);
+        const homeType = troop.home.tileType ?? TILE_TYPES.house1;
+        const approach = buildingManager.findInteractionApproachBlock(x, y, homeType, troop);
         if (!approach) return false;
         troop.task = true;
         troop.roam = false;

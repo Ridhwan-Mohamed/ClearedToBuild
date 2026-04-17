@@ -20,6 +20,9 @@ import stoneAxe from 'url:../assets/players/forager/stone_axe.png';
 import stonePickaxe from 'url:../assets/players/forager/stone_pickaxe.png';
 import goldAxe from 'url:../assets/players/forager/gold_axe.png';
 import goldPickaxe from 'url:../assets/players/forager/gold_pickaxe.png';
+import foragerSwimUp from 'url:../assets/players/forager/forager_swim_up.png';
+import foragerSwimDown from 'url:../assets/players/forager/forager_swim_down.png';
+import foragerSwimSidewards from 'url:../assets/players/forager/forager_swim_sidewards.png';
  
 export class Forager {
 
@@ -38,6 +41,9 @@ export class Forager {
         scene.load.image('forager_stone_pickaxe', stonePickaxe);
         scene.load.image('forager_gold_axe', goldAxe);
         scene.load.image('forager_gold_pickaxe', goldPickaxe);
+        scene.load.spritesheet('forager_swim_up', foragerSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_swim_down', foragerSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('forager_swim_sidewards', foragerSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -72,8 +78,11 @@ export class Forager {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'forager_walk_down',
                 down_left: 'forager_walk_down_left',
@@ -81,6 +90,11 @@ export class Forager {
                 up: 'forager_walk_up',
                 up_left: 'forager_walk_up_left',
                 up_right: 'forager_walk_up_right',
+            },
+            swimDirections: {
+                up: 'forager_swim_up',
+                down: 'forager_swim_down',
+                side: 'forager_swim_sidewards',
             }
         });
         sprite.name = NameGenerator.generate();
@@ -121,12 +135,12 @@ export class Forager {
             return;
         }
 
-        // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (OrderRunner.stepUnit(forager)) return;
         if (forager.task) return;
 
+        if (Player.tryEnterQueuedSleep?.(forager)) return;
         if (Scheduler.stepUnit(forager)) return;
-
+        
         if (!forager.task && forager.state === CONTROL_STATES.TRACK_MODE && !forager.roam) {
             Player.roam(forager);
         }

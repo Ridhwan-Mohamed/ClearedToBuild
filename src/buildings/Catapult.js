@@ -300,6 +300,7 @@ export class Catapult {
   onDamaged(damage, currentHealth, maxHealth) {
     this.health = Math.max(0, currentHealth ?? this.health);
     this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
+    buildingManager.queueAutoFixForBuilding(this, this.teamNumber);
 
     const scene = this.scene;
     const targets = [this.baseSprite, this.topSprite];

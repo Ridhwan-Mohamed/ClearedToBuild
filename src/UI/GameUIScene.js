@@ -207,6 +207,7 @@ export class GameUIScene extends Phaser.Scene {
       world.housesTab = null;
       world.buildTab = null;
       world.cardsTab = null;
+      world.functionTab = null;
     }
   }
 
@@ -439,6 +440,7 @@ export class GameUIScene extends Phaser.Scene {
     w.housesTab = this.housesTab;
     w.buildTab = this.buildTab;
     w.cardsTab = this.cardsTab;
+    w.functionTab = this.functionTab;
   }
 
   _buildTopHud() {
@@ -1847,10 +1849,11 @@ export class GameUIScene extends Phaser.Scene {
     const hoverOut = [];
     let onSelect = null;
     let selectDelayMs = 0;
-    const visualTop = -(cardHeight / 2) + 82;
+    const visualTop = -(cardHeight / 2) + 84;
+    let contentBottom = visualTop + 64;
 
     if (option?.presentationType === "card") {
-      const frameWrap = this.add.container(0, visualTop);
+      const frameWrap = this.add.container(0, visualTop - 6);
       const hasCardFrame = this.textures.exists("reward_mini_card");
       const plateShadow = this.add.image(4, 8, hasCardFrame ? "reward_mini_card" : "__WHITE")
         .setAlpha(hasCardFrame ? 0.18 : 0.10)
@@ -1859,36 +1862,27 @@ export class GameUIScene extends Phaser.Scene {
         .setTint(accent)
         .setAlpha(hasCardFrame ? 0.98 : 0.18);
       if (hasCardFrame) {
-        plateShadow.setDisplaySize(134, 156);
-        plate.setDisplaySize(134, 156);
+        plateShadow.setDisplaySize(118, 140);
+        plate.setDisplaySize(118, 140);
       } else {
-        plateShadow.setDisplaySize(130, 154);
-        plate.setDisplaySize(130, 154);
+        plateShadow.setDisplaySize(114, 138);
+        plate.setDisplaySize(114, 138);
       }
-      const iconPlate = this.add.circle(0, -30, 28, 0x0f2031, 0.92)
+      const iconPlate = this.add.circle(0, -32, 24, 0x0f2031, 0.92)
         .setStrokeStyle(2, 0xffffff, 0.18);
-      const icon = this.add.image(0, -30, option?.cardImageKey || "__WHITE")
-        .setDisplaySize(42, 42);
+      const icon = this.add.image(0, -32, option?.cardImageKey || "__WHITE")
+        .setDisplaySize(36, 36);
       const cardName = this.add.text(0, 18, String(option?.title || "Card"), {
         fontFamily: "Bungee",
-        fontSize: "10px",
+        fontSize: "9px",
         color: "#fffaf0",
         stroke: "#08131d",
         strokeThickness: 3,
         align: "center",
-        wordWrap: { width: 106 },
+        wordWrap: { width: 92 },
       }).setOrigin(0.5);
-      const cardText = this.add.text(0, 62, String(option?.cardText || option?.subtitle || ""), {
-        fontFamily: "Bungee",
-        fontSize: "8px",
-        color: "#dbeeff",
-        stroke: "#08131d",
-        strokeThickness: 2,
-        align: "center",
-        wordWrap: { width: 110 },
-        lineSpacing: 4,
-      }).setOrigin(0.5);
-      frameWrap.add([plateShadow, plate, iconPlate, icon, cardName, cardText]);
+      frameWrap.add([plateShadow, plate, iconPlate, icon, cardName]);
+      contentBottom = frameWrap.y + (plate.displayHeight / 2);
       nodes.push(frameWrap);
 
       hoverIn.push(() => {
@@ -1910,20 +1904,21 @@ export class GameUIScene extends Phaser.Scene {
         });
       });
     } else if (option?.presentationType === "recruit") {
-      const glow = this.add.circle(0, visualTop + 6, 58, accent, 0.14);
-      const plate = this.add.circle(0, visualTop + 6, 48, 0x10263b, 0.96)
+      const glow = this.add.circle(0, visualTop + 2, 54, accent, 0.14);
+      const plate = this.add.circle(0, visualTop + 2, 44, 0x10263b, 0.96)
         .setStrokeStyle(2, accent, 0.36);
-      const portrait = this.add.sprite(0, visualTop + 8, option?.portraitKey || "__WHITE").setOrigin(0.5);
-      applyPortraitKeyToSprite(this, portrait, option?.portraitKey, 84);
-      const recruitText = this.add.text(0, visualTop + 74, "Free Recruit", {
+      const portrait = this.add.sprite(0, visualTop + 4, option?.portraitKey || "__WHITE").setOrigin(0.5);
+      applyPortraitKeyToSprite(this, portrait, option?.portraitKey, 76);
+      const recruitText = this.add.text(0, visualTop + 58, "Free Recruit", {
         fontFamily: "Bungee",
-        fontSize: "10px",
+        fontSize: "9px",
         color: "#fff4d6",
         stroke: "#08131d",
         strokeThickness: 3,
         align: "center",
       }).setOrigin(0.5);
       nodes.push(glow, plate, portrait, recruitText);
+      contentBottom = recruitText.y + (recruitText.height / 2);
 
       hoverIn.push(() => {
         this.tweens.add({
@@ -1944,24 +1939,25 @@ export class GameUIScene extends Phaser.Scene {
         });
       });
     } else if (option?.presentationType === "chest") {
-      const glow = this.add.circle(0, visualTop + 6, 62, accent, 0.14);
-      const chest = this.add.sprite(0, visualTop + 2, "reward_treasure_chest", 0)
-        .setScale(0.94);
+      const glow = this.add.circle(0, visualTop + 2, 56, accent, 0.14);
+      const chest = this.add.sprite(0, visualTop - 4, "reward_treasure_chest", 0)
+        .setScale(0.88);
       const contents = Array.isArray(option?.chestContents) ? option.chestContents.slice(0, 3) : [];
-      const chipGap = 54;
+      const chipGap = 48;
       contents.forEach((entry, index) => {
         const chipX = (index - ((contents.length - 1) / 2)) * chipGap;
-        const chipBg = this.add.circle(chipX, visualTop + 72, 16, 0x0d2334, 0.96)
+        const chipBg = this.add.circle(chipX, visualTop + 60, 15, 0x0d2334, 0.96)
           .setStrokeStyle(2, 0xffffff, 0.12);
-        const icon = this.add.image(chipX, visualTop + 72, entry?.key || "__WHITE")
-          .setDisplaySize(18, 18);
-        const amount = this.add.text(chipX + 16, visualTop + 82, `x${Math.max(0, Number(entry?.amount || 0))}`, {
+        const icon = this.add.image(chipX, visualTop + 60, entry?.key || "__WHITE")
+          .setDisplaySize(16, 16);
+        const amount = this.add.text(chipX + 15, visualTop + 70, `x${Math.max(0, Number(entry?.amount || 0))}`, {
           fontFamily: "Bungee",
           fontSize: "8px",
           color: "#fff7e6",
           stroke: "#08131d",
           strokeThickness: 2,
         }).setOrigin(0, 0.5);
+        contentBottom = Math.max(contentBottom, amount.y + (amount.height / 2));
         nodes.push(chipBg, icon, amount);
       });
       nodes.push(glow, chest);
@@ -2001,7 +1997,7 @@ export class GameUIScene extends Phaser.Scene {
       selectDelayMs = 180;
     }
 
-    return { nodes, hoverIn, hoverOut, onSelect, selectDelayMs };
+    return { nodes, hoverIn, hoverOut, onSelect, selectDelayMs, contentBottom };
   }
 
   _destroyTownXpRewardPresentation() {
@@ -2141,7 +2137,7 @@ export class GameUIScene extends Phaser.Scene {
     const cardSpacing = Math.min(300, Math.floor((panelWidth - 150) / Math.max(1, options.length)));
     const startX = -((Math.max(0, options.length - 1)) * cardSpacing) / 2;
     const cardWidth = Math.min(250, Math.floor((panelWidth - 140) / Math.max(1, options.length)));
-    const cardHeight = Math.min(320, panelHeight - 250);
+    const cardHeight = Math.min(348, panelHeight - 222);
 
     options.forEach((option, index) => {
       const x = startX + (index * cardSpacing);
@@ -2153,6 +2149,7 @@ export class GameUIScene extends Phaser.Scene {
       const tagBg = this.add.graphics();
       const selectBg = this.add.graphics();
       const visual = this._buildTownXpRewardVisual(option, cardWidth, cardHeight, accent, destroyers);
+      const selectY = (cardHeight / 2) - 34;
 
       const drawCard = (hovered = false) => {
         this._drawRoundedPanel(bg, cardWidth, cardHeight, {
@@ -2172,7 +2169,16 @@ export class GameUIScene extends Phaser.Scene {
 
         glow.clear();
         glow.fillStyle(accent, hovered ? 0.12 : 0.07);
-        glow.fillRoundedRect(-(cardWidth / 2) + 14, -(cardHeight / 2) + 52, cardWidth - 28, 74, 20);
+        const visualSlotTop = -(cardHeight / 2) + 52;
+        const visualSlotHeight = option?.presentationType === "card" ? 126 : 84;
+        const visualSlotRadius = option?.presentationType === "card" ? 24 : 20;
+        glow.fillRoundedRect(
+          -(cardWidth / 2) + 14,
+          visualSlotTop,
+          cardWidth - 28,
+          visualSlotHeight,
+          visualSlotRadius,
+        );
 
         tagBg.clear();
         this._drawRoundedPanel(tagBg, 126, 32, {
@@ -2197,7 +2203,7 @@ export class GameUIScene extends Phaser.Scene {
           shadowAlpha: hovered ? 0.18 : 0.10,
           shadowOffsetY: 6,
         });
-        selectBg.setPosition(0, (cardHeight / 2) - 38);
+        selectBg.setPosition(0, selectY);
       };
 
       const tagText = this.add.text(0, -(cardHeight / 2) + 34, String(option?.badgeLabel || "REWARD"), {
@@ -2207,42 +2213,89 @@ export class GameUIScene extends Phaser.Scene {
         stroke: "#f8feff",
         strokeThickness: 2,
       }).setOrigin(0.5);
-      const titleText = this.add.text(0, 6, String(option?.title || "Reward"), {
+      const titleText = this.add.text(0, 0, String(option?.title || "Reward"), {
         fontFamily: "Bungee",
-        fontSize: "18px",
+        fontSize: "16px",
         color: "#fff7e6",
         stroke: "#08131d",
         strokeThickness: 4,
         align: "center",
         wordWrap: { width: cardWidth - 34 },
       }).setOrigin(0.5);
-      const subtitleText = this.add.text(0, 54, String(option?.subtitle || ""), {
-        fontFamily: "Bungee",
-        fontSize: "11px",
-        color: "#d7efff",
-        stroke: "#08131d",
-        strokeThickness: 3,
-        align: "center",
-        wordWrap: { width: cardWidth - 42 },
-        lineSpacing: 6,
-      }).setOrigin(0.5);
-      const hintText = this.add.text(0, 100, String(option?.hint || ""), {
+      const subtitleText = this.add.text(0, 0, String(option?.subtitle || ""), {
         fontFamily: "Bungee",
         fontSize: "10px",
+        color: "#d7efff",
+        stroke: "#08131d",
+        strokeThickness: 2,
+        align: "center",
+        wordWrap: { width: cardWidth - 42 },
+        lineSpacing: 3,
+      }).setOrigin(0.5);
+      const hintText = this.add.text(0, 0, String(option?.hint || ""), {
+        fontFamily: "Bungee",
+        fontSize: "9px",
         color: "#ffe9c7",
         stroke: "#08131d",
-        strokeThickness: 3,
+        strokeThickness: 2,
         align: "center",
         wordWrap: { width: cardWidth - 44 },
-        lineSpacing: 6,
+        lineSpacing: 3,
       }).setOrigin(0.5);
-      const selectText = this.add.text(0, (cardHeight / 2) - 38, "Choose", {
+      const selectText = this.add.text(0, selectY, "Choose", {
         fontFamily: "Bungee",
         fontSize: "15px",
         color: "#0c2b3f",
         stroke: "#f8feff",
         strokeThickness: 2,
       }).setOrigin(0.5);
+      const layoutCardText = () => {
+        const bodyTop = Math.max(12, Math.round(Number(visual?.contentBottom || 0) + 24));
+        const bodyBottom = Math.round(selectY - 34);
+        let titleGap = 10;
+        let bodyGap = String(option?.hint || "").trim() ? 8 : 0;
+        let tuned = false;
+
+        const placeTextBlock = () => {
+          const titleHeight = Math.ceil(titleText.height);
+          const subtitleHeight = Math.ceil(subtitleText.height);
+          const hintVisible = Boolean(String(option?.hint || "").trim());
+          const hintHeight = hintVisible ? Math.ceil(hintText.height) : 0;
+          const totalHeight = titleHeight + subtitleHeight + hintHeight + titleGap + bodyGap;
+          const availableHeight = Math.max(0, bodyBottom - bodyTop);
+
+          if (totalHeight > availableHeight && !tuned) {
+            tuned = true;
+            titleGap = 8;
+            bodyGap = hintVisible ? 6 : 0;
+            subtitleText.setFontSize("9px");
+            subtitleText.setLineSpacing(2);
+            hintText.setFontSize("8px");
+            hintText.setLineSpacing(2);
+            return placeTextBlock();
+          }
+
+          const startY = bodyTop + Math.max(0, Math.floor((availableHeight - totalHeight) / 2));
+          let cursorY = startY;
+
+          titleText.setY(cursorY + (titleHeight / 2));
+          cursorY += titleHeight + titleGap;
+
+          subtitleText.setY(cursorY + (subtitleHeight / 2));
+          cursorY += subtitleHeight;
+
+          if (hintVisible) {
+            cursorY += bodyGap;
+            hintText.setY(cursorY + (hintHeight / 2));
+            hintText.setVisible(true);
+          } else {
+            hintText.setVisible(false);
+          }
+        };
+
+        placeTextBlock();
+      };
+      layoutCardText();
 
       const hit = this.add.rectangle(0, 0, cardWidth, cardHeight, 0xffffff, 0.001)
         .setInteractive({ useHandCursor: true });
@@ -2304,17 +2357,7 @@ export class GameUIScene extends Phaser.Scene {
       });
     });
 
-    const footer = this.add.text(0, (panelHeight / 2) - 44, "Level rewards wait for calmer moments, so night defenses stay smooth.", {
-      fontFamily: "Bungee",
-      fontSize: "10px",
-      color: "#9fc1d2",
-      stroke: "#08131d",
-      strokeThickness: 3,
-      align: "center",
-      wordWrap: { width: panelWidth - 140 },
-    }).setOrigin(0.5);
-
-    panel.add([badgeBg, badgeText, title, subtitle, progressLine, footer]);
+    panel.add([badgeBg, badgeText, title, subtitle, progressLine]);
     root.add([shade, bloomA, bloomB, panel]);
 
     this.tweens.add({
@@ -2905,5 +2948,6 @@ export class GameUIScene extends Phaser.Scene {
     this._syncUiAnimationTimeScale();
     this.contractHud?.update?.();
     this.selectionCommandBar?.update?.();
+    this.functionTab?.update?.();
   }
 }

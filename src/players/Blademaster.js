@@ -17,6 +17,9 @@ import blademasterWalkUp from 'url:../assets/players/blademaster/blademaster_wal
 import blademasterWalkUpLeft from 'url:../assets/players/blademaster/blademaster_walk_up_left.png';
 import blademasterWalkUpRight from 'url:../assets/players/blademaster/blademaster_walk_up_right.png';
 import blademasterSlash from 'url:../assets/players/blademaster/blademaster_slash.png';
+import blademasterSwimUp from 'url:../assets/players/blademaster/blademaster_swim_up.png';
+import blademasterSwimDown from 'url:../assets/players/blademaster/blademaster_swim_down.png';
+import blademasterSwimSidewards from 'url:../assets/players/blademaster/blademaster_swim_sidewards.png';
 
 export class Blademaster {
 
@@ -31,6 +34,9 @@ export class Blademaster {
         scene.load.spritesheet('blademaster_walk_up_left', blademasterWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('blademaster_walk_up_right', blademasterWalkUpRight, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('blademaster_slash', blademasterSlash, { frameWidth: 50, frameHeight: 50 });
+        scene.load.spritesheet('blademaster_swim_up', blademasterSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_swim_down', blademasterSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('blademaster_swim_sidewards', blademasterSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
     
     constructor(x, y, teamNumber) {
@@ -69,8 +75,11 @@ export class Blademaster {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'blademaster_walk_down',
                 down_left: 'blademaster_walk_down_left',
@@ -78,6 +87,11 @@ export class Blademaster {
                 up: 'blademaster_walk_up',
                 up_left: 'blademaster_walk_up_left',
                 up_right: 'blademaster_walk_up_right',
+            },
+            swimDirections: {
+                up: 'blademaster_swim_up',
+                down: 'blademaster_swim_down',
+                side: 'blademaster_swim_sidewards',
             }
         });
 
@@ -108,6 +122,8 @@ export class Blademaster {
         if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
+
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
         if (!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);

@@ -7,7 +7,7 @@ import { Blademaster } from "../players/Blademaster";
 import { Brawler } from "../players/Brawler";
 import { Fireman } from "../players/Fireman";
 import { Gunslinger } from "../players/Gunslinger";
-import { townRoads } from "../town";
+import { Teams } from "../Teams";
 
 const PLAYER_CLASS_BY_KEY = {
   farmer: Farmer,
@@ -29,7 +29,7 @@ export class GameStart {
     const spawnPoints = Array.isArray(startCfg?.spawnPoints) ? startCfg.spawnPoints : [];
 
     // fallback roads (same as before)
-    const roads = townRoads[`${teamNumber}`] ?? [];
+    const roads = Teams.getTownRoadTiles?.(teamNumber) ?? [];
     const fallbackSpawns = Phaser.Utils.Array.Shuffle(roads).slice(); // copy
 
     const playerArray = [];

@@ -5,21 +5,24 @@ export const UI_ITEM_TYPES = {
         description: "Water from a unclean source, for farming",
         cooksTo: "clean_water",
         label: "Unclean Water",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 1
     },
     clean_water: {
         name: "clean_water",
         icon: "waterIcon",
         label: "Clean Water",
         description: "Safe drinking water",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 2
     },
     food: {
         name: "food",
         icon: "foodIcon",
         description: "Cooked rations",
         label: "Food",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 3
     },
     rawFood: {
         name: "rawFood",
@@ -27,21 +30,24 @@ export const UI_ITEM_TYPES = {
         description: "Uncooked rations",
         label: "Raw Food",
         cooksTo: "food",
-        stacks: 15
+        stacks: 15,
+        moneyValue: 2
     },
     wood: {
         name: "wood",
         icon: "woodIcon",
         label: "Wood",
         description: "Basic fuel for ovens",
-        stacks: 5
+        stacks: 5,
+        moneyValue: 1
     },
     stone: {
         name: "stone",
         icon: "stoneIcon",
         label: "Stone",
         description: "Construction material",
-        stacks: 5
+        stacks: 5,
+        moneyValue: 1
     },
     crop: {
         name: "crop",
@@ -50,22 +56,25 @@ export const UI_ITEM_TYPES = {
         label: "Crop",
         stacks: 10,
         food: true,
-        foodValue: 1
+        foodValue: 1,
+        moneyValue: 2
     },
     seedCrop: {
-        name: 'seedCrop',
+        name: "seedCrop",
         stacks: 10,
         label: "Crop Seed",
-        icon: 'seeds',
+        icon: "seeds",
         food: false,
-        seed: true
+        seed: true,
+        moneyValue: 1
     },
     seedBerry: {
-        name: 'seedBerry',
+        name: "seedBerry",
         label: "Berry Seed",
         stacks: 10,
-        icon: 'berry',
+        icon: "berry",
         food: false,
-        seed: true
+        seed: true,
+        moneyValue: 2
     }
 };

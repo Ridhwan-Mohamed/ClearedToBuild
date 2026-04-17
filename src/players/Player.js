@@ -29,6 +29,7 @@ import { PathDebugDrawer } from "../lib/navmesh/PathDebugDrawer";
 import { InterruptController } from "../ai/scheduler/InterruptController";
 import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
+import { OrderRunner } from "../orders/OrderRunner";
 import {
     shouldUseDirectionalFacing,
     syncDirectionalAnimationState,
@@ -57,6 +58,7 @@ export class Player {
     static CARRY_ICON_OFFSET_Y = 28;
     static CARRY_ICON_SIZE     = 18;
     static HIGHLIGHT_RING_OFFSET_Y = 10;
+    static FRIENDLY_VISION_BOOST = 0.58;
 
     static resetRuntimeState(scene = null) {
         this.scene = scene ?? null;
@@ -215,7 +217,12 @@ export class Player {
                 VisibilitySystem.moveVisionBubble(troop.visionId, gx, gy, troop.visionRadius);
             } else {
                 // Fallback if somehow missing id
-                troop.visionId = VisibilitySystem.addVisionBubble({ x: gx, y: gy, r: troop.visionRadius, boost: 0.1 });
+                troop.visionId = VisibilitySystem.addVisionBubble({
+                    x: gx,
+                    y: gy,
+                    r: troop.visionRadius,
+                    boost: troop.visionBoost ?? this.FRIENDLY_VISION_BOOST,
+                });
             }
             troop.gridX = gx;
             troop.gridY = gy;
@@ -406,8 +413,12 @@ export class Player {
         // give the player its own vision bubble (centered on grid)
         if (cube.body.team === 1) {
             cube.visionRadius = cube.visionRadius ?? 6;
+            cube.visionBoost = cube.visionBoost ?? this.FRIENDLY_VISION_BOOST;
             cube.visionId = VisibilitySystem.addVisionBubble({
-                x: cube.gridX, y: cube.gridY, r: cube.visionRadius, boost: 0.1
+                x: cube.gridX,
+                y: cube.gridY,
+                r: cube.visionRadius,
+                boost: cube.visionBoost,
             }, /*noRepaint=*/false);
         }
 
@@ -1996,9 +2007,14 @@ export class Player {
 
         this.setAnimState(troop, troop.swim || troop.idle);
         troop.body.setVelocity(vx, vy);
-        if (Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01) {
+
+        const isMoving = Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01;
+        updateDirectionalAnimationFromVelocity(troop, vx, vy, isMoving);
+
+        if (isMoving && !shouldUseDirectionalFacing(troop)) {
             troop.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
         }
+
         return true;
     }
 
@@ -2479,25 +2495,55 @@ export class Player {
         this._updateCarryIndicator(troop);
     }
 
-static onWallDestroyed(troop, task) {
-  const teamNumber = troop.body.team;
-  Teams.removeFromStateArray(teamNumber, "enemyDestroyTileStates", task);
+    static tryEnterQueuedSleep(troop) {
+        if (!troop?.active || !troop._sleepQueued) return false;
 
-  troop.task = null;
-  if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
-  troop.play(troop.idle);
-  Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-}
+        if (troop.state === CONTROL_STATES.SLEEP_MODE) {
+            troop._sleepQueued = false;
+            troop._sleepQueuedAt = 0;
+            return true;
+        }
 
-static onBlockDestroyed(troop, task) {
-  const teamNumber = troop.body.team;
-  Teams.removeFromStateArray(teamNumber, "enemyDestroyStates", task);
+        if (troop.state === CONTROL_STATES.GO_HOME_MODE) {
+            return false;
+        }
 
-  troop.task = null;
-  if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
-  troop.play(troop.idle);
-  Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-}
+        if (troop.task) return false;
+        if (troop.timer) return false;
+        if (troop.track) return false;
+        if (troop.currentPath?.length) return false;
+        if (StorageManager.isCarrying(troop)) return false;
+        if (troop.pendingFuelJob || troop.pendingOvenJob) return false;
+        if (troop.state !== CONTROL_STATES.TRACK_MODE) return false;
 
+        const result = OrderRunner.toggleSleepTroops?.([troop]);
+        if (result?.ok) {
+            troop._sleepQueued = false;
+            troop._sleepQueuedAt = 0;
+            return true;
+        }
+
+        return false;
+    }
+
+    static onWallDestroyed(troop, task) {
+    const teamNumber = troop.body.team;
+    Teams.removeFromStateArray(teamNumber, "enemyDestroyTileStates", task);
+
+    troop.task = null;
+    if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
+    troop.play(troop.idle);
+    Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+    }
+
+    static onBlockDestroyed(troop, task) {
+    const teamNumber = troop.body.team;
+    Teams.removeFromStateArray(teamNumber, "enemyDestroyStates", task);
+
+    troop.task = null;
+    if (troop.timer) { troop.timer.remove(false); troop.timer = null; }
+    troop.play(troop.idle);
+    Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+    }
       
 }

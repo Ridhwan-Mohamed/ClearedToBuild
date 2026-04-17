@@ -1,5 +1,6 @@
 
 // === HousesTab.js ===
+import Phaser from "phaser";
 import { Teams } from '../../Teams';
 import { StaminaManager } from '../../Manager/staminaManager.js';
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, showAlert } from '../../constants';
@@ -9,6 +10,12 @@ import {
   DEFAULT_PLAYER_PORTRAIT_KEY,
   getPlayerPortraitKey,
 } from '../../players/playerPortraits.js';
+import {
+  BOTTOM_BAR_THEME,
+  makeGlassRoundRect,
+  mixColor,
+  setHoverLiftState,
+} from "./BottomBarTheme";
 
 export default class HousesTab {
   constructor(scene, teamNumber = 1) {
@@ -17,6 +24,7 @@ export default class HousesTab {
     this.selected = null;
     this.rows = new Map(); // house -> { row, bg, hpFill, occText }
     this._onWheel = null;
+    this._rowBaseY = new WeakMap();
 
     this.root = this.build();
     this.bindScrollInput();
@@ -63,13 +71,30 @@ export default class HousesTab {
       height: 200,
       scrollMode: 0,
       scrollDetectionMode: 'rectBounds',
-      background: scene.rexUI.add.roundRectangle(0, 0, 0, 0, 8, 0x000000, 0.25),
+      background: makeGlassRoundRect(scene, 0, 0, 16, {
+        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+        alpha: 0.74,
+        stroke: 0x98e7ff,
+        strokeAlpha: 0.12,
+      }),
       panel: { child: this.listBody, mask: { padding: 1 } },
       sliderY: scene.rexUI.add.slider({
         height: 160,
         orientation: 'y',
-        track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x333333),
-        thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 28, 5, 0x888888),
+        track: makeGlassRoundRect(scene, 10, 0, 5, {
+          fill: 0x0b2230,
+          alpha: 0.82,
+          stroke: 0x98e7ff,
+          strokeAlpha: 0.08,
+          strokeWidth: 1,
+        }),
+        thumb: makeGlassRoundRect(scene, 10, 28, 5, {
+          fill: 0x72d8ff,
+          alpha: 0.86,
+          stroke: 0xffffff,
+          strokeAlpha: 0.18,
+          strokeWidth: 1,
+        }),
       }),
       scrollerY: {
         pointerOutRelease: true,
@@ -93,7 +118,13 @@ export default class HousesTab {
   makeBar(width, height, fillColor) {
     const scene = this.scene;
     const s = scene.rexUI.add.overlapSizer({ width, height });
-    const bg = scene.rexUI.add.roundRectangle(0, 0, width, height, 4, 0x222222, 1);
+    const bg = makeGlassRoundRect(scene, width, height, 4, {
+      fill: 0x08121a,
+      alpha: 0.92,
+      stroke: 0x98e7ff,
+      strokeAlpha: 0.06,
+      strokeWidth: 1,
+    });
     const fill = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), height - 2, 4, fillColor, 1)
       .setOrigin(0, 0.5);
 
@@ -117,14 +148,22 @@ export default class HousesTab {
     const makeHpBarWithText = (width, height) => {
       const s = scene.rexUI.add.overlapSizer({ width, height });
 
-      const bg = rr(width, height, 5, 0x222222, 1);
+      const bg = makeGlassRoundRect(scene, width, height, 5, {
+        fill: 0x08121a,
+        alpha: 0.92,
+        stroke: 0x98e7ff,
+        strokeAlpha: 0.06,
+        strokeWidth: 1,
+      });
       const fill = rr(Math.max(1, width - 2), height - 2, 5, 0x4caf50, 1)
         .setOrigin(0, 0.5);
 
       const txt = scene.add.text(0, 0, 'HP —/—', {
         fontFamily: 'Bungee',
         fontSize: 12,
-        color: '#ffffff',
+        color: BOTTOM_BAR_THEME.text,
+        stroke: '#081621',
+        strokeThickness: 2,
       }).setOrigin(0.5, 0.5);
 
       s.addBackground(bg);
@@ -144,8 +183,8 @@ export default class HousesTab {
       return s;
     };
 
-    const title = scene.add.text(0, 0, 'House', { fontSize: '16px', color: '#EDEDED' });
-    const sub = scene.add.text(0, 0, '—', { fontSize: '12px', color: '#B0B0B0' });
+    const title = scene.add.text(0, 0, 'House', { fontFamily: 'Bungee', fontSize: '16px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
+    const sub = scene.add.text(0, 0, '—', { fontFamily: 'Bungee', fontSize: '11px', color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 });
     const houseHpBar = makeHpBarWithText(240, 14);
 
     const occSizer = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 8 } });
@@ -165,7 +204,12 @@ export default class HousesTab {
     const panel = scene.rexUI.add.sizer({
       orientation: 'y',
       space: { left: 10, right: 10, top: 8, bottom: 8, item: 10 },
-    });
+    }).addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
+      fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.06),
+      alpha: 0.82,
+      stroke: 0xa6e9ff,
+      strokeAlpha: 0.16,
+    }));
 
     const titleCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 2 } })
       .add(title, 0, 'left', 0, false)
@@ -209,27 +253,48 @@ export default class HousesTab {
 
   makeButton(scene, labelText, onClick, bgColor = 0x2a5bd8, h = 28) {
     const label = scene.rexUI.add.label({
-      background: scene.rexUI.add.roundRectangle(0, 0, 0, h, 10, bgColor),
-      text: scene.add.text(0, 0, labelText, { fontFamily: 'Bungee', fontSize: 13, color: '#ffffff' }),
+      background: makeGlassRoundRect(scene, 0, h, 10, {
+        fill: mixColor(BOTTOM_BAR_THEME.panelFill, bgColor, 0.24),
+        alpha: 0.9,
+        stroke: bgColor,
+        strokeAlpha: 0.22,
+        strokeWidth: 1.5,
+      }),
+      text: scene.add.text(0, 0, labelText, { fontFamily: 'Bungee', fontSize: 13, color: '#ffffff', stroke: '#081621', strokeThickness: 2 }),
       space: { left: 10, right: 10, top: 5, bottom: 5 },
     });
 
     label.setMinSize(92, h);
-    label.setInteractive({ useHandCursor: true }).on('pointerup', () => onClick?.());
+    label.setInteractive({ useHandCursor: true })
+      .on('pointerup', () => onClick?.())
+      .on('pointerover', () => {
+        label.__baseY ??= label.y;
+        setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
+      })
+      .on('pointerout', () => {
+        label.__baseY ??= label.y;
+        setHoverLiftState(scene, label, false, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
+      });
     return label;
   }
 
   buildOccupantSlot(scene, idx) {
     const rr = (w, h, r, color, alpha = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, color, alpha);
 
-    const bg = rr(0, 0, 8, 0x000000, 0.20);
+    const bg = makeGlassRoundRect(scene, 0, 0, 12, {
+      fill: mixColor(BOTTOM_BAR_THEME.panelSoftFill, 0xffffff, 0.04),
+      alpha: 0.82,
+      stroke: 0xffffff,
+      strokeAlpha: 0.08,
+      strokeWidth: 1,
+    });
 
     const portrait = scene.add.sprite(0, 0, DEFAULT_PLAYER_PORTRAIT_KEY)
       .setDisplaySize(44, 44)
       .setOrigin(0.5, 0.5);
     portrait.setVisible(false);
 
-    const name = scene.add.text(0, 0, `Slot ${idx + 1}: —`, { fontSize: '13px', color: '#ffffff' });
+    const name = scene.add.text(0, 0, `Slot ${idx + 1}: —`, { fontFamily: 'Bungee', fontSize: '12px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
     const hp = this.makeBar(160, 8, 0x4caf50); // green
     const st = this.makeBar(160, 8, 0x2196f3); // blue
@@ -368,17 +433,22 @@ export default class HousesTab {
   createRow(house) {
     const scene = this.scene;
 
-    const tint = 0x777777;
-    const bg = scene.rexUI.add.roundRectangle(0, 0, 0, 0, 6, tint, 0.15)
-      .setStrokeStyle(2, tint, 1);
+    const tint = 0xa5d8ff;
+    const bg = makeGlassRoundRect(scene, 0, 0, 14, {
+      fill: mixColor(BOTTOM_BAR_THEME.cardFill, tint, 0.08),
+      alpha: 0.88,
+      stroke: tint,
+      strokeAlpha: 0.12,
+      strokeWidth: 1.5,
+    });
 
     const gx = Math.floor((house.x ?? 0) / SQUARESIZE);
     const gy = Math.floor((house.y ?? 0) / SQUARESIZE);
 
-    const title = scene.add.text(0, 0, `${gx},${gy} - 🏠`, { fontSize: '13px', color: '#ffffff' });
+    const title = scene.add.text(0, 0, `${gx},${gy} - House`, { fontFamily: 'Bungee', fontSize: '12px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
     const occCount = (house.occupants?.filter(Boolean).length) || 0;
-    const occText = scene.add.text(0, 0, `Occ: ${occCount}/2`, { fontSize: '12px', color: '#dddddd' });
+    const occText = scene.add.text(0, 0, `Occ: ${occCount}/2`, { fontFamily: 'Bungee', fontSize: '10px', color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 });
 
     // Make the bar span (almost) the full row width
     const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
@@ -401,23 +471,54 @@ export default class HousesTab {
 
     row.setMinSize(fullWidth, 6);
 
-    row.setInteractive({ useHandCursor: true }).on('pointerdown', () => this.select(house));
+    row.setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.select(house))
+      .on('pointerover', () => {
+        const data = this.rows.get(house);
+        if (!data) return;
+        data.hovered = true;
+        this.updateRowVisual(house);
+      })
+      .on('pointerout', () => {
+        const data = this.rows.get(house);
+        if (!data) return;
+        data.hovered = false;
+        this.updateRowVisual(house);
+      });
 
-    this.rows.set(house, { row, bg, hpFill: hp.sizer, occText });
+    this._rowBaseY.set(row, row.y);
+    this.rows.set(house, { row, bg, hpFill: hp.sizer, occText, title, hovered: false });
+    this.updateRowVisual(house);
 
     return row;
   }
 
   select(house) {
     this.selected = house;
-
-    for (const [h, data] of this.rows.entries()) {
-      const on = (h === house);
-      data.bg.setAlpha(on ? 1 : 0.6);
-      data.bg.setStrokeStyle(2, on ? 0xffffff : 0x777777, 1);
-    }
+    for (const h of this.rows.keys()) this.updateRowVisual(h);
 
     this.paintDetails();
+  }
+
+  updateRowVisual(house) {
+    const data = this.rows.get(house);
+    if (!data) return;
+    const selected = this.selected === house;
+    const hovered = !!data.hovered;
+    const accent = selected ? 0xffd9a3 : 0xa5d8ff;
+    data.bg.setFillStyle(
+      mixColor(BOTTOM_BAR_THEME.cardFill, accent, selected ? 0.16 : hovered ? 0.12 : 0.08),
+      selected ? 0.94 : hovered ? 0.9 : 0.88
+    );
+    data.bg.setStrokeStyle(selected ? 2.5 : hovered ? 2 : 1.5, accent, selected ? 0.34 : hovered ? 0.22 : 0.12);
+    data.title?.setColor(selected ? "#fff8eb" : BOTTOM_BAR_THEME.text);
+    data.occText?.setColor(selected ? "#ffe4b2" : BOTTOM_BAR_THEME.textMuted);
+    setHoverLiftState(this.scene, data.row, selected || hovered, {
+      baseY: this._rowBaseY.get(data.row) ?? data.row.y,
+      hoverLift: 0,
+      hoverScale: selected ? 1.012 : 1.008,
+      moveY: false,
+    });
   }
 
   selectFromWorld(house) {

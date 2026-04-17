@@ -71,7 +71,7 @@ function stylizeColor(baseColor, type, x, y, w, h) {
   rgb = shade(rgb, 1 + n * 0.12);
 
   // Biome/material accents.
-  if (type === "grass" || type === "dirt" || type === "crops" || type === "grassCrop" || type === "grassBerry") {
+  if (type === "grass" || type === "dark_grass" || type === "dirt" || type === "crops" || type === "grassCrop" || type === "grassBerry") {
     rgb = blend(rgb, { r: 120, g: 220, b: 120 }, 0.06);
   } else if (type === "fort_floor" || type === "wall" || type === "woodWall") {
     rgb = blend(rgb, { r: 165, g: 155, b: 145 }, 0.08);
@@ -85,7 +85,11 @@ function stylizeColor(baseColor, type, x, y, w, h) {
   return rgb;
 }
 
-export function paintOverviewTexture(ctx, grid, colorForType, bounds = null) {
+function inBounds(x, y, minX, minY, maxX, maxY) {
+  return x >= minX && x <= maxX && y >= minY && y <= maxY;
+}
+
+export function paintOverviewTexture(ctx, grid, colorForType, bounds = null, overlayMarkers = null) {
   const h = grid.length;
   const w = grid[0].length;
   const minX = bounds ? Math.max(0, bounds.minX) : 0;
@@ -128,6 +132,18 @@ export function paintOverviewTexture(ctx, grid, colorForType, bounds = null) {
       if (waterDown || waterRight) rgb = shade(rgb, 0.80);
 
       ctx.fillStyle = rgbToHex(rgb);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  if (Array.isArray(overlayMarkers)) {
+    for (const marker of overlayMarkers) {
+      const x = Number(marker?.x);
+      const y = Number(marker?.y);
+      const color = marker?.color;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !color) continue;
+      if (!inBounds(x, y, minX, minY, maxX, maxY)) continue;
+      ctx.fillStyle = color;
       ctx.fillRect(x, y, 1, 1);
     }
   }

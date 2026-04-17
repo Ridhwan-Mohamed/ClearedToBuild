@@ -312,10 +312,10 @@ export const POWERUP_CARDS = [
 
     // ====== Builder: Make Building Faster =====
     {
-        id: "builder_speed_2x",
+        id: "build_speed_2x",
         image: "icon_house",                // ← house icon sprite you’ll make
         name: "Master Builders",
-        text: "Builders construct buildings 2x faster.",
+        text: "Builders construct buildings and walls 2x faster.",
         type: "player",
         target: "builder",
         OUTLINE: "#4433ff",                 // builder tint color
@@ -323,10 +323,12 @@ export const POWERUP_CARDS = [
         apply: () => {
             console.log("Apply 2x build speed to Builders");
             buildingManager.blockBuildingDuration /= 2;
+            buildingManager.tileBuildingDuration /= 2;
         },
         remove: () => {
             console.log("Removing 2x build speed to Builders");
             buildingManager.blockBuildingDuration *= 2;
+            buildingManager.tileBuildingDuration *= 2;
         }
     }
 ];

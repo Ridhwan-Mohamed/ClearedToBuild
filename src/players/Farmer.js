@@ -19,6 +19,9 @@ import farmerWalkUp from 'url:../assets/players/farmer/farmer_walk_up.png';
 import farmerWalkUpLeft from 'url:../assets/players/farmer/farmer_walk_up_left.png';
 import farmerWalkUpRight from 'url:../assets/players/farmer/farmer_walk_up_right.png';
 import farmerPlant from 'url:../assets/players/farmer/farmer_plant.png';
+import farmerSwimUp from 'url:../assets/players/farmer/farmer_swim_up.png';
+import farmerSwimDown from 'url:../assets/players/farmer/farmer_swim_down.png';
+import farmerSwimSidewards from 'url:../assets/players/farmer/farmer_swim_sidewards.png';
 
 export class Farmer {
 
@@ -34,6 +37,9 @@ export class Farmer {
         scene.load.spritesheet('farmer_walk_up', farmerWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('farmer_walk_up_left', farmerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('farmer_walk_up_right', farmerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_swim_up', farmerSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_swim_down', farmerSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('farmer_swim_sidewards', farmerSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -75,8 +81,11 @@ export class Farmer {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'farmer_walk_down',
                 down_left: 'farmer_walk_down_left',
@@ -84,6 +93,11 @@ export class Farmer {
                 up: 'farmer_walk_up',
                 up_left: 'farmer_walk_up_left',
                 up_right: 'farmer_walk_up_right',
+            },
+            swimDirections: {
+                up: 'farmer_swim_up',
+                down: 'farmer_swim_down',
+                side: 'farmer_swim_sidewards',
             }
         });
         ZoomMixer.createPlayerMoniker(farmer);
@@ -113,6 +127,7 @@ export class Farmer {
 
         // 1. If manually assigned via tilling or harvesting
         if (troop.task) return;
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
 
         if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){

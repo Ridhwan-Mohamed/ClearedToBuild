@@ -12,6 +12,35 @@ export class Teams {
       this.teamLists = {};
     }
 
+    static createTownAutomationState() {
+      return {
+        waterEnabled: false,
+        gatherEnabled: false,
+        gatherTargets: {
+          wood: 0,
+          stone: 0,
+          seed: 0,
+          berry: 0,
+        },
+        waterOrderId: null,
+        gatherOrderIds: {
+          wood: null,
+          stone: null,
+          seed: null,
+          berry: null,
+        },
+      };
+    }
+
+    static ensureTownAutomation(teamNumber) {
+      const team = this.getTeam(teamNumber);
+      if (!team) return null;
+      if (!team.townAutomation) {
+        team.townAutomation = this.createTownAutomationState();
+      }
+      return team.townAutomation;
+    }
+
     static _cropNeedsWater(crop) {
       return !!(
         crop &&
@@ -125,6 +154,7 @@ export class Teams {
         townTowerList: [],
         stateLists: {},
         cardHand: [],
+        townAutomation: this.createTownAutomationState(),
         buildings: [],
         buildingFixTasks: [],
         siegeTileStates: [],
@@ -223,7 +253,111 @@ export class Teams {
       }
       return cost;
     }
-  
+
+    static _normalizeGridTile(tile) {
+      if (Array.isArray(tile) && tile.length >= 2) {
+        const x = Number(tile[0]);
+        const y = Number(tile[1]);
+        if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+      }
+
+      if (tile && typeof tile === "object") {
+        const x = Number(tile.x);
+        const y = Number(tile.y);
+        if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+      }
+
+      return null;
+    }
+
+    static getTownCenterTile(teamNumber) {
+      const center = this.getTeam(teamNumber)?.center;
+      return this._normalizeGridTile(center);
+    }
+
+    static _isOccupiedTile(x, y) {
+      return Player.troops.some((troop) => {
+        if (!troop?.active || troop.visible === false) return false;
+        const gx = Math.floor((troop.x ?? 0) / SQUARESIZE);
+        const gy = Math.floor((troop.y ?? 0) / SQUARESIZE);
+        return gx === x && gy === y;
+      });
+    }
+
+    static isTownRoadTile(teamNumber, x, y) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+      if (x < 0 || x >= WORLD_DIMENSIONX || y < 0 || y >= WORLD_DIMENSIONY) return false;
+      if (Map.navGrid?.[y]?.[x] !== 1) return false;
+      return !!Map._hasTypeAt?.(x, y, "road");
+    }
+
+    static getTownRoadTiles(teamNumber) {
+      const roads = townRoads[`${teamNumber}`] ?? townRoads[teamNumber] ?? [];
+      if (!Array.isArray(roads) || roads.length === 0) return [];
+
+      const center = this.getTownCenterTile(teamNumber);
+      const seen = new Set();
+      const valid = [];
+
+      for (const road of roads) {
+        const point = this._normalizeGridTile(road);
+        if (!point) continue;
+        const key = `${point.x},${point.y}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!this.isTownRoadTile(teamNumber, point.x, point.y)) continue;
+        valid.push(point);
+      }
+
+      if (!center) return valid;
+
+      valid.sort((a, b) => {
+        const da = ((a.x - center.x) ** 2) + ((a.y - center.y) ** 2);
+        const db = ((b.x - center.x) ** 2) + ((b.y - center.y) ** 2);
+        if (da !== db) return da - db;
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+      });
+
+      return valid;
+    }
+
+    static getTownCenterRoadTile(teamNumber) {
+      return this.getTownRoadTiles(teamNumber)[0] ?? null;
+    }
+
+    static getTownCenterRoadWorld(teamNumber) {
+      const tile = this.getTownCenterRoadTile(teamNumber) || this.getTownCenterTile(teamNumber);
+      if (!tile) return null;
+      return {
+        gx: tile.x,
+        gy: tile.y,
+        x: tile.x * SQUARESIZE + SQUARESIZE / 2,
+        y: tile.y * SQUARESIZE + SQUARESIZE / 2,
+      };
+    }
+
+    static getTownSpawnTile(teamNumber) {
+      const roads = this.getTownRoadTiles(teamNumber);
+      if (!roads.length) return null;
+      return roads.find((road) => !this._isOccupiedTile(road.x, road.y)) ?? roads[0];
+    }
+
+    static findTownReturnTarget(troop) {
+      const teamNumber = troop?.body?.team;
+      const roads = this.getTownRoadTiles(teamNumber);
+      if (!troop?.body || !roads.length) return null;
+
+      for (const road of roads) {
+        const path = Player.pathTo(troop, road.x, road.y);
+        if (path?.length) {
+          return { tile: road, path };
+        }
+      }
+
+      return null;
+    }
+   
     static addPlayer(teamNumber, player) {
       const team = Teams.teamLists[teamNumber];
       if (!team || !player.active) return;
@@ -313,7 +447,7 @@ export class Teams {
           if (
             nx >= 0 && nx < WORLD_DIMENSIONX &&
             ny >= 0 && ny < WORLD_DIMENSIONY &&
-            Map.grid[ny][nx] === 35 || Map.grid[ny][nx] === TILE_TYPES.crops.grid
+            (Map._hasTypeAt?.(nx, ny, "road") || Map.grid?.[ny]?.[nx] === TILE_TYPES.crops.grid)
           ) {
             return false; // adjacent to a road → not far
           }
@@ -325,16 +459,23 @@ export class Teams {
       
      
     static sendTroopToTown(troop) {
+      if (!troop?.body) return null;
       const teamNum = troop.body.team;
       const team = Teams.teamLists[teamNum];
       if (!team) {
         console.warn(`No team found for troop with team ${teamNum}.`);
-        return;
+        return null;
       }
-    
-      // Extract the saved center tile for this team
-      const roads = townRoads[`${troop.body.team}`];
-      Teams.sendTroopToRoadPool(troop, roads, CONTROL_STATES.BACK_TO_TOWN);
+
+      const returnTarget = this.findTownReturnTarget(troop);
+      if (!returnTarget?.path?.length) {
+        console.warn(`No valid town road return path for troop with team ${teamNum}.`);
+        return null;
+      }
+
+      this.movePlayerState(troop, CONTROL_STATES.BACK_TO_TOWN);
+      Player.moveTo(troop, returnTarget.path);
+      return returnTarget.path;
     }
 
     static sendTroopToRoadPool(troop, roads, moveState = CONTROL_STATES.BACK_TO_TOWN) {

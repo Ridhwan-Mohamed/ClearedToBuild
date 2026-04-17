@@ -17,6 +17,9 @@ import brawlerWalkUp from 'url:../assets/players/brawler/brawler_walk_up.png';
 import brawlerWalkUpLeft from 'url:../assets/players/brawler/brawler_walk_up_left.png';
 import brawlerWalkUpRight from 'url:../assets/players/brawler/brawler_walk_up_right.png';
 import boxingGloveFx from 'url:../assets/Players/boxing_glove.png';
+import brawlerSwimUp from 'url:../assets/players/brawler/brawler_swim_up.png';
+import brawlerSwimDown from 'url:../assets/players/brawler/brawler_swim_down.png';
+import brawlerSwimSidewards from 'url:../assets/players/brawler/brawler_swim_sidewards.png';
 
 export class Brawler {
 
@@ -31,6 +34,9 @@ export class Brawler {
         scene.load.spritesheet('brawler_walk_up_left', brawlerWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('brawler_walk_up_right', brawlerWalkUpRight, { frameWidth: 32, frameHeight: 32 });
         scene.load.image('brawler_boxing_glove_fx', boxingGloveFx);
+        scene.load.spritesheet('brawler_swim_up', brawlerSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_swim_down', brawlerSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('brawler_swim_sidewards', brawlerSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -68,8 +74,11 @@ export class Brawler {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'brawler_walk_down',
                 down_left: 'brawler_walk_down_left',
@@ -77,6 +86,11 @@ export class Brawler {
                 up: 'brawler_walk_up',
                 up_left: 'brawler_walk_up_left',
                 up_right: 'brawler_walk_up_right',
+            },
+            swimDirections: {
+                up: 'brawler_swim_up',
+                down: 'brawler_swim_down',
+                side: 'brawler_swim_sidewards',
             }
         });
 
@@ -103,6 +117,7 @@ export class Brawler {
         if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
         if (!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam)
             Player.roam(troop);

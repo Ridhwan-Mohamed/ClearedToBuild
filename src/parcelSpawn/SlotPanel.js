@@ -4,8 +4,10 @@ import { ForestPage } from "./pages/ForestPage.js";
 import { RockPage } from "./pages/RockPage.js";
 import { PressurePage } from "./pages/PressurePage.js";
 import { MarketPage } from "./pages/MarketPage.js";
+import { MilitiaPage } from "./pages/MilitiaPage.js";
 import { showAlert } from "../constants.js";
 import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
+import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
 
 export class SlotPanel {
   constructor(scene, cfg) {
@@ -36,6 +38,11 @@ export class SlotPanel {
     this._buildGrid();
     this._buildOverviewGrid();
     this.setMode("detailed");
+    this._onTownXpChanged = () => this.refreshMilitiaLockState();
+    this._onStoreUnlockChanged = () => this.refreshMilitiaLockState();
+
+    this.scene?.events?.on?.("townxp:changed", this._onTownXpChanged);
+    this.scene?.events?.on?.("store:unlock-changed", this._onStoreUnlockChanged);
   }
 
   _buildFrame() {
@@ -71,10 +78,11 @@ export class SlotPanel {
       strokeThickness: 4,
       align: "center",
     }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+    this.detailProxyLabel.setInteractive({ useHandCursor: true });
     this.detailHitZone = this.scene.add.zone(0, 0, this.W, this.H)
       .setOrigin(0.5)
       .setScrollFactor(1)
-      .setInteractive({ useHandCursor: true });
+      .setInteractive({ useHandCursor: false });
 
     this.detailHitZone.on("pointerover", (_pointer, _localX, _localY, event) => {
       if (this.mode === "overview" || !this.container.visible) return;
@@ -88,12 +96,22 @@ export class SlotPanel {
       this._setDetailedProxyHovered(false);
       this.scene?.uiScene?.contractHud?.setExternalHover?.(this.id, false);
     });
-    this.detailHitZone.on("pointerdown", (_pointer, _localX, _localY, event) => {
+    this.detailProxyLabel.on("pointerover", (_pointer, _localX, _localY, event) => {
       if (this.mode === "overview" || !this.container.visible) return;
       event?.stopPropagation?.();
       this._setDetailedProxyHovered(true);
     });
-    this.detailHitZone.on("pointerup", (_pointer, _localX, _localY, event) => {
+    this.detailProxyLabel.on("pointerout", (_pointer, event) => {
+      if (this.mode === "overview") return;
+      event?.stopPropagation?.();
+      this._setDetailedProxyHovered(false);
+    });
+    this.detailProxyLabel.on("pointerdown", (_pointer, _localX, _localY, event) => {
+      if (this.mode === "overview" || !this.container.visible) return;
+      event?.stopPropagation?.();
+      this._setDetailedProxyHovered(true);
+    });
+    this.detailProxyLabel.on("pointerup", (_pointer, _localX, _localY, event) => {
       if (this.mode === "overview" || !this.container.visible) return;
       event?.stopPropagation?.();
       this._handleDetailedProxyClick();
@@ -152,6 +170,9 @@ export class SlotPanel {
     this.detailProxyGlow?.setVisible(visible);
     this.detailProxyBadge?.setVisible(visible);
     this.detailProxyLabel?.setVisible(visible);
+    if (this.detailProxyLabel?.input) {
+      this.detailProxyLabel.input.enabled = visible;
+    }
     if (this.detailHitZone?.input) {
       this.detailHitZone.input.enabled = visible;
     }
@@ -192,22 +213,27 @@ export class SlotPanel {
   }
 
   _buildGrid() {
-    const pad = 14;
-    const innerW = this.W - pad*2;
-    const gridTop = -this.H/2 + 44;
+    const pad = 10;
+    const innerW = this.W - pad * 2;
+    const innerH = this.H - pad * 2;
+    const gridTop = -innerH / 2 + 24;
 
     const btnW = Math.floor(innerW / 2) - 10;
     const btnH = 34;
     const gapX = 10;
     const gapY = 10;
 
+    const militiaUnlocked = this._canAccessMilitia();
+    
     const buttons = [
-      { label: "🌲 Forest",   type: "FOREST"   },
-      { label: "🪨 Rock",     type: "ROCK"     },
-      { label: "⚔️ Pressure", type: "PRESSURE" },
-      { label: "🏪 Market",   type: "MARKET"   },
-      { label: "🌾 Farm",     type: "FARM"     },
-      { label: "🛡 Militia",  type: "MILITIA"  },
+      { label: "🌲 Forest",   type: "FOREST",   locked: false },
+      { label: "🪨 Rock",     type: "ROCK",     locked: false },
+      { label: "⚔️ Pressure", type: "PRESSURE", locked: false },
+      { label: "🏪 Market",   type: "MARKET",   locked: false },
+      { label: "🌾 Field",    type: "FARM",     locked: false },
+      militiaUnlocked
+        ? { label: "🛡 Militia", type: "MILITIA", locked: false }
+        : { label: this._getMilitiaLockedLabel(), type: null, locked: true },
     ];
 
     this.gridObjects = [];
@@ -216,34 +242,90 @@ export class SlotPanel {
       const row = Math.floor(i / 2);
       const col = i % 2;
 
-      const x = -innerW/2 + (btnW/2) + col * (btnW + gapX);
+      const x = -innerW / 2 + (btnW / 2) + col * (btnW + gapX);
       const y = gridTop + row * (btnH + gapY);
+      const def = buttons[i];
 
       const b = makeButton(this.scene, {
         x, y,
         w: btnW, h: btnH,
-        label: buttons[i].label,
-        onClick: () => this.open(buttons[i].type),
+        label: def.label,
+        onClick: () => {
+          if (def.locked) {
+            this._showMilitiaLockedMessage();
+            return;
+          }
+          this.open(def.type);
+        },
       });
 
-      // Safety: ensure ALL children have scrollFactor=1.
       b.setScrollFactor(1);
-      b.list?.forEach?.(go => go.setScrollFactor?.(1));
+      b.list?.forEach?.((go) => go.setScrollFactor?.(1));
+
+      if (def.locked) {
+        b.list?.forEach?.((go) => {
+          if (go?.setAlpha) go.setAlpha(0.72);
+        });
+      }
 
       this.container.add(b);
       this.gridObjects.push(b);
     }
   }
 
+  refreshMilitiaLockState() {
+    this._clearPage?.();
+
+    if (Array.isArray(this.gridObjects)) {
+      for (const obj of this.gridObjects) {
+        try { obj?.destroy?.(); } catch {}
+      }
+    }
+    this.gridObjects = [];
+
+    if (Array.isArray(this.overviewGridObjects)) {
+      for (const obj of this.overviewGridObjects) {
+        try { obj?.destroy?.(); } catch {}
+      }
+    }
+    this.overviewGridObjects = [];
+
+    if (Array.isArray(this._overviewCards)) {
+      this._overviewCards.length = 0;
+    }
+
+    this._buildGrid();
+    this._buildOverviewGrid();
+
+    if (this._state !== "PAGE") {
+      const showDetailed = this.mode !== "overview";
+      this.gridObjects?.forEach?.((obj) => obj?.setVisible?.(showDetailed));
+      this.overviewGridObjects?.forEach?.((obj) => obj?.setVisible?.(!showDetailed));
+    }
+  }
+
   _getOverviewDefs() {
-    return [
+    const defs = [
       { type: "FOREST", emoji: "🌲", cost: () => getContractPermitCost("FOREST") },
       { type: "ROCK", emoji: "🪨", cost: () => getContractPermitCost("ROCK") },
       { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => getContractPermitCost("PRESSURE", 1) },
       { type: "MARKET", emoji: "🏪", cost: () => getContractPermitCost("MARKET") },
       { type: "FARM", emoji: "🌾", cost: () => getContractPermitCost("FARM") },
-      { type: "MILITIA", emoji: "🛡", cost: () => getContractPermitCost("MILITIA") },
     ];
+
+    if (this._canAccessMilitia()) {
+      defs.push({ type: "MILITIA", emoji: "🛡", cost: () => 0 });
+    } else {
+      defs.push({
+        type: "LOCKED_MILITIA",
+        emoji: "🔒",
+        label: "Level 3",
+        locked: true,
+        cost: () => 0,
+      });
+    }
+
+    return defs;
   }
 
   _buildOverviewGrid() {
@@ -270,7 +352,10 @@ export class SlotPanel {
         .setScrollFactor(1)
         .setInteractive({ useHandCursor: true });
 
-      const emoji = this.scene.add.text(x, y - 26, def.emoji, {
+      const titleText = def.locked ? (def.label || "Locked") : def.type;
+      const emojiText = def.emoji || "";
+
+      const emoji = this.scene.add.text(x, y - 26, emojiText, {
         fontSize: "84px",
         stroke: "#001018",
         strokeThickness: 8,
@@ -293,6 +378,11 @@ export class SlotPanel {
       bg.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
       bg.on("pointerdown", () => bg.setFillStyle(0xffffff, 0.22));
       bg.on("pointerup", () => {
+        const isLocked = !!def.locked;
+        if (isLocked) {
+          this._showMilitiaLockedMessage();
+          return;
+        }
         bg.setFillStyle(0xffffff, 0.16);
         if (this.mode !== "overview" || this._pressureMode) return;
         if (def.type === "PRESSURE") {
@@ -331,6 +421,48 @@ export class SlotPanel {
     this._buildOverviewPressureMenu(cellW, cellH, innerW, innerH);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+  }
+
+  _isMilitiaUnlocked() {
+    return hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel);
+  }
+
+  _getMilitiaLockedLabel() {
+    return "🔒 Level 3";
+  }
+
+  _showMilitiaLockedMessage() {
+    showAlert(this.scene, "Militia parcel unlocks at Town Level 3.", "#ffcc66");
+  }
+
+  refreshMilitiaLockState() {
+    this._rebuildGrid();
+    this._rebuildOverviewGrid();
+  }
+
+  _rebuildGrid() {
+    this.gridObjects?.forEach((o) => {
+      try { o.destroy?.(); } catch {}
+    });
+    this.gridObjects = [];
+    this._buildGrid();
+
+    if (this.mode === "overview" || this._state === "PAGE" || this._pressureMode) {
+      this.gridObjects?.forEach((o) => o.setVisible(false));
+    }
+  }
+
+  _rebuildOverviewGrid() {
+    this.overviewGridObjects?.forEach((o) => {
+      try { o.destroy?.(); } catch {}
+    });
+    this.overviewGridObjects = [];
+    this._overviewCards = [];
+    this._buildOverviewGrid();
+
+    if (this.mode !== "overview" || this._overviewMenu !== "GRID" || this._pressureMode) {
+      this.overviewGridObjects?.forEach((o) => o.setVisible(false));
+    }
   }
 
   _refreshOverviewGridCosts() {
@@ -423,6 +555,26 @@ export class SlotPanel {
       const amount = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
       card.costText.setText(formatPermitCostText(amount));
     }
+  }
+
+  _getTownLevel() {
+    return Math.max(1, Number(this.scene?.getTownXpSnapshot?.()?.level || 1));
+  }
+
+  _isMilitiaUnlocked() {
+    return hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel);
+  }
+
+  _canAccessMilitia() {
+    return this._isMilitiaUnlocked() && this._getTownLevel() >= 3;
+  }
+
+  _getMilitiaLockedLabel() {
+    return "🔒 Lv 3";
+  }
+
+  _showMilitiaLockedMessage() {
+    showAlert(this.scene, "🔒 Unlocks at Town XP Level 3", "#ffe08a");
   }
 
   _openOverviewPressureMenu() {
@@ -519,15 +671,20 @@ export class SlotPanel {
       this._showParcelLockedMessage();
       return;
     }
-    this._clearPage();
 
-    // Hide grid buttons while a page is open
+    if (type === "MILITIA" && !this._canAccessMilitia()) {
+      this._showMilitiaLockedMessage();
+      return;
+    }
+
+    this._clearPage();
     this.gridObjects.forEach(o => o.setVisible(false));
 
     if (type === "FOREST") this._page = new ForestPage(this.scene, this);
     else if (type === "ROCK") this._page = new RockPage(this.scene, this);
     else if (type === "PRESSURE") this._page = new PressurePage(this.scene, this);
     else if (type === "MARKET") this._page = new MarketPage(this.scene, this);
+    else if (type === "MILITIA") this._page = new MilitiaPage(this.scene, this);
     else {
       this._page = new BasePage(this.scene, this, {
         title: `${type} (todo)`,
@@ -576,6 +733,10 @@ export class SlotPanel {
     this._refreshDetailedProxyVisual();
   }
 
+  _canUseMilitiaParcel() {
+    return hasStoreUnlock(STORE_UNLOCK_KEYS.gunslinger);
+  }
+
   _canBuyContracts() {
     return this.scene?.clock?.canBuyParcels?.() ?? true;
   }
@@ -609,7 +770,17 @@ export class SlotPanel {
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
+    if (type === "MILITIA" && !this._canAccessMilitia()) {
+      this._showMilitiaLockedMessage();
+      return;
+    }
 
+    if (type === "MILITIA" && !this._canUseMilitiaParcel()) {
+      showAlert(this.scene, "Militia parcel unlocks after Gunslinger.", "#ffcc66");
+      return;
+    }
+
+    const moneyCost = Math.max(0, Number(payload.moneyCost ?? 0));
     // ✅ compute cost (allow payload.cost override if you really want)
     const cost = (payload.cost != null) ? payload.cost : getContractPermitCost(type, difficulty);
 
@@ -619,12 +790,25 @@ export class SlotPanel {
       this.scene.updatePermits(-cost);
     }
 
+    if (moneyCost > 0) {
+      if (!this.scene.checkSufficientFunds(moneyCost)) {
+        if (cost > 0) this.scene.updatePermits(+cost);
+        return;
+      }
+      this.scene.updateMoney(-moneyCost);
+    }
+
     let started = null;
     try {
       if (type === "FOREST") started = pm.startForest(this.id);
       else if (type === "ROCK") started = pm.startRock(this.id);
       else if (type === "FARM") started = pm.startFarm?.(this.id);
-      else if (type === "MILITIA") started = pm.startMilitia?.(this.id);
+      else if (type === "MILITIA") {
+        started = pm.startMilitia?.(this.id, {
+          militiaConfig: payload.militiaConfig ?? null,
+          moneyCost,
+        });
+      }
       else if (type === "PRESSURE") started = pm.startPressure(this.id, difficulty, { source: "manual" });
       else if (type === "MARKET") started = pm.startMarket(this.id);
       else console.warn("Unknown contract type:", type);
@@ -632,15 +816,20 @@ export class SlotPanel {
       console.error("Contract commit failed:", e);
       // optional: refund on error
       if (cost > 0) this.scene.updatePermits(+cost);
+      if (moneyCost > 0) this.scene.updateMoney(+moneyCost);      
       return;
     }
 
     if (!started) {
       if (cost > 0) this.scene.updatePermits(+cost);
+      if (moneyCost > 0) this.scene.updateMoney(+moneyCost);
       return;
     }
 
-    pm.markContractPermitCost?.(started, cost);
+    // Militia consumes permits permanently. Other parcel contracts keep current refund-on-end behavior.
+    if (type !== "MILITIA") {
+      pm.markContractPermitCost?.(started, cost);
+    }
 
     this.playCloseTween(() => this.setVisible(false));
   }
@@ -906,3 +1095,4 @@ export class SlotPanel {
   }
 
 }
+

@@ -1,11 +1,7 @@
 // navmeshUpdater.js
 import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from '../../constants.js';
-import { Map } from '../../map.js';
-import Vector2 from "./math/vector-2.js";
 import { NavMesh } from './navmesh.js';
 import { buildPolysFromGridMap } from './map-parsers/build-polys-from-grid-map.js';
-import NavPoly from './navpoly.js';
-import Polygon from './math/polygon.js';
 
 export class NavMeshUpdater {
     constructor(navMesh, scene, opts) {
@@ -54,8 +50,9 @@ export class NavMeshUpdater {
         this.clearDebug();
     
         const drawnPortals = new Set(); // Prevent double-drawing of portals
+        const polygons = this.navMesh.getPolygons ? this.navMesh.getPolygons() : this.navMesh.navPolygons;
     
-        for (const polygon of this.navMesh.navPolygons) {
+        for (const polygon of polygons) {
             const graphics = this.scene.add.graphics();
             graphics.lineStyle(1, 0xffffff, 0.4);
             graphics.fillStyle(0x00ff00, 0.2);
@@ -131,6 +128,7 @@ export class NavMeshUpdater {
      * Block multiple tiles at once (for multi-tile walls).
      */
     blockTiles(tileCoords, addTiles = false) {
+        const polygons = this.navMesh.getPolygons ? this.navMesh.getPolygons() : this.navMesh.navPolygons;
         const tileRects = tileCoords.map(({ x, y }) => ({
             x: x * SQUARESIZE,
             y: y * SQUARESIZE,
@@ -141,26 +139,20 @@ export class NavMeshUpdater {
         // Step 1: Find affected polygons
         let affectedPolys;
         if(addTiles){
-            affectedPolys = this.navMesh.navPolygons.filter(poly =>
+            affectedPolys = polygons.filter(poly =>
                 tileRects.some(tileRect => this._polygonIsAdjacentToRect(poly.polygon.points, tileRect))
-            );            
+            );    
         }else{
-            affectedPolys = this.navMesh.navPolygons.filter(poly =>
+            affectedPolys = polygons.filter(poly =>
                 tileRects.some(tileRect => this._polygonIntersectsRect(poly.polygon.points, tileRect))
             );
         }
-        const removedPolyIds = affectedPolys.map(p => p.id);
-
-        // Step 2: Gather unaffected neighbors
-        const neighborPolys = new Set();
-        for (const poly of affectedPolys) {
-            for (const neighbor of poly.neighbors) {
-                if (!affectedPolys.includes(neighbor)) {
-                    neighborPolys.add(neighbor);
-                }
-            }
+    
+        if (!affectedPolys.length) {
+            return { removedPolyIds: [], addedPolyIds: [], neighborPolyIds: [] };
         }
     
+        // Step 2: Gather unaffected neighbors
         // Step 3: Find bounds
         const bounds = this._getPolygonsBounds(affectedPolys.map(p => p.polygon.points));
     
@@ -201,31 +193,15 @@ export class NavMeshUpdater {
         // Step 6: Create new polys from nav grid (simple rectangles)
         const newPolygons = this._extractPolygonsFromGrid(navGrid, bounds.x, bounds.y);
     
-        // Step 7: Build NavPoly instances
-        const newNavPolys = newPolygons.map((polyPoints, i) => {
-            const polygon = new Polygon(polyPoints.map(p => new Vector2(p.x, p.y)));
-            const id = this.navMesh._nextPolyId++;
-            return new NavPoly(id, polygon);
-        });
-        const addedPolyIds = newNavPolys.map(p => p.id);
-        const neighborPolyIds = Array.from(neighborPolys).map(p => p.id);
-
-        // Step 9: Remove old polys
-        for (const oldPoly of affectedPolys) {
-            this.navMesh.removePolygon(oldPoly);
-        }
-    
-        // Step 10: Add new polys
-        for (const newPoly of newNavPolys) {
-            this.navMesh.addPolygon(newPoly);
-        }
-
-        const allPolys = newNavPolys.concat(Array.from(neighborPolys));
-        this.navMesh.calculateNewNeighbors(allPolys);
-        this.navMesh.rebuild()
+        // Step 7: Replace only the affected polygons; NavMesh handles ID allocation and stitching.
+        const { removedPolys, addedPolys, neighborPolys } = this.navMesh.replacePolygons(affectedPolys, newPolygons);
     
         if (this.debugEnabled) this.drawDebug();
-        return { removedPolyIds, addedPolyIds, neighborPolyIds };
+        return {
+            removedPolyIds: removedPolys.map((poly) => poly.id),
+            addedPolyIds: addedPolys.map((poly) => poly.id),
+            neighborPolyIds: neighborPolys.map((poly) => poly.id)
+        };
     }
 
     _getPolygonsBounds(allPoints) {
@@ -246,7 +222,7 @@ export class NavMeshUpdater {
         // 2. Extract polygons from the temp navmesh and shift back into world coordinates
         const worldPolys = [];
     
-        for (const navPoly of tempNavMesh.navPolygons) {
+        for (const navPoly of tempNavMesh.getPolygons()) {
             const shiftedPoints = navPoly.polygon.points.map(p => ({
                 x: p.x + originX,
                 y: p.y + originY
@@ -257,27 +233,6 @@ export class NavMeshUpdater {
     
         return worldPolys;
     }
-    
-    _reconnectPolygons(newPolys, oldNeighbors) {
-        // Connect new polys to each other
-        for (let i = 0; i < newPolys.length; i++) {
-            for (let j = i + 1; j < newPolys.length; j++) {
-                if (newPolys[i].polygon.sharesEdge(newPolys[j].polygon)) {
-                    newPolys[i].neighbors.push(newPolys[j]);
-                    newPolys[j].neighbors.push(newPolys[i]);
-                }
-            }
-        }
-        // Connect new polys to old neighbors
-        for (const neighbor of oldNeighbors) {
-            for (const newPoly of newPolys) {
-                if (neighbor.polygon.sharesEdge(newPoly.polygon)) {
-                    neighbor.neighbors.push(newPoly);
-                    newPoly.neighbors.push(neighbor);
-                }
-            }
-        }
-    }    
 
     _polygonIntersectsRect(points, rect) {
         const polyBounds = this._getPolygonBounds(points);
@@ -352,41 +307,7 @@ export class NavMeshUpdater {
     }
 
     setupAddAndRemove(){
-        this.navMesh.addPolygon = function (navPoly) {
-            const id = this.navPolygons.length;
-            // Add to navPolygons list
-            this.navPolygons.push(navPoly);
-        };
-        
-        this.navMesh.removePolygon = function(poly) {
-            // Remove shared references from neighbors
-            for (const neighbor of poly.neighbors) {
-                // Remove this polygon from the neighbor's neighbor list
-                neighbor.neighbors = neighbor.neighbors.filter(n => n !== poly);
-        
-                // Remove shared portal between poly and neighbor
-                neighbor.portals = neighbor.portals.filter(portal => {
-                    // Check if this portal is shared with the poly we're removing
-                    return !poly.portals.some(pPortal =>
-                        (pPortal.start.x === portal.start.x && pPortal.start.y === portal.start.y &&
-                            pPortal.end.x === portal.end.x && pPortal.end.y === portal.end.y) ||
-                        (pPortal.end.x === portal.start.x && pPortal.end.y === portal.start.y &&
-                            pPortal.start.x === portal.end.x && pPortal.start.y === portal.end.y)
-                    );
-                });
-            }
-        
-            // Clear the polygon's own data
-            poly.neighbors = [];
-            poly.portals = [];
-        
-            // Remove polygon from navPolygons list
-            const index = this.navPolygons.findIndex(p => p === poly);
-            if (index !== -1) {
-                this.navPolygons.splice(index, 1);
-            }
-        };
-            
+        return this.navMesh;
     }
 
     _polygonIsAdjacentToRect(points, rect) {

@@ -17,6 +17,7 @@ export class ClayOven {
     constructor(x, y, teamNumber) {
         this.teamNumber = teamNumber;
         const item = TILE_TYPES.clayOven
+        this.tileType = item;
         this.sprite = Map.addToWorldStatic(
             ClayOven.scene.add.sprite(
                 (x + Math.floor(item.lenX/2)) * SQUARESIZE,
@@ -629,6 +630,7 @@ export class ClayOven {
     onDamaged(damage, currentHealth, maxHealth) {
         this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
         this.health = Math.max(0, currentHealth);
+        buildingManager.queueAutoFixForBuilding(this, this.teamNumber);
 
         this.shakeAndFlash();
 

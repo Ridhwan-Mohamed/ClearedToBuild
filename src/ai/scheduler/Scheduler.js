@@ -18,8 +18,7 @@ export class Scheduler {
     };
 
     static stepUnit(troop) {
-        if (!troop?.active || troop.task) return false;
-        const role = this._roleForTroop(troop);
+        if (!troop?.active || troop.task || troop?._sleepQueued) return false;        const role = this._roleForTroop(troop);
         if (!role || !this.enabledRoles[role]) return false;
 
         if (this._tryCarryRecovery(troop)) return true;

@@ -8,14 +8,20 @@ import { weapons } from "../weapons";
 import { pickRaidApproachForPOI, recalculateDestroyTasksFromPoint } from "../Manager/spawnManager";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner"
 import { ZoomMixer } from "../UI/ZoomMixer";
-import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
-import { InterruptController } from "../ai/scheduler/InterruptController";
+import {
+    attachDirectionalSix,
+    shouldUseDirectionalFacing,
+    updateDirectionalAnimationFromVelocity
+} from "./PlayerDirectionalAnimator";import { InterruptController } from "../ai/scheduler/InterruptController";
 import raiderWalkDown from 'url:../assets/players/raider/raider_walk_down.png';
 import raiderWalkDownLeft from 'url:../assets/players/raider/raider_walk_down_left.png';
 import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_right.png';
 import raiderWalkUp from 'url:../assets/players/raider/raider_walk_up.png';
 import raiderWalkUpLeft from 'url:../assets/players/raider/raider_walk_up_left.png';
 import raiderWalkUpRight from 'url:../assets/players/raider/raider_walk_up_right.png';
+import raiderSwimUp from 'url:../assets/players/raider/raider_swim_up.png';
+import raiderSwimDown from 'url:../assets/players/raider/raider_swim_down.png';
+import raiderSwimSidewards from 'url:../assets/players/raider/raider_swim_sidewards.png';
 import handsFx from 'url:../assets/Players/hands.png';
 export class Raider {
     // Used by Player.followPath via sprite.type.speed / sprite.type.stamina
@@ -32,6 +38,9 @@ export class Raider {
         scene.load.spritesheet('raider_walk_up_left', raiderWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('raider_walk_up_right', raiderWalkUpRight, { frameWidth: 32, frameHeight: 32 });
         scene.load.image('raider_hands_fx', handsFx);
+        scene.load.spritesheet('raider_swim_up', raiderSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_swim_down', raiderSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('raider_swim_sidewards', raiderSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
     
     constructor(x, y, teamNumber = 0) {
@@ -66,8 +75,11 @@ export class Raider {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'raider_walk_down',
                 down_left: 'raider_walk_down_left',
@@ -75,6 +87,11 @@ export class Raider {
                 up: 'raider_walk_up',
                 up_left: 'raider_walk_up_left',
                 up_right: 'raider_walk_up_right',
+            },
+            swimDirections: {
+                up: 'raider_swim_up',
+                down: 'raider_swim_down',
+                side: 'raider_swim_sidewards',
             }
         });
         ZoomMixer.createPlayerMoniker(raider);
@@ -144,7 +161,16 @@ export class Raider {
             }
             const baseSpeed = Math.max(100, 100 * Math.max(1, Number(troop.moveSpeedMultiplier ?? 1) || 1));
             const speed = Math.max(baseSpeed, Number(troop.swimSpeed ?? 0) || 0);
-            troop.body.setVelocity(dx * speed, dy * speed);
+            const vx = dx * speed;
+            const vy = dy * speed;
+
+            Player.setAnimState(troop, troop.swim || troop.idle);
+            troop.body.setVelocity(vx, vy);
+            updateDirectionalAnimationFromVelocity(troop, vx, vy, true);
+
+            if (!shouldUseDirectionalFacing(troop)) {
+                troop.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
+            }
             }
 
             // swimming uses manual velocity

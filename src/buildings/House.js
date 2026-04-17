@@ -19,6 +19,7 @@ export class House {
         this.x = x;
         this.y = y;
         this.team = team;
+        this.tileType = houseType;
         this.capacity = 2;
         this.occupants = [];
         this._isBroken = false;
@@ -403,6 +404,7 @@ export class House {
     onDamaged(damage, currentHealth, maxHealth) {
         this.maxHealth = maxHealth ?? this.maxHealth ?? 1;
         this.health = Math.max(0, currentHealth);
+        buildingManager.queueAutoFixForBuilding(this, this.team);
 
         if (this.health <= 0 && !this._isBroken) {
             this.evacuateResidents();

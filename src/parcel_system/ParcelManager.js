@@ -64,25 +64,39 @@ export class ParcelManager {
     this.map._uiIgnoreWorldLayer();
   }
 
-  startMilitia(slotId) {
+  startMilitia(slotId, opts = {}) {
     if (this.slotToContractId[slotId]) return null;
 
     const id = `MILITIA_${slotId}_${Date.now()}`;
-    this.slotToContractId[slotId] = id;
+    const origin = this.getSlotOrigin(slotId);
 
-    // If you want it tracked like other contracts (optional):
-    this.contractsById.set(id, {
-      id, type: "MILITIA", slotId,
-      difficulty: 1,
+    const inst = new ParcelContractInstance({
+      id,
+      type: "MILITIA",
+      slotId,
+      origin,
+      scene: this.scene,
+      rng: this.rng,
+      map: this.map,
+      parcelManager: this,
+      militiaConfig: opts.militiaConfig ?? null,
     });
 
-    // TODO later: spawn militia units + expiry timer
-    // For now, just immediately free the slot or keep it "occupied" by design.
-    // If you want it to end immediately:
-    // this.removeContract(slotId, id, "complete");
+    inst.moneyCost = Math.max(0, Number(opts.moneyCost ?? 0));
+
+    this.slotToContractId[slotId] = id;
+    this.contractsById.set(id, inst);
+
+    inst.spawn();
+    this._refreshAfterParcelPaint();
+
+    const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
+    slotPanel?.clearPressureState?.();
+    slotPanel?.setVisible?.(false);
 
     return id;
   }
+
   startMarket(slotId) {
     if (this.slotToContractId[slotId]) return null;
 

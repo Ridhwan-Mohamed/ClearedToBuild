@@ -929,7 +929,7 @@ export class Map{
         const def = TILE_TYPES[name];
         if (!def) return null;
 
-        if (!(name === 'grass' || name === 'dirt' || name === 'road' || name === 'fort_floor' || name === 'water')) return null;
+        if (!(name === 'grass' || name === 'dark_grass' || name === 'dirt' || name === 'road' || name === 'fort_floor' || name === 'water')) return null;
 
         const { shape, angle } = this._shapeAndAngle(def, val);
         const a = def.assets;
@@ -965,6 +965,10 @@ export class Map{
                     )
                 ], x, y, name);
             }
+        }
+        if (name === 'dark_grass' && contact === 'grass') {
+            const spec = a.edge?.grass || a.interior;
+            return this._appendGrassWaterInnerOverlay([this._makeRenderEntry(spec, angle)], x, y, name);
         }
         const spec = shape === 'edge'
             ? (a.edge?.[contact] || a.edge?.grass || a.interior)
@@ -1061,13 +1065,13 @@ export class Map{
     }
 
     static _supportsGrassWaterInnerOverlay(name) {
-        return name === 'grass' || name === 'dirt' || name === 'road' || name === 'fort_floor';
+        return name === 'grass' || name === 'dark_grass' || name === 'dirt' || name === 'road' || name === 'fort_floor';
     }
 
     static _isGrassStyleNeighborFor(x, y) {
         const neighborName = this._terrainNameAt(x, y);
         if (!neighborName || neighborName === 'water') return false;
-        if (neighborName === 'grass') return true;
+        if (neighborName === 'grass' || neighborName === 'dark_grass') return true;
         if (!(neighborName === 'dirt' || neighborName === 'road' || neighborName === 'fort_floor')) return false;
 
         const cell = this.grid?.[y]?.[x];
@@ -1126,7 +1130,7 @@ export class Map{
     }
 
     static _appendGrassWaterInnerOverlay(entries, x, y, currentName) {
-        const overlaySpec = TILE_TYPES.grass?.assets?.innerCorner?.water;
+        const overlaySpec = TILE_TYPES[currentName]?.assets?.innerCorner?.water || TILE_TYPES.grass?.assets?.innerCorner?.water;
         if (!overlaySpec) return entries;
 
         const overlayAngles = this._grassWaterInnerOverlayAngles(x, y, currentName);
@@ -1821,7 +1825,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         const SW = hasNeighbor(x-1, y+1);
         const SE = hasNeighbor(x+1, y+1);
         const cnt = (A?1:0) + (B?1:0) + (L?1:0) + (R?1:0);
-        const supportsExtendedShapes = (tileType === 'dirt' || tileType === 'road' || tileType === 'fort_floor');
+        const supportsExtendedShapes = (tileType === 'dirt' || tileType === 'road' || tileType === 'fort_floor' || tileType === 'dark_grass');
 
         // 0 neighbors → interior
         if (cnt === 0 && (def.name != "wall" && def.name != "woodWall")) return write(def.interior);

@@ -7,10 +7,10 @@ export class FarmPage extends BasePage {
 
     super(scene, slot, {
       bgColor: 0x166534,
-      title: "Farm Contract",
+      title: "Field Contract",
       lines: [
-        "Wild hedge parcel.",
-        "Seeds and berries grow there over open grass.",
+        "Dark field parcel.",
+        "Seeds and berries grow there over dark grass.",
         "Send foragers to gather and haul them home.",
         "",
         `Permit Cost: ${formatPermitCostText(cost)}`,

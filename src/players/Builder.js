@@ -17,6 +17,9 @@ import builderWalkDownRight from 'url:../assets/players/builder/builder_walk_dow
 import builderWalkUp from 'url:../assets/players/builder/builder_walk_up.png';
 import builderWalkUpLeft from 'url:../assets/players/builder/builder_walk_up_left.png';
 import builderWalkUpRight from 'url:../assets/players/builder/builder_walk_up_right.png';
+import builderSwimUp from 'url:../assets/players/builder/builder_swim_up.png';
+import builderSwimDown from 'url:../assets/players/builder/builder_swim_down.png';
+import builderSwimSidewards from 'url:../assets/players/builder/builder_swim_sidewards.png';
 
 export class Builder {
 
@@ -30,6 +33,9 @@ export class Builder {
         scene.load.spritesheet('builder_walk_up', builderWalkUp, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('builder_walk_up_left', builderWalkUpLeft, { frameWidth: 32, frameHeight: 32 });
         scene.load.spritesheet('builder_walk_up_right', builderWalkUpRight, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_swim_up', builderSwimUp, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_swim_down', builderSwimDown, { frameWidth: 32, frameHeight: 32 });
+        scene.load.spritesheet('builder_swim_sidewards', builderSwimSidewards, { frameWidth: 32, frameHeight: 32 });
     }
 
     constructor(x, y, teamNumber) {
@@ -69,8 +75,11 @@ export class Builder {
             defaultDirection: 'down',
             walkStateKey: 'walk',
             idleStateKey: 'idle',
+            swimStateKey: 'swim',
             idleFrame: 1,
+            swimIdleFrame: 1,
             frameRate: 7,
+            swimFrameRate: 8,
             directions: {
                 down: 'builder_walk_down',
                 down_left: 'builder_walk_down_left',
@@ -78,6 +87,11 @@ export class Builder {
                 up: 'builder_walk_up',
                 up_left: 'builder_walk_up_left',
                 up_right: 'builder_walk_up_right',
+            },
+            swimDirections: {
+                up: 'builder_swim_up',
+                down: 'builder_swim_down',
+                side: 'builder_swim_sidewards',
             }
         });
 
@@ -112,6 +126,7 @@ export class Builder {
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (troop.task) return;
 
+        if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
         if (!troop.task && !troop.track && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
@@ -218,6 +233,16 @@ export class Builder {
         if (troop.timer) {
             troop.timer.remove(false);
             troop.timer = null;
+        }
+
+        if (troop.buildSwingTween) {
+            troop.buildSwingTween.remove();
+            troop.buildSwingTween = null;
+        }
+
+        if (troop.buildSwingFx) {
+            troop.buildSwingFx.destroy();
+            troop.buildSwingFx = null;
         }
 
         // ❗ Remove from Player.characters group

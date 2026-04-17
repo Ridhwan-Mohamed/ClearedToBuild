@@ -133,6 +133,19 @@ function getDisplayEntries(reward) {
       {
         key: reward.compositeArt.textureKey ?? null,
         compositeArt: reward.compositeArt,
+        emoji: reward.emoji ?? null,
+        label: reward.displayLabel ?? "Store Preview",
+        tintColor: reward.imageTint,
+      },
+    ];
+  }
+
+  if (typeof reward?.emoji === "string" && reward.emoji.trim()) {
+    return [
+      {
+        key: null,
+        compositeArt: null,
+        emoji: reward.emoji,
         label: reward.displayLabel ?? "Store Preview",
         tintColor: reward.imageTint,
       },
@@ -149,6 +162,8 @@ function getDisplayEntries(reward) {
 
   return keys.map((key, index) => ({
     key,
+    compositeArt: null,
+    emoji: null,
     label: keys.length === 1 ? reward.displayLabel ?? "Store Preview" : `Preview ${index + 1}`,
     tintColor: index === 1 && reward.imageTint2 != null ? reward.imageTint2 : reward.imageTint,
   }));
@@ -161,6 +176,7 @@ function createArtSlot(
     y,
     key,
     compositeArt,
+    emoji,
     label,
     accentColor,
     panelColor,
@@ -192,6 +208,24 @@ function createArtSlot(
     if (tintColor != null) {
       art.setTint(toColorNumber(tintColor, 0xffffff));
     }
+  } else if (typeof emoji === "string" && emoji.trim()) {
+    art = scene.add
+      .text(0, -8, emoji, {
+        fontSize: "82px",
+        fontFamily: "Arial",
+        color: "#ffffff",
+        align: "center",
+        stroke: "#05070d",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5);
+
+    const emojiPlate = scene.add
+      .circle(0, -8, 54, 0xffffff, 0.08)
+      .setStrokeStyle(2, accentColor, 0.28);
+
+    slot.add(emojiPlate);
+    slot.sendToBack(emojiPlate);
   } else {
     const fallbackText = resolvedKey ? `Art pending\n${resolvedKey}` : "Reward art\ncoming soon";
     art = scene.add

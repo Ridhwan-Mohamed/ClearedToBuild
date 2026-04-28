@@ -541,9 +541,10 @@ export class ContractHud {
           kind: "pressure-live",
           iconText: "💀".repeat(Math.max(1, active.difficulty || 1)),
           timerText: "LIVE",
-          fillColor: 0x7f1d1d,
+          fillColor: 0x351013,
           strokeColor: 0xf87171,
           iconSize: 18,
+          fillAlpha: 0.94,
           contract: active,
         };
       }
@@ -554,9 +555,10 @@ export class ContractHud {
         kind: "active",
         iconText: def.emoji,
         timerText: fmtMMSS(remainingMs),
-        fillColor: def.color,
+        fillColor: 0x101827,
         strokeColor: 0xffffff,
         iconSize: 24,
+        fillAlpha: 0.94,
         contract: active,
       };
     }
@@ -567,9 +569,10 @@ export class ContractHud {
         kind: "pressure-incoming",
         iconText: "💀".repeat(Math.max(1, incoming.difficulty || 1)),
         timerText: incoming.phase === "countdown" ? incoming.remainingText : "LOCK",
-        fillColor: 0x5b1720,
+        fillColor: 0x2a1318,
         strokeColor: 0xfca5a5,
         iconSize: 18,
+        fillAlpha: 0.93,
         incoming,
       };
     }
@@ -579,10 +582,10 @@ export class ContractHud {
           kind: "locked-empty",
           iconText: "🔒",
           timerText: "LOCK",
-          fillColor: 0x1f2937,
+          fillColor: 0x111827,
           strokeColor: 0xfbbf24,
           iconSize: 24,
-          fillAlpha: 0.18,
+          fillAlpha: 0.88,
         };
       }
 
@@ -590,10 +593,10 @@ export class ContractHud {
         kind: "empty",
         iconText: "+",
         timerText: "BUY",
-        fillColor: 0x111827,
+        fillColor: 0x0b1220,
         strokeColor: 0xdbeafe,
         iconSize: 30,
-        fillAlpha: 0,
+        fillAlpha: 0.86,
       };
     }
 

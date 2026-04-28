@@ -2,7 +2,7 @@
 // North fort "raid spawn" island: terrain + tower + enemy-only-walkable walls + a few raiders.
 
 import { PARCEL_SIZE } from "./ParcelConfig.js";
-import { TILE_TYPES, SQUARESIZE, TILE_MAP, colorFor } from "../constants.js";
+import { TILE_TYPES, SQUARESIZE, TILE_MAP } from "../constants.js";
 import { StageState } from "../parcelController/StageState.js";
 import { TowerBuilding } from "../buildings/Tower.js";
 import { Wall } from "../buildings/Wall.js";
@@ -481,19 +481,31 @@ export function spawnNorthFort({
     grunt.fortRoads = fortRoads;
   }
 
-  try {
-    map.reDraw?.();
-    scene.rebuildBothNavMeshes?.();
-    map._uiIgnoreWorldLayer?.();
-  } catch (_) {}
-
-  // Arm the fort objective AFTER everything is spawned and bounds are known
   const parcelBounds = {
     minx: origin.x,
     miny: origin.y,
     maxx: origin.x + size - 1,
     maxy: origin.y + size - 1,
   };
+
+  try {
+    const refreshArea = {
+      x: parcelBounds.minx,
+      y: parcelBounds.miny,
+      w: parcelBounds.maxx - parcelBounds.minx + 1,
+      h: parcelBounds.maxy - parcelBounds.miny + 1,
+      parcelTag: "parcel:fort_north",
+    };
+    if (scene.refreshParcelArea) {
+      scene.refreshParcelArea(refreshArea);
+    } else {
+      map.reDraw?.();
+      scene.rebuildBothNavMeshes?.();
+    }
+    map._uiIgnoreWorldLayer?.();
+  } catch (_) {}
+
+  // Arm the fort objective AFTER everything is spawned and bounds are known
 
   StageState.setFortObjective({
     parcel: "north_fort",
@@ -623,7 +635,20 @@ export function clearNorthFort({ scene, map, meta } = {}) {
     2
   );
 
-  scene.rebuildBothNavMeshes?.();
+  const refreshBounds = meta?.refs?.parcelBounds || bounds;
+  const refreshArea = {
+    x: refreshBounds.minx,
+    y: refreshBounds.miny,
+    w: refreshBounds.maxx - refreshBounds.minx + 1,
+    h: refreshBounds.maxy - refreshBounds.miny + 1,
+    parcelTag: "parcel:fort_north",
+  };
+  if (scene.refreshParcelArea) {
+    scene.refreshParcelArea(refreshArea);
+  } else {
+    map.reDraw?.();
+    scene.rebuildBothNavMeshes?.();
+  }
   map._uiIgnoreWorldLayer?.();
 }
 
@@ -634,9 +659,6 @@ export function respawnNorthFort({ scene, map, mainIslandOrigin, oldMeta } = {})
   clearNorthFort({ scene, map, meta: oldMeta });
 
   const spawned = spawnNorthFort({ scene, map, mainIslandOrigin });
-
-  scene.zoomMixer?.buildOverviewTextureFromGrid?.(map.grid, SQUARESIZE, (cell) => colorFor(cell));
-  map._uiIgnoreWorldLayer?.();
 
   return spawned;
 }

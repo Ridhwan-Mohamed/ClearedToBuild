@@ -128,8 +128,15 @@ export class NavMeshUpdater {
      * Block multiple tiles at once (for multi-tile walls).
      */
     blockTiles(tileCoords, addTiles = false) {
+        const cleanTileCoords = (Array.isArray(tileCoords) ? tileCoords : [])
+            .filter((tile) => Number.isFinite(tile?.x) && Number.isFinite(tile?.y));
+        if (!cleanTileCoords.length) {
+            return { removedPolyIds: [], addedPolyIds: [], neighborPolyIds: [] };
+        }
+
         const polygons = this.navMesh.getPolygons ? this.navMesh.getPolygons() : this.navMesh.navPolygons;
-        const tileRects = tileCoords.map(({ x, y }) => ({
+        const parcelTag = this.scene?.resolveParcelTagForTiles?.(cleanTileCoords) ?? null;
+        const tileRects = cleanTileCoords.map(({ x, y }) => ({
             x: x * SQUARESIZE,
             y: y * SQUARESIZE,
             w: SQUARESIZE,
@@ -137,24 +144,24 @@ export class NavMeshUpdater {
         }));
     
         // Step 1: Find affected polygons
-        let affectedPolys;
-        if(addTiles){
-            affectedPolys = polygons.filter(poly =>
-                tileRects.some(tileRect => this._polygonIsAdjacentToRect(poly.polygon.points, tileRect))
-            );    
-        }else{
-            affectedPolys = polygons.filter(poly =>
-                tileRects.some(tileRect => this._polygonIntersectsRect(poly.polygon.points, tileRect))
+        const affectedPolys = polygons.filter(poly => {
+            if (!this._polyMatchesParcelTag(poly, parcelTag)) {
+                return false;
+            }
+
+            return tileRects.some(tileRect => addTiles
+                ? this._polygonTouchesRect(poly.polygon.points, tileRect)
+                : this._polygonIntersectsRect(poly.polygon.points, tileRect)
             );
-        }
+        });
     
-        if (!affectedPolys.length) {
+        if (!affectedPolys.length && !addTiles) {
             return { removedPolyIds: [], addedPolyIds: [], neighborPolyIds: [] };
         }
     
         // Step 2: Gather unaffected neighbors
         // Step 3: Find bounds
-        const bounds = this._getPolygonsBounds(affectedPolys.map(p => p.polygon.points));
+        const bounds = this._getPatchWorldBounds(affectedPolys, tileRects);
     
         // Step 4: Build local nav grid
         const gridWidth = Math.ceil(bounds.w / SQUARESIZE);
@@ -162,40 +169,94 @@ export class NavMeshUpdater {
         const navGrid = Array.from({ length: gridHeight }, () => Array(gridWidth).fill(0)); // All blocked initially        
     
         // Step 5: Mark blocked tiles in nav grid
-        for (const poly of affectedPolys) {
-            const polyPoints = poly.polygon.points;
-        
-            const minTileX = Math.floor((Math.min(...polyPoints.map(p => p.x)) - bounds.x) / SQUARESIZE);
-            const maxTileX = Math.floor((Math.max(...polyPoints.map(p => p.x)) - bounds.x) / SQUARESIZE);
-            const minTileY = Math.floor((Math.min(...polyPoints.map(p => p.y)) - bounds.y) / SQUARESIZE);
-            const maxTileY = Math.floor((Math.max(...polyPoints.map(p => p.y)) - bounds.y) / SQUARESIZE);
-        
-            for (let ty = minTileY; ty <= maxTileY; ty++) {
-                for (let tx = minTileX; tx <= maxTileX; tx++) {
-                    const worldX = bounds.x + tx * SQUARESIZE + SQUARESIZE / 2;
-                    const worldY = bounds.y + ty * SQUARESIZE + SQUARESIZE / 2;
+        for (let ty = 0; ty < gridHeight; ty++) {
+            for (let tx = 0; tx < gridWidth; tx++) {
+                const worldX = bounds.x + tx * SQUARESIZE + SQUARESIZE / 2;
+                const worldY = bounds.y + ty * SQUARESIZE + SQUARESIZE / 2;
+                for (const poly of affectedPolys) {
                     if (poly.contains({ x: worldX, y: worldY })) {
                         navGrid[ty][tx] = 1;
+                        break;
                     }
                 }
             }
         }
         //mark tile coords as 0
         const TILE_COORD_VAL = addTiles? 1 : 0;
-        for (const { x, y } of tileCoords) {
+        for (const { x, y } of cleanTileCoords) {
             const localX = Math.floor((x * SQUARESIZE - bounds.x) / SQUARESIZE);
             const localY = Math.floor((y * SQUARESIZE - bounds.y) / SQUARESIZE);
             if (navGrid[localY] && navGrid[localY][localX] !== undefined) {
                 navGrid[localY][localX] = TILE_COORD_VAL;
             }
         }
-    
+
         // Step 6: Create new polys from nav grid (simple rectangles)
-        const newPolygons = this._extractPolygonsFromGrid(navGrid, bounds.x, bounds.y);
+        const newPolygons = this._extractPolygonsFromGrid(navGrid, bounds.x, bounds.y, { parcelTag });
     
         // Step 7: Replace only the affected polygons; NavMesh handles ID allocation and stitching.
-        const { removedPolys, addedPolys, neighborPolys } = this.navMesh.replacePolygons(affectedPolys, newPolygons);
+        const { removedPolys, addedPolys, neighborPolys } = this.navMesh.replacePolygons(affectedPolys, newPolygons, {
+            allowMerge: true,
+            mergeWithActive: true,
+            compactAll: true
+        });
     
+        if (this.debugEnabled) this.drawDebug();
+        return {
+            removedPolyIds: removedPolys.map((poly) => poly.id),
+            addedPolyIds: addedPolys.map((poly) => poly.id),
+            neighborPolyIds: neighborPolys.map((poly) => poly.id)
+        };
+    }
+
+    replaceBounds(bounds, sourceGrid, opts = {}) {
+        const normalized = this._normalizeGridBounds(bounds, sourceGrid);
+        if (!normalized) {
+            return { removedPolyIds: [], addedPolyIds: [], neighborPolyIds: [] };
+        }
+
+        const parcelTag = opts.parcelTag ?? bounds?.parcelTag ?? null;
+        const requestedWorldRect = {
+            x: normalized.minX * SQUARESIZE,
+            y: normalized.minY * SQUARESIZE,
+            w: normalized.width * SQUARESIZE,
+            h: normalized.height * SQUARESIZE
+        };
+
+        const polygons = this.navMesh.getPolygons ? this.navMesh.getPolygons() : this.navMesh.navPolygons;
+        const allowCrossTag = opts.allowCrossTagMerge === true || opts.allowMerge === true;
+        const affectedPolys = polygons.filter((poly) => {
+            if (!allowCrossTag && !this._polyMatchesParcelTag(poly, parcelTag)) {
+                return false;
+            }
+            return this._polygonIntersectsRect(poly.polygon.points, requestedWorldRect);
+        });
+
+        const rebuildBounds = this._expandGridBoundsForPolygons(normalized, affectedPolys, sourceGrid);
+        const worldRect = {
+            x: rebuildBounds.minX * SQUARESIZE,
+            y: rebuildBounds.minY * SQUARESIZE,
+            w: rebuildBounds.width * SQUARESIZE,
+            h: rebuildBounds.height * SQUARESIZE
+        };
+
+        const localGrid = [];
+        for (let gy = rebuildBounds.minY; gy <= rebuildBounds.maxY; gy++) {
+            const row = [];
+            for (let gx = rebuildBounds.minX; gx <= rebuildBounds.maxX; gx++) {
+                row.push(sourceGrid[gy]?.[gx] ? 1 : 0);
+            }
+            localGrid.push(row);
+        }
+
+        const newPolygons = this._extractPolygonsFromGrid(localGrid, worldRect.x, worldRect.y, { parcelTag });
+
+        const { removedPolys, addedPolys, neighborPolys } = this.navMesh.replacePolygons(affectedPolys, newPolygons, {
+            allowMerge: opts.allowMerge === true,
+            mergeWithActive: opts.allowMerge === true,
+            compactAll: opts.compactAll === true || opts.allowMerge === true
+        });
+
         if (this.debugEnabled) this.drawDebug();
         return {
             removedPolyIds: removedPolys.map((poly) => poly.id),
@@ -214,7 +275,53 @@ export class NavMeshUpdater {
         return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
     }
 
-    _extractPolygonsFromGrid(grid, originX, originY) {
+    _getPatchWorldBounds(affectedPolys, tileRects) {
+        const allRects = [];
+        for (const poly of affectedPolys) {
+            allRects.push(this._getPolygonBounds(poly.polygon.points));
+        }
+        allRects.push(...tileRects);
+
+        const minX = Math.min(...allRects.map((rect) => rect.x));
+        const minY = Math.min(...allRects.map((rect) => rect.y));
+        const maxX = Math.max(...allRects.map((rect) => rect.x + rect.w));
+        const maxY = Math.max(...allRects.map((rect) => rect.y + rect.h));
+
+        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+
+    _expandGridBoundsForPolygons(bounds, affectedPolys, sourceGrid) {
+        const width = sourceGrid[0].length;
+        const height = sourceGrid.length;
+        let minX = bounds.minX;
+        let minY = bounds.minY;
+        let maxX = bounds.maxX;
+        let maxY = bounds.maxY;
+
+        for (const poly of affectedPolys) {
+            const polyBounds = this._getPolygonBounds(poly.polygon.points);
+            minX = Math.min(minX, Math.floor(polyBounds.x / SQUARESIZE));
+            minY = Math.min(minY, Math.floor(polyBounds.y / SQUARESIZE));
+            maxX = Math.max(maxX, Math.ceil((polyBounds.x + polyBounds.w) / SQUARESIZE) - 1);
+            maxY = Math.max(maxY, Math.ceil((polyBounds.y + polyBounds.h) / SQUARESIZE) - 1);
+        }
+
+        minX = Math.max(0, minX);
+        minY = Math.max(0, minY);
+        maxX = Math.min(width - 1, maxX);
+        maxY = Math.min(height - 1, maxY);
+
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
+        };
+    }
+
+    _extractPolygonsFromGrid(grid, originX, originY, opts = {}) {
 
         // Create a new navmesh instance (locally, not touching your main one)
         const tempNavMesh = new NavMesh(buildPolysFromGridMap(grid, SQUARESIZE, SQUARESIZE, undefined, 0));
@@ -227,11 +334,65 @@ export class NavMeshUpdater {
                 x: p.x + originX,
                 y: p.y + originY
             }));
+            const parcelTags = this._collectParcelTagsForPolygon(shiftedPoints, grid, originX, originY, opts);
     
-            worldPolys.push(shiftedPoints);
+            worldPolys.push({
+                points: shiftedPoints,
+                parcelTags,
+                parcelTag: parcelTags.length === 1 ? parcelTags[0] : null
+            });
         }
     
         return worldPolys;
+    }
+
+    _collectParcelTagsForPolygon(points, grid, originX, originY, opts = {}) {
+        const bounds = this._getPolygonBounds(points);
+        const gridWidth = grid[0]?.length ?? 0;
+        const gridHeight = grid.length;
+        const minLocalX = Math.max(0, Math.floor((bounds.x - originX) / SQUARESIZE));
+        const minLocalY = Math.max(0, Math.floor((bounds.y - originY) / SQUARESIZE));
+        const maxLocalX = Math.min(
+            gridWidth - 1,
+            Math.ceil((bounds.x + bounds.w - originX) / SQUARESIZE) - 1
+        );
+        const maxLocalY = Math.min(
+            gridHeight - 1,
+            Math.ceil((bounds.y + bounds.h - originY) / SQUARESIZE) - 1
+        );
+        const tags = [];
+
+        for (let localY = minLocalY; localY <= maxLocalY; localY++) {
+            for (let localX = minLocalX; localX <= maxLocalX; localX++) {
+                if (!grid[localY]?.[localX]) {
+                    continue;
+                }
+
+                const worldX = originX + localX * SQUARESIZE + SQUARESIZE / 2;
+                const worldY = originY + localY * SQUARESIZE + SQUARESIZE / 2;
+                if (
+                    worldX < bounds.x ||
+                    worldX >= bounds.x + bounds.w ||
+                    worldY < bounds.y ||
+                    worldY >= bounds.y + bounds.h
+                ) {
+                    continue;
+                }
+
+                const tileX = Math.floor(worldX / SQUARESIZE);
+                const tileY = Math.floor(worldY / SQUARESIZE);
+                const tag = this.scene?.resolveParcelTagForTile?.(tileX, tileY) ?? opts.parcelTag ?? "main";
+                if (!tags.includes(tag)) {
+                    tags.push(tag);
+                }
+            }
+        }
+
+        if (!tags.length && opts.parcelTag != null) {
+            tags.push(opts.parcelTag);
+        }
+
+        return this._normalizeParcelTags(tags);
     }
 
     _polygonIntersectsRect(points, rect) {
@@ -244,6 +405,10 @@ export class NavMeshUpdater {
             polyBounds.y >= rect.y + rect.h             // polygon is below tile
         );
     }    
+
+    _polygonTouchesRect(points, rect) {
+        return this._polygonIntersectsRect(points, rect) || this._polygonIsAdjacentToRect(points, rect);
+    }
 
     _getPolygonBounds(points) {
         const xs = points.map(p => p.x);
@@ -322,6 +487,120 @@ export class NavMeshUpdater {
             !(polyBounds.x + polyBounds.w <= rect.x || polyBounds.x >= rect.x + rect.w);
     
         return horizontallyAdjacent || verticallyAdjacent;
+    }
+
+    _normalizeGridBounds(bounds, sourceGrid) {
+        if (!bounds || !Array.isArray(sourceGrid) || !sourceGrid.length || !Array.isArray(sourceGrid[0])) {
+            return null;
+        }
+
+        const width = sourceGrid[0].length;
+        const height = sourceGrid.length;
+        const hasNormalizedBounds =
+            bounds.minX != null &&
+            bounds.minY != null &&
+            (
+                (bounds.maxX != null && bounds.maxY != null) ||
+                (bounds.width != null && bounds.height != null)
+            );
+
+        let minX;
+        let minY;
+        let maxX;
+        let maxY;
+
+        if (hasNormalizedBounds) {
+            minX = Math.floor(Number(bounds.minX));
+            minY = Math.floor(Number(bounds.minY));
+            maxX = bounds.maxX != null
+                ? Math.floor(Number(bounds.maxX))
+                : Math.floor(Number(bounds.minX) + Number(bounds.width) - 1);
+            maxY = bounds.maxY != null
+                ? Math.floor(Number(bounds.maxY))
+                : Math.floor(Number(bounds.minY) + Number(bounds.height) - 1);
+        } else {
+            const x = Math.floor(Number(bounds.x));
+            const y = Math.floor(Number(bounds.y));
+            const w = Math.floor(Number(bounds.w));
+            const h = Math.floor(Number(bounds.h));
+
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+                return null;
+            }
+
+            minX = x;
+            minY = y;
+            maxX = x + w - 1;
+            maxY = y + h - 1;
+        }
+
+        if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+            return null;
+        }
+
+        minX = Math.max(0, minX);
+        minY = Math.max(0, minY);
+        maxX = Math.min(width - 1, maxX);
+        maxY = Math.min(height - 1, maxY);
+
+        if (maxX < minX || maxY < minY) {
+            return null;
+        }
+
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
+        };
+    }
+
+    _polyMatchesParcelTag(poly, parcelTag) {
+        if (parcelTag == null) return true;
+        return this._getPolyParcelTags(poly).includes(parcelTag);
+    }
+
+    _getPolyParcelTags(poly) {
+        if (!poly) return [];
+
+        const tags = [];
+        const addTag = (tag) => {
+            if (typeof tag === "string" && tag.length && !tags.includes(tag)) {
+                tags.push(tag);
+            }
+        };
+        const readMeta = (meta) => {
+            if (!meta) return;
+            if (Array.isArray(meta.parcelTags)) {
+                for (const tag of meta.parcelTags) addTag(tag);
+            }
+            addTag(meta.parcelTag);
+        };
+
+        readMeta(poly);
+        readMeta(poly.navMeta);
+        readMeta(poly.__navMeta);
+
+        return this._normalizeParcelTags(tags);
+    }
+
+    _normalizeParcelTags(tags) {
+        const unique = [];
+        for (const tag of tags || []) {
+            if (typeof tag !== "string" || !tag.length || unique.includes(tag)) {
+                continue;
+            }
+            unique.push(tag);
+        }
+
+        unique.sort((a, b) => {
+            if (a === "main") return -1;
+            if (b === "main") return 1;
+            return a.localeCompare(b);
+        });
+        return unique;
     }
     
 }

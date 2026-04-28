@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { House } from "../../buildings/House.js";
 import { showAlert, CONTROL_STATES } from "../../constants";
 import { StaminaManager } from "../../Manager/staminaManager.js";
+import { AudioManager } from "../../Manager/AudioManager.js";
 import { Player } from "../../players/Player";
 import {
     applyPortraitKeyToSprite,
@@ -15,6 +16,10 @@ import {
     mixColor,
     setHoverLiftState,
 } from "./BottomBarTheme";
+
+const TAB_BASE_DEPTH = 51;
+const TAB_BG_DEPTH = 0;
+const TAB_CONTENT_DEPTH = 1;
 
 
 export default class PlayerTab {
@@ -69,18 +74,35 @@ export default class PlayerTab {
 
     build() {
         const scene = this.scene;
+        const detailWidth = Math.max(260, Math.floor(scene.scale.width / 3) - 40);
+        const detailHeight = 180;
 
         const root = scene.rexUI.add.sizer({
             orientation: 'x',
             space: { left: 8, right: 8, top: 8, bottom: 8, item: 10 },
-        });
+        }).setDepth(TAB_BASE_DEPTH);
 
         // build the detail panel first
         this.detailCard = this.buildUnitInfoPanel(scene);
+        this.detailScroll = scene.rexUI.add.scrollablePanel({
+            width: detailWidth,
+            height: detailHeight,
+            scrollMode: 0,
+            scrollDetectionMode: 'rectBounds',
+            background: makeGlassRoundRect(scene, 0, 0, 16, {
+                fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+                alpha: 0.74,
+                stroke: 0x98e7ff,
+                strokeAlpha: 0.12,
+            }),
+            panel: { child: this.detailCard.panel, mask: { padding: 1 } },
+            space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
+        }).setDepth(TAB_BASE_DEPTH);
 
         // LEFT (details) — 1/3
         this.detailSizer = scene.rexUI.add.sizer({ orientation: 'y' })
-            .add(this.detailCard.panel, { proportion: 1, expand: true });
+            .add(this.detailScroll, { proportion: 1, expand: true })
+            .setDepth(TAB_BASE_DEPTH);
 
         // RIGHT (list) — 2/3
         this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
@@ -119,7 +141,7 @@ export default class PlayerTab {
                 rectBoundsInteractive: true,
             },
             space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
-        });
+        }).setDepth(TAB_BASE_DEPTH);
 
         // 🔒 proportions fixed here
         root.add(this.detailSizer, { proportion: 1, expand: true });
@@ -144,9 +166,11 @@ export default class PlayerTab {
         seedPrice = 70,
         sleepPrice = null                // set a number to show, or null to hide
     } = {}) {
+        const compact = scene.scale.width < 1180;
 
-        const BAR_W = 260;
-        const BAR_H = 14;
+        const BAR_W = compact ? 232 : 244;
+        const BAR_H = compact ? 12 : 13;
+        const BUTTON_H = compact ? 30 : 32;
 
         // ---------- helpers ----------
         const rr = (w, h, r, color, alpha = 1) =>
@@ -209,14 +233,14 @@ export default class PlayerTab {
 
         // Detail panel rows now:
         const hpBar = makeSegmentedBar(BAR_W, BAR_H, 0xFF5A70);
-        const hpVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
+        const hpVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: compact ? 10 : 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
         const stBar = makeSegmentedBar(BAR_W, BAR_H, 0x69D6FF);
-        const stVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
+        const stVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: compact ? 10 : 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
         function makeButton(labelText, onClick) {
             const label = scene.rexUI.add.label({
-                background: makeGlassRoundRect(scene, 0, 36, 10, {
+                background: makeGlassRoundRect(scene, 0, BUTTON_H, 10, {
                     fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0x7acfff, 0.2),
                     alpha: 0.9,
                     stroke: 0x7acfff,
@@ -225,18 +249,21 @@ export default class PlayerTab {
                 }),
                 text: scene.add.text(0, 0, labelText, {
                     fontFamily: 'Bungee',
-                    fontSize: 13,
+                    fontSize: compact ? 12 : 13,
                     color: '#ffffff',
                     stroke: '#081621',
                     strokeThickness: 2,
                 }),
-                space: { left: 14, right: 14, top: 8, bottom: 8 }
+                space: { left: compact ? 12 : 14, right: compact ? 12 : 14, top: compact ? 6 : 7, bottom: compact ? 6 : 7 }
             });
-            label.setMinSize(80, 36);
+            label.setMinSize(compact ? 74 : 80, BUTTON_H);
 
             label
                 .setInteractive({ useHandCursor: true })
-                .on('pointerup', () => onClick?.())
+                .on('pointerup', () => {
+                    AudioManager.playBottomBarClick();
+                    onClick?.();
+                })
                 .on('pointerover', () => {
                     label.__baseY ??= label.y;
                     setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
@@ -259,7 +286,7 @@ export default class PlayerTab {
 
         function makeSellButton(onClick) {
             const label = scene.rexUI.add.label({
-                background: makeGlassRoundRect(scene, 0, 36, 10, {
+                background: makeGlassRoundRect(scene, 0, BUTTON_H, 10, {
                     fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffd07d, 0.2),
                     alpha: 0.92,
                     stroke: 0xffd07d,
@@ -268,18 +295,21 @@ export default class PlayerTab {
                 }),
                 text: scene.add.text(0, 0, 'Sell', {
                     fontFamily: 'Bungee',
-                    fontSize: 13,
+                    fontSize: compact ? 12 : 13,
                     color: '#fff8e5',
                     stroke: '#5a2c00',
                     strokeThickness: 2,
                 }),
-                space: { left: 14, right: 14, top: 8, bottom: 8 }
+                space: { left: compact ? 12 : 14, right: compact ? 12 : 14, top: compact ? 6 : 7, bottom: compact ? 6 : 7 }
             });
-            label.setMinSize(80, 36);
+            label.setMinSize(compact ? 74 : 80, BUTTON_H);
 
             label
                 .setInteractive({ useHandCursor: true })
-                .on('pointerup', () => onClick?.())
+                .on('pointerup', () => {
+                    AudioManager.playBottomBarClick();
+                    onClick?.();
+                })
                 .on('pointerover', () => {
                     label.__baseY ??= label.y;
                     setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
@@ -301,10 +331,10 @@ export default class PlayerTab {
         }
 
         // ---------- header row: portrait + details ----------
-        const header = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 12 } });
+        const header = scene.rexUI.add.sizer({ orientation: 'x', space: { item: compact ? 10 : 12 } });
 
         const portrait = scene.add.sprite(0, 0, DEFAULT_PLAYER_PORTRAIT_KEY)
-            .setDisplaySize(48, 48)
+            .setDisplaySize(compact ? 42 : 44, compact ? 42 : 44)
             .setOrigin(0.5, 0.5);
         portrait.setVisible(false); // start hidden
         this.portrait = portrait;
@@ -312,26 +342,26 @@ export default class PlayerTab {
         const detailsText = scene.add.text(
             0, 0,
             `Name: ${name}\nType: ${type}\nTeam: ${team}\nWeapon: ${weapon}`,
-            { fontFamily: 'Bungee', fontSize: 15, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 }
+            { fontFamily: 'Bungee', fontSize: compact ? 13 : 14, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 }
         );
 
         header.add(portrait,    0, 'center', 0, false);
         header.add(detailsText, 0, 'left',   0, true);
 
         // ---------- bars column ----------
-        const barsCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
+        const barsCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: compact ? 5 : 6 } });
 
-        const hpRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
+        const hpRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: compact ? 6 : 8 } });
         hpRow.add(
-            scene.add.text(0, 0, 'HP', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
+            scene.add.text(0, 0, 'HP', { fontFamily: 'Bungee', fontSize: compact ? 10 : 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
             0, 'center', { right: 4 }, false
         );
         hpRow.add(hpBar, 0, 'center', 0, false);
         hpRow.add(hpVal, 0, 'center', 0, false);
 
-        const stRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 8 } });
+        const stRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: compact ? 6 : 8 } });
         stRow.add(
-            scene.add.text(0, 0, 'ST', { fontFamily: 'Bungee', fontSize: 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
+            scene.add.text(0, 0, 'ST', { fontFamily: 'Bungee', fontSize: compact ? 10 : 11, color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 }),
             0, 'center', { right: 4 }, false
         );
         stRow.add(stBar, 0, 'center', 0, false);
@@ -347,7 +377,7 @@ export default class PlayerTab {
         });
 
         // make the row as wide as the HP/ST bars so alignment is predictable
-        buttonsRow.setMinSize(BAR_W, 40);
+        buttonsRow.setMinSize(BAR_W, BUTTON_H + 8);
 
         const sellBtn   = makeSellButton(() => ui.sellSelected());
         const sleepBtn  = makeButton('Sleep', () => ui.sendSelectedToSleep())
@@ -390,15 +420,18 @@ export default class PlayerTab {
         updateButtonsLayout({ isFriendly: false, isCombatant: false, isEnemy: false });
 
         // ---------- root panel stack ----------
-        const panel = scene.rexUI.add.sizer({
-            orientation: 'y',
-            space: { left: 8, right: 8, top: 6, bottom: 6, item: 8 }
-        }).addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
+        const panelBg = makeGlassRoundRect(scene, 0, 0, 18, {
             fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.06),
             alpha: 0.82,
             stroke: 0xa6e9ff,
             strokeAlpha: 0.16,
-        }));
+        }).setDepth(TAB_BG_DEPTH);
+        const panel = scene.rexUI.add.sizer({
+            orientation: 'y',
+            space: { left: compact ? 7 : 8, right: compact ? 7 : 8, top: compact ? 5 : 6, bottom: compact ? 5 : 6, item: compact ? 6 : 8 }
+        });
+        header.setDepth(TAB_CONTENT_DEPTH);
+        barsCol.setDepth(TAB_CONTENT_DEPTH);
 
         panel.add(header,     0, 'left', 0, true);
         panel.add(barsCol,    0, 'left', 0, true);
@@ -422,7 +455,7 @@ export default class PlayerTab {
                 detailsText.setText(
                     `Name: ${u.name}\nType: ${u.type}\nTeam: ${u.team}\nWeapon: ${u.weapon}`
                 );
-                applyPortraitKeyToSprite(scene, portrait, u.portraitKey, 48);
+                applyPortraitKeyToSprite(scene, portrait, u.portraitKey, compact ? 42 : 44);
             },
             setPrices() {},
             setSleepButton() {},
@@ -607,7 +640,7 @@ export default class PlayerTab {
             stroke: accent,
             strokeAlpha: 0.12,
             strokeWidth: 1.5,
-        });
+        }).setDepth(TAB_BG_DEPTH);
 
         const name = scene.add.text(
             0, 0,
@@ -623,7 +656,7 @@ export default class PlayerTab {
             stroke: 0x98e7ff,
             strokeAlpha: 0.05,
             strokeWidth: 1,
-        }).setOrigin(0,0.5);
+        });
         const g  = scene.add.graphics();
         const c  = scene.add.container(0,0,[bg,g]);
         c.setSize(width, height);
@@ -676,22 +709,9 @@ export default class PlayerTab {
 
         const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
             .add(hp, 0, 'left', 0, false)
-            .add(st, 0, 'left', 0, false);
-
-        const barsFrame = scene.rexUI.add.sizer({
-            orientation: 'y',
-            space: { left: 6, right: 6, top: 4, bottom: 4 },
-        })
-            .addBackground(
-                makeGlassRoundRect(scene, 0, 0, 10, {
-                    fill: mixColor(BOTTOM_BAR_THEME.panelSoftFill, 0xffffff, 0.04),
-                    alpha: 0.82,
-                    stroke: 0xffffff,
-                    strokeAlpha: 0.08,
-                    strokeWidth: 1,
-                })
-            )
-            .add(bars, 0, 'center', 0, false);
+            .add(st, 0, 'left', 0, false)
+            .setDepth(TAB_CONTENT_DEPTH);
+        name.setDepth(TAB_CONTENT_DEPTH);
 
         const row = scene.rexUI.add.sizer({
             orientation: 'x',
@@ -699,7 +719,8 @@ export default class PlayerTab {
         })
             .addBackground(bg)
             .add(name, { proportion: 1, expand: false })
-            .add(barsFrame, { proportion: 0, expand: false, padding: { left: 6, right: 10 } });
+            .add(bars, { proportion: 0, expand: false, padding: { left: 6, right: 10 } })
+            .setDepth(TAB_BASE_DEPTH);
         
         // 🔥 stretch full width
         const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
@@ -925,12 +946,15 @@ export default class PlayerTab {
         );
         data.bg.setStrokeStyle(selected ? 2.5 : hovered ? 2 : 1.5, accent, selected ? 0.34 : hovered ? 0.22 : 0.12);
         data.nameText?.setColor(selected ? "#fff8eb" : BOTTOM_BAR_THEME.text);
-        setHoverLiftState(this.scene, data.row, selected || hovered, {
+        setHoverLiftState(this.scene, data.row, hovered, {
             baseY: this._rowBaseY.get(data.row) ?? data.row.y,
             hoverLift: 0,
-            hoverScale: selected ? 1.012 : 1.008,
+            hoverScale: 1.008,
             moveY: false,
         });
+        if (!hovered) {
+            data.row.setScale(1);
+        }
     }
 
     typeOf(s) {

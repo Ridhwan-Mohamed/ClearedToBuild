@@ -13,6 +13,15 @@ import { Fireman } from "../players/Fireman.js";
 import { Builder } from "../players/Builder.js";
 import { Forager } from "../players/Forager.js";
 import { Player } from "../players/Player.js";
+import {
+  BUILDING_PANEL_TEXT_STYLES,
+  createBuildingHoverPanel,
+  destroyStructuralHealthBar,
+  ensureStructuralHealthBar,
+  getStructuralBarAnchor,
+  getStructuralHealthBarTargets,
+  layoutStructuralHealthBar,
+} from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 
@@ -92,6 +101,7 @@ export class Prison {
     this.isHovered = false;
 
     this.uiContainer = this.scene.add.container(0, 0).setDepth(UIDEPTH);
+    this.panelRoot = null;
     this.panelBg = null;
     this.panelText1 = null;
     this.panelText2 = null;
@@ -240,32 +250,55 @@ export class Prison {
   }
 
   _ensurePanel() {
-    if (this.panelBg) return;
+    if (this.panelRoot) return;
 
     const scene = this.scene;
+    this.panelRoot = createBuildingHoverPanel(scene, {
+      width: 186,
+      height: 46,
+      depth: UIDEPTH,
+      accentColor: 0xe2a75f,
+    });
+    this.panelBg = this.panelRoot.panelBg;
+    this.panelIcon = scene.add.image(-62, 1, "char")
+      .setDepth(UIDEPTH + 2)
+      .setScale(0.35);
+    this._tintPrisonerIcon(this.panelIcon);
+    this.panelText1 = scene.add
+      .text(-34, ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", BUILDING_PANEL_TEXT_STYLES.title)
+      .setOrigin(0, 0.5)
+      .setDepth(UIDEPTH + 2);
+    this.panelText2 = scene.add
+      .text(-34, ENEMY_BUILDING_HOVER_UI.LINE2_DY + 1, "", BUILDING_PANEL_TEXT_STYLES.body)
+      .setOrigin(0, 0.5)
+      .setDepth(UIDEPTH + 2);
+    this.panelRoot.add([this.panelIcon, this.panelText1, this.panelText2]);
+    this.panelRoot.setVisible(false);
+    this.uiContainer.add(this.panelRoot);
+    return;
     const { cx, y } = this._panelPos();
 
     // wider because we’ll include an icon + 2 lines
     this.panelBg = scene.add
-      .rectangle(cx, y, 170, 30, 0x000000, 0.6)
+      .rectangle(cx, y, 182, 44, 0x121b24, 0.95)
       .setOrigin(0.5)
       .setDepth(UIDEPTH)
-      .setStrokeStyle(1, 0xffffff, 0.4);
+      .setStrokeStyle(2, 0xe4f6ff, 0.16);
 
     // ✅ prisoner icon (House uses 'char' + tint) :contentReference[oaicite:3]{index=3}
-    this.panelIcon = scene.add.image(cx - 70, y, "char")
+    this.panelIcon = scene.add.image(cx - 66, y, "char")
       .setDepth(UIDEPTH + 1)
       .setScale(0.35);
 
     this._tintPrisonerIcon(this.panelIcon);
 
     this.panelText1 = scene.add
-      .text(cx - 40, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(cx - 36, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", BUILDING_PANEL_TEXT_STYLES.title)
       .setOrigin(0, 0.5)
       .setDepth(UIDEPTH + 2);
 
     this.panelText2 = scene.add
-      .text(cx - 40, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(cx - 36, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY + 1, "", BUILDING_PANEL_TEXT_STYLES.body)
       .setOrigin(0, 0.5)
       .setDepth(UIDEPTH + 2);
 
@@ -274,15 +307,23 @@ export class Prison {
   }
 
   _updatePanel() {
+    if (this.panelRoot) {
+      const { cx, y } = this._panelPos();
+      this.panelRoot.setPosition(cx, y);
+      this.panelText1?.setText(`HP: ${Math.max(0, this.health)}/${this.maxHealth}`);
+      this.panelText2?.setText(`Prisoner: ${this.lockedType}`);
+      return;
+    }
+
     if (!this.panelBg) return;
 
     const { cx, y } = this._panelPos();
 
     this.panelBg.setPosition(cx, y);
-    this.panelIcon.setPosition(cx - 70, y);
+    this.panelIcon.setPosition(cx - 66, y);
 
-    this.panelText1.setPosition(cx - 40, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY);
-    this.panelText2.setPosition(cx - 40, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY);
+    this.panelText1.setPosition(cx - 36, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY);
+    this.panelText2.setPosition(cx - 36, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY + 1);
 
     this.panelText1.setText(`HP: ${Math.max(0, this.health)}/${this.maxHealth}`);
     this.panelText2.setText(`Prisoner: ${this.lockedType}`);
@@ -295,6 +336,11 @@ export class Prison {
     this._ensurePanel();
     this._updatePanel();
 
+    if (this.panelRoot) {
+      this.panelRoot.setVisible(true);
+      return;
+    }
+
     this.panelBg.setVisible(true);
     this.panelIcon?.setVisible(true);
     this.panelText1.setVisible(true);
@@ -302,6 +348,11 @@ export class Prison {
   }
 
   _hidePanel() {
+    if (this.panelRoot) {
+      this.panelRoot.setVisible(false);
+      return;
+    }
+
     if (!this.panelBg) return;
 
     this.panelBg.setVisible(false);
@@ -315,23 +366,7 @@ export class Prison {
   // ──────────────────────────
   ensureHealthBar() {
     if (!this.sprite || !this.scene) return;
-
-    const fullWidth = (this.tileType.lenX || 4) * SQUARESIZE;
-    const topY = this.sprite.y - 6;
-    const cx = this.sprite.x + fullWidth / 2;
-
-    if (!this.healthBarBg) {
-      this.healthBarBg = this.scene.add
-        .rectangle(cx, topY, fullWidth, 4, 0x000000, 0.6)
-        .setDepth(BLOCKDEPTH + 1);
-      Map.addToWorldStatic(this.healthBarBg);
-    }
-    if (!this.healthBar) {
-      this.healthBar = this.scene.add
-        .rectangle(cx, topY, fullWidth, 2, 0xff0000, 1)
-        .setDepth(BLOCKDEPTH + 2);
-      Map.addToWorldStatic(this.healthBar);
-    }
+    ensureStructuralHealthBar(this, this.scene, { fillColor: 0xf45d48 });
   }
 
   updateHealthBar() {
@@ -339,21 +374,23 @@ export class Prison {
     this.ensureHealthBar();
     if (!this.healthBar || !this.healthBarBg) return;
 
-    const fullWidth = (this.tileType.lenX || 4) * SQUARESIZE;
-    const cx = this.sprite.x + fullWidth / 2;
-    const topY = this.sprite.y - 6;
-
     const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-    this.healthBarBg.setPosition(cx, topY);
-    this.healthBar.setPosition(cx - (fullWidth * (1 - ratio)) / 2, topY);
-    this.healthBarBg.setDisplaySize(fullWidth, 4);
-    this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+    const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+      widthScale: 1,
+      paddingX: 14,
+      yOffset: 14,
+    });
 
     const now = this.scene.time?.now ?? 0;
     const visible = this.isHovered || now < this._damageBarUntil;
-    this.healthBarBg.setVisible(visible);
-    this.healthBar.setVisible(visible);
+    layoutStructuralHealthBar(this, {
+      ratio,
+      centerX,
+      topY,
+      width,
+      visible,
+      fillColor: 0xf45d48,
+    });
 
     if (this.isHovered) this._updatePanel();
   }
@@ -361,8 +398,7 @@ export class Prison {
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
     const targets = [this.sprite];
-    if (this.healthBarBg) targets.push(this.healthBarBg);
-    if (this.healthBar) targets.push(this.healthBar);
+    targets.push(...getStructuralHealthBarTargets(this));
 
     this.scene.tweens.add({
       targets,
@@ -435,8 +471,7 @@ export class Prison {
       this.collider = null;
     }
 
-    if (this.healthBarBg) this.healthBarBg.destroy();
-    if (this.healthBar) this.healthBar.destroy();
+    destroyStructuralHealthBar(this);
     if (this.visionId != null) {
       VisibilitySystem.removeVisionBubble(this.visionId);
       this.visionId = null;
@@ -448,5 +483,6 @@ export class Prison {
 
     this.uiContainer?.destroy(true);
     this.uiContainer = null;
+    this.panelRoot = null;
   }
 }

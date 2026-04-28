@@ -1,5 +1,4 @@
 import Phaser from "phaser";
-import { UIDEPTH } from "../../constants";
 import { getCardHand } from "../Powerups";
 import { getCardOutlineTint } from "../CardPreview";
 import {
@@ -8,40 +7,35 @@ import {
   mixColor,
 } from "./BottomBarTheme";
 
-const CARD_W = 154;
-const CARD_H = 176;
-const CARD_GAP = 20;
-const HEADER_Y = -122;
-const VIEWPORT_Y = -80;
-const VIEWPORT_H = 176;
-const COUNT_PILL_W = 108;
+const CARD_W = 196;
+const MIN_CARD_H = 94;
+const CARD_GAP = 12;
+const TAB_H = 120;
+const STRIP_H = 98;
+const TAB_BASE_DEPTH = 51;
+const MIN_TAB_W = 420;
 
 export default class CardsTab {
   constructor(scene, teamNumber = 1) {
     this.scene = scene;
     this.teamNumber = String(teamNumber);
-    this.view = scene.add.container(0, 0).setDepth(UIDEPTH);
-
     this._cardRefs = [];
-    this._dragging = false;
-    this._dragStartX = 0;
-    this._scrollStart = 0;
-    this._scrollX = 0;
-    this._contentWidth = 0;
     this._onWheel = null;
-    this._onPointerMove = null;
-    this._onPointerUp = null;
     this._onResize = () => {
       if (!this.view) return;
-      this.view.removeAll(true);
-      this._maskShape?.destroy();
-      this._cardRefs = [];
-      this._buildFrame();
+      this.buildShell();
       this.rebuild();
     };
 
-    this._buildFrame();
-    this._bindScrollInput();
+    this.view = scene.rexUI.add.sizer({
+      orientation: "y",
+      width: this.getTabWidth(),
+      height: TAB_H,
+      space: { left: 8, right: 8, top: 4, bottom: 2, item: 4 },
+    }).setDepth(TAB_BASE_DEPTH);
+
+    this.buildShell();
+    this.bindScrollInput();
     this.scene.scale.on("resize", this._onResize);
     this.rebuild();
   }
@@ -52,17 +46,10 @@ export default class CardsTab {
       this.scene.input.off("wheel", this._onWheel);
       this._onWheel = null;
     }
-    if (this._onPointerMove) {
-      this.scene.input.off("pointermove", this._onPointerMove);
-      this._onPointerMove = null;
-    }
-    if (this._onPointerUp) {
-      this.scene.input.off("pointerup", this._onPointerUp);
-      this._onPointerUp = null;
-    }
-    this._maskShape?.destroy();
     this.view?.destroy(true);
     this.view = null;
+    this.listBody = null;
+    this.scroll = null;
     this._cardRefs = [];
   }
 
@@ -76,303 +63,324 @@ export default class CardsTab {
     this.rebuild();
   }
 
-  _buildFrame() {
+  getTabWidth() {
+    return Math.max(MIN_TAB_W, this.scene.scale.width - 20);
+  }
+
+  getStripWidth() {
+    return Math.max(MIN_TAB_W - 16, this.scene.scale.width - 36);
+  }
+
+  getCardHeight() {
+    const boundsHeight = this.scroll?.getBounds?.()?.height;
+    const scrollHeight = boundsHeight ?? this.scroll?.height ?? STRIP_H;
+    return Math.max(MIN_CARD_H, Math.floor(scrollHeight - 8));
+  }
+
+  buildShell() {
     const scene = this.scene;
-    const viewportW = Math.max(440, scene.scale.width - 138);
-    this.viewport = {
-      x: 0,
-      y: VIEWPORT_Y,
-      w: viewportW,
-      h: VIEWPORT_H,
-      left: -viewportW / 2,
-      top: VIEWPORT_Y,
-    };
+    const tabWidth = this.getTabWidth();
+    const stripWidth = this.getStripWidth();
 
-    this.headerPlate = makeGlassRoundRect(scene, 244, 34, 16, {
-      fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.16),
-      alpha: 0.9,
-      stroke: 0x9fe7ff,
-      strokeAlpha: 0.24,
-    }).setPosition(0, HEADER_Y);
-
-    this.headerText = scene.add.text(0, HEADER_Y, "CARD DECK", {
-      fontFamily: "Bungee",
-      fontSize: "16px",
-      color: BOTTOM_BAR_THEME.text,
-      stroke: "#081621",
-      strokeThickness: 3,
-      letterSpacing: 1,
-    }).setOrigin(0.5);
-
-    this.countPill = makeGlassRoundRect(scene, COUNT_PILL_W, 28, 14, {
-      fill: mixColor(0xffd47c, 0xffffff, 0.14),
-      alpha: 0.92,
-      stroke: 0xfff1b3,
-      strokeAlpha: 0.26,
-    }).setPosition((viewportW / 2) - 86, HEADER_Y);
-
-    this.countText = scene.add.text((viewportW / 2) - 86, HEADER_Y, "0 CARDS", {
-      fontFamily: "Bungee",
-      fontSize: "12px",
-      color: "#fff8d6",
-      stroke: "#5a2c00",
-      strokeThickness: 2,
-    }).setOrigin(0.5);
-
-    this.subText = scene.add.text(0, HEADER_Y + 23, "DRAG OR SCROLL TO BROWSE YOUR ACTIVE TOWN CARDS", {
-      fontFamily: "Bungee",
-      fontSize: "10px",
-      color: BOTTOM_BAR_THEME.textMuted,
-      stroke: "#081621",
-      strokeThickness: 2,
-      letterSpacing: 0.3,
-    }).setOrigin(0.5);
-
-    this.viewportBg = makeGlassRoundRect(scene, viewportW, VIEWPORT_H, 24, {
+    this.view.removeAll(true);
+    this.view.setMinSize(tabWidth, TAB_H);
+    this.view.addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
       fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
       alpha: 0.78,
       stroke: 0x98e7ff,
-      strokeAlpha: 0.16,
-    }).setPosition(0, VIEWPORT_Y + (VIEWPORT_H / 2));
+      strokeAlpha: 0.14,
+    }));
 
-    this.viewportGlow = scene.add.rectangle(0, VIEWPORT_Y + 18, viewportW - 34, 28, 0xffffff, 0.08)
-      .setOrigin(0.5, 0.5);
-
-    this.viewportHit = scene.add.rectangle(0, VIEWPORT_Y + (VIEWPORT_H / 2), viewportW, VIEWPORT_H, 0x000000, 0.001)
-      .setInteractive({ useHandCursor: true });
-
-    this.cardsContainer = scene.add.container(this.viewport.left, this.viewport.top);
-
-    this.emptyTitle = scene.add.text(0, VIEWPORT_Y + 58, "No cards yet", {
-      fontFamily: "Bungee",
-      fontSize: "18px",
-      color: BOTTOM_BAR_THEME.text,
-      stroke: "#081621",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-
-    this.emptyBody = scene.add.text(0, VIEWPORT_Y + 90, "Town powerups will show up here once you earn or buy them.", {
-      fontFamily: "Bungee",
-      fontSize: "11px",
-      color: BOTTOM_BAR_THEME.textMuted,
-      stroke: "#081621",
-      strokeThickness: 2,
-      align: "center",
-    }).setOrigin(0.5);
-
-    this._maskShape = scene.make.graphics({ x: 0, y: 0, add: false });
-    this._maskShape.fillStyle(0xffffff, 1);
-    this._maskShape.fillRect(this.viewport.left, this.viewport.top, this.viewport.w, this.viewport.h);
-    this.cardsContainer.setMask(this._maskShape.createGeometryMask());
-
-    this.viewportHit.on("pointerdown", (pointer) => {
-      this._dragging = true;
-      this._dragStartX = pointer.x;
-      this._scrollStart = this._scrollX;
+    const titleLabel = scene.rexUI.add.label({
+      background: makeGlassRoundRect(scene, 0, 0, 12, {
+        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.16),
+        alpha: 0.9,
+        stroke: 0x9fe7ff,
+        strokeAlpha: 0.24,
+      }),
+      text: scene.add.text(0, 0, "CARD DECK", {
+        fontFamily: "Bungee",
+        fontSize: "13px",
+        color: BOTTOM_BAR_THEME.text,
+        stroke: "#081621",
+        strokeThickness: 3,
+        letterSpacing: 0.6,
+      }),
+      space: { left: 14, right: 14, top: 6, bottom: 6 },
     });
 
-    this.view.add([
-      this.viewportBg,
-      this.viewportGlow,
-      this.cardsContainer,
-      this.viewportHit,
-      this.headerPlate,
-      this.headerText,
-      this.countPill,
-      this.countText,
-      this.subText,
-      this.emptyTitle,
-      this.emptyBody,
-    ]);
+    this.countText = scene.add.text(0, 0, "0 CARDS", {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#000000",
+      stroke: "#ffffff",
+      strokeThickness: 1,
+    }).setAlpha(1);
+    this.countText.setColor("#000000");
+    this.countText.setTint(0x000000);
+
+    const countLabel = scene.rexUI.add.label({
+      background: makeGlassRoundRect(scene, 0, 0, 11, {
+        fill: mixColor(0xffd47c, 0xffffff, 0.14),
+        alpha: 0.92,
+        stroke: 0xfff1b3,
+        strokeAlpha: 0.26,
+      }),
+      text: this.countText,
+      space: { left: 12, right: 12, top: 4, bottom: 4 },
+    });
+    this.countText.setDepth(this.countText.depth + 1 || 10);
+    const header = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { left: 4, right: 4, item: 8 },
+    });
+    header.add(titleLabel, { proportion: 0, expand: false, align: "left" });
+    header.add(scene.add.zone(0, 0, 1, 1), { proportion: 1, expand: true });
+    header.add(countLabel, { proportion: 0, expand: false, align: "right" });
+
+    this.listBody = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { left: 6, right: 6, top: 1, bottom: 1, item: CARD_GAP },
+    });
+
+    this.scroll = scene.rexUI.add.scrollablePanel({
+      width: stripWidth,
+      height: STRIP_H,
+      scrollMode: 1,
+      scrollDetectionMode: "rectBounds",
+      background: makeGlassRoundRect(scene, 0, 0, 18, {
+        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+        alpha: 0.76,
+        stroke: 0x98e7ff,
+        strokeAlpha: 0.16,
+      }),
+      panel: { child: this.listBody, mask: { padding: 1 } },
+      scrollerX: {
+        pointerOutRelease: true,
+        rectBoundsInteractive: true,
+      },
+      space: { left: 6, right: 6, top: 2, bottom: 2, panel: 8 },
+    }).setDepth(TAB_BASE_DEPTH);
+
+    this.view.add(header, { proportion: 0, expand: true });
+    this.view.add(this.scroll, { proportion: 1, expand: true });
+    this.view.layout();
   }
 
-  _bindScrollInput() {
-    if (this._onWheel || this._onPointerMove || this._onPointerUp) return;
-
-    this._onPointerMove = (pointer) => {
-      if (!this._dragging) return;
-      const dx = pointer.x - this._dragStartX;
-      this._scrollX = this._scrollStart + dx;
-      this._clampScroll();
-    };
-
-    this._onPointerUp = () => {
-      this._dragging = false;
-    };
+  bindScrollInput() {
+    if (this._onWheel) return;
 
     this._onWheel = (pointer, _gameObjects, dx, dy) => {
       if (this.scene.uiBottomBar?.currentPage !== "cards") return;
-      if (!this._isPointerOverViewport(pointer)) return;
-      const delta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      if (Math.abs(delta) < 0.1) return;
-      this._scrollX -= delta * 0.82;
-      this._clampScroll();
+      if (!this.scene.uiBottomBar?.expanded) return;
+      if (!this.scroll?.isOverflowX) return;
+      if (!this.isPointerOverScroll(pointer)) return;
+
+      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+      if (Math.abs(dominantDelta) < 0.1) return;
+
+      this.scroll.addChildOX(-dominantDelta * 0.8, true);
       this.scene.input.stopPropagation();
     };
 
-    this.scene.input.on("pointermove", this._onPointerMove);
-    this.scene.input.on("pointerup", this._onPointerUp);
     this.scene.input.on("wheel", this._onWheel);
   }
 
-  _isPointerOverViewport(pointer) {
-    if (!pointer || !this.viewportHit?.getBounds) return false;
-    const bounds = this.viewportHit.getBounds();
+  isPointerOverScroll(pointer) {
+    if (!pointer || !this.scroll?.getBounds) return false;
+    const bounds = this.scroll.getBounds();
     return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
   }
 
   rebuild() {
-    if (!this.view) return;
+    if (!this.listBody || !this.scroll) return;
+    this.view.layout();
+
     const hand = getCardHand(this.teamNumber) || [];
-    this._cardRefs.forEach((ref) => ref.container?.destroy(true));
+    const cardHeight = this.getCardHeight();
+
+    this.listBody.removeAll(true);
+    this.listBody.setMinSize(0, cardHeight);
     this._cardRefs = [];
-    this.cardsContainer.removeAll(true);
+    this.countText?.setText(`${hand.length} ${hand.length === 1 ? "CARD" : "CARDS"}`);
+    this.countText?.setColor?.("#000000");
+    this.countText?.setTint?.(0x000000);
+    this.countText?.setAlpha?.(1);
 
-    this.countText.setText(`${hand.length} ${hand.length === 1 ? "CARD" : "CARDS"}`);
-    this.emptyTitle.setVisible(hand.length === 0);
-    this.emptyBody.setVisible(hand.length === 0);
-
-    const availableWidth = this.viewport.w;
-    let xCursor = 0;
-
-    hand.forEach((card, index) => {
-      const ref = this._createCard(card, xCursor + (CARD_W / 2), 12 + (CARD_H / 2), index);
-      this._cardRefs.push(ref);
-      this.cardsContainer.add(ref.container);
-      xCursor += CARD_W + CARD_GAP;
-    });
-
-    this._contentWidth = Math.max(0, xCursor - CARD_GAP);
-    if (this._contentWidth <= availableWidth) {
-      this._scrollX = Math.floor((availableWidth - this._contentWidth) / 2);
-    }
-    this._clampScroll();
-  }
-
-  _clampScroll() {
-    if (!this.cardsContainer) return;
-    const viewportLeft = this.viewport.left;
-    const availableWidth = this.viewport.w;
-    const contentWidth = this._contentWidth || 0;
-
-    if (contentWidth <= availableWidth) {
-      this.cardsContainer.x = viewportLeft + Math.floor((availableWidth - contentWidth) / 2);
+    if (hand.length === 0) {
+      this.listBody.add(this.createEmptyState(cardHeight), { proportion: 0, expand: true, align: "center" });
+      this.scroll.setChildOX?.(0, true);
+      this.scroll.layout();
+      this.view.layout();
       return;
     }
 
-    const maxScroll = 0;
-    const minScroll = -(contentWidth - availableWidth);
-    this._scrollX = Phaser.Math.Clamp(this._scrollX, minScroll, maxScroll);
-    this.cardsContainer.x = viewportLeft + this._scrollX;
+    hand.forEach((card, index) => {
+      const ref = this.createCard(card, index, cardHeight);
+      this._cardRefs.push(ref);
+      this.listBody.add(ref.card, { proportion: 0, expand: true, align: "center" });
+    });
+
+    this.scroll.setChildOX?.(0, true);
+    this.scroll.layout();
+    this.view.layout();
   }
 
-  _createCard(card, x, y, index) {
+  createEmptyState(cardHeight = this.getCardHeight()) {
+    const scene = this.scene;
+    const shell = scene.rexUI.add.sizer({
+      orientation: "y",
+      width: Math.max(280, this.getStripWidth() - 32),
+      height: cardHeight,
+      space: { left: 14, right: 14, top: 12, bottom: 10, item: 4 },
+    });
+    shell.setMinSize(Math.max(280, this.getStripWidth() - 32), cardHeight);
+    shell.addBackground(makeGlassRoundRect(scene, 0, 0, 16, {
+      fill: mixColor(BOTTOM_BAR_THEME.cardFill, 0x72d8ff, 0.08),
+      alpha: 0.9,
+      stroke: 0x98e7ff,
+      strokeAlpha: 0.18,
+    }));
+
+    shell.add(scene.add.text(0, 0, "NO CARDS YET", {
+      fontFamily: "Bungee",
+      fontSize: "12px",
+      color: BOTTOM_BAR_THEME.text,
+      stroke: "#081621",
+      strokeThickness: 3,
+    }), { proportion: 0, expand: false, align: "center" });
+
+    shell.add(scene.add.text(0, 0, "Earn or buy town powerups to fill this deck.", {
+      fontFamily: "Bungee",
+      fontSize: "8px",
+      color: BOTTOM_BAR_THEME.textMuted,
+      stroke: "#081621",
+      strokeThickness: 2,
+      align: "center",
+      wordWrap: { width: Math.max(240, this.getStripWidth() - 72) },
+    }), { proportion: 0, expand: false, align: "center" });
+
+    return shell;
+  }
+
+  createCard(card, index, cardHeight = this.getCardHeight()) {
     const scene = this.scene;
     const tint = getCardOutlineTint(card);
     const softTint = mixColor(tint, 0xffffff, 0.35);
 
-    const container = scene.add.container(x, y);
+    const shell = scene.rexUI.add.overlapSizer({
+      width: CARD_W,
+      height: cardHeight,
+    });
+    shell.setMinSize(CARD_W, cardHeight);
 
-    const glow = scene.add.rectangle(0, 8, CARD_W - 10, CARD_H - 18, tint, 0.1)
-      .setOrigin(0.5)
-      .setAlpha(0.16)
-      .setScale(0.94);
-
-    const shadow = scene.add.rectangle(0, 10, CARD_W, CARD_H, 0x031019, 0.18)
-      .setOrigin(0.5);
-
-    const outer = makeGlassRoundRect(scene, CARD_W, CARD_H, 24, {
+    const bg = makeGlassRoundRect(scene, CARD_W, cardHeight, 18, {
       fill: mixColor(BOTTOM_BAR_THEME.cardFill, tint, 0.12),
       alpha: 0.94,
       stroke: tint,
-      strokeAlpha: 0.54,
+      strokeAlpha: 0.4,
       strokeWidth: 2,
     });
 
-    const inner = scene.add.rectangle(0, -44, CARD_W - 26, 44, 0xffffff, 0.09).setOrigin(0.5);
+    const shine = scene.add.rectangle(0, (-cardHeight / 2) + 14, CARD_W - 24, 14, 0xffffff, 0.06)
+      .setOrigin(0.5);
 
-    const iconPlate = makeGlassRoundRect(scene, CARD_W - 28, 58, 18, {
+    const iconPlate = scene.rexUI.add.overlapSizer({ width: 44, height: 44 });
+    iconPlate.addBackground(makeGlassRoundRect(scene, 44, 44, 12, {
       fill: mixColor(BOTTOM_BAR_THEME.panelFill, tint, 0.15),
-      alpha: 0.82,
+      alpha: 0.84,
       stroke: softTint,
       strokeAlpha: 0.18,
       strokeWidth: 1.5,
-    }).setPosition(0, -43);
-
+    }));
     const icon = scene.textures.exists(card?.image)
-      ? scene.add.image(0, -43, card.image).setDisplaySize(42, 42)
-      : scene.add.rectangle(0, -43, 42, 42, softTint, 0.25).setStrokeStyle(2, tint, 0.4);
+      ? scene.add.image(0, 0, card.image).setDisplaySize(24, 24)
+      : scene.add.rectangle(0, 0, 24, 24, softTint, 0.25).setStrokeStyle(2, tint, 0.4);
+    iconPlate.add(icon, { align: "center" });
 
-    const tag = makeGlassRoundRect(scene, 72, 22, 11, {
-      fill: mixColor(tint, 0x0c1a24, 0.2),
-      alpha: 0.96,
-      stroke: 0xffffff,
-      strokeAlpha: 0.12,
-      strokeWidth: 1,
-    }).setPosition(0, -74);
+    const tagLabel = scene.rexUI.add.label({
+      background: makeGlassRoundRect(scene, 0, 0, 8, {
+        fill: mixColor(tint, 0x0c1a24, 0.2),
+        alpha: 0.96,
+        stroke: 0xffffff,
+        strokeAlpha: 0.12,
+        strokeWidth: 1,
+      }),
+      text: scene.add.text(0, 0, `#${index + 1}`, {
+        fontFamily: "Bungee",
+        fontSize: "9px",
+        color: "#fff9df",
+        stroke: "#081621",
+        strokeThickness: 2,
+      }),
+      space: { left: 8, right: 8, top: 3, bottom: 3 },
+    });
 
-    const tagText = scene.add.text(0, -74, `CARD ${index + 1}`, {
+    const name = scene.add.text(0, 0, String(card?.name || "Card"), {
       fontFamily: "Bungee",
-      fontSize: "10px",
-      color: "#fff9df",
-      stroke: "#081621",
-      strokeThickness: 2,
-    }).setOrigin(0.5);
-
-    const name = scene.add.text(0, -2, String(card?.name || "Card"), {
-      fontFamily: "Bungee",
-      fontSize: "13px",
+      fontSize: "12px",
       color: BOTTOM_BAR_THEME.text,
       stroke: "#081621",
-      strokeThickness: 3,
-      align: "center",
-      wordWrap: { width: CARD_W - 24 },
-    }).setOrigin(0.5);
+      strokeThickness: 2,
+      wordWrap: { width: CARD_W - 88 },
+    });
 
-    const body = scene.add.text(0, 52, String(card?.text || ""), {
+    const body = scene.add.text(0, 0, String(card?.text || ""), {
       fontFamily: "Bungee",
-      fontSize: "10px",
+      fontSize: "13px",
       color: BOTTOM_BAR_THEME.textSoft,
       stroke: "#081621",
       strokeThickness: 2,
-      align: "center",
-      wordWrap: { width: CARD_W - 30 },
       lineSpacing: 2,
-    }).setOrigin(0.5);
+      wordWrap: { width: CARD_W - 88 },
+    });
 
-    const hit = scene.add.zone(0, 0, CARD_W, CARD_H)
-      .setInteractive({ useHandCursor: true });
+    const right = scene.rexUI.add.sizer({
+      orientation: "y",
+      space: { item: 4 },
+    });
+    right.add(tagLabel, { proportion: 0, expand: false, align: "left" });
+    right.add(name, { proportion: 0, expand: false, align: "left" });
 
-    container.add([glow, shadow, outer, inner, iconPlate, icon, tag, tagText, name, body, hit]);
+    const top = scene.rexUI.add.sizer({
+      orientation: "x",
+      space: { item: 8 },
+    });
+    top.add(iconPlate, { proportion: 0, expand: false, align: "center" });
+    top.add(right, { proportion: 1, expand: true, align: "center" });
 
-    const baseY = y;
-    const baseScale = 1;
-    const applyHoverState = (hovered) => {
-      scene.tweens.killTweensOf(container);
-      scene.tweens.killTweensOf(glow);
+    const content = scene.rexUI.add.sizer({
+      orientation: "y",
+      width: CARD_W - 20,
+      height: cardHeight - 18,
+      space: { left: 10, right: 10, top: 10, bottom: 10, item: 6 },
+    });
+    content.setMinSize(CARD_W - 20, cardHeight - 18);
+    content.add(top, { proportion: 0, expand: true });
+    content.add(body, { proportion: 1, expand: true, align: "left" });
+
+    const hit = scene.add.zone(0, 0, CARD_W, cardHeight).setInteractive({ useHandCursor: true });
+    shell.addBackground(bg);
+    shell.add(shine, { align: "center" });
+    shell.add(content, { align: "center" });
+    shell.add(hit, { align: "center", expand: true });
+
+    const applyState = (hovered) => {
+      scene.tweens.killTweensOf(shell);
       scene.tweens.add({
-        targets: container,
-        y: hovered ? baseY - 8 : baseY,
-        scaleX: hovered ? 1.035 : baseScale,
-        scaleY: hovered ? 1.035 : baseScale,
-        duration: 150,
+        targets: shell,
+        scaleX: hovered ? 1.02 : 1,
+        scaleY: hovered ? 1.02 : 1,
+        duration: 140,
         ease: "Quad.easeOut",
       });
-      scene.tweens.add({
-        targets: glow,
-        alpha: hovered ? 0.34 : 0.16,
-        scaleX: hovered ? 1.06 : 0.94,
-        scaleY: hovered ? 1.08 : 0.94,
-        duration: 150,
-        ease: "Quad.easeOut",
-      });
-      outer.setStrokeStyle(hovered ? 3 : 2, tint, hovered ? 0.9 : 0.54);
-      iconPlate.setFillStyle(mixColor(BOTTOM_BAR_THEME.panelFill, tint, hovered ? 0.24 : 0.15), hovered ? 0.92 : 0.82);
+      bg.setFillStyle(mixColor(BOTTOM_BAR_THEME.cardFill, tint, hovered ? 0.18 : 0.12), hovered ? 0.98 : 0.94);
+      bg.setStrokeStyle(hovered ? 3 : 2, tint, hovered ? 0.8 : 0.4);
     };
 
-    hit.on("pointerover", () => applyHoverState(true));
-    hit.on("pointerout", () => applyHoverState(false));
+    hit.on("pointerover", () => applyState(true));
+    hit.on("pointerout", () => applyState(false));
 
-    return { container, card, hit };
+    return { card: shell, hit };
   }
 }

@@ -93,6 +93,8 @@ import { createPlayerPortraitAnimations, getPlayerPortraitKey, preloadPlayerPort
 import { getHordeModifierForIndex } from './parcel_system/HordeModifiers.js';
 import { addCardToHand, getCardHand } from './UI/Powerups.js';
 import { UI_ITEM_TYPES } from './UI/UIConstants.js';
+import { SaveManager } from './save/SaveManager.js';
+import { AchievementSystem } from './achievements/AchievementSystem.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -116,6 +118,7 @@ const TOWN_XP_SOURCE_VALUES = Object.freeze({
     hordeSurvived: 55,
     fortCleared: 95,
 });
+const DEBUG_SHOW_MILITIA_LEVEL3_UNLOCK_ON_START = false;
 const TOWN_XP_RECRUIT_DEFS = Object.freeze([
     { key: "farmer", title: "Fresh Farmer", subtitle: "Recruit 1 Farmer for your village", accentColor: 0x8b5a2b, ctor: Farmer },
     { key: "builder", title: "Busy Builder", subtitle: "Recruit 1 Builder for faster construction", accentColor: 0x4433ff, ctor: Builder },
@@ -209,6 +212,14 @@ export class mapView extends Phaser.Scene {
         };
     }
 
+    getAchievementBoardSnapshot() {
+        return this.achievementSystem?.getBoardSnapshot?.() ?? {
+            serial: 0,
+            totalCompleted: 0,
+            activeGoals: [],
+        };
+    }
+
     _buildMilitiaUnlockReward() {
         return {
             id: "town_xp_militia_unlock",
@@ -249,6 +260,27 @@ export class mapView extends Phaser.Scene {
         return true;
     }
 
+    _maybeShowDebugMilitiaLevel3Unlock() {
+        if (!DEBUG_SHOW_MILITIA_LEVEL3_UNLOCK_ON_START) return;
+        if (this._debugMilitiaLevel3UnlockShown) return;
+        this._debugMilitiaLevel3UnlockShown = true;
+
+        this.time?.delayedCall?.(900, () => {
+            if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return;
+
+            const state = this._townXp || (this._townXp = this._createTownXpState());
+            state.level = Math.max(3, Number(state.level || 1));
+            state.xpForNextLevel = this._getTownXpRequirement(state.level);
+
+            if (!this._isMilitiaParcelUnlocked()) {
+                unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, this);
+            }
+
+            this.events.emit("townxp:changed", this.getTownXpSnapshot());
+            this._showMilitiaParcelUnlockPresentation();
+        });
+    }
+
     _resetRuntimeState() {
         this.gridPlace = false;
         this.selectMode = true;
@@ -267,6 +299,12 @@ export class mapView extends Phaser.Scene {
         this.farmBanner = null;            // top-center instruction banner (container)
         this.farmBannerParts = null;       // { left, esc, middle, seedCount, seedIcon, right }
         this.farmInstructionText = null;   // top-center instruction banner
+        this.farmInstructionUI = null;
+        this.farmInstrLeft = null;
+        this.farmInstrMid = null;
+        this.farmInstrSeedCount = null;
+        this.farmInstrSeedIcon = null;
+        this.farmInstrRight = null;
         this.harvestMode = false;
         this.money = 400; // Starting fallback amount
         this.seeds = 10;
@@ -339,6 +377,8 @@ export class mapView extends Phaser.Scene {
         this._activeRewardUI = null;
         this._activeBossRewardUI = null;
         this._activeTownXpRewardUI = null;
+        this.achievementSystem = null;
+        this._debugMilitiaLevel3UnlockShown = false;
         this._movementLocked = false;
         this.stageCompleteLock = false;
         this.clock = null;
@@ -355,9 +395,16 @@ export class mapView extends Phaser.Scene {
         this.menuPreview = null;
         this.draftMenu = null;
         this._teamTownIcon = null;
+        this.continueButton = null;
+        this._skipStarterResourceSeed = false;
+        this._pendingContinueSnapshot = null;
         this._draftTownIconUnsub = null;
         this._stageHud = null;
         this._pendingMenuPhase = false;
+        this._menuModeActive = false;
+        this._startupCameraLocked = true;
+        this._continueCameraLockActive = false;
+        this._startupCameraCenter = null;
         this._menuRevealFx = null;
         this._restartCarryCover = null;
         this._scaleResizeHandlers = [];
@@ -371,6 +418,46 @@ export class mapView extends Phaser.Scene {
         return handler;
     }
 
+    _getStartupCameraPose() {
+        const overlayScene = MainMenu._getOverlayScene?.(this) || this;
+        return MainMenu._getDraftCameraPose?.(this, overlayScene, this._pendingContinueSnapshot)
+            || MainMenu._getMainIslandOverviewPose?.(this, overlayScene, this._pendingContinueSnapshot)
+            || null;
+    }
+
+    _applyStartupCameraPose({ applyZoom = false } = {}) {
+        const cam = this.cameras?.main;
+        if (!cam) return;
+
+        const pose = this._getStartupCameraPose();
+        if (applyZoom && pose) {
+            MainMenu._applyCameraPose?.(cam, pose);
+            if (Number.isFinite(pose.centerX) && Number.isFinite(pose.centerY)) {
+                this._startupCameraCenter = { x: pose.centerX, y: pose.centerY };
+            }
+            return;
+        }
+
+        const zoom = Math.max(0.0001, Number(cam.zoom || pose?.targetZoom || 1));
+        const lockedCenter = this._startupCameraCenter;
+        const centerX = Number.isFinite(lockedCenter?.x)
+            ? lockedCenter.x
+            : Number.isFinite(pose?.centerX)
+            ? pose.centerX
+            : ((PARCEL.MAIN_ORIGIN.x + (PARCEL.SIZE * 0.5)) * SQUARESIZE);
+        const centerY = Number.isFinite(lockedCenter?.y)
+            ? lockedCenter.y
+            : Number.isFinite(pose?.centerY)
+            ? pose.centerY
+            : ((PARCEL.MAIN_ORIGIN.y + (PARCEL.SIZE * 0.5)) * SQUARESIZE);
+        const scrollX = centerX - ((cam.width * 0.5) / zoom);
+        const scrollY = centerY - ((cam.height * 0.5) / zoom);
+
+        cam.setScroll(scrollX, scrollY);
+        cam.scrollX = scrollX;
+        cam.scrollY = scrollY;
+    }
+
     registerRunParcelClaim(type, meta = {}) {
         const normalized = String(type || "").toUpperCase();
         if (!normalized || normalized === "PRESSURE" || normalized === "MILITIA") return;
@@ -380,6 +467,7 @@ export class mapView extends Phaser.Scene {
         stats.claimedContractIds.add(key);
         stats.parcelsClaimed += 1;
         this.addTownXp(TOWN_XP_SOURCE_VALUES.parcelClaim, "Parcel Claimed");
+        SaveManager.queueAutosave("parcel_claim");
     }
 
     registerRunEnemyDefeat(troop, opts = {}) {
@@ -391,6 +479,9 @@ export class mapView extends Phaser.Scene {
         if (stats.defeatedEnemyIds.has(key)) return;
         stats.defeatedEnemyIds.add(key);
         stats.enemiesDefeated += 1;
+        if (troop?.isRaider) {
+            this.achievementSystem?.addStat?.("raidersKilled", 1);
+        }
         this.addTownXp(
             troop?.isFortGrunt ? TOWN_XP_SOURCE_VALUES.fortGruntKill : TOWN_XP_SOURCE_VALUES.raiderKill,
             troop?.isFortGrunt ? "Fort Grunt Defeated" : "Raider Defeated"
@@ -993,6 +1084,7 @@ export class mapView extends Phaser.Scene {
         }
 
         this.events.emit("townxp:changed", this.getTownXpSnapshot());
+        SaveManager.queueAutosave("town_xp");
         return levelsGained;
     }
 
@@ -1505,6 +1597,7 @@ export class mapView extends Phaser.Scene {
 
     handleDuskStart() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        SaveManager.queueAutosave("phase_dusk");
         const preview = this.getUpcomingHordePreviewSummary();
         if (preview) {
             const alertText = `${preview.headline || "Coastal Assault Tonight"} | H${preview.hordeIndex} | ${Math.max(0, Number(preview.totalEnemies || 0))} ${preview.enemyLabel || "Raiders"}${preview.modifierLabel ? ` | ${preview.modifierLabel}` : ""}`;
@@ -1514,6 +1607,7 @@ export class mapView extends Phaser.Scene {
 
     handleNightStart() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        SaveManager.queueAutosave("phase_night");
         if (this._activeNightHorde?.startedOnDay === this.clock?.day) return;
         if (Number(this.clock?.day || 1) < 2) {
             showAlert(this, "Free day: the first horde arrives tomorrow night", "#a7f3d0");
@@ -1525,9 +1619,21 @@ export class mapView extends Phaser.Scene {
     handleDayStart() {
         this._resetParcelUiState();
         this.grantTownTowerDawnIncome();
+        SaveManager.queueDailyAutosave(this.clock?.day, "day_start");
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         this.finishNightlyHordeAtDawn();
         this._syncNightPressurePreviewPanels();
+    }
+
+    isDailyAutosaveReady() {
+        if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return false;
+        if (this._hordeRewardInProgress || this.stageCompleteLock) return false;
+        if (this._activeRewardUI || this._activeBossRewardUI || this._activeTownXpRewardUI) return false;
+        if (Math.max(0, Number(this._townXp?.pendingLevelRewards || 0)) > 0) return false;
+        if (this.clock?.paused) return false;
+        if (this.menu?.active || this.draftMenu?.active) return false;
+        if (this.uiScene?.pauseMenu?.isOpen) return false;
+        return true;
     }
 
     grantTownTowerDawnIncome() {
@@ -1548,6 +1654,7 @@ export class mapView extends Phaser.Scene {
         this._lastTownCoreLost = tower || null;
         this._movementLocked = true;
         this.stageCompleteLock = true;
+        SaveManager.clearRunSave();
 
         this._activeRewardUI?.destroy?.();
         this._activeRewardUI = null;
@@ -1710,6 +1817,7 @@ export class mapView extends Phaser.Scene {
     }
 
     _cleanupForSceneShutdown() {
+        SaveManager.detachScene(this);
         Turret.cancelPlacement();
         Catapult.cancelPlacement();
         this.overviewOceanWaves?.destroy?.();
@@ -1718,6 +1826,7 @@ export class mapView extends Phaser.Scene {
         this.overviewCloudLayer = null;
         this.overviewShoreWaves?.destroy?.();
         this.overviewShoreWaves = null;
+        this._menuModeActive = false;
         this._activeRewardUI?.destroy?.();
         this._activeRewardUI = null;
         this._activeBossRewardUI?.destroy?.();
@@ -1732,12 +1841,23 @@ export class mapView extends Phaser.Scene {
         this.logoMini = null;
         this.startButton?.destroy?.();
         this.startButton = null;
+        this.continueButton?.destroy?.();
+        this.continueButton = null;
         this.menuPreview?.destroy?.();
         this.menuPreview = null;
         this._menuRevealFx?.destroy?.(true);
         this._menuRevealFx = null;
         this._restartCarryCover?.destroy?.();
         this._restartCarryCover = null;
+        this.farmInstructionUI?.destroy?.(true);
+        this.farmInstructionUI = null;
+        this.farmInstrLeft = null;
+        this.farmInstrMid = null;
+        this.farmInstrSeedCount = null;
+        this.farmInstrSeedIcon = null;
+        this.farmInstrRight = null;
+        this.farmHover?.destroy?.();
+        this.farmHover = null;
         this._teamTownIcon?.destroyWithLabel?.();
         this._teamTownIcon?.destroy?.();
         this._teamTownIcon = null;
@@ -2310,7 +2430,7 @@ export class mapView extends Phaser.Scene {
     _ensureOceanTextures() {
         if (!this.textures.exists("ocean_gradient")) {
             const g = this.make.graphics({ x: 0, y: 0, add: false });
-            g.fillGradientStyle(0x1a5d7e, 0x1a5d7e, 0x2f93bc, 0x2f93bc, 1, 1, 1, 1);
+            g.fillGradientStyle(0x115f89, 0x115f89, 0x1b7aaa, 0x1b7aaa, 1, 1, 1, 1);
             g.fillRect(0, 0, 4, 256);
             g.generateTexture("ocean_gradient", 4, 256);
             g.destroy();
@@ -2323,7 +2443,7 @@ export class mapView extends Phaser.Scene {
         const w = this.scale.width;
         const h = this.scale.height;
 
-        this.oceanBackdropBase = this.add.rectangle(0, 0, w, h, 0x1e6f93, 1)
+        this.oceanBackdropBase = this.add.rectangle(0, 0, w, h, 0x156c99, 1)
             .setOrigin(0)
             .setScrollFactor(0)
             .setDepth(-10000);
@@ -2331,7 +2451,7 @@ export class mapView extends Phaser.Scene {
         this.oceanBackdropGradient = this.add.image(0, 0, "ocean_gradient")
             .setOrigin(0)
             .setDisplaySize(w, h)
-            .setAlpha(0.34)
+            .setAlpha(0.18)
             .setScrollFactor(0)
             .setDepth(-9999);
 
@@ -2376,10 +2496,12 @@ export class mapView extends Phaser.Scene {
     }
 
     _updateOceanBackdrop() {
-        this._setOceanBackdropMode(this.zoomMixer?.mode || "detailed");
-        this.overviewOceanWaves?.update?.(this.zoomMixer?.mode || "detailed", this.time?.now || 0);
-        this.overviewCloudLayer?.update?.(this.zoomMixer?.mode || "detailed");
-        this.overviewShoreWaves?.update?.(this.zoomMixer?.mode || "detailed", this.time?.now || 0);
+        const inMenuOverview = !!(this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase);
+        const mode = inMenuOverview ? "overview" : (this.zoomMixer?.mode || "detailed");
+        this._setOceanBackdropMode(mode);
+        this.overviewOceanWaves?.update?.(mode, this.time?.now || 0);
+        this.overviewCloudLayer?.update?.(mode);
+        this.overviewShoreWaves?.update?.(inMenuOverview ? "detailed" : mode, this.time?.now || 0);
     }
 
     create() {
@@ -2412,7 +2534,16 @@ export class mapView extends Phaser.Scene {
         }
         this.uiScene = this.scene.get('GameUIScene');
         this.uiScene?.bindWorldScene?.(this);
+        SaveManager.attachScene(this);
+        this.achievementSystem = new AchievementSystem(this);
+        this.events.on('store:unlock-changed', () => SaveManager.queueAutosave('store_unlock'));
         this.cameras.main.useBounds = false;
+        this._applyStartupCameraPose({ applyZoom: true });
+        this._trackScaleResize(() => {
+            if (this._startupCameraLocked || this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive) {
+                this._applyStartupCameraPose();
+            }
+        });
         if (this.uiScene?.sys?.isActive?.() && !this.menu?.active) {
             MainMenu.startMenuPhase();
         }
@@ -2526,6 +2657,7 @@ export class mapView extends Phaser.Scene {
         this.clock = new Clock(this);
         this.clock.paused = true;
         this.applySimulationSpeed(true);
+        this._maybeShowDebugMilitiaLevel3Unlock();
         this.graphics = this.add.graphics(); // Graphics object for drawing the selection outline
         this._setupSelectionDragZone();
         this.startCell = null; // Start cell (grid coordinates)
@@ -2625,14 +2757,13 @@ export class mapView extends Phaser.Scene {
                 let y = Math.floor((pointer.y + cam.scrollY) / SQUARESIZE);
                 if(items == TILE_TYPES.player){GameMap.handleMapClick(x,y,items)}
                 else{
-                    Teams.teamLists['1'].blockBuildingStates.push({
+                    buildingManager.queueBlockBuildTask({
                         type: items,
                         x: x - Math.floor(items.lenX/2),
                         y: y - Math.floor(items.lenY/2),
                         duration: 100,
                         assigned: 0
-                    });
-                    buildingManager.assignTroopToBuildBlock(1);
+                    }, 1);
                 }
             }
             else if(Turret.isPlacing){
@@ -2847,6 +2978,18 @@ export class mapView extends Phaser.Scene {
         if (this.keys.up.isDown || this.keys.arrowUp.isDown) inputY -= 1;
         if (this.keys.down.isDown || this.keys.arrowDown.isDown) inputY += 1;
 
+        if (this._startupCameraLocked) {
+            const inMenuOverview = !!(this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive);
+            if (!inMenuOverview) {
+                this._startupCameraLocked = false;
+            } else if (inputX === 0 && inputY === 0) {
+                this._applyStartupCameraPose();
+                return;
+            } else {
+                this._startupCameraLocked = false;
+            }
+        }
+
         // Normalize diagonal movement so speed is consistent.
         if (inputX !== 0 && inputY !== 0) {
             const inv = 1 / Math.sqrt(2);
@@ -2916,7 +3059,7 @@ export class mapView extends Phaser.Scene {
             const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
             this.graphics.clear();
             this.renderFarmSelectionPreview(preview.cells);
-            this.setFarmInstructionPhase2(preview.totalNeeded);
+            this.setFarmInstructionPhase2(preview);
             return;
         }
         else if (this.isBrushMode && this.isBrushActive) {
@@ -2992,6 +3135,10 @@ export class mapView extends Phaser.Scene {
     }
 
     onPointerUp(pointer) {
+        if (this.wallDestroyer?.active) {
+            this.wallDestroyer.onPointerUp(pointer);
+            return;
+        }
         if (
             this._trackpadTapDragActive &&
             pointer?.button === 0 &&
@@ -3324,7 +3471,22 @@ export class mapView extends Phaser.Scene {
     // === Farm mode: laptop-friendly 2-click plot selection ===
 // === Farm instruction UI (segmented, colored parts, seed icon) ===
 ensureFarmInstructionUI() {
-    if (this.farmInstructionUI) return;
+    const hasLiveUi =
+        !!this.farmInstructionUI?.active &&
+        !!this.farmInstrLeft?.scene &&
+        !!this.farmInstrMid?.scene &&
+        !!this.farmInstrSeedCount?.scene &&
+        !!this.farmInstrSeedIcon?.scene &&
+        !!this.farmInstrRight?.scene;
+    if (hasLiveUi) return;
+
+    this.farmInstructionUI?.destroy?.(true);
+    this.farmInstructionUI = null;
+    this.farmInstrLeft = null;
+    this.farmInstrMid = null;
+    this.farmInstrSeedCount = null;
+    this.farmInstrSeedIcon = null;
+    this.farmInstrRight = null;
 
     const y = 40; // below top bar
     const x = this.cameras.main.width / 2;
@@ -3444,8 +3606,12 @@ setFarmInstructionPhase1() {
     this.layoutFarmInstruction();
 }
 
-setFarmInstructionPhase2(totalNeeded) {
+setFarmInstructionPhase2(previewData) {
     this.ensureFarmInstructionUI();
+
+    const totalNeeded = Number(previewData?.totalNeeded || 0);
+    const cappedTotal = Number(previewData?.cappedTotal || 0);
+    const maxSeedsReached = !!previewData?.maxSeedsReached;
 
     this.farmInstrLeft.setText("Select end spot");
     this.farmInstrMid.setText(" - x");
@@ -3454,7 +3620,11 @@ setFarmInstructionPhase2(totalNeeded) {
     const enough = (this.seeds >= totalNeeded);
     this.farmInstrSeedCount.setColor(enough ? "#00ff00" : "#ff4444");
 
-    this.farmInstrRight.setText("  Esc to go back");
+    this.farmInstrRight.setText(
+        maxSeedsReached
+            ? `  Max ${cappedTotal} seeds reached. Esc to go back`
+            : "  Esc to go back"
+    );
     this.farmInstrRight.setColor("#ff4444");
 
     this.showFarmInstruction();
@@ -3523,6 +3693,7 @@ getPendingFarmTileKeySet() {
 getFarmSelectionPreviewData(minX, maxX, minY, maxY) {
     const pending = this.getPendingFarmTileKeySet();
     const cells = [];
+    const availableNewSeeds = Math.max(0, (this.seeds ?? 0) - pending.size);
 
     const startX = Phaser.Math.Clamp(minX, 0, WORLD_DIMENSIONX - 1);
     const endX = Phaser.Math.Clamp(maxX, 0, WORLD_DIMENSIONX - 1);
@@ -3534,17 +3705,43 @@ getFarmSelectionPreviewData(minX, maxX, minY, maxY) {
             pendingCount: pending.size,
             newCount: 0,
             totalNeeded: pending.size,
+            cappedTotal: Math.min(pending.size, this.seeds ?? 0),
+            plantableNewCount: 0,
+            availableNewSeeds,
+            maxSeedsReached: pending.size > (this.seeds ?? 0),
             validSelection: false,
             enoughSeeds: pending.size <= this.seeds,
             cells,
         };
     }
 
-    const availableNewSeeds = Math.max(0, (this.seeds ?? 0) - pending.size);
     let newCount = 0;
+    const pivotX = Phaser.Math.Clamp(
+        (this.startCell && this.startCell.x >= startX && this.startCell.x <= endX) ? this.startCell.x : startX,
+        startX,
+        endX
+    );
+    const pivotY = Phaser.Math.Clamp(
+        (this.startCell && this.startCell.y >= startY && this.startCell.y <= endY) ? this.startCell.y : startY,
+        startY,
+        endY
+    );
+    const targetX = typeof this.endCell?.x === "number" ? this.endCell.x : endX;
+    const targetY = typeof this.endCell?.y === "number" ? this.endCell.y : endY;
+    const xStep = targetX < pivotX ? -1 : 1;
+    const yStep = targetY < pivotY ? -1 : 1;
+    const xValues = [];
+    const yValues = [];
 
-        for (let y = startY; y <= endY; y++) {
-        for (let x = startX; x <= endX; x++) {
+    for (let x = pivotX; xStep > 0 ? x <= endX : x >= startX; x += xStep) {
+        xValues.push(x);
+    }
+    for (let y = pivotY; yStep > 0 ? y <= endY : y >= startY; y += yStep) {
+        yValues.push(y);
+    }
+
+    for (const y of yValues) {
+        for (const x of xValues) {
             const kind = this.getFarmTilePlacementType(x, y);
             if (!kind) continue;
 
@@ -3570,10 +3767,16 @@ getFarmSelectionPreviewData(minX, maxX, minY, maxY) {
     }
 
     const totalNeeded = pending.size + newCount;
+    const plantableNewCount = Math.min(newCount, availableNewSeeds);
+    const cappedTotal = pending.size + plantableNewCount;
     return {
         pendingCount: pending.size,
         newCount,
         totalNeeded,
+        cappedTotal,
+        plantableNewCount,
+        availableNewSeeds,
+        maxSeedsReached: totalNeeded > cappedTotal,
         validSelection: newCount > 0,
         enoughSeeds: totalNeeded <= this.seeds,
         cells,
@@ -3660,9 +3863,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
             const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
             if (!preview.validSelection) return;
-
-            if (!this.checkSufficientSeeds(preview.totalNeeded)) {
-                // stay in phase 2, user can resize selection or Esc back
+            if ((preview.plantableNewCount || 0) <= 0) {
                 return;
             }
 
@@ -3708,13 +3909,21 @@ cancelFarmSelection(exitFarmMode = false) {
             // FARM/TILL selection mode
             const tillList = Teams.teamLists['1'].tileList;
             const preview = this.getFarmSelectionPreviewData(minX, maxX, minY, maxY);
+            const maxNewSeeds = Math.max(0, preview.plantableNewCount || 0);
+            let addedCount = 0;
 
             for (const cell of preview.cells) {
+                if (addedCount >= maxNewSeeds) break;
                 const key = `${cell.x},${cell.y}`;
                 if (existing.has(key)) continue;
                 existing.add(key);
                 tillList.push({ x: cell.x, y: cell.y, assigned: 0, kind: cell.kind });
                 this.addTillPreviewSprite(cell.x, cell.y, cell.queuedTint ?? cell.tint);
+                addedCount++;
+            }
+
+            if (addedCount > 0) {
+                AudioManager.playBuildingComplete({ volume: 0.2 });
             }
 
             // IMPORTANT: do NOT turn farmMode off here.
@@ -3886,6 +4095,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
     updateMoney(amountDelta) {
         this.money += amountDelta;
+        SaveManager.queueAutosave("money");
         if (this.uiScene?.onMoneyChanged) {
             this.uiScene.onMoneyChanged(amountDelta);
             return;
@@ -3930,6 +4140,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
     updateSeeds(amountDelta) {
         this.seeds += amountDelta;
+        SaveManager.queueAutosave("seeds");
         if (this.uiScene?.onSeedsChanged) {
             this.uiScene.onSeedsChanged(amountDelta);
             return;
@@ -3972,6 +4183,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
     updateBerry(amountDelta) {
         this.berries += amountDelta;
+        SaveManager.queueAutosave("berries");
         if (this.uiScene?.onBerryChanged) {
             this.uiScene.onBerryChanged(amountDelta);
             return;
@@ -4011,6 +4223,7 @@ cancelFarmSelection(exitFarmMode = false) {
 
     updatePermits(amountDelta) {
         this.permits = Math.max(0, (this.permits ?? 0) + amountDelta);
+        SaveManager.queueAutosave("permits");
         if (this.uiScene?.onPermitsChanged) {
             this.uiScene.onPermitsChanged(amountDelta);
             return;
@@ -4053,6 +4266,7 @@ cancelFarmSelection(exitFarmMode = false) {
     
     
     createAnim(key,repeat = -1, frameRate = 3, end=2){
+        if (this.anims.exists(key)) return;
         this.anims.create({
             key: key,
             frames: this.anims.generateFrameNumbers(key, { start: 0, end: end }),
@@ -4062,14 +4276,15 @@ cancelFarmSelection(exitFarmMode = false) {
     }
     
     update(time, delta) {
+        if (this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive) {
+            this._applyStartupCameraPose();
+        }
         this._updateOceanBackdrop();
         const effectiveSimSpeed = this.applySimulationSpeed();
-
         if (effectiveSimSpeed > 0) {
             const simDeltaMs = delta * effectiveSimSpeed;
             this.simNowMs += simDeltaMs;
             const simNowMs = this.getSimulationNow();
-
             Turret.updateAll(simNowMs, simDeltaMs);
             Catapult.updateAll(simNowMs, simDeltaMs);
             this.clock.update(Math.max(1, Math.round(effectiveSimSpeed)));
@@ -4090,9 +4305,17 @@ cancelFarmSelection(exitFarmMode = false) {
         this._refreshNorthFortArrivalMarker();
         this._syncNightPressurePreviewPanels();
         this._tryPresentPendingTownXpReward();
+        this.achievementSystem?.update?.();
+        SaveManager.tick(this);
+        if (this._startupCameraLocked && (this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive)) {
+            this._applyStartupCameraPose();
+        }
     }
 
     showSaveNotification() {
+        if (this.uiScene?.showSaveNotification) {
+            return this.uiScene.showSaveNotification();
+        }
         const text = this.add.text(this.cameras.main.width / 2, -50, "World data saved 🌍", {
             fontSize: "32px",
             fill: "#ffffff",
@@ -4212,6 +4435,8 @@ cancelFarmSelection(exitFarmMode = false) {
 
     renderFarmSelectionPreview(cells = []) {
         const desired = new Set();
+        let addedCount = 0;
+        let removedCount = 0;
 
         for (const cell of cells) {
             const key = `${cell.x},${cell.y}`;
@@ -4224,12 +4449,24 @@ cancelFarmSelection(exitFarmMode = false) {
             }
 
             this.addFarmSelectionPreviewSprite(cell.x, cell.y, cell.tint ?? 0x52ff7a);
+            addedCount++;
         }
 
         for (const [key, spr] of this.farmSelectionPreviewSprites.entries()) {
             if (desired.has(key)) continue;
             spr.destroy();
             this.farmSelectionPreviewSprites.delete(key);
+            removedCount++;
+        }
+
+        if (this.farmSelectActive && this.farmSelectPhase === 2) {
+            const bubbleCount = addedCount + removedCount;
+            for (let index = 0; index < bubbleCount; index++) {
+                AudioManager.playMenuClick({
+                    volume: 0.1,
+                    rate: removedCount > 0 && index >= addedCount ? 1.04 : 1,
+                });
+            }
         }
     }
 
@@ -4289,6 +4526,7 @@ cancelFarmSelection(exitFarmMode = false) {
         }
 
         spr.destroy();
+        AudioManager.playMenuClick({ volume: 0.1, rate: 1.04 });
     }
 
     startStageCompleteSequence(stageIndex, meta) {
@@ -4680,7 +4918,7 @@ const config = {
     dom: { createContainer: true },  // <-- THIS fixes the error
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: '#1e6f93',
+    backgroundColor: 0x156c99,
     scene: [mapView, GameUIScene, itemTab],
     scale: {
         mode: Phaser.Scale.RESIZE,

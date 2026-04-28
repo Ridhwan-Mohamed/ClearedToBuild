@@ -2,6 +2,7 @@
 
 import { UIDEPTH } from '../constants';
 import { UI_ITEM_TYPES } from './UIConstants';
+import { BUILDING_PANEL_TEXT_STYLES, createBuildingHoverPanel } from './BuildingTheme';
 
 export class StorageUI {
     static scene = null;
@@ -26,17 +27,21 @@ export class StorageUI {
 
         let ui = storage.statusUI;
         if (!ui) {
-            const container = this.scene.add.container(0, 0).setDepth(UIDEPTH + 1).setScrollFactor(0);
-            const bg = this.scene.add.rectangle(0, 0, style.width, style.height, style.bg, 0.95)
-                .setStrokeStyle(1, 0xffffff, 0.18);
+            const container = createBuildingHoverPanel(this.scene, {
+                width: style.width + 16,
+                height: style.height + 8,
+                depth: UIDEPTH + 1,
+                scrollFactor: 0,
+                accentColor: style.bg,
+            });
+            const bg = container.panelBg;
             const text = this.scene.add.text(0, 0, style.label, {
-                fontSize: '8px',
-                fill: style.text,
-                fontFamily: 'Bungee',
+                ...BUILDING_PANEL_TEXT_STYLES.compactBody,
+                color: style.text,
                 align: 'center'
             }).setOrigin(0.5).setLineSpacing(-2);
 
-            container.add([bg, text]);
+            container.add(text);
 
             const updatePosition = () => {
                 if (!storage?.sprite?.active) return;
@@ -87,47 +92,44 @@ export class StorageUI {
         if (storage.minorUI) return;
         const capacity = Number(storage?.capacity ?? 0) || 8;
 
-        const bg = this.scene.add.rectangle(0, 0, 60, 14, 0x000000, 0.75)
-            .setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH);
+        const panel = createBuildingHoverPanel(this.scene, {
+            width: 88,
+            height: 30,
+            depth: UIDEPTH,
+            scrollFactor: 0,
+            accentColor: 0x9ee493,
+        });
 
         const text = this.scene.add.text(0, 0, `${storage.totalStored}/${capacity}`, {
-            fontSize: '12px',
-            fill: '#ffffff',
-            fontFamily: 'Bungee',
+            ...BUILDING_PANEL_TEXT_STYLES.compact,
             align: 'center'
-        }).setOrigin(0.5).setScrollFactor(0).setDepth(UIDEPTH);
+        }).setOrigin(0.5);
+        panel.add(text);
 
         const updatePosition = () => {
             const { x, y } = storage.sprite;
-            bg.setPosition(x - this.scene.cameras.main.scrollX, y - 40 - this.scene.cameras.main.scrollY);
-            text.setPosition(bg.x, bg.y);
+            panel.setPosition(x - this.scene.cameras.main.scrollX, y - 44 - this.scene.cameras.main.scrollY);
         };
 
         updatePosition();
         this.scene.events.on('update', updatePosition);
-        bg._uiUpdate = updatePosition;
-        text._uiUpdate = updatePosition;
+        panel._uiUpdate = updatePosition;
 
-        storage.minorUI = [bg, text];
+        storage.minorUI = { root: panel, text };
     }
 
     static refreshMinor(storage) {
-        if (!storage.minorUI || !Array.isArray(storage.minorUI)) return;
+        if (!storage.minorUI?.text) return;
 
         const total = storage.getTotalCount?.() ?? storage.totalStored ?? 0;
         const capacity = Number(storage?.capacity ?? 0) || 8;
-        const [bg, text] = storage.minorUI;
-        if (text?.setText) {
-            text.setText(`${total}/${capacity}`);
-        }
+        storage.minorUI.text.setText(`${total}/${capacity}`);
     }
 
     static hideMinor(storage) {
         if (storage.minorUI) {
-            storage.minorUI.forEach(el => {
-                if (el._uiUpdate) this.scene.events.off('update', el._uiUpdate);
-                el.destroy();
-            });
+            if (storage.minorUI.root?._uiUpdate) this.scene.events.off('update', storage.minorUI.root._uiUpdate);
+            storage.minorUI.root?.destroy?.();
             storage.minorUI = null;
         }
     }

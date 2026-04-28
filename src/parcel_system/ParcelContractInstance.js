@@ -5,7 +5,7 @@ import { paintResourceParcel, paintWaterRect } from "./ParcelTerrain.js";
 import { createPressureSpawners } from "./PressureSpawner.js";
 import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
 import { Map as GameMap } from "../map.js";
-import { TILE_TYPES, TILE_MAP, SQUARESIZE, colorFor, removeFromArray } from "../constants.js";
+import { TILE_TYPES, TILE_MAP, SQUARESIZE, removeFromArray } from "../constants.js";
 import { spawnMarketShip, DEFAULT_SUPPLY_PRICES } from "../UI/ShipMarket";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { FarmBushNode } from "../buildings/FarmBushNode";
@@ -363,6 +363,16 @@ export class ParcelContractInstance {
     }
   }
 
+  getParcelBounds() {
+    return {
+      x: this.origin?.x ?? 0,
+      y: this.origin?.y ?? 0,
+      w: PARCEL_SIZE,
+      h: PARCEL_SIZE,
+      parcelTag: `parcel:${this.slotId}`,
+    };
+  }
+
   spawn() {
     const M = this.map;
 
@@ -458,6 +468,7 @@ export class ParcelContractInstance {
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
       const prices = { ...DEFAULT_SUPPLY_PRICES };
+      this._marketPrices = { ...prices };
 
       this._marketShipHandle = spawnMarketShip(this.scene, {
         parcelCenterWorld: { x: cx, y: cy },
@@ -476,6 +487,162 @@ export class ParcelContractInstance {
     }
 
     GameMap._uiIgnoreWorldLayer();
+  }
+
+  getSnapshot() {
+    return {
+      id: this.id,
+      type: this.type,
+      slotId: this.slotId,
+      origin: this.origin ? { x: this.origin.x, y: this.origin.y } : null,
+      expireAt: this.expireAt ?? null,
+      difficulty: this.difficulty ?? 1,
+      spawned: this.spawned ?? 0,
+      killed: this.killed ?? 0,
+      totalPlannedEnemies: this.totalPlannedEnemies ?? 0,
+      enemyType: this.enemyType ?? "raider",
+      enemyTypeLabel: this.enemyTypeLabel ?? "Raiders",
+      spawnerCount: this.spawnerCount ?? 0,
+      pressureSource: this.pressureSource ?? "manual",
+      pressureOwnerTower: this.pressureOwnerTower ?? null,
+      pressureModifierKey: this.pressureModifierKey ?? null,
+      pressureModifier: this.pressureModifier ? { ...this.pressureModifier } : null,
+      pressureHordeIndex: this.pressureHordeIndex ?? null,
+      militiaConfig: this.militiaConfig ? { ...this.militiaConfig } : null,
+      marketPrices: this._marketPrices ? { ...this._marketPrices } : null,
+      permitCost: this.permitCost ?? 0,
+      placedObjects: (this.placedObjects || [])
+        .filter((obj) => obj && obj.active !== false)
+        .map((obj) => ({
+          kind: obj.resourceKind
+            ? `${obj.resourceKind}_bush`
+            : (obj.resourceTileType?.name || obj.tileType?.name || (obj.enemyType ? "spawner" : null)),
+          x: Number(obj.gridX ?? obj.x ?? obj.tilePos?.tileX ?? 0),
+          y: Number(obj.gridY ?? obj.y ?? obj.tilePos?.tileY ?? 0),
+          health: Number(obj.health ?? obj.hp ?? 0),
+          maxHealth: Number(obj.maxHealth ?? obj.maxHp ?? 0),
+          quotaRemaining: Number(obj.quotaRemaining ?? 0),
+          aliveCount: Number(obj.aliveCount ?? 0),
+          intervalMs: Number(obj.intervalMs ?? 0),
+          enemyType: obj.enemyType ?? null,
+          enemyMods: obj.enemyMods ? { ...obj.enemyMods } : null,
+          enemyTypeLabel: obj.enemyTypeLabel ?? null,
+          modifierKey: obj.modifierKey ?? null,
+          modifierLabel: obj.modifierLabel ?? null,
+        })),
+    };
+  }
+
+  restoreSnapshot(saved = null) {
+    if (!saved) return;
+    this.expireAt = saved.expireAt ?? this.expireAt;
+    this.spawned = Number(saved.spawned ?? this.spawned ?? 0);
+    this.killed = Number(saved.killed ?? this.killed ?? 0);
+    this.totalPlannedEnemies = Number(saved.totalPlannedEnemies ?? this.totalPlannedEnemies ?? 0);
+    this.enemyType = saved.enemyType ?? this.enemyType;
+    this.enemyTypeLabel = saved.enemyTypeLabel ?? this.enemyTypeLabel;
+    this.spawnerCount = Number(saved.spawnerCount ?? this.spawnerCount ?? 0);
+    this.permitCost = Number(saved.permitCost ?? this.permitCost ?? 0);
+    this._marketPrices = saved.marketPrices ? { ...saved.marketPrices } : this._marketPrices;
+    this.militiaConfig = saved.militiaConfig ? { ...saved.militiaConfig } : this.militiaConfig;
+    this.pressureModifier = saved.pressureModifier ? { ...saved.pressureModifier } : this.pressureModifier;
+    this.pressureModifierKey = saved.pressureModifierKey ?? this.pressureModifierKey;
+    this.pressureOwnerTower = saved.pressureOwnerTower ?? this.pressureOwnerTower;
+    this.pressureHordeIndex = saved.pressureHordeIndex ?? this.pressureHordeIndex;
+    this.pressureSource = saved.pressureSource ?? this.pressureSource;
+
+    if (this.type === "PRESSURE") {
+      const spawnerSnapshots = Array.isArray(saved.placedObjects) ? saved.placedObjects.filter((entry) => entry.kind === "spawner") : [];
+      this.spawners = [];
+      this.placedObjects = [];
+      for (const entry of spawnerSnapshots) {
+        const spawner = this.pm.spawnSpawnerBuilding({
+          gx: entry.x,
+          gy: entry.y,
+          contractId: this.id,
+          plannedEnemies: entry.quotaRemaining,
+          spawnIntervalMs: entry.intervalMs,
+          enemyType: entry.enemyType || this.enemyType,
+          enemyMods: entry.enemyMods || this.pressureModifier,
+          enemyTypeLabel: entry.enemyTypeLabel || this.enemyTypeLabel,
+          modifierKey: entry.modifierKey || this.pressureModifierKey,
+          modifierLabel: entry.modifierLabel || this.pressureModifier?.label || null,
+        });
+        if (!spawner) continue;
+        spawner.hp = Number(entry.health ?? spawner.hp ?? 0);
+        spawner.maxHp = Number(entry.maxHealth ?? spawner.maxHp ?? 0);
+        spawner.quotaRemaining = Number(entry.quotaRemaining ?? spawner.quotaRemaining ?? 0);
+        spawner.aliveCount = Number(entry.aliveCount ?? spawner.aliveCount ?? 0);
+        spawner._updateCounter?.();
+        this.spawners.push({ building: spawner });
+        this.placedObjects.push(spawner);
+      }
+      this._startUITick();
+      return;
+    }
+
+    if (this.type === "FOREST" || this.type === "ROCK") {
+      const entries = Array.isArray(saved.placedObjects) ? saved.placedObjects : [];
+      this.placedObjects = [];
+      for (const entry of entries) {
+        const tileType = entry.kind === "pine" ? TILE_TYPES.pine : TILE_TYPES.rock;
+        const obj = GameMap.handleLoadNonSpread(entry.x, entry.y, tileType);
+        if (!obj) continue;
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+        obj.health = Number(entry.health ?? obj.health ?? 0);
+        this.placedObjects.push(obj);
+      }
+      this._startUITick();
+      const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
+      this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      return;
+    }
+
+    if (this.type === "FARM") {
+      FarmBushNode.init(this.scene);
+      const entries = Array.isArray(saved.placedObjects) ? saved.placedObjects : [];
+      this.placedObjects = [];
+      for (const entry of entries) {
+        const kind = String(entry.kind || "").startsWith("berry") ? "berry" : "seed";
+        const obj = new FarmBushNode(entry.x, entry.y, kind);
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+        obj.health = Number(entry.health ?? obj.health ?? 0);
+        this.placedObjects.push(obj);
+      }
+      this._startUITick();
+      const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
+      this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      return;
+    }
+
+    if (this.type === "MILITIA") {
+      this._spawnMilitiaFormation();
+      this._startUITick();
+      const remaining = Math.max(0, Number(this.expireAt || 0) - Date.now());
+      this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      return;
+    }
+
+    if (this.type === "MARKET") {
+      const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
+      const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
+      const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
+      this._startUITick();
+      this._marketShipHandle = spawnMarketShip(this.scene, {
+        parcelCenterWorld: { x: cx, y: cy },
+        slotId: this.slotId,
+        teamNumber: 1,
+        durationMs: remaining,
+        prices: this._marketPrices || { ...DEFAULT_SUPPLY_PRICES },
+      });
+      this.timerEvent = this.scene.time.delayedCall(remaining, () => {
+        const handle = this._marketShipHandle;
+        if (handle?.depart) handle.depart(() => this.complete("timeout"));
+        else this.complete("timeout");
+      }, null, this);
+    }
   }
 
   onRaiderSpawned() {
@@ -571,11 +738,18 @@ export class ParcelContractInstance {
     }
 
     this.spawners = [];
-    if (this.scene?.zoomMixer?.mode !== "overview") {
-      this.map.reDraw?.();
+    if (this.scene?.refreshParcelArea) {
+      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
+        waterSourceUpdate: {
+          excludeParcelId: this.id,
+        },
+      });
+    } else {
+      if (this.scene?.zoomMixer?.mode !== "overview") {
+        this.map.reDraw?.();
+      }
+      this.scene?.rebuildBothNavMeshes?.();
     }
-    this.scene.rebuildBothNavMeshes();
-    this.scene.zoomMixer.buildOverviewTextureFromGrid(this.map.grid, SQUARESIZE, (cell) => colorFor(cell));
     GameMap._uiIgnoreWorldLayer();
     this.pm.removeContract(this.slotId, this.id, reason);
   }

@@ -4,8 +4,9 @@
   "description": "",
   "scripts": {
     "start": "parcel ./src/index.html",
+    "start:navmesh-lab": "parcel ./src/examples/navmesh-lab/index.html",
     "start:clean": "powershell -Command \"Remove-Item -Recurse -Force dist,.parcel-cache -ErrorAction SilentlyContinue; parcel ./src/index.html\"",
-    "build": "parcel build ./src/index.html --public-url ./ --dist-dir dist --no-scope-hoist",
+    "build": "parcel build ./src/index.html ./src/examples/navmesh-lab/index.html --public-url ./ --dist-dir dist --no-scope-hoist",
     "deploy": "gh-pages -d dist",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

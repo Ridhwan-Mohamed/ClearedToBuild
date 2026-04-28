@@ -11,6 +11,8 @@ import {
   mixColor,
   setHoverLiftState,
 } from "./BottomBarTheme";
+import { AudioManager } from "../../Manager/AudioManager.js";
+import { UIDEPTH } from "../../constants.js";
 
 const COLOR_DARK = 0x0f3144;
 const COLOR_FUNCTIONS = 0x8f7cff;
@@ -20,22 +22,31 @@ const COLOR_STORAGE   = 0xffc97a;
 const COLOR_CARDS     = 0xffdd73;
 const COLOR_BROWNISH  = 0xa78bfa;
 const COLOR_BUILD     = 0xff97c2;
+const BOTTOM_BAR_DEPTH = UIDEPTH + 40;
 
 // after EXPANDED/COLLAPSED:
-const COLLAPSED = 32;     // how much of the bar stays visible when hidden
+const COLLAPSED = 100;     // how much of the bar stays visible when hidden
 const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
 const START_OPEN  = false; // start expanded?
+const BOTTOM_BAR_SIDE_INSET = 12;
+
+function getBottomBarWidth(scene) {
+  return Math.max(0, scene.scale.width - (BOTTOM_BAR_SIDE_INSET * 2));
+}
 
 export function CreateBottomBar(scene) {
   scene.uiBottomBar?.destroy?.();
   const tabPage = CreateTabPage(scene);
   const collapsedOffset = EXPANDED - COLLAPSED + 155;
+  const barWidth = getBottomBarWidth(scene);
 
   const ui = tabPage.sizer
     .setOrigin(0.5, 1)
+    .setDepth(BOTTOM_BAR_DEPTH)
+    .setScrollFactor(0)
     // ✅ start in collapsed position (no mystery +95/+155)
     .setPosition(scene.scale.width / 2, scene.scale.height + collapsedOffset)
-    .setMinSize(scene.scale.width, EXPANDED)
+    .setMinSize(barWidth, EXPANDED)
     .layout();
 
   const tabs = tabPage.tabs;
@@ -63,10 +74,11 @@ export function CreateBottomBar(scene) {
 
   const syncBottomBarLayout = () => {
     const width = scene.scale.width;
+    const barWidth = getBottomBarWidth(scene);
     const expandedY = scene.scale.height;
     const collapsedY = scene.scale.height + collapsedOffset;
     const progress = scene.uiBottomBar?.openProgress ?? (expanded ? 1 : 0);
-    ui.setMinSize(width, EXPANDED);
+    ui.setMinSize(barWidth, EXPANDED);
     ui.setPosition(width / 2, Phaser.Math.Linear(collapsedY, expandedY, progress));
     ui.layout();
     syncTabButtonAnchors(tabs, toggleBtn);
@@ -77,21 +89,24 @@ export function CreateBottomBar(scene) {
 
   // ensure setBottomBar updates scene.uiBottomBar.expanded too
   function setBottomBar(open) {
+    const nextOpen = !!open;
+    if (nextOpen === expanded && !tween) return;
     if (tween) tween.stop();
+    AudioManager.playSwipe({ volume: 0.28 });
     tween = scene.tweens.add({
       targets: ui,
-      y: open ? scene.uiBottomBar.expandedY : scene.uiBottomBar.collapsedY,
+      y: nextOpen ? scene.uiBottomBar.expandedY : scene.uiBottomBar.collapsedY,
       duration: 200,
       ease: 'Cubic.easeOut',
       onUpdate: () => {
         const expandedY = scene.uiBottomBar.expandedY;
         const collapsedY = scene.uiBottomBar.collapsedY;
         const travel = collapsedY - expandedY;
-        const progress = travel <= 0 ? (open ? 1 : 0) : Phaser.Math.Clamp((collapsedY - ui.y) / travel, 0, 1);
+        const progress = travel <= 0 ? (nextOpen ? 1 : 0) : Phaser.Math.Clamp((collapsedY - ui.y) / travel, 0, 1);
         scene.uiBottomBar.openProgress = progress;
       },
       onComplete: () => {
-        expanded = open;
+        expanded = nextOpen;
         scene.uiBottomBar.expanded = open;   // ✅ keep in sync
         scene.uiBottomBar.openProgress = open ? 1 : 0;
         tween = null;
@@ -115,6 +130,7 @@ export function CreateBottomBar(scene) {
   const onTabButtonClick = (btn) => {
     const key = btn?.name;
     if (!key) return;
+    AudioManager.playBottomBarClick();
     scene.cameras.main?.setScroll?.(0, 0);
 
     pages.swapPage(key);
@@ -126,11 +142,13 @@ export function CreateBottomBar(scene) {
       scene.playerTab?.hidePortrait?.();
       scene.playerTab?.onHide?.();
     }
+    if (key !== 'functions') scene.functionTab?.hide?.();
     if (key !== 'ovens')   scene.clayTab?.hide?.();
     if (key !== 'storage') scene.storageTab?.hide?.();
     if (key !== 'houses')  scene.housesTab?.hide?.();
     if (key !== 'build') scene.buildTab?.hide?.();
 
+    if (key === 'functions') scene.functionTab?.onShow?.();
     if (key === 'ovens')   scene.clayTab?.onShow?.();
     if (key === 'storage') scene.storageTab?.onShow?.();
     if (key === 'players') scene.playerTab?.onShow?.();
@@ -187,6 +205,7 @@ export function CreateBottomBar(scene) {
   // default page
   pages.swapPage('functions');
   tabs.setValue?.('functions');
+  scene.functionTab?.onShow?.();
   updateTabButtonStyles(tabs, 'functions');
 
   // (optional) spacebar toggle
@@ -238,12 +257,12 @@ export function CreateBottomBar(scene) {
 
 var CreateTabPage = function (scene) {
   const sizer = scene.rexUI.add.sizer({
-    width: scene.scale.width,
+    width: getBottomBarWidth(scene),
     orientation: 'y',
     space: { left: 0, right: 0, top: 0, bottom: 0, item: 0 }
   });
   sizer.addBackground(
-    makeGlassRoundRect(scene, 0, 0, 24, {
+    makeGlassRoundRect(scene, 0, 0, 0, {
       fill: BOTTOM_BAR_THEME.shellFill,
       alpha: BOTTOM_BAR_THEME.shellAlpha,
       stroke: BOTTOM_BAR_THEME.shellStroke,
@@ -253,7 +272,7 @@ var CreateTabPage = function (scene) {
 
   const topRow = scene.rexUI.add.sizer({ orientation: 'x', space: { item: 6 } });
   topRow.addBackground(
-    makeGlassRoundRect(scene, 0, 0, 18, {
+    makeGlassRoundRect(scene, 0, 0, 0, {
       fill: mixColor(BOTTOM_BAR_THEME.shellFill, 0xffffff, 0.08),
       alpha: 0.78,
       stroke: BOTTOM_BAR_THEME.shellStroke,
@@ -378,14 +397,15 @@ var CreateToggleLabel = function (scene, text, width = 44) {
 };
 
 var CreatePages = function (scene) {
+    const pageWidth = getBottomBarWidth(scene);
     const pages = scene.rexUI.add.pages({ fadeDuration: 500 })
-        .addBackground(makeGlassRoundRect(scene, 0, 0, 22, {
+        .addBackground(makeGlassRoundRect(scene, 0, 0, 0, {
           fill: COLOR_DARK,
           alpha: 0.72,
           stroke: BOTTOM_BAR_THEME.shellStroke,
           strokeAlpha: 0.10,
         }))
-        .add(new FunctionTab(scene, 0, 0, scene.scale.width, EXPANDED - 34).getContainer(), { key: 'functions', expand: true });
+        .add(new FunctionTab(scene, 0, 0, pageWidth, EXPANDED - 34).getContainer(), { key: 'functions', expand: true });
 
     const playerTab = new PlayerTab(scene);
     pages.add(playerTab.view, { key: 'players', expand: true });
@@ -397,7 +417,7 @@ var CreatePages = function (scene) {
     scene.clayTab = clayTab;
 
     // inside CreatePages(scene) where other tabs are created
-    scene.buildTab = new BuildTab(scene, 0, 0, scene.scale.width, EXPANDED - 40); // pass dimensions to BuildTab
+    scene.buildTab = new BuildTab(scene, 0, 0, pageWidth, EXPANDED - 40); // pass dimensions to BuildTab
     pages.add(scene.buildTab.view, { key: 'build', expand: true });
 
     const storageTab = new StorageTab(scene);

@@ -13,6 +13,7 @@ import { TowerBuilding } from "../buildings/Tower"
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker"
 import { UI_ITEM_TYPES } from "../UI/UIConstants"
 import { AudioManager } from "./AudioManager"
+import { StorageManager } from "./StorageManager"
 import { PathRegistry } from "../lib/navmesh/PathRegistry"
 import { PathRepair } from "../lib/navmesh/PathRepair"
 import { Wall } from "../buildings/Wall"
@@ -24,6 +25,7 @@ import { Gunslinger } from "../players/Gunslinger"
 import { Projectile } from "../Projectile"
 import { Scheduler } from "../ai/scheduler/Scheduler"
 import { updateDirectionalAnimationFromVelocity } from "../players/PlayerDirectionalAnimator"
+import { fightManager } from "./fightManager"
 
 export class buildingManager{
 
@@ -32,6 +34,13 @@ export class buildingManager{
     static scene;
     static blockBuildingDuration = 250;
     static tileBuildingDuration = 1000;
+    static _selectedWallJobId = null;
+    static _selectedWallJobTeamNumber = 1;
+    static _hoveredWallJobId = null;
+    static _hoveredWallJobTeamNumber = 1;
+    static _selectedConstructionTask = null;
+    static _selectedConstructionTeamNumber = 1;
+    static _wallJobSeed = 1;
 
     static createBuildTileStateArray(tiles, teamNumber, buildTypeName = null) {
         const team = Teams.teamLists[teamNumber];
@@ -47,11 +56,22 @@ export class buildingManager{
             assigned: 0,
             type: buildType,
             buildType,
+            buildTypeName: typeName,
+            teamNumber: Number(teamNumber),
+            refundCost: tile.refundCost ?? buildType.cost ?? buildType.price ?? null,
+            prepaid: !!tile.prepaid,
+            wallJobId: tile.wallJobId ?? null,
             queueKey: "buildingTileStates",
             };
             team.buildingTileStates.push(task);
-            this.ensureQueuedTileBuildGhost(task, teamNumber);
         });
+
+        this.refreshQueuedTileBuildGhosts(teamNumber);
+    }
+
+    static createWallJobId(teamNumber = 1) {
+        const seed = this._wallJobSeed++;
+        return `wall-job-${Number(teamNumber) || 1}-${seed}`;
     }
 
     static getSelectedBuilders(teamNumber = 1) {
@@ -131,8 +151,15 @@ export class buildingManager{
         if (removeQueueTask && resolvedQueueKey && task) {
             Teams.removeFromStateArray(teamNumber, resolvedQueueKey, task);
         }
+        if (task && resolvedQueueKey === "buildingTileStates" && !removeQueueTask) {
+            task._constructionStarted = false;
+            task._buildStartedAt = null;
+            this._stopConstructionTaskUiTicker(task);
+            this.updateConstructionHoverText(task);
+        }
         if (clearGhost && task) {
-            this.clearQueuedTileBuildGhost(task);
+            if (resolvedQueueKey === "blockBuildingStates") this.clearQueuedBlockBuildGhost(task);
+            else this.clearQueuedTileBuildGhost(task);
         }
 
         if (troop.timer) {
@@ -274,48 +301,529 @@ export class buildingManager{
         return true;
     }
 
-    static ensureQueuedTileBuildGhost(task, teamNumber = 1) {
-        teamNumber = Number(teamNumber);
-        if (!task || task.constructionSprite || !this.scene?.add) return task?.constructionSprite ?? null;
+    static _wallFamilyForTypeName(typeName) {
+        if (typeName === "wall" || typeName === "wall_door") return "stone";
+        if (typeName === "woodWall" || typeName === "woodWall_door") return "wood";
+        return null;
+    }
 
-        const sprite = this.scene.add.image(
-            task.x * SQUARESIZE + SQUARESIZE / 2,
-            task.y * SQUARESIZE + SQUARESIZE / 2,
-            "construction"
-        )
-            .setDisplaySize(SQUARESIZE, SQUARESIZE)
-            .setDepth(BLOCKDEPTH + 0.15)
-            .setAlpha(0.68)
-            .setInteractive({ useHandCursor: true });
+    static _isQueuedWallTask(task) {
+        const typeName = task?.buildTypeName ?? task?.buildType?.name ?? task?.type?.name ?? null;
+        return this._wallFamilyForTypeName(typeName) != null;
+    }
 
-        task.constructionSprite = sprite;
-        task.queueKey = task.queueKey ?? "buildingTileStates";
-        task._hovering = false;
+    static _queuedWallPieceAngle(gridVal, family) {
+        const def = family === "wood" ? TILE_TYPES.woodWall : TILE_TYPES.wall;
+        if (gridVal === def.interior) return 0;
+        if (gridVal === def.sides.up) return 0;
+        if (gridVal === def.sides.right) return 90;
+        if (gridVal === def.sides.down) return 180;
+        if (gridVal === def.sides.left) return 270;
+        if (gridVal === def.corners.topLeft) return 0;
+        if (gridVal === def.corners.topRight) return 90;
+        if (gridVal === def.corners.bottomRight) return 180;
+        if (gridVal === def.corners.bottomLeft) return 270;
+        return 0;
+    }
+
+    static _queuedWallDisplayInfo(task, queueTasks = []) {
+        const typeName = task?.buildTypeName ?? task?.buildType?.name ?? task?.type?.name ?? null;
+        const family = this._wallFamilyForTypeName(typeName);
+        if (!family) return null;
+
+        const isDoor = typeName === "wall_door" || typeName === "woodWall_door";
+        const queueMap = new globalThis.Map();
+        for (const queuedTask of queueTasks) {
+            const queuedTypeName = queuedTask?.buildTypeName ?? queuedTask?.buildType?.name ?? queuedTask?.type?.name ?? null;
+            if (this._wallFamilyForTypeName(queuedTypeName) !== family) continue;
+            queueMap.set(`${queuedTask.x},${queuedTask.y}`, queuedTypeName);
+        }
+
+        const placedMatchesFamily = (x, y) => {
+            const info = Map._wallStructureInfoAt?.(x, y) || null;
+            return this._wallFamilyForTypeName(info?.name) === family;
+        };
+        const solidAt = (x, y) => queueMap.has(`${x},${y}`) || placedMatchesFamily(x, y);
+
+        const up = solidAt(task.x, task.y - 1);
+        const down = solidAt(task.x, task.y + 1);
+        const left = solidAt(task.x - 1, task.y);
+        const right = solidAt(task.x + 1, task.y);
+        const count = (up ? 1 : 0) + (down ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
+
+        if (isDoor) {
+            const angle = up && down ? 90 : (left && right ? 0 : ((up || down) ? 90 : 0));
+            return { key: typeName, angle, alpha: 0.72 };
+        }
+
+        const def = family === "wood" ? TILE_TYPES.woodWall : TILE_TYPES.wall;
+        let gridVal = def.interior;
+
+        if (count === 1) {
+            if (up) gridVal = def.sides.right;
+            else if (right) gridVal = def.sides.up;
+            else if (down) gridVal = def.sides.left;
+            else gridVal = def.sides.down;
+        } else if (count === 2) {
+            if (up && down && !left && !right) gridVal = def.sides.right;
+            else if (left && right && !up && !down) gridVal = def.sides.up;
+            else if (up && left && !right && !down) gridVal = def.corners.bottomRight;
+            else if (up && right && !left && !down) gridVal = def.corners.bottomLeft;
+            else if (down && left && !right && !up) gridVal = def.corners.topRight;
+            else if (down && right && !left && !up) gridVal = def.corners.topLeft;
+        }
+
+        const key = family === "wood"
+            ? (gridVal === def.interior ? "woodWall_interior" : Object.values(def.sides).includes(gridVal) ? "woodWall_edge" : "woodWall_corner")
+            : (gridVal === def.interior ? "wall_interior" : Object.values(def.sides).includes(gridVal) ? "wall_edge" : "wall_corner");
+
+        return {
+            key,
+            angle: this._queuedWallPieceAngle(gridVal, family),
+            alpha: 0.68,
+        };
+    }
+
+    static _bindQueuedTileGhostInteractions(task, sprite, teamNumber = 1) {
+        sprite.removeAllListeners?.();
+        const isWallJobTask = this._isQueuedWallTask(task) && !!task?.wallJobId;
 
         sprite.on("pointerover", () => {
-            task._hovering = true;
-            sprite.setAlpha(0.85);
+            sprite.setAlpha(Math.max(Number(task._ghostBaseAlpha || sprite.alpha || 0.68), 0.68) + 0.17);
+            if (isWallJobTask) this.setQueuedWallJobHover(task.wallJobId, teamNumber);
         });
 
         sprite.on("pointerout", () => {
-            task._hovering = false;
-            sprite.setAlpha(0.68);
+            sprite.setAlpha(Number(task._ghostBaseAlpha || 0.68));
+            if (isWallJobTask && this._hoveredWallJobId === task.wallJobId) this.setQueuedWallJobHover(null, teamNumber);
         });
 
         sprite.on("pointerdown", () => {
+            if (isWallJobTask) {
+                const selectedBuilders = this.getSelectedBuilders(teamNumber);
+                if (!selectedBuilders.length) {
+                    this.selectQueuedWallJob(task.wallJobId, teamNumber);
+                    return;
+                }
+            }
             const selectedBuilders = this.getSelectedBuilders(teamNumber);
             if (selectedBuilders.length) {
                 this.assignSelectedBuildersToTask(task, CONTROL_STATES.BUILD_MODE_T, selectedBuilders);
                 return;
             }
-            this.cancelQueuedTileBuild(task, teamNumber);
+            this.selectQueuedConstructionTask(task, teamNumber);
         });
+    }
 
-        return sprite;
+    static _resolveQueuedBuildTeamNumber(task, fallback = 1) {
+        return Number(task?.teamNumber ?? task?.value?.teamNumber ?? task?.value?.team ?? fallback ?? 1) || 1;
+    }
+
+    static _getTaskDisplayName(task) {
+        const type = task?.type ?? task?.buildType ?? null;
+        const raw = type?.displayName || type?.name || task?.buildTypeName || "Building";
+        if (raw === "woodWall") return "Wood Wall";
+        if (raw === "wall") return "Stone Wall";
+        if (raw === "wall_door") return "Stone Door";
+        if (raw === "woodWall_door") return "Wood Door";
+        return String(raw)
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (m) => m.toUpperCase());
+    }
+
+    static _currentConstructionPercent(task) {
+        if (!task) return 0;
+        if (task.queueKey === "buildingTileStates" && task._constructionStarted) {
+            const total = Math.max(1, Number(task.totalDuration || this.tileBuildingDuration || 1));
+            const startedAt = Number(task._buildStartedAt || 0);
+            if (startedAt > 0 && this.scene?.time) {
+                const elapsed = Math.max(0, Number(this.scene.time.now || 0) - startedAt);
+                return Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
+            }
+        }
+
+        const total = Math.max(1, Number(task.totalDuration || task.duration || 1));
+        const done = total - Number(task.duration ?? total);
+        return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+    }
+
+    static _ensureConstructionTaskUi(task) {
+        const scene = this.scene;
+        if (!scene?.add || !task?.constructionSprite) return;
+
+        if (this._isQueuedWallTask(task)) {
+            task.labelBg?.destroy?.();
+            task.labelBg = null;
+            task.labelText?.destroy?.();
+            task.labelText = null;
+            return;
+        }
+
+        if (task.labelBg?.active) {
+            task.labelBg.destroy();
+        }
+        task.labelBg = null;
+
+        if (!task.labelText?.active) {
+            task.labelText = scene.add.text(0, 0, "", {
+                fontSize: "11px",
+                fill: "#ffffff",
+                stroke: "#000000",
+                strokeThickness: 3,
+                align: "center",
+                fontFamily: "Bungee",
+            })
+                .setOrigin(0.5, 0.5)
+                .setDepth(UIDEPTH + 6)
+                .setScrollFactor(1);
+        }
+    }
+
+    static _clearConstructionTaskUi(task) {
+        if (!task) return;
+        task._uiTicker?.remove?.(false);
+        task._uiTicker = null;
+        task.labelText?.destroy?.();
+        task.labelText = null;
+        if (this._selectedConstructionTask === task) {
+            this.clearQueuedConstructionSelection(this._selectedConstructionTeamNumber);
+        }
+    }
+
+    static _queuedWallJobTasks(wallJobId, teamNumber = 1) {
+        if (!wallJobId) return [];
+        const team = Teams.teamLists?.[teamNumber] ?? Teams.teamLists?.[`${teamNumber}`];
+        const queueTasks = Array.isArray(team?.buildingTileStates) ? team.buildingTileStates : [];
+        return queueTasks.filter((task) => task?.wallJobId === wallJobId && this._isQueuedWallTask(task));
+    }
+
+    static _commandBar() {
+        return this.scene?.uiScene?.selectionCommandBar ?? null;
+    }
+
+    static _formatCommandRefund(costObj = null) {
+        if (!costObj || typeof costObj !== "object") return "no refund";
+        const parts = [];
+        for (const [key, rawAmount] of Object.entries(costObj)) {
+            const amount = Math.max(0, Number(rawAmount) || 0);
+            if (!(amount > 0)) continue;
+            if (key === "money") parts.push(`$${amount}`);
+            else if (key === "permits") parts.push(`${amount} permit${amount === 1 ? "" : "s"}`);
+            else parts.push(`${amount} ${String(key).replace(/_/g, " ")}`);
+        }
+        return parts.join(" | ") || "no refund";
+    }
+
+    static _sumTaskRefunds(tasks = []) {
+        const bundle = {};
+        for (const task of tasks) {
+            const cost = task?.refundCost ?? task?.type?.cost ?? task?.buildType?.cost ?? task?.type?.price ?? task?.buildType?.price ?? null;
+            if (!cost || typeof cost !== "object") continue;
+            for (const [key, rawAmount] of Object.entries(cost)) {
+                const amount = Math.max(0, Number(rawAmount) || 0);
+                if (!(amount > 0)) continue;
+                bundle[key] = Math.max(0, Number(bundle[key] || 0)) + amount;
+            }
+        }
+        return bundle;
+    }
+
+    static _isQueuedConstructionTaskLive(task, teamNumber = 1) {
+        if (!task) return false;
+        const normalizedTeam = Number(teamNumber || this._resolveQueuedBuildTeamNumber(task, 1));
+        const queueKey = task.queueKey ?? task.taskMeta?.arrayKey ?? null;
+        const team = Teams.teamLists?.[normalizedTeam] ?? Teams.teamLists?.[`${normalizedTeam}`];
+        const queue = Array.isArray(team?.[queueKey]) ? team[queueKey] : [];
+        return queue.some((queuedTask) => this._sameQueuedBuildTask(queuedTask, task));
+    }
+
+    static _syncBuildQueueCommandBar() {
+        const bar = this._commandBar();
+        if (!bar) return;
+        if (this.scene?.destroyWallMode) {
+            bar.clearContext?.("build-queue");
+            return;
+        }
+
+        const wallTasks = this._queuedWallJobTasks(this._selectedWallJobId, this._selectedWallJobTeamNumber);
+        if (wallTasks.length) {
+            bar.setContext("build-queue", {
+                helperText: () => {
+                    const refundText = this._formatCommandRefund(this._sumTaskRefunds(wallTasks));
+                    return `WALL QUEUE | ${wallTasks.length} tiles | Refund ${refundText}`;
+                },
+                buttons: () => [
+                    {
+                        id: "cancel-wall-queue",
+                        label: "CANCEL WALL QUEUE",
+                        styleKey: "cancel",
+                        onClick: () => this.cancelQueuedWallJob(this._selectedWallJobId, this._selectedWallJobTeamNumber),
+                    },
+                    {
+                        id: "close-wall-queue",
+                        label: "CLOSE",
+                        styleKey: "neutral",
+                        onClick: () => this.clearQueuedWallJobSelection(this._selectedWallJobTeamNumber),
+                    },
+                ],
+            });
+            return;
+        }
+
+        if (this._selectedConstructionTask && this._isQueuedConstructionTaskLive(this._selectedConstructionTask, this._selectedConstructionTeamNumber)) {
+            const task = this._selectedConstructionTask;
+            const teamNumber = this._selectedConstructionTeamNumber;
+            bar.setContext("build-queue", {
+                helperText: () => {
+                    const pct = this._currentConstructionPercent(task);
+                    const refundText = this._formatCommandRefund(this._sumTaskRefunds([task]));
+                    return `${this._getTaskDisplayName(task)} ${pct}% | Refund ${refundText}`;
+                },
+                buttons: () => [
+                    {
+                        id: "cancel-build",
+                        label: "CANCEL BUILD",
+                        styleKey: "cancel",
+                        onClick: () => this.cancelConstructionTask(task, teamNumber),
+                    },
+                    {
+                        id: "close-build",
+                        label: "CLOSE",
+                        styleKey: "neutral",
+                        onClick: () => this.clearQueuedConstructionSelection(teamNumber),
+                    },
+                ],
+            });
+            return;
+        }
+
+        bar.clearContext?.("build-queue");
+    }
+
+    static setQueuedWallJobHover(wallJobId = null, teamNumber = 1) {
+        const normalizedTeam = Number(teamNumber || 1);
+        if (this._hoveredWallJobId === wallJobId && this._hoveredWallJobTeamNumber === normalizedTeam) return;
+        this._hoveredWallJobId = wallJobId;
+        this._hoveredWallJobTeamNumber = normalizedTeam;
+        this.refreshQueuedTileBuildGhosts(normalizedTeam);
+    }
+
+    static clearQueuedWallJobSelection(teamNumber = this._selectedWallJobTeamNumber || 1) {
+        const normalizedTeam = Number(teamNumber || 1);
+        this._selectedWallJobId = null;
+        this._selectedWallJobTeamNumber = normalizedTeam;
+        this.refreshQueuedTileBuildGhosts(normalizedTeam);
+        this._syncBuildQueueCommandBar();
+    }
+
+    static selectQueuedWallJob(wallJobId, teamNumber = 1) {
+        const normalizedTeam = Number(teamNumber || 1);
+        this._selectedWallJobId = wallJobId;
+        this._selectedWallJobTeamNumber = normalizedTeam;
+        this._selectedConstructionTask = null;
+        this.refreshQueuedTileBuildGhosts(normalizedTeam);
+        this._syncBuildQueueCommandBar();
+    }
+
+    static clearQueuedConstructionSelection(teamNumber = this._selectedConstructionTeamNumber || 1) {
+        this._selectedConstructionTask = null;
+        this._selectedConstructionTeamNumber = Number(teamNumber || 1);
+        this._syncBuildQueueCommandBar();
+    }
+
+    static selectQueuedConstructionTask(task, teamNumber = 1) {
+        if (!task) return;
+        const previousWallJobId = this._selectedWallJobId;
+        const previousWallTeamNumber = this._selectedWallJobTeamNumber;
+        this._selectedConstructionTask = task;
+        this._selectedConstructionTeamNumber = Number(teamNumber || this._resolveQueuedBuildTeamNumber(task, 1));
+        this._selectedWallJobId = null;
+        if (previousWallJobId) {
+            this.refreshQueuedTileBuildGhosts(previousWallTeamNumber);
+        }
+        this._syncBuildQueueCommandBar();
+    }
+
+    static _startConstructionTaskUiTicker(task) {
+        if (!task || task._uiTicker || !this.scene?.time) return;
+        task._uiTicker = this.scene.time.addEvent({
+            delay: 100,
+            loop: true,
+            callback: () => {
+                if (!task?.constructionSprite?.active) {
+                    task._uiTicker?.remove?.(false);
+                    task._uiTicker = null;
+                    return;
+                }
+                this.updateConstructionHoverText(task);
+            },
+        });
+    }
+
+    static _stopConstructionTaskUiTicker(task) {
+        task?._uiTicker?.remove?.(false);
+        if (task) task._uiTicker = null;
+    }
+
+    static _refundQueuedBuildCost(task, teamNumber = 1) {
+        if (!task?.prepaid) return false;
+
+        const cost = task.refundCost
+            ?? task.type?.cost
+            ?? task.buildType?.cost
+            ?? task.type?.price
+            ?? task.buildType?.price
+            ?? null;
+        if (!cost || typeof cost !== "object") return false;
+
+        const scene = this.scene;
+        for (const [resourceKey, rawAmount] of Object.entries(cost)) {
+            const amount = Math.max(0, Number(rawAmount) || 0);
+            if (!(amount > 0)) continue;
+
+            if (resourceKey === "money") {
+                scene?.updateMoney?.(amount);
+                continue;
+            }
+            if (resourceKey === "permits") {
+                scene?.updatePermits?.(amount);
+                continue;
+            }
+
+            const itemDef = UI_ITEM_TYPES[resourceKey];
+            if (!itemDef) continue;
+
+            const added = StorageManager.grantItemToTeam(String(teamNumber), itemDef, amount, scene);
+            const overflow = Math.max(0, amount - added);
+            if (overflow > 0) {
+                const sellPrice = Math.max(0, Number(StorageManager.getStorageSellPrice(itemDef) || 0));
+                if (sellPrice > 0) {
+                    scene?.updateMoney?.(sellPrice * overflow);
+                }
+            }
+        }
+
+        task.prepaid = false;
+        return true;
+    }
+
+    static _unblockQueuedBlockTaskArea(task) {
+        if (!task?._navBlocked) return;
+
+        const blockTiles = this._blockBuildTiles(task);
+        for (const tile of blockTiles) {
+            if (Map.navGrid?.[tile.y]) Map.navGrid[tile.y][tile.x] = 1;
+            if (Map.enemyNavGrid?.[tile.y]) Map.enemyNavGrid[tile.y][tile.x] = 1;
+        }
+
+        try {
+            this.NavMeshUpdater?.blockTiles?.(blockTiles, true);
+            this.EnemyNavMeshUpdater?.blockTiles?.(blockTiles, true);
+        } catch (e) {
+            console.warn("queued block build nav restore skipped", e);
+        }
+
+        task._navBlocked = false;
+        this._markQueuedBlockBuildAreaDirty();
+    }
+
+    static refreshQueuedTileBuildGhosts(teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        const team = Teams.teamLists?.[teamNumber] ?? Teams.teamLists?.[`${teamNumber}`];
+        const queueTasks = Array.isArray(team?.buildingTileStates) ? team.buildingTileStates : [];
+        if (this._selectedWallJobTeamNumber === teamNumber && this._selectedWallJobId) {
+            const stillExists = queueTasks.some((task) => task?.wallJobId === this._selectedWallJobId && this._isQueuedWallTask(task));
+            if (!stillExists) this._selectedWallJobId = null;
+        }
+        if (this._hoveredWallJobTeamNumber === teamNumber && this._hoveredWallJobId) {
+            const stillHovered = queueTasks.some((task) => task?.wallJobId === this._hoveredWallJobId && this._isQueuedWallTask(task));
+            if (!stillHovered) this._hoveredWallJobId = null;
+        }
+        for (const task of queueTasks) {
+            this.ensureQueuedTileBuildGhost(task, teamNumber, queueTasks);
+        }
+        this._syncBuildQueueCommandBar();
+    }
+
+    static ensureQueuedTileBuildGhost(task, teamNumber = 1, queueTasks = null) {
+        teamNumber = Number(teamNumber);
+        if (!task || !this.scene?.add) return task?.constructionSprite ?? null;
+
+        task.queueKey = task.queueKey ?? "buildingTileStates";
+        const spriteX = task.x * SQUARESIZE + SQUARESIZE / 2;
+        const spriteY = task.y * SQUARESIZE + SQUARESIZE / 2;
+        const allQueueTasks = queueTasks || Teams.teamLists?.[teamNumber]?.buildingTileStates || Teams.teamLists?.[`${teamNumber}`]?.buildingTileStates || [];
+
+        if (this._isQueuedWallTask(task)) {
+            const display = this._queuedWallDisplayInfo(task, allQueueTasks);
+            if (!display) return task?.constructionSprite ?? null;
+            const isSelectedJob =
+                !!task.wallJobId &&
+                task.wallJobId === this._selectedWallJobId &&
+                Number(teamNumber) === Number(this._selectedWallJobTeamNumber || 1);
+            const isHoveredJob =
+                !!task.wallJobId &&
+                task.wallJobId === this._hoveredWallJobId &&
+                Number(teamNumber) === Number(this._hoveredWallJobTeamNumber || 1);
+
+            let sprite = task.constructionSprite;
+            if (!sprite || !sprite.active) {
+                sprite = this.scene.add.sprite(spriteX, spriteY, display.key, 0)
+                    .setDisplaySize(SQUARESIZE, SQUARESIZE)
+                    .setDepth(BLOCKDEPTH + 0.15)
+                    .setInteractive({ useHandCursor: true });
+                task.constructionSprite = sprite;
+                this._bindQueuedTileGhostInteractions(task, sprite, teamNumber);
+            } else {
+                sprite.setPosition(spriteX, spriteY);
+                sprite.setTexture(display.key, 0);
+                sprite.setDisplaySize(SQUARESIZE, SQUARESIZE);
+            }
+
+            task._ghostBaseAlpha = display.alpha;
+            sprite.setAngle(display.angle || 0);
+            sprite.clearTint();
+            if (isSelectedJob) sprite.setTintFill(0xffe7a1);
+            else if (isHoveredJob) sprite.setTintFill(0xfff2bf);
+
+            const resolvedAlpha = isSelectedJob
+                ? 1
+                : isHoveredJob
+                    ? Math.max(display.alpha + 0.28, 0.98)
+                    : display.alpha;
+            sprite.setAlpha(resolvedAlpha);
+            sprite.setDepth(BLOCKDEPTH + (isSelectedJob ? 0.32 : isHoveredJob ? 0.24 : 0.15));
+            this._ensureConstructionTaskUi(task);
+            this.updateConstructionHoverText(task);
+            this._syncBuildQueueCommandBar();
+            return sprite;
+        }
+
+        if (!task.constructionSprite || !task.constructionSprite.active) {
+            const sprite = this.scene.add.image(spriteX, spriteY, "construction")
+                .setDisplaySize(SQUARESIZE, SQUARESIZE)
+                .setDepth(BLOCKDEPTH + 0.15)
+                .setInteractive({ useHandCursor: true });
+            task.constructionSprite = sprite;
+            this._bindQueuedTileGhostInteractions(task, sprite, teamNumber);
+        } else {
+            task.constructionSprite.setPosition(spriteX, spriteY);
+            task.constructionSprite.setTexture("construction");
+            task.constructionSprite.setDisplaySize(SQUARESIZE, SQUARESIZE);
+            task.constructionSprite.setAngle(0);
+        }
+
+        task._ghostBaseAlpha = 0.68;
+        task.constructionSprite.setAlpha(0.68);
+        this._ensureConstructionTaskUi(task);
+        this.updateConstructionHoverText(task);
+        return task.constructionSprite;
     }
 
     static clearQueuedTileBuildGhost(task) {
         if (!task) return;
+        this._stopConstructionTaskUiTicker(task);
+        this._clearConstructionTaskUi(task);
         task.constructionSprite?.destroy?.();
         task.constructionSprite = null;
     }
@@ -323,10 +831,299 @@ export class buildingManager{
     static cancelQueuedTileBuild(task, teamNumber = 1) {
         teamNumber = Number(teamNumber);
         if (!task) return false;
-        this._releaseBuildersOnTask(task);
+        const team = Teams.teamLists?.[teamNumber] ?? Teams.teamLists?.[`${teamNumber}`];
+        const builders = (team?.builderList || []).filter((troop) =>
+            troop?.active && troop.task && this._sameQueuedBuildTask(troop.task, task)
+        );
+
         Teams.removeFromStateArray(teamNumber, task.queueKey ?? "buildingTileStates", task);
+        for (const troop of builders) {
+            this._clearBuilderQueuedBuildState(troop, {
+                queueKey: "buildingTileStates",
+                removeQueueTask: false,
+                assignNext: false,
+                clearGhost: false,
+            });
+        }
+        this._refundQueuedBuildCost(task, teamNumber);
         this.clearQueuedTileBuildGhost(task);
+        this.refreshQueuedTileBuildGhosts(teamNumber);
+        const remainingQueue = team?.buildingTileStates || [];
+        for (const troop of builders) {
+            if (!troop?.active) continue;
+            Manager.assignOneTroopToAction(troop, remainingQueue, CONTROL_STATES.BUILD_MODE_T);
+        }
         return true;
+    }
+
+    static cancelQueuedWallJob(wallJobId, teamNumber = 1) {
+        teamNumber = Number(teamNumber || 1);
+        if (!wallJobId) return false;
+        const team = Teams.teamLists?.[teamNumber] ?? Teams.teamLists?.[`${teamNumber}`];
+        const queue = Array.isArray(team?.buildingTileStates) ? team.buildingTileStates : [];
+        const tasks = queue.filter((task) => task?.wallJobId === wallJobId && this._isQueuedWallTask(task));
+        if (!tasks.length) return false;
+
+        const builders = team?.builderList || [];
+        for (const troop of builders) {
+            if (!troop?.active || !troop.task || troop.task.wallJobId !== wallJobId) continue;
+            this._clearBuilderQueuedBuildState(troop, {
+                queueKey: "buildingTileStates",
+                removeQueueTask: false,
+                assignNext: false,
+                clearGhost: false,
+            });
+        }
+
+        for (const task of tasks) {
+            Teams.removeFromStateArray(teamNumber, "buildingTileStates", task);
+            this._refundQueuedBuildCost(task, teamNumber);
+            this.clearQueuedTileBuildGhost(task);
+        }
+
+        if (this._selectedWallJobId === wallJobId && this._selectedWallJobTeamNumber === teamNumber) {
+            this._selectedWallJobId = null;
+        }
+        if (this._hoveredWallJobId === wallJobId && this._hoveredWallJobTeamNumber === teamNumber) {
+            this._hoveredWallJobId = null;
+        }
+        this.refreshQueuedTileBuildGhosts(teamNumber);
+        this._syncBuildQueueCommandBar();
+        return true;
+    }
+
+    static cancelConstructionTask(task, teamNumber = 1) {
+        if (!task) return false;
+        const queueKey = task.queueKey ?? task.taskMeta?.arrayKey ?? null;
+        if (queueKey === "buildingTileStates") {
+            return this.cancelQueuedTileBuild(task, teamNumber);
+        }
+        if (queueKey === "blockBuildingStates") {
+            return this.cancelQueuedBlockBuild(task, teamNumber);
+        }
+        return false;
+    }
+
+    static _ensureConstructionHoverUi() {
+        const scene = this.scene;
+        if (!scene?.add) return;
+
+        if (!scene.constructionHoverText) {
+            scene.constructionHoverText = scene.add
+                .text(0, 0, "", {
+                    fontSize: "12px",
+                    fill: "#ffffff",
+                    stroke: "#000000",
+                    strokeThickness: 3,
+                    align: "center",
+                })
+                .setOrigin(0.5, 1)
+                .setDepth(UIDEPTH + 6)
+                .setScrollFactor(1)
+                .setVisible(false);
+
+            scene.constructionHoverBg = scene.add
+                .rectangle(0, 0, 10, 10, 0x000000, 0.6)
+                .setStrokeStyle(1, 0xffffff, 0.4)
+                .setOrigin(0.5, 1)
+                .setDepth(UIDEPTH + 5)
+                .setScrollFactor(1)
+                .setVisible(false);
+        }
+    }
+
+    static _normalizeBlockBuildTask(task, teamNumber = 1) {
+        if (!task) return null;
+
+        const typeName = task.type?.name ?? task.buildType?.name ?? task.buildTypeName ?? task.type ?? task.buildType;
+        const type = TILE_TYPES[typeName] ?? task.type ?? task.buildType ?? null;
+        if (!type) return null;
+
+        task.type = type;
+        task.buildType = type;
+        task.buildTypeName = type.name;
+        task.queueKey = "blockBuildingStates";
+        task.assigned = Number(task.assigned || 0);
+        task.teamNumber = Number(task.teamNumber ?? teamNumber ?? 1);
+        task.refundCost = task.refundCost ?? type.cost ?? type.price ?? null;
+        task.duration = Math.max(1, Number(task.duration || 100));
+        task.totalDuration = Math.max(task.duration, Number(task.totalDuration || task.duration || 100));
+        return task;
+    }
+
+    static _blockBuildTiles(task) {
+        const tiles = [];
+        const lenX = Math.max(1, Number(task?.type?.lenX ?? 1));
+        const lenY = Math.max(1, Number(task?.type?.lenY ?? 1));
+        const startX = Number(task?.x ?? 0);
+        const startY = Number(task?.y ?? 0);
+
+        for (let y = startY; y < startY + lenY; y++) {
+            for (let x = startX; x < startX + lenX; x++) {
+                tiles.push({ x, y });
+            }
+        }
+
+        return tiles;
+    }
+
+    static _markQueuedBlockBuildAreaDirty() {
+        Map.regionSystem?.markDirty?.();
+        Map.regionDrawer?.markDirty?.();
+        Map.enemyRegionSystem?.markDirty?.();
+        Map.enemyRegionDrawer?.markDirty?.();
+    }
+
+    static _blockNavForQueuedBlockTask(task) {
+        if (!task || task._navBlocked) return;
+
+        const blockTiles = this._blockBuildTiles(task);
+        if (!blockTiles.length) return;
+
+        for (const tile of blockTiles) {
+            if (Map.navGrid?.[tile.y]) Map.navGrid[tile.y][tile.x] = 0;
+            if (Map.enemyNavGrid?.[tile.y]) Map.enemyNavGrid[tile.y][tile.x] = 0;
+        }
+
+        try {
+            const change = this.NavMeshUpdater?.blockTiles?.(blockTiles);
+            if (change?.removedPolyIds) {
+                const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
+                if (impacted) {
+                    for (const unit of impacted) {
+                        PathRepair.repairUnitPath(unit, change.removedPolyIds, Map.navMesh);
+                    }
+                }
+            }
+
+            const enemyChange = this.EnemyNavMeshUpdater?.blockTiles?.(blockTiles);
+            if (enemyChange?.removedPolyIds) {
+                const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
+                if (impacted) {
+                    for (const unit of impacted) {
+                        PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("queued block build nav update skipped", e);
+        }
+
+        task._navBlocked = true;
+        this._markQueuedBlockBuildAreaDirty();
+    }
+
+    static _startQueuedBlockConstruction(task) {
+        if (!task) return;
+        task.totalDuration = Math.max(task.duration || 1, Number(task.totalDuration || task.duration || 1));
+        task._constructionStarted = true;
+        this._blockNavForQueuedBlockTask(task);
+        this.updateConstructionHoverText(task);
+    }
+
+    static ensureQueuedBlockBuildGhost(task, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        task = this._normalizeBlockBuildTask(task, teamNumber);
+        if (!task || task.constructionSprite || !this.scene?.add) return task?.constructionSprite ?? null;
+
+        const sprite = Map.scene.add.image(
+            task.x * SQUARESIZE + (task.type.lenX * SQUARESIZE) / 2,
+            task.y * SQUARESIZE + (task.type.lenY * SQUARESIZE) / 2,
+            "construction"
+        )
+            .setDepth(BLOCKDEPTH)
+            .setDisplaySize(task.type.lenX * SQUARESIZE, task.type.lenY * SQUARESIZE)
+            .setAlpha(task._constructionStarted ? 0.78 : 0.62)
+            .setInteractive({ useHandCursor: true });
+
+        task.constructionSprite = sprite;
+
+        sprite.on("pointerover", () => {
+            sprite.setAlpha(task._constructionStarted ? 0.9 : 0.76);
+        });
+
+        sprite.on("pointerout", () => {
+            sprite.setAlpha(task._constructionStarted ? 0.78 : 0.62);
+        });
+
+        sprite.on("pointerdown", () => {
+            const selectedBuilders = this.getSelectedBuilders(teamNumber);
+            if (selectedBuilders.length) {
+                this.assignSelectedBuildersToTask(task, CONTROL_STATES.BUILD_MODE_B, selectedBuilders);
+                return;
+            }
+            this.selectQueuedConstructionTask(task, teamNumber);
+        });
+
+        this._ensureConstructionTaskUi(task);
+        this.updateConstructionHoverText(task);
+
+        return sprite;
+    }
+
+    static clearQueuedBlockBuildGhost(task) {
+        if (!task) return;
+        this._stopConstructionTaskUiTicker(task);
+        this._clearConstructionTaskUi(task);
+        task.constructionSprite?.destroy?.();
+        task.constructionSprite = null;
+    }
+
+    static cancelQueuedBlockBuild(task, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        task = this._normalizeBlockBuildTask(task, teamNumber);
+        if (!task) return false;
+
+        const team = Teams.teamLists?.[teamNumber] ?? Teams.teamLists?.[`${teamNumber}`];
+        const builders = (team?.builderList || []).filter((troop) =>
+            troop?.active && troop.task && this._sameQueuedBuildTask(troop.task, task)
+        );
+
+        Teams.removeFromStateArray(teamNumber, "blockBuildingStates", task);
+        for (const troop of builders) {
+            this._clearBuilderQueuedBuildState(troop, {
+                queueKey: "blockBuildingStates",
+                removeQueueTask: false,
+                assignNext: false,
+                clearGhost: false,
+            });
+        }
+        this._unblockQueuedBlockTaskArea(task);
+        this._refundQueuedBuildCost(task, teamNumber);
+        this.clearQueuedBlockBuildGhost(task);
+        const remainingQueue = team?.blockBuildingStates || [];
+        for (const troop of builders) {
+            if (!troop?.active) continue;
+            Manager.assignOneTroopToAction(troop, remainingQueue, CONTROL_STATES.BUILD_MODE_B);
+        }
+        return true;
+    }
+
+    static restoreQueuedBlockBuildTask(task, teamNumber = 1) {
+        task = this._normalizeBlockBuildTask(task, teamNumber);
+        if (!task) return null;
+        task._navBlocked = false;
+        this.ensureQueuedBlockBuildGhost(task, teamNumber);
+        if (task._constructionStarted) {
+            this._blockNavForQueuedBlockTask(task);
+        }
+        return task;
+    }
+
+    static queueBlockBuildTask(task, teamNumber = 1) {
+        teamNumber = Number(teamNumber);
+        const team = Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber];
+        if (!team) return null;
+        if (!Array.isArray(team.blockBuildingStates)) team.blockBuildingStates = [];
+
+        const normalized = this._normalizeBlockBuildTask(task, teamNumber);
+        if (!normalized) return null;
+        normalized.refundCost = normalized.refundCost ?? normalized.type?.cost ?? normalized.buildType?.cost ?? null;
+
+        team.blockBuildingStates.push(normalized);
+        this.ensureQueuedBlockBuildGhost(normalized, teamNumber);
+        this.assignTroopToBuildBlock(teamNumber);
+        return normalized;
     }
 
     static ensureFixTaskVisual(task) {
@@ -388,6 +1185,12 @@ export class buildingManager{
     static _startBuilderBuildPresentation(sprite, task, duration = this.tileBuildingDuration) {
         if (!sprite?.active || !task || !sprite.scene) return;
 
+        task._constructionStarted = true;
+        task.totalDuration = Math.max(1, Number(task.totalDuration || duration || this.tileBuildingDuration || 1));
+        task._buildStartedAt = Number(this.scene?.time?.now || 0);
+        this._startConstructionTaskUiTicker(task);
+        this.updateConstructionHoverText(task);
+
         const target = this._getBuildTaskTargetWorld(task);
         const aim = Math.atan2(target.y - sprite.y, target.x - sprite.x);
         const swingArc = Math.PI * 0.72;
@@ -448,11 +1251,31 @@ export class buildingManager{
             y: t.y,
             assigned: 0,
             type: t.type,
+            refundCost: t.refundCost ?? t.type?.cost ?? t.type?.price ?? null,
             // ✅ store what the tile WAS so Builder.js can refund correctly
             originalGridVal: t.originalGridVal,
 
             // ✅ drive wall HP / time pacing (beginDestroyingTile already uses wall.hp)
             duration: 9999, // any >0; beginDestroyingTile re-ticks off wall.hp anyway
+            });
+        });
+    }
+
+    static createDestroyStateArray(tasks, teamNumber) {
+        const team = Teams.teamLists[teamNumber];
+        if (!Array.isArray(team.destroyStates)) team.destroyStates = [];
+
+        tasks.forEach((task) => {
+            if (!task?.type || task?.value == null) return;
+            team.destroyStates.push({
+                x: task.x,
+                y: task.y,
+                assigned: 0,
+                type: task.type,
+                value: task.value,
+                duration: Math.max(1, Number(task.duration || task.totalDuration || task.value?.health || task.value?.hp || 100)),
+                totalDuration: Math.max(1, Number(task.totalDuration || task.duration || task.value?.maxHealth || task.value?.maxHp || 100)),
+                refundCost: task.refundCost ?? task.type?.cost ?? task.type?.price ?? null,
             });
         });
     }
@@ -559,6 +1382,7 @@ export class buildingManager{
                 if (tileAlreadyBuilt) {
                     this.clearQueuedTileBuildGhost(liveTask);
                     Teams.removeFromStateArray(teamNumber, "buildingTileStates", liveTask);
+                    this.refreshQueuedTileBuildGhosts(teamNumber);
                 }
                 this._clearBuilderQueuedBuildState(troop, {
                     queueKey: "buildingTileStates",
@@ -662,6 +1486,7 @@ export class buildingManager{
                 assignNext: true,
                 clearGhost: true,
             });
+            this.refreshQueuedTileBuildGhosts(teamNumber);
             this._releaseOtherBuildersForQueuedBuild(completedTask, teamNumber, troop, "buildingTileStates");
         });
     }
@@ -912,10 +1737,10 @@ export class buildingManager{
 
         // 2) Resolve start world pos
         if (tStartX == null || tStartY == null) {
-            let troopX = Math.floor(troop.body.x / SQUARESIZE);
-            let troopY = Math.floor(troop.body.y / SQUARESIZE);
-            tStartX = troop.body.x;
-            tStartY = troop.body.y;
+            let troopX = Math.floor(troop.x / SQUARESIZE);
+            let troopY = Math.floor(troop.y / SQUARESIZE);
+            tStartX = troop.x;
+            tStartY = troop.y;
 
             if (!navGrid[troopY]?.[troopX]) {
                 const [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
@@ -960,67 +1785,9 @@ export class buildingManager{
             return;
         }
 
-        if (!task.constructionSprite) {
-            task.constructionSprite = Map.scene.add.image(
-                task.x * SQUARESIZE + (task.type.lenX * SQUARESIZE) / 2,
-                task.y * SQUARESIZE + (task.type.lenY * SQUARESIZE) / 2,
-                'construction'
-            ).setDepth(BLOCKDEPTH);
-
-            task.constructionSprite.setDisplaySize(
-                task.type.lenX * SQUARESIZE,
-                task.type.lenY * SQUARESIZE
-            );
-
-            task.totalDuration = task.duration;
-            task._hovering = false;
-
-            const scene = this.scene;
-
-            if (!scene.constructionHoverText) {
-                scene.constructionHoverText = scene.add
-                    .text(0, 0, "", {
-                        fontSize: "12px",
-                        fill: "#ffffff",
-                        stroke: "#000000",
-                        strokeThickness: 3,
-                        align: "center",
-                    })
-                    .setOrigin(0.5, 1)
-                    .setDepth(UIDEPTH + 6)
-                    .setScrollFactor(1)
-                    .setVisible(false);
-
-                scene.constructionHoverBg = scene.add
-                    .rectangle(0, 0, 10, 10, 0x000000, 0.6)
-                    .setStrokeStyle(1, 0xffffff, 0.4)
-                    .setOrigin(0.5, 1)
-                    .setDepth(UIDEPTH + 5)
-                    .setScrollFactor(1)
-                    .setVisible(false);
-            }
-
-            task.constructionSprite.setInteractive({ useHandCursor: true });
-
-            task.constructionSprite.on("pointerover", () => {
-                task._hovering = true;
-                scene.constructionHoverBg.setVisible(true);
-                scene.constructionHoverText.setVisible(true);
-                buildingManager.updateConstructionHoverText(task);
-            });
-
-            task.constructionSprite.on("pointerout", () => {
-                task._hovering = false;
-                scene.constructionHoverBg.setVisible(false);
-                scene.constructionHoverText.setVisible(false);
-            });
-
-            task.constructionSprite.on("pointerdown", () => {
-                const selectedBuilders = this.getSelectedBuilders(sprite.body.team);
-                if (!selectedBuilders.length) return;
-                this.assignSelectedBuildersToTask(task, CONTROL_STATES.BUILD_MODE_B, selectedBuilders);
-            });
-        }
+        this.ensureQueuedBlockBuildGhost(task, sprite.body.team);
+        this._startQueuedBlockConstruction(task);
+        task.constructionSprite?.setAlpha?.(0.78);
 
         AudioManager.setConstructionActive(sprite, true);
 
@@ -1062,9 +1829,7 @@ export class buildingManager{
                 task.duration -= 2;
                 sprite.stamina = Math.max(0, sprite.stamina - 0.2);
 
-                if (task._hovering) {
-                    buildingManager.updateConstructionHoverText(task);
-                }
+                buildingManager.updateConstructionHoverText(task);
 
                 if (task.duration <= 0) {
                     this._clearBuilderBuildPresentation(sprite);
@@ -1088,63 +1853,16 @@ export class buildingManager{
 
                     AudioManager.playSound("sfx_building_complete");
 
-                    if (task.constructionSprite) {
-                        task.constructionSprite.destroy();
-                        task.constructionSprite = null;
-                    }
-
-                    const scene = buildingManager.scene;
-                    if (scene) {
-                        if (scene.constructionHoverText) {
-                            scene.constructionHoverText.setVisible(false);
-                        }
-                        if (scene.constructionHoverBg) {
-                            scene.constructionHoverBg.setVisible(false);
-                        }
-                    }
-                    task._hovering = false;
+                    this.clearQueuedBlockBuildGhost(task);
 
                     this.handlePlacement(task, teamNumber);
 
-                    let blockTiles = [];
-                    let startY = task.y;
-                    let startX = task.x;
-
-                    for (let i = startY; i < task.type.lenY + startY; i++) {
-                        for (let j = startX; j < task.type.lenX + startX; j++) {
-                            blockTiles.push({ x: j, y: i });
-
-                            Map.navGrid[i][j] = 0;
-                            Map.enemyNavGrid[i][j] = 0;
-                            Map.enemyRegionSystem?.markDirty?.();
-                            Map.enemyRegionSystem?.ensureUpToDate?.();
-                        }
-                    }
-
                     this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
-
-                    const change = this.NavMeshUpdater.blockTiles(blockTiles);
-                    if (change && change.removedPolyIds) {
-                        const impacted = PathRegistry.handlePolysRemoved(Map.navMesh, change.removedPolyIds, change.addedPolyIds);
-                        if (impacted) {
-                            for (const unit of impacted) {
-                                PathRepair.repairUnitPath(unit, change.removedPolyIds, Map.navMesh);
-                            }
-                        }
-                    }
-
-                    const enemyChange = this.EnemyNavMeshUpdater.blockTiles(blockTiles);
-                    if (enemyChange && enemyChange.removedPolyIds) {
-                        const impacted = PathRegistry.handlePolysRemoved(Map.enemyNavMesh, enemyChange.removedPolyIds, enemyChange.addedPolyIds);
-                        if (impacted) {
-                            for (const unit of impacted) {
-                                PathRepair.repairUnitPath(unit, enemyChange.removedPolyIds, Map.enemyNavMesh);
-                            }
-                        }
-                    }
 
                     Map.regionSystem?.markDirty?.();
                     Map.regionDrawer?.markDirty?.();
+                    Map.enemyRegionSystem?.markDirty?.();
+                    Map.enemyRegionSystem?.ensureUpToDate?.();
                     Map.enemyRegionDrawer?.markDirty?.();
 
                     Teams.removeFromStateArray(teamNumber, "blockBuildingStates", task);
@@ -1195,6 +1913,13 @@ export class buildingManager{
         Manager.assignTroopsToAction(troops, destroyList, CONTROL_STATES.DESTROY_MODE, force);
     }
 
+    static assignTroopsToDestroyTile(teamNumber){
+        const destroyList = Teams.teamLists[`${teamNumber}`].destroyTileStates;
+        const force = Player.selected.length ? true : false;
+        const troops = Player.selected.length ? Player.selected : Teams.teamLists[`${teamNumber}`].builderList;
+        Manager.assignTroopsToAction(troops, destroyList, CONTROL_STATES.DESTROY_MODE_T, force);
+    }
+
     static beginDestroyingBlock(sprite) {
         let task = sprite.task;
         if (!task || task.duration <= 0) {
@@ -1239,6 +1964,7 @@ export class buildingManager{
                 const targetSprite = sprite._getDestroyTarget?.();
                 if (!targetSprite || !targetSprite.active) return;
 
+                fightManager.playAttackPresentation(sprite, targetSprite, { playAudio: false });
                 const ang = Phaser.Math.Angle.Between(sprite.x, sprite.y, targetSprite.x, targetSprite.y);
 
                 const proj = new Projectile(
@@ -1248,8 +1974,6 @@ export class buildingManager{
                     sprite,
                     true
                 );
-
-                sprite.play(sprite.action);
 
                 // cadence: schedule next shot if task still alive
                 if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
@@ -1266,7 +1990,6 @@ export class buildingManager{
                 if (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger)) {
                     // Raiders / enemies: use their weapon to damage buildings
                     damage = sprite.weapon?.baseDmg || 5;
-                    AudioManager.playWeaponAttack(sprite, sprite.weapon);
                 } else {
                     // Player-side "demolition" – slow chip damage
                     damage = 2;
@@ -1277,14 +2000,15 @@ export class buildingManager{
 
                 // Resolve building instance: prefer value.buildingRef, fall back to value
                 const targetObj = task.value?.buildingRef || task.value;
+                if (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger)) {
+                    fightManager.playAttackPresentation(sprite, targetObj?.sprite || targetObj);
+                }
 
                 if (targetObj && typeof targetObj.onDamaged === "function") {
                     targetObj.onDamaged(damage, task.duration, task.totalDuration);
                 }
             }
 
-            sprite.play(sprite.action);
-            
             if (task.duration <= 0) {
                 if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
                 console.log("Done Destroying.");
@@ -1343,6 +2067,7 @@ export class buildingManager{
             }
 
             const targetSprite = wall.sprite;
+            fightManager.playAttackPresentation(sprite, targetSprite, { playAudio: false });
             const ang = Phaser.Math.Angle.Between(sprite.x, sprite.y, targetSprite.x, targetSprite.y);
 
             const proj = new Projectile(
@@ -1353,7 +2078,6 @@ export class buildingManager{
                 true            
             );
 
-            sprite.play(sprite.action);
 
             // cadence: keep shooting until destroyed (don’t rely on `destroyed` here)
             if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
@@ -1370,8 +2094,7 @@ export class buildingManager{
             ? (sprite.weapon?.baseDmg || 5)
             : 2;
 
-            AudioManager.playWeaponAttack(sprite, sprite.weapon);
-
+            fightManager.playAttackPresentation(sprite, wall.sprite);
 
             // Apply damage to the wall itself (this drives phase/frame changes)
             destroyed = wall.damage(damage);
@@ -1380,8 +2103,6 @@ export class buildingManager{
         // OPTIONAL: expose hp for debug UI / bars
         task.totalHp = wall.maxHp;
         task.hp = wall.hp;
-
-        sprite.play(sprite.action);
 
         // If not destroyed yet, keep ticking
         if (!destroyed) {
@@ -1461,6 +2182,11 @@ export class buildingManager{
         // per-unit callbacks (kept from your completion block)
         if (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger) {
             Player.onBlockDestroyed(sprite, task);
+        } else if (teamNumber) {
+            this._refundQueuedBuildCost({
+                prepaid: true,
+                refundCost: task.refundCost ?? task.type?.cost ?? task.type?.price ?? null,
+            }, teamNumber);
         }
 
         // ✅ remove the shared task from the team queue
@@ -1695,56 +2421,76 @@ export class buildingManager{
 
     static hasRequiredMaterials(costObj, teamNumber) {
         for (const [res, count] of Object.entries(costObj)) {
-            if (!StorageBuilding.hasTeamMaterials(res, count, teamNumber)) {
-                return false;
+            const amount = Math.max(0, Number(count) || 0);
+            if (!(amount > 0)) continue;
+            if (res === "money") {
+                if ((this.scene?.money ?? 0) < amount) return false;
+                continue;
             }
+            if (res === "permits") {
+                if ((this.scene?.permits ?? 0) < amount) return false;
+                continue;
+            }
+
+            const itemDef = UI_ITEM_TYPES[res];
+            if (!itemDef) continue;
+            const storages = Teams.teamLists?.[teamNumber]?.storageList ?? Teams.teamLists?.[`${teamNumber}`]?.storageList ?? [];
+            const available = storages.reduce((sum, storage) => sum + Math.max(0, Number(storage?.getItemCount?.(itemDef) || 0)), 0);
+            if (available < amount) return false;
         }
         return true;
     }
 
     static consumeRequiredMaterials(costObj, teamNumber) {
         for (const [res, count] of Object.entries(costObj)) {
-            StorageBuilding.removeTeamMaterials(res, count, teamNumber);
-            DailyNeedsTracker.updateUIItems(UI_ITEM_TYPES[res], count, true);
+            const amount = Math.max(0, Number(count) || 0);
+            if (!(amount > 0)) continue;
+            if (res === "money") {
+                this.scene?.updateMoney?.(-amount);
+                continue;
+            }
+            if (res === "permits") {
+                this.scene?.updatePermits?.(-amount);
+                continue;
+            }
+
+            const itemDef = UI_ITEM_TYPES[res];
+            if (!itemDef) continue;
+            let remaining = amount;
+            const storages = Teams.teamLists?.[teamNumber]?.storageList ?? Teams.teamLists?.[`${teamNumber}`]?.storageList ?? [];
+            for (const storage of storages) {
+                if (!(remaining > 0) || !storage?.removeItem) break;
+                const before = Math.max(0, Number(storage.getItemCount?.(itemDef) || 0));
+                storage.removeItem(itemDef.name, remaining);
+                const after = Math.max(0, Number(storage.getItemCount?.(itemDef) || 0));
+                remaining -= Math.max(0, before - after);
+            }
+            const consumed = amount - remaining;
+            if (consumed > 0) {
+                DailyNeedsTracker.updateUIItems(itemDef, consumed, true);
+            }
         }
     }
 
     static updateConstructionHoverText(task) {
         const scene = buildingManager.scene;
         if (!scene || !task || !task.constructionSprite) return;
+        if (this._isQueuedWallTask(task)) return;
+        this._ensureConstructionTaskUi(task);
 
-        const label = scene.constructionHoverText;
-        const bg    = scene.constructionHoverBg;
-        if (!label || !bg) return;
+        const label = task.labelText;
+        if (!label) return;
 
-        const total = task.totalDuration || task.duration || 1;
-        const done  = total - task.duration;
-        const pct   = Math.max(
-            0,
-            Math.min(100, Math.round((done / total) * 100))
-        );
-
-        const name =
-            (task.type && (task.type.displayName || task.type.name)) ||
-            "Building";
-
+        const pct = this._currentConstructionPercent(task);
+        const name = this._getTaskDisplayName(task);
         label.setText(`${name}\n${pct}%`);
 
-        // Position above the construction sprite
-        const x = task.constructionSprite.x;
-        const y =
-            task.constructionSprite.y -
-            task.constructionSprite.displayHeight / 2 -
-            4;
+        const sprite = task.constructionSprite;
+        const x = sprite.x;
+        const y = sprite.y;
 
         label.setPosition(x, y);
-
-        // Size bg to text, with padding
-        const pad = 4;
-        const w = label.width + pad * 2;
-        const h = label.height + pad * 2;
-        bg.setSize(w, h);
-        bg.setPosition(x, y);
+        label.setVisible(true);
     }
 
 }

@@ -9,6 +9,14 @@ import {
     DEFAULT_PLAYER_PORTRAIT_KEY,
     getPlayerPortraitKey,
 } from "../players/playerPortraits";
+import {
+    createBuildingHoverPanel,
+    destroyStructuralHealthBar,
+    ensureStructuralHealthBar,
+    getStructuralBarAnchor,
+    getStructuralHealthBarTargets,
+    layoutStructuralHealthBar,
+} from "../UI/BuildingTheme";
 
 export class House {
 
@@ -46,6 +54,7 @@ export class House {
                 .setInteractive()
                 .on('pointerdown', () => {
                     const scene = this.scene;
+                    if (scene?.destroyWallMode) return;
                     const handled = buildingManager.handleBuildingClickForBuilders(this, null, this.team);
                     if (handled) return;
 
@@ -125,26 +134,31 @@ export class House {
 
     updateIcons() {
         this.clearIcons(); // always start fresh
+        if (!this.occupants.length) return;
 
-        // Create background
-        this.iconBg = this.scene.add.rectangle(
-            this.sprite.x + 30,
-            this.sprite.y - 14,
-            64, // width: 2 icons @20px + padding
-            22,
-            0x000000,
-            0.6
-        ).setOrigin(0.5).setDepth(9).setStrokeStyle(1, 0xffffff, 0.4);
-        this.uiContainer.add(this.iconBg);
+        const bounds = this.sprite.getBounds();
+        const iconCount = this.occupants.length;
+        const iconSpacing = 26;
+        const panelWidth = Math.max(78, 40 + ((iconCount - 1) * iconSpacing));
+
+        this.iconPanel = createBuildingHoverPanel(this.scene, {
+            x: bounds.centerX,
+            y: bounds.top - 14,
+            width: panelWidth,
+            height: 34,
+            depth: UIDEPTH,
+            accentColor: 0x9be7ff,
+        });
+        this.uiContainer.add(this.iconPanel);
 
         this.uiIcons = this.occupants.map((p, i) => {
             const icon = this.scene.add.sprite(
-                this.sprite.x + 16 + i * 28,
-                this.sprite.y - 14,
+                ((i - ((iconCount - 1) * 0.5)) * iconSpacing),
+                1,
                 DEFAULT_PLAYER_PORTRAIT_KEY
-            ).setDepth(10);
+            ).setDepth(UIDEPTH + 2);
             applyPortraitKeyToSprite(this.scene, icon, getPlayerPortraitKey(p), 18);
-            this.uiContainer.add(icon);
+            this.iconPanel.add(icon);
             return icon;
         });
 
@@ -313,13 +327,13 @@ export class House {
     }
 
     clearIcons() {
-        if (this.iconBg) {
-            this.iconBg.destroy();
-            this.iconBg = null;
+        if (this.iconPanel) {
+            this.iconPanel.destroy();
+            this.iconPanel = null;
         }
 
         for (const icon of this.uiIcons) {
-            if (icon) icon.destroy();
+            if (icon?.active) icon.destroy();
         }
 
         this.uiContainer.removeAll(true);
@@ -345,22 +359,7 @@ export class House {
         if (!this.sprite) return;
         const scene = this.scene;
         if (!scene) return;
-
-        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE);
-        const y = this.sprite.y - this.sprite.displayHeight / 2 - 4;
-
-        if (!this.healthBarBg) {
-            this.healthBarBg = scene.add
-                .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 4, 0x000000, 0.6)
-                .setDepth(BLOCKDEPTH + 1);
-            Map.addToWorldStatic(this.healthBarBg);
-        }
-        if (!this.healthBar) {
-            this.healthBar = scene.add
-                .rectangle(this.sprite.x + fullWidth / 2, y, fullWidth, 2, 0x00ff00, 1)
-                .setDepth(BLOCKDEPTH + 2);
-            Map.addToWorldStatic(this.healthBar);
-        }
+        ensureStructuralHealthBar(this, scene, { fillColor: 0x61d98f });
     }
 
     updateHealthBar() {
@@ -368,23 +367,29 @@ export class House {
         this.ensureHealthBar();
 
         if (!this.healthBar || !this.healthBarBg) return;
-        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE);
         const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-        this.healthBarBg.setDisplaySize(fullWidth, 4);
-        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+        const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+            widthScale: 1,
+            paddingX: 14,
+            yOffset: 12,
+        });
 
         const now = this.scene?.time?.now ?? 0;
         const visible = this.isHovered || now < this._damageBarUntil;
-        this.healthBarBg.setVisible(visible);
-        this.healthBar.setVisible(visible);
+        layoutStructuralHealthBar(this, {
+            ratio,
+            centerX,
+            topY,
+            width,
+            visible,
+            fillColor: 0x61d98f,
+        });
     }
 
     shakeAndFlash() {
         if (!this.sprite) return;
         const targets = [this.sprite];
-        if (this.healthBarBg) targets.push(this.healthBarBg);
-        if (this.healthBar)   targets.push(this.healthBar);
+        targets.push(...getStructuralHealthBarTargets(this));
 
         this.scene.tweens.add({
             targets,
@@ -442,8 +447,7 @@ export class House {
 
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
-        if (this.healthBarBg) this.healthBarBg.destroy();
-        if (this.healthBar)   this.healthBar.destroy();
+        destroyStructuralHealthBar(this);
         this.sleepFxContainer?.destroy();
         this.sprite?.destroy();
         this.clearIcons?.();

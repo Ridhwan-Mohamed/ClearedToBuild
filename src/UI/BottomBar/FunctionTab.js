@@ -5,11 +5,13 @@ import { StorageManager } from "../../Manager/StorageManager";
 import { OrderRunner } from "../../orders/OrderRunner";
 import { ORDER_KINDS } from "../../orders/OrderTypes";
 import { InterruptController } from "../../ai/scheduler/InterruptController";
+import { AudioManager } from "../../Manager/AudioManager.js";
 import { BOTTOM_BAR_THEME, mixColor } from "./BottomBarTheme";
 
 const FUNCTION_TAB_SOURCE = "function_tab";
 const CONTENT_PADDING_X = 14;
-const CONTENT_PADDING_TOP = 8;
+const CONTENT_PADDING_TOP = 0;
+const CONTENT_PADDING_BOTTOM = 0;
 const MAIN_BUTTON_GAP = 8;
 const CARD_GAP = 8;
 const MAIN_BUTTON_HEIGHT = 44;
@@ -78,15 +80,8 @@ export default class FunctionTab {
       this.updateVisuals();
     };
 
-    this.container = scene.rexUI.add.sizer({
-      orientation: "y",
-      width,
-      height,
-      space: { left: 0, right: 0, top: 0, bottom: 0 },
-    });
-
     this.view = scene.add.container(0, 0).setSize(width, height);
-    this.container.add(this.view, { proportion: 1, expand: true });
+    this.container = this.view;
 
     this.mainButtons = {};
     this.mainButtonOrder = [];
@@ -135,7 +130,7 @@ export default class FunctionTab {
     const bg = this.scene.add.graphics();
     const text = this.scene.add.text(0, 0, "", {
       fontFamily: "Bungee",
-      fontSize: "12px",
+      fontSize: "14px",
       fontStyle: "bold",
       align: "center",
       color: "#ffffff",
@@ -184,6 +179,7 @@ export default class FunctionTab {
       event?.stopPropagation?.();
       button.pressed = false;
       this._drawMainButton(button, button.active);
+      AudioManager.playBottomBarClick();
       button.onClick?.();
     });
 
@@ -245,6 +241,7 @@ export default class FunctionTab {
       if (button.disabled) return;
       button.pressed = false;
       this._drawMiniButton(button);
+      AudioManager.playBottomBarClick();
       button.onClick?.();
     });
 
@@ -257,7 +254,7 @@ export default class FunctionTab {
     const bg = this.scene.add.graphics();
     const title = this.scene.add.text(0, -18, resource.label, {
       fontFamily: "Bungee",
-      fontSize: "11px",
+      fontSize: "13px",
       fontStyle: "bold",
       color: resource.text,
       stroke: "#081621",
@@ -265,7 +262,7 @@ export default class FunctionTab {
     }).setOrigin(0.5);
     const status = this.scene.add.text(0, 0, "0 / 0", {
       fontFamily: "Bungee",
-      fontSize: "14px",
+      fontSize: "16px",
       fontStyle: "bold",
       color: "#f8fafc",
       stroke: "#081621",
@@ -293,21 +290,40 @@ export default class FunctionTab {
   }
 
   relayout() {
-    this.container.setMinSize(this.width, this.height);
+    const liveWidth = Math.max(
+      this.width,
+      Number(this.view?.width || 0),
+      Number(this.view?.displayWidth || 0),
+      Number(this.view?.getBounds?.()?.width || 0),
+      Number(this.scene.uiBottomBar?.pages?.width || 0),
+      Number(this.scene.scale.width || 0),
+    );
+    const liveHeight = Math.max(
+      this.height,
+      Number(this.view?.height || 0),
+      Number(this.view?.displayHeight || 0),
+      Number(this.view?.getBounds?.()?.height || 0),
+      Number(this.scene.uiBottomBar?.pages?.height || 0),
+    );
+
+    this.width = liveWidth;
+    this.height = liveHeight;
+
     this.view.setSize(this.width, this.height);
 
-    const restRowCount = 2;
-    const usedHeight =
-      MAIN_BUTTON_HEIGHT +
-      10 +
-      GATHER_CARD_HEIGHT +
-      12 +
-      REST_BUTTON_HEIGHT;
+    const availableHeight = Math.max(90, this.height - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM);
+    const rowGapA = 4;
+    const rowGapB = 4;
+    const usableHeight = availableHeight - rowGapA - rowGapB;
 
-    const top = -this.height / 2 + Math.max(CONTENT_PADDING_TOP, Math.floor((this.height - usedHeight) / 2));
-    const row1Y = top + MAIN_BUTTON_HEIGHT / 2;
-    const row2Y = top + MAIN_BUTTON_HEIGHT + 10 + GATHER_CARD_HEIGHT / 2;
-    const restRowY = top + MAIN_BUTTON_HEIGHT + 10 + GATHER_CARD_HEIGHT + 12 + REST_BUTTON_HEIGHT / 2;
+    const topRowHeight = Math.max(MAIN_BUTTON_HEIGHT, Math.floor(usableHeight * 0.34));
+    const middleRowHeight = Math.max(GATHER_CARD_HEIGHT, Math.floor(usableHeight * 0.4));
+    const bottomRowHeight = Math.max(REST_BUTTON_HEIGHT, usableHeight - topRowHeight - middleRowHeight);
+
+    const top = -this.height / 2 + CONTENT_PADDING_TOP;
+    const row1Y = top + topRowHeight / 2;
+    const row2Y = top + topRowHeight + rowGapA + middleRowHeight / 2;
+    const restRowY = top + topRowHeight + rowGapA + middleRowHeight + rowGapB + bottomRowHeight / 2;
 
     const usableWidth = Math.max(360, this.width - CONTENT_PADDING_X * 2);
 
@@ -319,7 +335,7 @@ export default class FunctionTab {
 
     this.mainButtonOrder.forEach((button, index) => {
       button.width = mainButtonWidth;
-      button.height = MAIN_BUTTON_HEIGHT;
+      button.height = topRowHeight;
       button.root.setPosition(mainStartX + index * (mainButtonWidth + MAIN_BUTTON_GAP), row1Y);
       button.hit.setSize(button.width, button.height);
       button.text.setPosition(0, 0);
@@ -336,12 +352,13 @@ export default class FunctionTab {
 
     gatherCards.forEach((card, index) => {
       card.width = cardWidth;
-      card.height = GATHER_CARD_HEIGHT;
+      card.height = middleRowHeight;
       card.root.setPosition(cardStartX + index * (cardWidth + CARD_GAP), row2Y);
-      card.title.setPosition(0, -18);
+      card.title.setPosition(0, -Math.floor(card.height * 0.24));
       card.status.setPosition(0, 0);
-      card.minus.root.setPosition(-card.width / 2 + 18, 18);
-      card.plus.root.setPosition(card.width / 2 - 18, 18);
+      const miniY = Math.floor(card.height * 0.28);
+      card.minus.root.setPosition(-card.width / 2 + 18, miniY);
+      card.plus.root.setPosition(card.width / 2 - 18, miniY);
       card.minus.hit.setSize(MINI_BUTTON_SIZE, MINI_BUTTON_SIZE);
       card.plus.hit.setSize(MINI_BUTTON_SIZE, MINI_BUTTON_SIZE);
       this._drawMiniButton(card.minus);
@@ -357,15 +374,13 @@ export default class FunctionTab {
 
     restButtons.forEach((button, index) => {
       button.width = restButtonWidth;
-      button.height = REST_BUTTON_HEIGHT;
+      button.height = bottomRowHeight;
       button.root.setPosition(restStartX + index * (restButtonWidth + REST_BUTTON_GAP), restRowY);
       button.hit.setSize(button.width, button.height);
       button.text.setPosition(0, 0);
       button.text.setFixedSize(button.width - 12, button.height - 8);
       button.text.setOrigin(0.5);
     });
-
-    this.container.layout();
   }
 
   _getSceneActiveMode() {
@@ -1046,6 +1061,13 @@ export default class FunctionTab {
     if (shouldRefresh || this.activeMode !== this._getSceneActiveMode()) {
       this.updateVisuals();
     }
+  }
+
+  onShow() {
+    this.scene.time?.delayedCall?.(0, () => {
+      this.relayout();
+      this.updateVisuals();
+    });
   }
 
   registerHotkeys() {

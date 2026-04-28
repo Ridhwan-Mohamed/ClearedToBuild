@@ -4,6 +4,7 @@ import { calcPressureBonus, colorFor, getContractStage, SQUARESIZE, TILE_TYPES }
 import { PARCEL_SIZE, CONTRACT_SLOTS } from "./ParcelConfig.js";
 import { ParcelContractInstance } from "./ParcelContractInstance.js";
 import { Player } from "../players/Player.js";
+import { SaveManager } from "../save/SaveManager.js";
 
 export class ParcelManager {
   constructor({ scene, opts }) {
@@ -45,23 +46,29 @@ export class ParcelManager {
   startPressure(slotId, difficulty = 1, opts = {}) { return this._startPressure(slotId, difficulty, opts); }
   startFarm(slotId) { return this._startResource(slotId, "FARM"); }
 
-  _refreshAfterParcelPaint() {
+  _refreshAfterParcelPaint(bounds = null, opts = {}) {
     const isOverview = this.scene?.zoomMixer?.mode === "overview";
     if (!isOverview) {
       this.map.setDetailedWorldVisible?.(true);
-      this.map.reDraw?.();
     } else {
-      this.map.deleteAllGridElements?.();
       this.map.setDetailedWorldVisible?.(false);
     }
 
-    this.scene.rebuildBothNavMeshes();
-    this.scene.zoomMixer.buildOverviewTextureFromGrid(
-      this.map.grid,
-      SQUARESIZE,
-      (cell) => colorFor(cell)
-    );
+    if (bounds && this.scene?.refreshParcelArea) {
+      this.scene.refreshParcelArea(bounds, opts);
+    } else {
+      if (!isOverview) {
+        this.map.reDraw?.();
+      }
+      this.scene.rebuildBothNavMeshes?.();
+      this.scene.zoomMixer?.buildOverviewTextureFromGrid?.(
+        this.map.grid,
+        SQUARESIZE,
+        (cell) => colorFor(cell)
+      );
+    }
     this.map._uiIgnoreWorldLayer();
+    this.scene?.parcelSpawnUI?.setMode?.(this.scene?.zoomMixer?.mode || "detailed");
   }
 
   startMilitia(slotId, opts = {}) {
@@ -88,11 +95,12 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
 
     inst.spawn();
-    this._refreshAfterParcelPaint();
+    this._refreshAfterParcelPaint(inst.getParcelBounds?.());
 
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();
-    slotPanel?.setVisible?.(false);
+    slotPanel?.resetUiState?.();
+    slotPanel?.setVisible?.(true);
 
     return id;
   }
@@ -118,12 +126,14 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
 
     inst.spawn();
-    this._refreshAfterParcelPaint();
+    this._refreshAfterParcelPaint(inst.getParcelBounds?.());
     this._notifyExpansionParcelClaimed("MARKET", slotId, id);
+    SaveManager.queueAutosave("parcel_market_start");
 
     // hide slot UI while active
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
-    slotPanel?.setVisible?.(false);
+    slotPanel?.resetUiState?.();
+    slotPanel?.setVisible?.(true);
 
     return id;
   }
@@ -151,13 +161,20 @@ export class ParcelManager {
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
     inst.spawn();
-    this._refreshAfterParcelPaint();
+    this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
+      waterSourceUpdate: {
+        slotId,
+        landParcel: true,
+      },
+    });
     this._notifyExpansionParcelClaimed(type, slotId, id);
+    SaveManager.queueAutosave(`parcel_${String(type || "").toLowerCase()}_start`);
 
     // Hide the slot UI while a contract is active (no outline during play)
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();
-    slotPanel?.setVisible?.(false);
+    slotPanel?.resetUiState?.();
+    slotPanel?.setVisible?.(true);
 
     return id;
   }
@@ -191,11 +208,18 @@ export class ParcelManager {
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
     inst.spawn();
-    this._refreshAfterParcelPaint();
+    this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
+      waterSourceUpdate: {
+        slotId,
+        landParcel: true,
+      },
+    });
     // Hide the slot UI while a pressure contract is active (no outline during play)
+    SaveManager.queueAutosave("parcel_pressure_start");
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();
-    slotPanel?.setVisible?.(false);
+    slotPanel?.resetUiState?.();
+    slotPanel?.setVisible?.(true);
     return id;
   }
 
@@ -229,6 +253,7 @@ export class ParcelManager {
       // Normal slot: re-show the regular contract UI panel.
       this.scene.parcelSpawnUI.showSlot(slotId);
     }
+    SaveManager.queueAutosave(`parcel_remove_${reason || "unknown"}`);
   }
 
   markContractPermitCost(id, permitCost) {
@@ -253,6 +278,62 @@ export class ParcelManager {
     if (!contractId) return;
     const inst = this.contractsById.get(contractId);
     if (inst) inst.onSpawnerDestroyed?.(unspawnedCount);
+  }
+
+  getSnapshot() {
+    return {
+      mainIslandOrigin: this.mainIslandOrigin ? { ...this.mainIslandOrigin } : null,
+      slotToContractId: { ...this.slotToContractId },
+      contracts: Array.from(this.contractsById.values()).map((inst) => inst.getSnapshot?.()).filter(Boolean),
+    };
+  }
+
+  restoreSnapshot(saved = null) {
+    if (!saved) return;
+    this.mainIslandOrigin = saved.mainIslandOrigin ? { ...saved.mainIslandOrigin } : this.mainIslandOrigin;
+    this.contractsById.clear();
+    this.slotToContractId = { N: null, W: null, S: null, E: null };
+
+    const contracts = Array.isArray(saved.contracts) ? saved.contracts : [];
+    for (const entry of contracts) {
+      if (!entry?.id || !entry?.slotId || !entry?.type) continue;
+      const inst = new ParcelContractInstance({
+        id: entry.id,
+        type: entry.type,
+        slotId: entry.slotId,
+        origin: entry.origin || this.getSlotOrigin(entry.slotId),
+        scene: this.scene,
+        rng: this.rng,
+        map: this.map,
+        parcelManager: this,
+        difficulty: entry.difficulty ?? 1,
+        pressureSource: entry.pressureSource ?? "manual",
+        pressureOwnerTower: entry.pressureOwnerTower ?? null,
+        pressureModifierKey: entry.pressureModifierKey ?? null,
+        pressureModifier: entry.pressureModifier ?? null,
+        pressureHordeIndex: entry.pressureHordeIndex ?? null,
+        militiaConfig: entry.militiaConfig ?? null,
+      });
+      this.slotToContractId[entry.slotId] = entry.id;
+      this.contractsById.set(entry.id, inst);
+      inst.restoreSnapshot?.(entry);
+
+      const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(entry.slotId);
+      slotPanel?.clearPressureState?.();
+      slotPanel?.resetUiState?.();
+      slotPanel?.setVisible?.(true);
+    }
+
+    if (contracts.length) {
+      for (const inst of this.contractsById.values()) {
+        this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
+          waterSourceUpdate: {
+            slotId: inst.slotId,
+            landParcel: inst.type === "FOREST" || inst.type === "ROCK" || inst.type === "FARM" || inst.type === "PRESSURE",
+          },
+        });
+      }
+    }
   }
 
   forceClearContracts(reason = "external_cleanup", opts = {}) {

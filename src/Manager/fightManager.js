@@ -171,6 +171,49 @@ export class fightManager{
         });
     }
 
+    static playAttackPresentation(sprite, target, opts = {}) {
+        if (!sprite?.active || !target) return;
+
+        const weapon = opts.weapon ?? sprite.weapon;
+        if (!weapon) return;
+
+        Player.faceTarget?.(sprite, target, opts);
+
+        if (!weapon.projectile) {
+            if (sprite.isBlademaster) {
+                this.playBlademasterSlash(sprite, target);
+            } else if (sprite.isBrawler) {
+                this.playMeleeLungeFx(sprite, target, {
+                    textureKey: sprite.meleeFxKey || 'brawler_boxing_glove_fx',
+                    startOffset: 8,
+                    travel: 18,
+                    startScale: 0.72,
+                    endScale: 1.18,
+                    duration: 135,
+                    originX: 0.5,
+                    originY: 0.88,
+                });
+            } else if (sprite.isRaider || sprite.isFortGrunt || sprite.meleeFxKey) {
+                this.playMeleeLungeFx(sprite, target, {
+                    textureKey: sprite.meleeFxKey || 'raider_hands_fx',
+                    startOffset: 8,
+                    travel: 13,
+                    startScale: 0.78,
+                    endScale: 1.06,
+                    duration: 115,
+                    originX: 0.5,
+                    originY: 0.88,
+                });
+            }
+        }
+
+        if (opts.playAudio === false) return;
+        AudioManager.playWeaponAttack(sprite, weapon, opts.audioOpts ?? {
+            volume: weapon.projectile ? 0.45 : 0.32,
+            cooldownMs: weapon.projectile ? 60 : 80,
+        });
+    }
+
     static _scheduleAttackRecovery(sprite, weapon) {
         if (!sprite?.active || !weapon || sprite.timer) return;
 
@@ -264,36 +307,12 @@ export class fightManager{
             return;
         }
 
-        // Player.setAnimState(sprite, sprite.action);
-        if (sprite.isBlademaster) {
-            this.playBlademasterSlash(sprite, target);
-        } else if (sprite.isBrawler) {
-            this.playMeleeLungeFx(sprite, target, {
-                textureKey: sprite.meleeFxKey || 'brawler_boxing_glove_fx',
-                startOffset: 8,
-                travel: 18,
-                startScale: 0.72,
-                endScale: 1.18,
-                duration: 135,
-                originX: 0.5,
-                originY: 0.88,
-            });
-        } else if (sprite.isRaider || sprite.isFortGrunt) {
-            this.playMeleeLungeFx(sprite, target, {
-                textureKey: sprite.meleeFxKey || 'raider_hands_fx',
-                startOffset: 8,
-                travel: 13,
-                startScale: 0.78,
-                endScale: 1.06,
-                duration: 115,
-                originX: 0.5,
-                originY: 0.88,
-            });
-        }
+        this.playAttackPresentation(sprite, target, {
+            playAudio: !weapon.projectile,
+        });
 
         // Projectile weapon (gunslinger, etc.)
         if (weapon.projectile) {
-            AudioManager.playWeaponAttack(sprite, weapon, { volume: 0.45, cooldownMs: 60 });
             const leadPos = Projectile.leadAndAngle(sprite, target, weapon.speed);
             const angle = Phaser.Math.Angle.Between(sprite.x, sprite.y, leadPos.x, leadPos.y);
             new Projectile(sprite.x, sprite.y, angle, sprite.body.team, weapon, sprite);
@@ -315,7 +334,6 @@ export class fightManager{
         let color = '#ffffff';
 
         if (isHit) {
-            AudioManager.playWeaponAttack(sprite, weapon, { volume: 0.32, cooldownMs: 80 });
             damage = isCrit ? weapon.critDmg : weapon.baseDmg;
 
             fightManager.applyHitReaction(target, sprite, weapon);

@@ -9,6 +9,7 @@ import { AudioManager } from "../Manager/AudioManager";
 import { buildingManager } from "../Manager/buildingManager";
 import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathRepair } from "../lib/navmesh/PathRepair";
+import { destroyStructuralHealthBar, ensureStructuralHealthBar, getStructuralBarAnchor, getStructuralHealthBarTargets, layoutStructuralHealthBar } from "../UI/BuildingTheme";
 
 export class Turret {
   static scene = null;
@@ -139,7 +140,7 @@ export class Turret {
         item.lenX,
         item.lenY,
         state.topSprite,
-        { padding: 1, protectFarmSpots: true }
+        { padding: 1, protectFarmSpots: true, paddingAllowWalls: true, paddingProtectFarmSpots: false }
       );
 
       state.baseSprite.setPosition(placement.centerX, placement.centerY);
@@ -280,8 +281,7 @@ export class Turret {
 
     const scene = this.scene;
     const targets = [this.baseSprite, this.topSprite];
-    if (this.healthBarBg) targets.push(this.healthBarBg);
-    if (this.healthBar) targets.push(this.healthBar);
+    targets.push(...getStructuralHealthBarTargets(this));
 
     scene.tweens.add({
       targets,
@@ -315,27 +315,25 @@ export class Turret {
     const now = this.scene?.time?.now ?? 0;
     const shouldShow = this.isHovered || this.health < this.maxHealth || now < this._damageBarUntil;
     if (!shouldShow) {
-      this.healthBarBg?.destroy();
-      this.healthBar?.destroy();
-      this.healthBarBg = null;
-      this.healthBar = null;
+      destroyStructuralHealthBar(this);
       return;
     }
 
-    const fullWidth = Math.max(44, this.tileType.lenX * SQUARESIZE * 0.75);
-    const x = this.baseSprite.x - fullWidth / 2;
-    const y = this.baseSprite.y - (this.tileType.lenY * SQUARESIZE) / 2 - 14;
     const ratio = Phaser.Math.Clamp(this.health / Math.max(this.maxHealth, 1), 0, 1);
-
-    if (!this.healthBarBg) {
-      this.healthBarBg = this.scene.add.rectangle(0, 0, fullWidth, 6, 0x000000, 0.7).setOrigin(0, 0.5);
-    }
-    if (!this.healthBar) {
-      this.healthBar = this.scene.add.rectangle(0, 0, fullWidth, 4, 0xff3b30, 0.95).setOrigin(0, 0.5);
-    }
-
-    this.healthBarBg.setPosition(x, y).setSize(fullWidth, 6);
-    this.healthBar.setPosition(x, y).setSize(fullWidth * ratio, 4);
+    const { centerX, topY, width } = getStructuralBarAnchor(this.baseSprite, {
+      widthScale: 0.78,
+      paddingX: 10,
+      yOffset: 14,
+    });
+    ensureStructuralHealthBar(this, this.scene, { fillColor: 0xf45d48 });
+    layoutStructuralHealthBar(this, {
+      ratio,
+      centerX,
+      topY,
+      width,
+      visible: true,
+      fillColor: 0xf45d48,
+    });
   }
 
   destroy() {
@@ -353,10 +351,7 @@ export class Turret {
       this.collider = null;
     }
 
-    this.healthBarBg?.destroy();
-    this.healthBarBg = null;
-    this.healthBar?.destroy();
-    this.healthBar = null;
+    destroyStructuralHealthBar(this);
 
     Map.removeFromWorldStatic?.(this.topSprite, true);
     Map.removeFromWorldStatic?.(this.baseSprite, true);
@@ -381,6 +376,7 @@ export class Turret {
     const playerTeam = 1;
 
     if (this.teamNumber === playerTeam) {
+      if (this.scene?.destroyWallMode) return;
       buildingManager.handleBuildingClickForBuilders(this, null, this.teamNumber);
       return;
     }

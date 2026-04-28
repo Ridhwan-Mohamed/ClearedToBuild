@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDV Navmesh Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #08242c;
+            --bg-mid: #103846;
+            --panel: rgba(12, 25, 32, 0.86);
+            --panel-border: rgba(255, 225, 143, 0.28);
+            --panel-soft: rgba(255, 255, 255, 0.08);
+            --ink: #f6edd1;
+            --muted: #b9c0a5;
+            --gold: #f1c96c;
+            --land: #77b255;
+            --water: #3db7d6;
+            --danger: #dd6a5f;
+            --wall: #8b6b46;
+            --accent: #ffe7a3;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at top, rgba(64, 168, 184, 0.22), transparent 38%),
+                linear-gradient(180deg, var(--bg-mid), var(--bg-deep));
+            color: var(--ink);
+            font-family: "Inter", sans-serif;
+        }
+
+        body {
+            display: flex;
+        }
+
+        .lab-shell {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            width: 100%;
+            height: 100%;
+            gap: 0;
+        }
+
+        #game-shell {
+            position: relative;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            box-shadow: inset -18px 0 30px rgba(0, 0, 0, 0.22);
+        }
+
+        .top-strip {
+            position: absolute;
+            top: 18px;
+            left: 18px;
+            right: 390px;
+            z-index: 5;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            pointer-events: none;
+        }
+
+        .title-card,
+        .status-card {
+            pointer-events: auto;
+            border: 1px solid var(--panel-border);
+            background: linear-gradient(180deg, rgba(17, 28, 34, 0.88), rgba(10, 18, 23, 0.88));
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
+            backdrop-filter: blur(12px);
+        }
+
+        .title-card {
+            max-width: 560px;
+            padding: 16px 18px 14px;
+            border-radius: 18px;
+        }
+
+        .status-card {
+            min-width: 230px;
+            padding: 14px 16px;
+            border-radius: 16px;
+        }
+
+        .eyebrow {
+            font-family: "Bungee", cursive;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            color: var(--gold);
+            margin-bottom: 8px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-family: "Bungee", cursive;
+            font-size: 28px;
+            line-height: 1.05;
+            font-weight: 400;
+        }
+
+        .title-card p,
+        .status-card p,
+        .panel-copy,
+        .help-list,
+        .stat-note {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.45;
+            font-size: 13px;
+        }
+
+        .status-card p {
+            margin-top: 6px;
+        }
+
+        .control-panel {
+            position: relative;
+            z-index: 4;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background:
+                linear-gradient(180deg, rgba(16, 28, 34, 0.96), rgba(9, 16, 21, 0.98)),
+                linear-gradient(180deg, rgba(255, 220, 148, 0.08), transparent 24%);
+            border-left: 1px solid rgba(255, 234, 185, 0.12);
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            border-radius: 18px;
+            padding: 15px;
+            border: 1px solid var(--panel-border);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+
+        .panel-section h2 {
+            margin: 0 0 10px;
+            font-family: "Bungee", cursive;
+            font-size: 15px;
+            font-weight: 400;
+            color: var(--accent);
+        }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .button-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        button {
+            appearance: none;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03));
+            color: var(--ink);
+            padding: 11px 12px;
+            font-family: "Inter", sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            text-align: left;
+            cursor: pointer;
+            transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 255, 255, 0.28);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
+        }
+
+        button.active {
+            border-color: rgba(255, 233, 163, 0.65);
+            background: linear-gradient(180deg, rgba(255, 214, 108, 0.28), rgba(255, 214, 108, 0.10));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20);
+        }
+
+        .tool-land.active {
+            background: linear-gradient(180deg, rgba(119, 178, 85, 0.34), rgba(119, 178, 85, 0.12));
+        }
+
+        .tool-water.active {
+            background: linear-gradient(180deg, rgba(61, 183, 214, 0.34), rgba(61, 183, 214, 0.12));
+        }
+
+        .tool-wall.active {
+            background: linear-gradient(180deg, rgba(139, 107, 70, 0.42), rgba(139, 107, 70, 0.14));
+        }
+
+        .tool-erase.active {
+            background: linear-gradient(180deg, rgba(221, 106, 95, 0.34), rgba(221, 106, 95, 0.12));
+        }
+
+        .chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            min-height: 34px;
+            padding: 7px 11px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--ink);
+        }
+
+        .chip-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .stat-card {
+            border-radius: 14px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .stat-card strong {
+            display: block;
+            font-family: "Bungee", cursive;
+            font-size: 11px;
+            font-weight: 400;
+            letter-spacing: 0.05em;
+            color: var(--gold);
+            margin-bottom: 8px;
+        }
+
+        .stat-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--muted);
+        }
+
+        .stat-line span:last-child {
+            color: var(--ink);
+            font-weight: 700;
+        }
+
+        .help-list {
+            display: grid;
+            gap: 7px;
+            margin-top: 10px;
+        }
+
+        .help-list div {
+            padding-left: 12px;
+            position: relative;
+        }
+
+        .help-list div::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 7px;
+            width: 5px;
+            height: 5px;
+            border-radius: 999px;
+            background: var(--gold);
+        }
+
+        .footer-note {
+            font-size: 12px;
+            color: #d2c69d;
+            opacity: 0.9;
+        }
+
+        @media (max-width: 1120px) {
+            .lab-shell {
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-rows: minmax(0, 1fr) auto;
+            }
+
+            .top-strip {
+                right: 18px;
+            }
+
+            .control-panel {
+                border-left: none;
+                border-top: 1px solid rgba(255, 234, 185, 0.12);
+                max-height: 44vh;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .top-strip {
+                flex-direction: column;
+            }
+
+            .status-card {
+                min-width: 0;
+            }
+
+            .button-grid,
+            .button-row,
+            .stats-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            h1 {
+                font-size: 22px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="lab-shell">
+        <div id="game-shell"></div>
+
+        <div class="top-strip">
+            <section class="title-card">
+                <div class="eyebrow">PILLAGE THE VILLAGE / NAVMESH LAB</div>
+                <h1>Interactive Local Navmesh Patching Demo</h1>
+                <p>
+                    Edit land, water, and walls on a live 50x50 board. Toggle between full legacy rebuilds
+                    and the accelerated local patch path, then compare timings while the brawler repaths in real time.
+                </p>
+            </section>
+
+            <section class="status-card">
+                <div class="eyebrow">CURRENT STATE</div>
+                <div class="chip-row">
+                    <div class="chip" id="chip-tool"><span class="chip-dot" id="chip-tool-dot"></span><span id="chip-tool-text">Move</span></div>
+                    <div class="chip" id="chip-nav"><span class="chip-dot" id="chip-nav-dot"></span><span id="chip-nav-text">Land Only</span></div>
+                    <div class="chip" id="chip-update"><span class="chip-dot" id="chip-update-dot"></span><span id="chip-update-text">Accelerated</span></div>
+                </div>
+                <p id="status-summary">Accelerated mode patches only the edited tile bounds plus a one-tile border.</p>
+            </section>
+        </div>
+
+        <aside class="control-panel">
+            <section class="panel-section">
+                <h2>Tool</h2>
+                <p class="panel-copy">Move the brawler or paint the map directly. Nav polygons appear automatically while editing.</p>
+                <div class="button-grid">
+                    <button type="button" class="tool-move" data-tool="move">Move / Select</button>
+                    <button type="button" class="tool-land" data-tool="land">Paint Land</button>
+                    <button type="button" class="tool-water" data-tool="water">Paint Water</button>
+                    <button type="button" class="tool-wall" data-tool="wall">Paint Wall</button>
+                    <button type="button" class="tool-erase" data-tool="eraseWall">Erase Wall</button>
+                </div>
+            </section>
+
+            <section class="panel-section">
+                <h2>Traversal</h2>
+                <p class="panel-copy">Switch the active movement mesh and the polygon overlay view.</p>
+                <div class="button-row">
+                    <button type="button" data-nav-mode="land">Land Only</button>
+                    <button type="button" data-nav-mode="amphibious">Land + Water</button>
+                </div>
+            </section>
+
+            <section class="panel-section">
+                <h2>Update Path</h2>
+                <p class="panel-copy">Legacy rebuild reconstructs both navmeshes from the entire grid. Accelerated mode patches only the edited bounds.</p>
+                <div class="button-row">
+                    <button type="button" data-update-mode="legacy">Legacy Rebuild</button>
+                    <button type="button" data-update-mode="accelerated">Accelerated Patch</button>
+                </div>
+                <div class="chip-row">
+                    <div class="chip"><span class="chip-dot" style="color: #f1c96c;"></span><span id="last-patch-label">Last patch: local 3x3</span></div>
+                </div>
+            </section>
+
+            <section class="panel-section">
+                <h2>Stats</h2>
+                <p class="panel-copy">Numbers below are collected from actual edits in each mode.</p>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <strong>Accelerated</strong>
+                        <div class="stat-line"><span>Last edit</span><span id="stat-fast-last">0.00 ms</span></div>
+                        <div class="stat-line"><span>Average</span><span id="stat-fast-avg">0.00 ms</span></div>
+                        <div class="stat-line"><span>Samples</span><span id="stat-fast-count">0</span></div>
+                    </div>
+                    <div class="stat-card">
+                        <strong>Legacy</strong>
+                        <div class="stat-line"><span>Last edit</span><span id="stat-legacy-last">0.00 ms</span></div>
+                        <div class="stat-line"><span>Average</span><span id="stat-legacy-avg">0.00 ms</span></div>
+                        <div class="stat-line"><span>Samples</span><span id="stat-legacy-count">0</span></div>
+                    </div>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <strong>Active Mesh</strong>
+                        <div class="stat-line"><span>Polygons</span><span id="stat-polys">0</span></div>
+                        <div class="stat-line"><span>Reachable tiles</span><span id="stat-walkable">0</span></div>
+                    </div>
+                    <div class="stat-card">
+                        <strong>Map</strong>
+                        <div class="stat-line"><span>Land tiles</span><span id="stat-land-count">0</span></div>
+                        <div class="stat-line"><span>Water tiles</span><span id="stat-water-count">0</span></div>
+                        <div class="stat-line"><span>Wall tiles</span><span id="stat-wall-count">0</span></div>
+                    </div>
+                </div>
+                <p class="stat-note" id="stats-note">Paint the map to populate timing history.</p>
+            </section>
+
+            <section class="panel-section">
+                <h2>Controls</h2>
+                <div class="help-list">
+                    <div>Click the brawler to select it. In move mode, click any reachable point to send it there.</div>
+                    <div>Drag while painting to edit multiple tiles. Terrain edits redraw only the changed tile bounds plus a one-tile border.</div>
+                    <div>Use mouse wheel to zoom. Use <strong>W A S D</strong> to pan the camera.</div>
+                    <div>Hotkeys: <strong>1</strong> move, <strong>2</strong> land, <strong>3</strong> water, <strong>4</strong> wall, <strong>5</strong> erase wall.</div>
+                </div>
+            </section>
+
+            <section class="panel-section footer-note">
+                Built as a removable standalone example under <code>src/examples/navmesh-lab</code> so it can ship with the repo or be removed cleanly.
+            </section>
+        </aside>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+</body>
+</html>

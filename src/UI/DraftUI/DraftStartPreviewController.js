@@ -7,6 +7,8 @@ import { SQUARESIZE, TILE_MAP, TILE_TYPES, UIDEPTH } from "../../constants.js";
 import { buildingArray, generateTown } from "../../town.js";
 import { Map as GameMap } from "../../map.js";
 import { Player } from "../../players/Player.js";
+import { AudioManager } from "../../Manager/AudioManager.js";
+import { DEFAULT_PLAYER_PORTRAIT_KEY } from "../../players/playerPortraits.js";
 
 
 function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
@@ -53,6 +55,7 @@ export class DraftStartPreviewController {
     this._hover = null;
     this._lastWallBounds = null;
     this._lastGhostBounds = null;
+    this._lastMoveHoverKey = null;
 
     this.placed = []; // {x,y,typeKey,type,lenX,lenY,teamnum,tag}
     this._houseToggle = 0;
@@ -119,6 +122,7 @@ export class DraftStartPreviewController {
 
   clearHover() {
     this._hover = null;
+    this._lastMoveHoverKey = null;
     this.hoverGfx.clear();
     this.wallGhostGfx.clear();
   }
@@ -526,6 +530,35 @@ export class DraftStartPreviewController {
     Player.applyRoleTint(icon);
   }
 
+  _getDraftPortraitKey(typeKey) {
+    switch ((typeKey || "").toLowerCase()) {
+      case "farmer": return "portrait_farmer_healthy";
+      case "forager": return "portrait_forager_healthy";
+      case "fireman": return "portrait_fireman_healthy";
+      case "gunslinger": return "portrait_gunslinger_healthy";
+      case "builder": return "portrait_builder_healthy";
+      case "blademaster": return "portrait_blademaster_healthy";
+      case "brawler": return "portrait_brawler_healthy";
+      default: return DEFAULT_PLAYER_PORTRAIT_KEY;
+    }
+  }
+
+  _applyDraftPortrait(icon, portraitKey, zoom) {
+    if (!icon) return;
+    const key = portraitKey || DEFAULT_PLAYER_PORTRAIT_KEY;
+    const frame = this.worldScene.textures.getFrame(key, 0);
+    const frameWidth = frame?.width ?? 54;
+    const frameHeight = frame?.height ?? 50;
+    const displayHeight = 7 / Math.max(0.0001, zoom);
+    const displayWidth = Math.round((frameWidth / frameHeight) * displayHeight);
+
+    icon.anims?.stop?.();
+    icon
+      .setTexture(key, 0)
+      .setDisplaySize(displayWidth, displayHeight);
+    icon.clearTint?.();
+  }
+
   _setSpawnIcons(points) {
     // reuse icons
     while (this._spawnIcons.length > points.length) {
@@ -539,19 +572,21 @@ export class DraftStartPreviewController {
       // tile -> world center
       const worldX = p.x * SQUARESIZE + SQUARESIZE / 2;
       const worldY = p.y * SQUARESIZE + SQUARESIZE / 2;
+      const portraitKey = this._getDraftPortraitKey(p.type);
+      const zoom = this.worldScene.cameras.main.zoom;
 
       let icon = this._spawnIcons[i];
       if (!icon) {
-        icon = this.worldScene.add.image(worldX, worldY, "playerIcon")
+        icon = this.worldScene.add.sprite(worldX, worldY, portraitKey, 0)
           .setOrigin(0.5)
           .setDepth(UIDEPTH - 1);
-        icon.setScale(1 / this.worldScene.cameras.main.zoom); // adjust if needed for your preview zoom
+        this._applyDraftPortrait(icon, portraitKey, zoom);
         this.spawnIconContainer.add(icon);
         this._spawnIcons[i] = icon;
       } else {
         icon.setPosition(worldX, worldY);
+        this._applyDraftPortrait(icon, portraitKey, zoom);
       }
-      this._applyPlayerTint(icon, p.type);
     }
   }
 
@@ -977,6 +1012,16 @@ export class DraftStartPreviewController {
   setMoveHover(selected, state, gridX, gridY) {
 
     const ok = this._canMoveAt(selected, gridX, gridY).ok;
+    const moveKey = `${gridX},${gridY}`;
+    const changed = gridX !== selected?.x || gridY !== selected?.y;
+    if (ok && changed) {
+      if (moveKey !== this._lastMoveHoverKey) {
+        AudioManager.playLayoutMove();
+      }
+      this._lastMoveHoverKey = moveKey;
+    } else {
+      this._lastMoveHoverKey = null;
+    }
 
     // draw hover rect at target location using selected footprint
     const t = selected.type;

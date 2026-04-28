@@ -17,6 +17,9 @@ import { AudioManager } from "../Manager/AudioManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { Map as GameMap } from "../map";
 
+const FINALIZE_BUTTON_WIDTH = 54;
+const FINALIZE_BUTTON_HEIGHT = 34;
+
 export class WallPlacementController {
   constructor(scene) {
     this.scene = scene;
@@ -38,6 +41,7 @@ export class WallPlacementController {
 
     this.ui = null;               // container for phase text + finalize button
     this.phase = 0;               // 0 = not started, 1 = have start pivot
+    this._lastGhostQueuedCount = null;
 
     this.lastAxis = null;         // "x" or "y" (for “best linear” preference)
     this._initDoorPhysicsOnce(); // ✅ only needs to happen once per scene
@@ -135,6 +139,7 @@ _initDoorPhysicsOnce() {
 }
 
   start(wallTypeName) {
+    buildingManager.clearQueuedWallJobSelection?.(1);
     this.segments = [];
     this.segmentStart = null;
     this.active = true;
@@ -147,6 +152,7 @@ _initDoorPhysicsOnce() {
     this.committedCells = [];
     this.previewCells = [];
     this.phase = 0;
+    this._lastGhostQueuedCount = null;
     this.lastAxis = null;
 
     if (!this.previewContainer) {
@@ -175,6 +181,7 @@ _initDoorPhysicsOnce() {
   }
 
   stop() {
+    buildingManager.clearQueuedWallJobSelection?.(1);
     this.segmentStart = null;
     this.committedDoors = [];
     this.orderedBuildTiles = [];
@@ -184,6 +191,7 @@ _initDoorPhysicsOnce() {
     this.committedCells = [];
     this.previewCells = [];
     this.lastAxis = null;
+    this._lastGhostQueuedCount = null;
 
     if (this.previewContainer) this.previewContainer.removeAll(true);
     this.previewSprites = [];
@@ -240,12 +248,16 @@ _initDoorPhysicsOnce() {
   onPointerMove(pointer) {
     if (!this.active) return;
 
+    if (this._updateFinalizeHover(pointer)) {
+      return;
+    }
+
     const g = this._pointerToGrid(pointer);
     if (!g) return;
 
     // Phase 0: hover a single potential START tile
     if (this.phase === 0) {
-        const ok = this._canPlaceCell(g.x, g.y);
+        const ok = this._canUseSegmentPivot(g.x, g.y);
         this._setPhase1Text(ok, this._queuedCount());
         this.previewCells = [{ x: g.x, y: g.y }];
         this._redrawGhost(ok);
@@ -261,11 +273,10 @@ _initDoorPhysicsOnce() {
         this._redrawGhost(false);
         return;
     }
-    const longEnough = seg.length >= 1;
-    const ok = longEnough && this._canPlaceCells(seg, true);
-    const midIdx = Math.floor(seg.length / 2);  // works for 3+ length
+    const analysis = this._analyzeSegment(seg);
+    const ok = analysis.valid;
     this.previewCells = seg;
-    this._setPhase2Text(ok, this._queuedCount(seg));
+    this._setPhase2Text(ok, this._queuedCount(analysis.buildableCells));
     this._redrawGhost(ok);
 }
 
@@ -277,12 +288,8 @@ _initDoorPhysicsOnce() {
         return;
     }
 
-    if (this.finalBtn?.visible) {
-      const bounds = this.finalBtn.getBounds?.();
-      if (bounds && Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) {
-        this.finalize();
-        return;
-      }
+    if (this._handleFinalizePointer(pointer)) {
+      return;
     }
 
     const g = this._pointerToGrid(pointer);
@@ -290,7 +297,7 @@ _initDoorPhysicsOnce() {
 
     // Phase 0: pick START of a new segment
     if (this.phase === 0) {
-        if (!this._canPlaceCell(g.x, g.y)) return;
+        if (!this._canUseSegmentPivot(g.x, g.y)) return;
 
         this.segmentStart = { x: g.x, y: g.y };
         this.phase = 1;
@@ -305,35 +312,34 @@ _initDoorPhysicsOnce() {
 // Phase 1: click ends current segment (commit it)
 const seg = this._strictLineSegment(this.segmentStart, g);
 if (!seg || seg.length < 1) return;
-if (!this._canPlaceCells(seg, true)) return;
-
-const hasDoor = seg.length >= 3;
-const midIdx = hasDoor ? Math.floor(seg.length / 2) : -1;
+const analysis = this._analyzeSegment(seg);
+if (!analysis.valid) return;
 
 let doorCell = null;
-let wallCells = seg;
+let wallCells = analysis.buildableCells;
 let doorsForSegment = [];
 
 const doorTypeName =
-  (this.wallTypeName === "woodWall") ? "woodWall_door" : "wall_door";
+  this._doorTypeName();
 
-if (hasDoor) {
-  doorCell = seg[midIdx];
+doorCell = this._pickDoorCell(seg, analysis.buildableCells);
+
+if (doorCell) {
   doorsForSegment = [doorCell];
-  wallCells = seg.filter((_, i) => i !== midIdx);
+  wallCells = analysis.buildableCells.filter((cell) => !(cell.x === doorCell.x && cell.y === doorCell.y));
 
   this.committedDoors = this.committedDoors || [];
-  const isVertical = seg[0].x === seg[seg.length - 1].x;
-  const angle = isVertical ? 90 : 0;
+  const angle = this._segmentDoorAngle(seg, doorCell);
   this.committedDoors.push({ x: doorCell.x, y: doorCell.y, angle });
 }
 
 this.committedCells.push(...wallCells);
 
 // enqueue IN ORDER (door interleaved)
-for (let i = 0; i < seg.length; i++) {
-  const c = seg[i];
-  const isDoorHere = hasDoor && (i === midIdx);
+for (const c of seg) {
+  const isBuildable = analysis.buildableCells.some((cell) => cell.x === c.x && cell.y === c.y);
+  if (!isBuildable) continue;
+  const isDoorHere = !!doorCell && c.x === doorCell.x && c.y === doorCell.y;
   this.orderedBuildTiles.push({
     x: c.x,
     y: c.y,
@@ -374,8 +380,41 @@ finalize() {
     ordered.push(t);
   }
 
+  const totalCost = {};
+  for (const tile of ordered) {
+    const buildType = TILE_TYPES[tile.buildTypeName] ?? TILE_TYPES[this.wallTypeName];
+    const rawCost = buildType?.cost ?? buildType?.price ?? null;
+    if (!rawCost || typeof rawCost !== "object") continue;
+    for (const [resourceKey, rawAmount] of Object.entries(rawCost)) {
+      const amount = Math.max(0, Number(rawAmount) || 0);
+      if (!(amount > 0)) continue;
+      totalCost[resourceKey] = Math.max(0, Number(totalCost[resourceKey] || 0)) + amount;
+    }
+  }
+
+  // Keep this disabled while testing so wall placement is never blocked by current stock.
+  // if (Object.keys(totalCost).length && !buildingManager.hasRequiredMaterials(totalCost, "1")) {
+  //   return;
+  // }
+
+  const prepaid = Object.keys(totalCost).length > 0 && buildingManager.hasRequiredMaterials(totalCost, "1");
+  if (prepaid) {
+    buildingManager.consumeRequiredMaterials(totalCost, "1");
+  }
+
+  const wallJobId = buildingManager.createWallJobId?.("1") ?? `wall-job-${Date.now()}`;
+  const queuedTiles = ordered.map((tile) => {
+    const buildType = TILE_TYPES[tile.buildTypeName] ?? TILE_TYPES[this.wallTypeName];
+    return {
+      ...tile,
+      wallJobId,
+      prepaid,
+      refundCost: buildType?.cost ?? buildType?.price ?? null,
+    };
+  });
+
   // Enqueue mixed build types and let the builder scheduler delegate them.
-  buildingManager.createBuildTileStateArray(ordered, "1");
+  buildingManager.createBuildTileStateArray(queuedTiles, "1");
   this.stop();
 }
 
@@ -390,12 +429,6 @@ finalize() {
   }
 
     _strictLineSegment(a, b) {
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-
-        // must be same row or same col
-        if (dx !== 0 && dy !== 0) return null;
-
         return this._lineCells(a, b);
     }
 
@@ -403,16 +436,247 @@ finalize() {
     const cells = [];
     const sx = Math.sign(b.x - a.x);
     const sy = Math.sign(b.y - a.y);
+    const dx = Math.abs(b.x - a.x);
+    const dy = Math.abs(b.y - a.y);
 
     let x = a.x, y = a.y;
     cells.push({ x, y });
 
+    if (dx === 0 || dy === 0) {
+      while (x !== b.x || y !== b.y) {
+        if (x !== b.x) x += sx;
+        else if (y !== b.y) y += sy;
+        cells.push({ x, y });
+      }
+      return cells;
+    }
+
+    if (dx >= dy) {
+      let error = 0;
+      while (x !== b.x || y !== b.y) {
+        if (x !== b.x) {
+          x += sx;
+          cells.push({ x, y });
+          error += dy;
+        }
+
+        if (y !== b.y && error * 2 >= dx) {
+          y += sy;
+          cells.push({ x, y });
+          error -= dx;
+        }
+      }
+      return cells;
+    }
+
+    let error = 0;
     while (x !== b.x || y !== b.y) {
-      if (x !== b.x) x += sx;
-      else if (y !== b.y) y += sy;
-      cells.push({ x, y });
+      if (y !== b.y) {
+        y += sy;
+        cells.push({ x, y });
+        error += dx;
+      }
+
+      if (x !== b.x && error * 2 >= dy) {
+        x += sx;
+        cells.push({ x, y });
+        error -= dy;
+      }
     }
     return cells;
+  }
+
+  _doorTypeName() {
+    return this.wallTypeName === "woodWall" ? "woodWall_door" : "wall_door";
+  }
+
+  static _wallFamilyForTypeName(typeName) {
+    if (typeName === "wall" || typeName === "wall_door") return "stone";
+    if (typeName === "woodWall" || typeName === "woodWall_door") return "wood";
+    return null;
+  }
+
+  static _isWallFamilyTypeName(typeName) {
+    return this._wallFamilyForTypeName(typeName) != null;
+  }
+
+  static _typeNameMatchesWallFamily(typeName, family) {
+    return this._wallFamilyForTypeName(typeName) === family;
+  }
+
+  _placedWallMatchesFamily(x, y, family) {
+    const info = GameMap._wallStructureInfoAt?.(x, y) || null;
+    return WallPlacementController._typeNameMatchesWallFamily(info?.name, family);
+  }
+
+  _virtualWallTiles(previewBuildableCells = [], previewDoor = null) {
+    const tiles = new globalThis.Map();
+
+    for (const tile of this.orderedBuildTiles || []) {
+      const typeName = tile?.buildTypeName ?? tile?.type?.name ?? null;
+      if (!WallPlacementController._isWallFamilyTypeName(typeName)) continue;
+      tiles.set(`${tile.x},${tile.y}`, typeName);
+    }
+
+    for (const cell of previewBuildableCells || []) {
+      tiles.set(`${cell.x},${cell.y}`, this.wallTypeName);
+    }
+
+    if (previewDoor) {
+      tiles.set(`${previewDoor.x},${previewDoor.y}`, this._doorTypeName());
+    }
+
+    return tiles;
+  }
+
+  _wallDisplayInfoForCell(x, y, typeName, virtualTiles) {
+    const family = WallPlacementController._wallFamilyForTypeName(typeName);
+    if (!family) return null;
+
+    const isDoor = typeName === "wall_door" || typeName === "woodWall_door";
+    const solidAt = (gx, gy) => {
+      const virtualType = virtualTiles?.get(`${gx},${gy}`) ?? null;
+      if (WallPlacementController._typeNameMatchesWallFamily(virtualType, family)) return true;
+      return this._placedWallMatchesFamily(gx, gy, family);
+    };
+
+    const up = solidAt(x, y - 1);
+    const down = solidAt(x, y + 1);
+    const left = solidAt(x - 1, y);
+    const right = solidAt(x + 1, y);
+    const count = (up ? 1 : 0) + (down ? 1 : 0) + (left ? 1 : 0) + (right ? 1 : 0);
+
+    if (isDoor) {
+      const angle = up && down ? 90 : (left && right ? 0 : ((up || down) ? 90 : 0));
+      return { key: typeName, angle, isDoor: true };
+    }
+
+    const def = family === "wood" ? TILE_TYPES.woodWall : TILE_TYPES.wall;
+    let gridVal = def.interior;
+
+    if (count === 1) {
+      if (up) gridVal = def.sides.right;
+      else if (right) gridVal = def.sides.up;
+      else if (down) gridVal = def.sides.left;
+      else gridVal = def.sides.down;
+    } else if (count === 2) {
+      if (up && down && !left && !right) gridVal = def.sides.right;
+      else if (left && right && !up && !down) gridVal = def.sides.up;
+      else if (up && left && !right && !down) gridVal = def.corners.bottomRight;
+      else if (up && right && !left && !down) gridVal = def.corners.bottomLeft;
+      else if (down && left && !right && !up) gridVal = def.corners.topRight;
+      else if (down && right && !left && !up) gridVal = def.corners.topLeft;
+    }
+
+    const kind = family === "wood"
+      ? (gridVal === def.interior ? "woodWall_interior" : Object.values(def.sides).includes(gridVal) ? "woodWall_edge" : "woodWall_corner")
+      : (gridVal === def.interior ? "wall_interior" : Object.values(def.sides).includes(gridVal) ? "wall_edge" : "wall_corner");
+
+    return {
+      key: kind,
+      angle: WallPlacementController._angleForWallPiece(gridVal),
+      isDoor: false,
+    };
+  }
+
+  _sameWallFamilyName(name) {
+    if (!name) return false;
+    return name === this.wallTypeName || name === this._doorTypeName();
+  }
+
+  _queuedTileAt(x, y) {
+    return (this.orderedBuildTiles || []).find((tile) => tile.x === x && tile.y === y) || null;
+  }
+
+  _cellBuildState(x, y) {
+    const info = GameMap._wallStructureInfoAt?.(x, y) || null;
+    const queuedTile = this._queuedTileAt(x, y);
+    const sameFamilyPlaced = this._sameWallFamilyName(info?.name);
+    const sameFamilyQueued = this._sameWallFamilyName(queuedTile?.buildTypeName);
+    const hasPlacedWall = !!info;
+    const hasQueuedTile = !!queuedTile;
+    const canBuildNew =
+      !!Map.navGrid[y]?.[x] &&
+      !hasPlacedWall &&
+      !hasQueuedTile;
+
+    return {
+      info,
+      queuedTile,
+      sameFamilyPlaced,
+      sameFamilyQueued,
+      incorporated: sameFamilyPlaced || sameFamilyQueued,
+      canBuildNew,
+    };
+  }
+
+  _canUseSegmentPivot(x, y) {
+    const state = this._cellBuildState(x, y);
+    return state.canBuildNew || state.incorporated;
+  }
+
+  _analyzeSegment(cells) {
+    const buildableCells = [];
+
+    for (const cell of cells) {
+      const state = this._cellBuildState(cell.x, cell.y);
+      if (state.canBuildNew) {
+        buildableCells.push(cell);
+        continue;
+      }
+      if (state.incorporated) continue;
+      return { valid: false, buildableCells: [] };
+    }
+
+    return {
+      valid: buildableCells.length > 0,
+      buildableCells,
+    };
+  }
+
+  _pickDoorCell(seg, buildableCells) {
+    if (!Array.isArray(seg) || seg.length < 3 || !Array.isArray(buildableCells) || buildableCells.length === 0) {
+      return null;
+    }
+
+    const buildableKeys = new Set(buildableCells.map((cell) => `${cell.x},${cell.y}`));
+    const centerIndex = (seg.length - 1) / 2;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let bestIndex = Number.POSITIVE_INFINITY;
+
+    for (let i = 1; i < seg.length - 1; i++) {
+      const cell = seg[i];
+      if (!buildableKeys.has(`${cell.x},${cell.y}`)) continue;
+      const prev = seg[i - 1];
+      const next = seg[i + 1];
+      const straightThrough =
+        (prev?.x === cell.x && next?.x === cell.x) ||
+        (prev?.y === cell.y && next?.y === cell.y);
+      if (!straightThrough) continue;
+      const distance = Math.abs(i - centerIndex);
+      if (distance < bestDistance || (distance === bestDistance && i < bestIndex)) {
+        best = cell;
+        bestDistance = distance;
+        bestIndex = i;
+      }
+    }
+
+    return best;
+  }
+
+  _segmentDoorAngle(seg, doorCell) {
+    if (!Array.isArray(seg) || !doorCell) return 0;
+    const index = seg.findIndex((cell) => cell.x === doorCell.x && cell.y === doorCell.y);
+    if (index <= 0 || index >= seg.length - 1) return 0;
+
+    const prev = seg[index - 1];
+    const next = seg[index + 1];
+    const verticalThrough =
+      prev?.x === doorCell.x &&
+      next?.x === doorCell.x;
+
+    return verticalThrough ? 90 : 0;
   }
 
   _canPlaceCell(x, y) {
@@ -502,7 +766,7 @@ finalize() {
 
   _ensureUI() {
     if (!this.ui) {
-        const y = 60; // ✅ below top bar (farm uses y=40)
+        const y = 92; // below the top HUD / money row
         const x = this.scene.scale.width / 2;
 
         this.ui = this.scene.add.container(x, y)
@@ -524,7 +788,7 @@ finalize() {
 
         // keep finalize as a separate button to the right of the banner (still under top bar)
         this.finalBtn = this.scene.add.text(0, 0, "✔ Finalize", {
-        fontSize: "14px",
+        fontSize: "18px",
         fontFamily: "Bungee",
         color: "#ffffff",
         backgroundColor: "#222222",
@@ -535,9 +799,6 @@ finalize() {
         this.finalBtn.on("pointerdown", () => this.finalize());
 
         this.ui.add([this.uiBg, this.uiText, this.finalBtn]);
-
-        // ignore by main camera like other UI (optional, but consistent with your top HUD)
-        this.scene.cameras.main.ignore(this.ui);
 
         // keep centered on resize
         this.scene.scale.on("resize", ({ width }) => {
@@ -596,7 +857,7 @@ finalize() {
 // WallPlacementController.js
   _ensureUI() {
     if (!this.ui) {
-      const y = 60;
+      const y = 92;
       const x = this.scene.scale.width / 2;
 
       this.ui = this.scene.add.container(x, y)
@@ -604,8 +865,7 @@ finalize() {
         .setDepth(UIDEPTH + 10)
         .setVisible(true);
 
-      this.uiBg = this.scene.add.rectangle(0, 0, 10, 26, 0x222222, 0.75)
-        .setOrigin(0.5, 0.5);
+      this.uiBg = this.scene.add.graphics();
 
       this.uiText = this.scene.add.text(0, 0, "", {
         fontSize: "16px",
@@ -619,13 +879,50 @@ finalize() {
         fontSize: "14px",
         fontFamily: "Bungee",
         color: "#ffffff",
-        backgroundColor: "#222222",
-        padding: { left: 14, right: 14, top: 6, bottom: 6 },
+        stroke: "#02111d",
+        strokeThickness: 4,
       }).setOrigin(0.5, 0.5);
 
-      this.finalBtn.on("pointerdown", () => this.finalize());
+      this.finalBtn.setBackgroundColor("rgba(0,0,0,0)");
+      this.finalBtn.setPadding(0, 0, 0, 0);
+      this.finalBtn.on("pointerdown", (_pointer, _x, _y, event) => {
+        event?.stopPropagation?.();
+        if (!this._finalBtnEnabled) return;
+        this._finalBtnPressed = true;
+        this._drawFinalizeButton();
+        this._activateFinalizeButton();
+      });
       this.ui.add([this.uiBg, this.uiText, this.finalBtn]);
-
+      this.finalBtnGlass = this.scene.add.graphics();
+      this.finalBtnHit = this.scene.add.zone(0, 0, FINALIZE_BUTTON_WIDTH, FINALIZE_BUTTON_HEIGHT);
+      this._setFinalizeHitInteractive();
+      this.finalBtnHit.on("pointerover", (_pointer, _x, _y, event) => {
+        event?.stopPropagation?.();
+        this._finalBtnHovered = true;
+        AudioManager.playUiHover({ volume: 0.18 });
+        this._drawFinalizeButton();
+      });
+      this.finalBtnHit.on("pointerout", (_pointer, event) => {
+        event?.stopPropagation?.();
+        this._finalBtnHovered = false;
+        this._finalBtnPressed = false;
+        this._drawFinalizeButton();
+      });
+      this.finalBtnHit.on("pointerdown", (_pointer, _x, _y, event) => {
+        event?.stopPropagation?.();
+        if (!this._finalBtnEnabled) return;
+        this._finalBtnPressed = true;
+        this._drawFinalizeButton();
+      });
+      this.finalBtnHit.on("pointerup", (_pointer, _x, _y, event) => {
+        event?.stopPropagation?.();
+        this._finalBtnPressed = false;
+        this._drawFinalizeButton();
+        this._activateFinalizeButton();
+      });
+      this.ui.addAt(this.finalBtnGlass, 2);
+      this.ui.add(this.finalBtnHit);
+      this.ui.setScrollFactor(0, 0, true);
       this.scene.scale.on("resize", ({ width }) => {
         this.ui.setX(width / 2);
         this._layoutUI();
@@ -644,20 +941,123 @@ finalize() {
     const spacingY = 10;
     const w = this.uiText.width + padX * 2;
     const h = this.uiText.height + padY;
+    const bgH = Math.max(26, h);
 
-    this.uiBg.setSize(w, Math.max(26, h));
-    this.uiBg.setPosition(0, 0);
+    this.uiBg.clear();
+    this.uiBg.fillStyle(0x10293b, 0.72);
+    this.uiBg.fillRoundedRect(-w / 2, -bgH / 2, w, bgH, 12);
+    this.uiBg.fillStyle(0xffffff, 0.08);
+    this.uiBg.fillRoundedRect((-w / 2) + 2, (-bgH / 2) + 2, w - 4, Math.max(8, bgH * 0.42), 10);
+    this.uiBg.lineStyle(2, 0xffffff, 0.16);
+    this.uiBg.strokeRoundedRect(-w / 2, -bgH / 2, w, bgH, 12);
     this.uiText.setPosition(0, 0);
 
-    const btnY = this.uiBg.height / 2 + spacingY + this.finalBtn.height / 2;
+    const btnY = bgH / 2 + spacingY + this.finalBtn.height / 2;
     this.finalBtn.setPosition(0, btnY);
+    this.finalBtnGlass?.setPosition?.(0, 0);
+    this.finalBtnHit?.setPosition?.(0, btnY);
+    this._drawFinalizeButton();
   }
 
   _updateFinalizeEnabled(enabled) {
     if (!this.finalBtn) return;
+    this._finalBtnEnabled = !!enabled;
+    if (!enabled) {
+      this._finalBtnHovered = false;
+      this._finalBtnPressed = false;
+    }
     this.finalBtn.setVisible(enabled);
+    this.finalBtn.setAlpha(enabled ? 1 : 0.4);
+    this.finalBtnGlass?.setVisible?.(enabled);
+    this.finalBtnHit?.setActive?.(enabled);
     this.finalBtn.disableInteractive();
-    if (enabled) this.finalBtn.setInteractive({ useHandCursor: true });
+    this.finalBtnHit?.disableInteractive?.();
+    if (enabled) {
+      this.finalBtn.setInteractive({ useHandCursor: true });
+      this._setFinalizeHitInteractive();
+    }
+    this._drawFinalizeButton();
+  }
+
+  _setFinalizeHitInteractive() {
+    if (!this.finalBtnHit) return;
+    this.finalBtnHit.setInteractive({
+      hitArea: new Phaser.Geom.Rectangle(
+        -FINALIZE_BUTTON_WIDTH / 2,
+        -FINALIZE_BUTTON_HEIGHT / 2,
+        FINALIZE_BUTTON_WIDTH,
+        FINALIZE_BUTTON_HEIGHT
+      ),
+      hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+      useHandCursor: true,
+    });
+  }
+
+  _drawFinalizeButton() {
+    if (!this.finalBtnGlass || !this.finalBtn) return;
+    const enabled = !!this._finalBtnEnabled;
+    if (!enabled) {
+      this.finalBtnGlass.clear();
+      this.finalBtn.setScale(1);
+      return;
+    }
+    const hovered = !!this._finalBtnHovered && enabled;
+    const pressed = !!this._finalBtnPressed && enabled;
+    const width = FINALIZE_BUTTON_WIDTH;
+    const height = FINALIZE_BUTTON_HEIGHT;
+    const fillAlpha = enabled ? (pressed ? 0.54 : hovered ? 0.48 : 0.38) : 0.14;
+    const strokeAlpha = enabled ? (hovered ? 0.72 : 0.42) : 0.16;
+
+    this.finalBtnGlass.clear();
+    this.finalBtnGlass.fillStyle(0x17354a, fillAlpha);
+    this.finalBtnGlass.fillRoundedRect(-width / 2, this.finalBtn.y - (height / 2), width, height, 12);
+    this.finalBtnGlass.fillStyle(0xffffff, enabled ? (hovered ? 0.13 : 0.09) : 0.04);
+    this.finalBtnGlass.fillRoundedRect((-width / 2) + 2, this.finalBtn.y - (height / 2) + 2, width - 4, 12, 10);
+    this.finalBtnGlass.lineStyle(2, 0xffffff, strokeAlpha);
+    this.finalBtnGlass.strokeRoundedRect(-width / 2, this.finalBtn.y - (height / 2), width, height, 12);
+    this.finalBtnGlass.lineStyle(1, 0xa7f3d0, enabled ? (hovered ? 0.72 : 0.44) : 0.16);
+    this.finalBtnGlass.strokeRoundedRect((-width / 2) + 1, this.finalBtn.y - (height / 2) + 1, width - 2, height - 2, 11);
+    this.finalBtn.setScale(pressed ? 0.97 : hovered ? 1.04 : 1);
+  }
+
+  _getFinalizeBounds() {
+    if (!this.ui?.visible || !this.finalBtnHit?.active || !this.finalBtn?.visible) return null;
+
+    const width = this.finalBtnHit.width || FINALIZE_BUTTON_WIDTH;
+    const height = this.finalBtnHit.height || FINALIZE_BUTTON_HEIGHT;
+    const matrix = this.finalBtnHit.getWorldTransformMatrix?.();
+    const x = matrix?.tx ?? ((this.ui.x || 0) + (this.finalBtnHit.x || 0));
+    const y = matrix?.ty ?? ((this.ui.y || 0) + (this.finalBtnHit.y || 0));
+
+    return new Phaser.Geom.Rectangle(x - width / 2, y - height / 2, width, height);
+  }
+
+  _updateFinalizeHover(pointer) {
+    const bounds = this._getFinalizeBounds();
+    const hovered = !!(bounds && Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y));
+    if (hovered === !!this._finalBtnHovered) return hovered;
+    this._finalBtnHovered = hovered;
+    if (hovered) AudioManager.playUiHover({ volume: 0.18 });
+    if (!hovered) this._finalBtnPressed = false;
+    this._drawFinalizeButton();
+    return hovered;
+  }
+
+  _handleFinalizePointer(pointer) {
+    const bounds = this._getFinalizeBounds();
+    if (!bounds || !Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y)) return false;
+    if (!this._finalBtnEnabled) return true;
+    this._finalBtnPressed = true;
+    this._drawFinalizeButton();
+    this._activateFinalizeButton();
+    return true;
+  }
+
+  _activateFinalizeButton() {
+    if (!this.active || !this._finalBtnEnabled || !this.orderedBuildTiles?.length) return false;
+    AudioManager.playMenuClick({ volume: 0.2 });
+    this.finalize();
+    return true;
   }
 
   _setPhase1Text(valid = true, count = this._queuedCount()) {
@@ -674,12 +1074,6 @@ finalize() {
   }
 
 _redrawGhost(isValid = true) {
-  const def = TILE_TYPES[this.wallTypeName];
-
-  // For preview, use interior ghost images you preload
-  const ghostKey = (this.wallTypeName === "woodWall") ? "woodWall_interior" : "wall_interior";
-  const doorKey  = (this.wallTypeName === "woodWall") ? "woodWall_door" : "wall_door";
-
   if (!this.previewContainer) return;
 
   this.previewContainer.removeAll(true);
@@ -689,67 +1083,55 @@ _redrawGhost(isValid = true) {
   const alphaWall = 0.55;
   const alphaDoor = 0.75;
 
-  const drawWallCell = (c, a = alphaWall) => {
-    const spr = this.scene.add.image(
-      c.x * SQUARESIZE + SQUARESIZE / 2,
-      c.y * SQUARESIZE + SQUARESIZE / 2,
-      ghostKey
-    );
-    spr.setAlpha(a);
-    spr.setTintFill(tint);
-    spr.setBlendMode(Phaser.BlendModes.ADD);
-    this.previewContainer.add(spr);
-    this.previewSprites.push(spr);
-  };
+  const previewAnalysis = this._analyzeSegment(this.previewCells);
+  const previewBuildableCells = previewAnalysis.valid ? previewAnalysis.buildableCells : [];
+  const previewDoor = previewAnalysis.valid
+    ? this._pickDoorCell(this.previewCells, previewBuildableCells)
+    : null;
+  const previewQueuedCount = this._queuedCount(previewBuildableCells);
+  if (this._lastGhostQueuedCount != null && previewQueuedCount !== this._lastGhostQueuedCount) {
+    AudioManager.playLayoutMove({ volume: 0.2 });
+  }
+  this._lastGhostQueuedCount = previewQueuedCount;
+  const virtualTiles = this._virtualWallTiles(previewBuildableCells, previewDoor);
 
-  const drawDoorCell = (c, angleDeg = 0, a = alphaDoor) => {
+  const drawGhostTile = (cell, typeName, a = alphaWall) => {
+    const display = this._wallDisplayInfoForCell(cell.x, cell.y, typeName, virtualTiles);
+    if (!display) return;
+
     const spr = this.scene.add.sprite(
-      c.x * SQUARESIZE + SQUARESIZE / 2,
-      c.y * SQUARESIZE + SQUARESIZE / 2,
-      doorKey,
+      cell.x * SQUARESIZE + SQUARESIZE / 2,
+      cell.y * SQUARESIZE + SQUARESIZE / 2,
+      display.key,
       0
     );
-    spr.setAngle(angleDeg);
-    spr.setAlpha(a);
+    spr.setAngle(display.angle || 0);
+    spr.setDisplaySize(SQUARESIZE, SQUARESIZE);
+    spr.setAlpha(display.isDoor ? alphaDoor : a);
     spr.setTintFill(tint);
     spr.setBlendMode(Phaser.BlendModes.ADD);
     this.previewContainer.add(spr);
     this.previewSprites.push(spr);
   };
 
-  // --- 1) committed walls
-  for (const c of this.committedCells) drawWallCell(c);
-
-  // --- 2) committed doors (stay visible after segment ends)
-  for (const d of (this.committedDoors || [])) {
-    // rotation based on existing committed neighbors in Map.grid
-    drawDoorCell(d, d.angle ?? 0);
+  const committedTiles = [];
+  const seenCommitted = new Set();
+  for (const tile of this.orderedBuildTiles || []) {
+    const typeName = tile?.buildTypeName ?? tile?.type?.name ?? null;
+    if (!WallPlacementController._isWallFamilyTypeName(typeName)) continue;
+    const key = `${tile.x},${tile.y}`;
+    if (seenCommitted.has(key)) continue;
+    seenCommitted.add(key);
+    committedTiles.push({ x: tile.x, y: tile.y, typeName });
   }
+  for (const tile of committedTiles) drawGhostTile(tile, tile.typeName);
 
-  // --- 3) LIVE preview segment (during creation)
-  if (!this.previewCells || this.previewCells.length === 0) return;
+  if (!previewBuildableCells.length && !previewDoor) return;
 
-  // door exists only when preview segment is long enough
-  let previewDoor = null;
-  let previewDoorAngle = 0;
-
-  if (this.previewCells.length >= 3) {
-    const midIdx = Math.floor(this.previewCells.length / 2);
-    previewDoor = this.previewCells[midIdx];
-
-    const isVertical =
-      this.previewCells[0].x === this.previewCells[this.previewCells.length - 1].x;
-    previewDoorAngle = isVertical ? 90 : 0;
+  for (const cell of previewBuildableCells) {
+    const isDoorHere = previewDoor && cell.x === previewDoor.x && cell.y === previewDoor.y;
+    drawGhostTile(cell, isDoorHere ? this._doorTypeName() : this.wallTypeName);
   }
-
-  // draw preview walls (exclude preview door cell so it doesn't get covered)
-  for (const c of this.previewCells) {
-    if (previewDoor && c.x === previewDoor.x && c.y === previewDoor.y) continue;
-    drawWallCell(c, alphaWall);
-  }
-
-  // draw preview door on top
-  if (previewDoor) drawDoorCell(previewDoor, previewDoorAngle, alphaDoor);
 }
 
 static isDoorTileNumber(n) {

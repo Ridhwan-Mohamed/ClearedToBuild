@@ -767,6 +767,34 @@ export function handleGridXY(x,y,itemX,itemY){
     return [finalX,finalY]
 }
 
+function maybePlayErrorAlertSound(targetScene, message, color) {
+    const upper = String(message || "").toUpperCase();
+    const isErrorMessage =
+        upper.includes("ERROR")
+        || upper.includes("FAILED")
+        || upper.includes("INVALID")
+        || upper.includes("COULD NOT")
+        || upper.includes("MISSED")
+        || upper.includes("REQUIRED")
+        || upper.includes("CANNOT");
+
+    let isErrorColor = false;
+    const hex = String(color || "").trim().replace(/^#/, "");
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        isErrorColor = r >= 180 && r > (g * 1.14) && r > (b * 1.14);
+    }
+
+    if (!isErrorMessage && !isErrorColor) return;
+    if (!targetScene?.cache?.audio?.exists?.("sfx_ui_error")) return;
+    targetScene.sound?.play?.("sfx_ui_error", {
+        volume: 0.24,
+        rate: 0.94 + Math.random() * 0.09,
+    });
+}
+
 export function showAlert(scene, message, color = '#ffffff', duration = 1400) {
     const uiScene = scene?.uiScene
         || scene?.scene?.get?.('GameUIScene')
@@ -779,6 +807,8 @@ export function showAlert(scene, message, color = '#ffffff', duration = 1400) {
     if (uiScene && typeof uiScene.showAlertMessage === 'function') {
         return uiScene.showAlertMessage(message, color, duration);
     }
+
+    maybePlayErrorAlertSound(uiScene, message, color);
 
     const alert = uiScene.add.text(
         uiScene.cameras.main.width / 2, 0, message,
@@ -815,7 +845,7 @@ export function clearTaskPlusTimer(sprite){
 }
 
 export const gridColors = {
-    water:  0x3cb8f1,
+    water:  0x156c99,
     wall: 0x808080,
     woodWall: 0x65350f,
     wall_door: 0x5a5a5a,

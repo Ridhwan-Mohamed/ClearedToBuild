@@ -129,6 +129,41 @@ export class Clock {
         return `Day ${this.day} - ${this.formatClockFaceTime()}`;
     }
 
+    getSnapshot() {
+        return {
+            paused: !!this.paused,
+            powerupScreenShown: !!this.powerupScreenShown,
+            hours: Number(this.hours || 0),
+            minutes: Number(this.minutes || 0),
+            day: Number(this.day || 1),
+            waveAmount: Number(this.waveAmount || 1),
+            spawnedThisNight: Number(this.spawnedThisNight || 0),
+            lastSend: this.lastSend ?? null,
+            wasNight: !!this.wasNight,
+            minuteStep: Number(this.minuteStep || 0.3),
+            ticksPerMinute: Number(this.ticksPerMinute || 1),
+            tickCount: Number(this.tickCount || 0),
+        };
+    }
+
+    restoreSnapshot(snapshot = null) {
+        if (!snapshot || typeof snapshot !== "object") return;
+        this.paused = !!snapshot.paused;
+        this.powerupScreenShown = !!snapshot.powerupScreenShown;
+        this.hours = Number(snapshot.hours ?? this.hours ?? 5);
+        this.minutes = Number(snapshot.minutes ?? this.minutes ?? 50);
+        this.day = Math.max(1, Number(snapshot.day ?? this.day ?? 1));
+        this.waveAmount = Math.max(1, Number(snapshot.waveAmount ?? this.waveAmount ?? 1));
+        this.spawnedThisNight = Math.max(0, Number(snapshot.spawnedThisNight ?? this.spawnedThisNight ?? 0));
+        this.lastSend = snapshot.lastSend ?? null;
+        this.wasNight = !!snapshot.wasNight;
+        this.minuteStep = Number(snapshot.minuteStep ?? this.minuteStep ?? 0.3);
+        this.ticksPerMinute = Math.max(1, Number(snapshot.ticksPerMinute ?? this.ticksPerMinute ?? 1));
+        this.tickCount = Math.max(0, Number(snapshot.tickCount ?? this.tickCount ?? 0));
+        this.externalText?.setText?.(this.formatTimeWithDay());
+        this.updateLighting?.();
+    }
+
     _minutesUntilHour(targetHour) {
         const current = this.getHourFloat() * 60;
         let target = Number(targetHour) * 60;

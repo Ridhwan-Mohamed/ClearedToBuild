@@ -142,26 +142,14 @@ export class Builder {
         Teams.removeFromStateArray(teamNumber, "destroyTileStates", task);
 
         // 2) Refund / auto-consume using originalGridVal from the task
-        const originalGridVal = task.originalGridVal;
-        const kind = Wall.kindFromGridVal(originalGridVal);
-        if (kind) {
-            const refundKey =
-            kind.material === "stone"
-                ? "wood"
-                : "stone";
-
-            const refundItem = UI_ITEM_TYPES[refundKey];
-            if (refundItem) {
-                // prefer paying for an existing wall build in queue
-                const buildQ = team.buildingTileStates;
-                if (Array.isArray(buildQ) && buildQ.length) {
-                    const match = buildQ.find(t => t?.type?.name && this._matchesWallBuildType(t.type.name, kind));
-                    if (match) {
-                        match.prepaid = true;
-                    } else {
-                        this._storeRefund(team, refundItem);
-                    }
-                } else {
+        const refundBundle = task.refundCost ?? task.type?.cost ?? task.type?.price ?? null;
+        if (refundBundle && typeof refundBundle === "object") {
+            for (const [resourceKey, rawAmount] of Object.entries(refundBundle)) {
+                const amount = Math.max(0, Number(rawAmount) || 0);
+                if (!(amount > 0)) continue;
+                const refundItem = UI_ITEM_TYPES[resourceKey];
+                if (!refundItem) continue;
+                for (let count = 0; count < amount; count += 1) {
                     this._storeRefund(team, refundItem);
                 }
             }

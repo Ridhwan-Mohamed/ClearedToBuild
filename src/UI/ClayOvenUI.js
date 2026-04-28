@@ -3,6 +3,7 @@
 import { UIDEPTH } from '../constants';
 import { Teams } from '../Teams';
 import { UI_ITEM_TYPES } from './UIConstants';
+import { BUILDING_PANEL_TEXT_STYLES, createBuildingHoverPanel } from './BuildingTheme';
 
 export class ClayOvenUI {
     static scene = null; // set externally
@@ -73,19 +74,21 @@ export class ClayOvenUI {
     static showMinor(oven) {
         if (oven.minorUI) return;
 
-        const bg = this.scene.add.rectangle(0, 0, 80, 26, 0x000000, 0.7)
-            .setOrigin(0.5)
-            .setDepth(UIDEPTH)
-            .setScrollFactor(0); // <- Not 1. Set to 0 for fixed UI
+        const panel = createBuildingHoverPanel(this.scene, {
+            width: 128,
+            height: 44,
+            depth: UIDEPTH,
+            scrollFactor: 0,
+            accentColor: 0xf0b86a,
+        });
 
         const status = this.scene.add.text(0, 0, '', {
-            fontSize: '12px',
-            fill: '#ffffff',
-            fontFamily: 'Bungee',
-            align: 'center'
-        }).setOrigin(0.5).setDepth(UIDEPTH).setScrollFactor(0);
+            ...BUILDING_PANEL_TEXT_STYLES.compactBody,
+            align: 'center',
+        }).setOrigin(0.5).setLineSpacing(2);
 
-        oven.minorUI = [bg, status];
+        panel.add(status);
+        oven.minorUI = { root: panel, status };
 
         // 🔁 Frame-by-frame position update in screen space
         oven.minorUIUpdater = () => {
@@ -97,8 +100,7 @@ export class ClayOvenUI {
             const screenX = worldX - cam.scrollX;
             const screenY = worldY - cam.scrollY;
 
-            bg.setPosition(screenX, screenY);
-            status.setPosition(screenX, screenY);
+            panel.setPosition(screenX, screenY);
             const slotCount = oven.cookingSlots?.length || 1;
             status.setText(`Fuel: ${oven.fuel || 0}\nBurner: ${oven.cookingSlots?.filter(x => x).length || 0}/${slotCount}`);
         };
@@ -108,7 +110,7 @@ export class ClayOvenUI {
 
     static hideMinor(oven) {
         if (oven.minorUI) {
-            oven.minorUI.forEach(el => el.destroy());
+            oven.minorUI.root?.destroy?.();
             oven.minorUI = null;
 
             if (oven.minorUIUpdater) {

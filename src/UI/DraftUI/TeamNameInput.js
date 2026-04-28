@@ -11,6 +11,7 @@ export class TeamNameInput {
   constructor(scene, opts = {}) {
     this.scene = scene;
     this.onChange = opts.onChange ?? (() => {});
+    this.onType = opts.onType ?? (() => {});
 
     const width = opts.width ?? 220;
     const wrapperStyle = opts.wrapperStyle ?? "display:flex; flex-direction:column; gap:6px; align-items:stretch;";
@@ -50,8 +51,24 @@ export class TeamNameInput {
 
     const input = this.dom.node.querySelector("input");
     this.input = input;
+    this._lastValue = String(input?.value ?? opts.initialValue ?? "");
     input.addEventListener("input", () => {
       const v = input.value ?? "";
+      const previousValue = this._lastValue ?? "";
+      const nextLength = Array.from(v).length;
+      const previousLength = Array.from(previousValue).length;
+      const addedCount = Math.max(0, nextLength - previousLength);
+      const removedCount = Math.max(0, previousLength - nextLength);
+      if (addedCount > 0 || removedCount > 0) {
+        this.onType({
+          value: v,
+          previousValue,
+          addedCount,
+          removedCount,
+          changedCount: addedCount + removedCount,
+        });
+      }
+      this._lastValue = v;
       this.onChange(v);
     });
 
@@ -91,7 +108,9 @@ export class TeamNameInput {
 
   setValue(v) {
     const input = this.getInputElement();
-    if (input) input.value = v ?? "";
+    const nextValue = v ?? "";
+    if (input) input.value = nextValue;
+    this._lastValue = String(nextValue);
   }
 
   focus() {
@@ -104,6 +123,7 @@ export class TeamNameInput {
       this._outsidePointerHandler = null;
     }
     this.input = null;
+    this._lastValue = "";
     this.dom?.destroy();
   }
 }

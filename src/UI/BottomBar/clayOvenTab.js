@@ -1,5 +1,10 @@
 import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
+import { AudioManager } from "../../Manager/AudioManager.js";
+import { buildingManager } from "../../Manager/buildingManager.js";
+import { mixColor } from "./BottomBarTheme.js";
+
+const TAB_BASE_DEPTH = 51;
 
 export default class ClayOvenTab {
   static ensureBlankTexture(scene) {
@@ -132,7 +137,6 @@ export default class ClayOvenTab {
 
   panelBg(w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) {
     const bg = this.rr(w, h, r, c, a, stroke, sa);
-    bg.setDepth(-1);
     return bg;
   }
 
@@ -155,6 +159,9 @@ export default class ClayOvenTab {
     btn.setInteractive({ useHandCursor: true });
     btn.on("pointerover", () => bg.setFillStyle(fill, 1));
     btn.on("pointerout", () => bg.setFillStyle(fill, 0.95));
+    btn.on("pointerup", () => {
+      AudioManager.playBottomBarClick();
+    });
     btn.setEnabledState = (enabled) => {
       btn.disableInteractive();
       if (enabled) btn.setInteractive({ useHandCursor: true });
@@ -210,15 +217,22 @@ export default class ClayOvenTab {
     const s = this.scene.rexUI.add.overlapSizer({ width, height });
     const bg = this.panelBg(width, height, height / 2, 0x08121a, 0.92, 0x92ddff, 0.08);
     const fill = this.scene.rexUI.add.roundRectangle(0, 0, 1, height - 4, (height - 4) / 2, 0x49cf73, 1).setOrigin(0, 0.5);
-    const text = this.txt("Idle", { fontSize: (width < 110 || this.scene.scale.width < 1080) ? 8 : 9, color: "#d7f3dc" }).setOrigin(0.5);
+    const text = this.txt("Idle", { fontSize: (width < 110 || this.scene.scale.width < 1080) ? 8 : 9, color: "#9fb3bf" }).setOrigin(0.5);
     s.addBackground(bg);
     s.add(fill, { align: "left", padding: { left: 2, right: 2 } });
     s.add(text, { align: "center" });
     s.setValue = (pct, label = "Idle", color = 0x49cf73) => {
-      const fillWidth = Math.max(1, (width - 4) * Phaser.Math.Clamp(pct || 0, 0, 1));
-      fill.setSize(fillWidth, height - 4);
-      fill.setFillStyle(color, 1);
+      const progress = Phaser.Math.Clamp(pct || 0, 0, 1);
+      const fillWidth = Math.max(0, Math.round((width - 4) * progress));
+      const active = progress > 0;
+      fill.setVisible(active);
+      if (active) {
+        fill.setSize(fillWidth, height - 4);
+        fill.setRadius((height - 4) / 2);
+        fill.setFillStyle(color, 1);
+      }
       text.setText(label);
+      text.setColor(active ? "#d7f3dc" : "#9fb3bf");
       s.layout();
     };
     return s;
@@ -230,26 +244,26 @@ export default class ClayOvenTab {
 
   build() {
     const scene = this.scene;
+    const contentHeight = 200;
     const rootSpace = { left: 10, right: 10, top: 8, bottom: 8, item: 12 };
     const splitWidth = Math.max(0, scene.scale.width - rootSpace.left - rootSpace.right - rootSpace.item);
-    if (splitWidth < 420) {
-      this.detailWidth = Math.max(160, Math.floor(splitWidth * 0.46));
-      this.listWidth = Math.max(160, splitWidth - this.detailWidth);
-    } else {
-      const minPaneWidth = splitWidth >= 700 ? 320 : 240;
-      this.detailWidth = Phaser.Math.Clamp(
-        Math.floor(splitWidth * 0.44),
-        minPaneWidth,
-        Math.max(minPaneWidth, splitWidth - minPaneWidth)
-      );
-      this.listWidth = Math.max(minPaneWidth, splitWidth - this.detailWidth);
-    }
+    const detailProportion = 4;
+    const listProportion = 5;
+    const totalProportion = detailProportion + listProportion;
+    const minPaneWidth = splitWidth >= 760 ? 280 : splitWidth >= 520 ? 220 : 160;
+    this.detailWidth = Phaser.Math.Clamp(
+      Math.floor(splitWidth * (detailProportion / totalProportion)),
+      minPaneWidth,
+      Math.max(minPaneWidth, splitWidth - minPaneWidth)
+    );
+    this.listWidth = Math.max(minPaneWidth, splitWidth - this.detailWidth);
 
-    const root = scene.rexUI.add.sizer({ orientation: "x", space: rootSpace });
+    const root = scene.rexUI.add.sizer({ orientation: "x", space: rootSpace }).setDepth(TAB_BASE_DEPTH);
     this.detail = this.buildDetailPanel();
+    this.detail.panel?.setMinSize?.(this.detailWidth, contentHeight);
     this.detailScroll = scene.rexUI.add.scrollablePanel({
       width: this.detailWidth,
-      height: 200,
+      height: contentHeight,
       scrollMode: 0,
       scrollDetectionMode: "rectBounds",
       background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
@@ -262,13 +276,18 @@ export default class ClayOvenTab {
       }),
       scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
       space: { left: 8, right: 8, top: 8, bottom: 8, panel: 8 },
-    });
-    root.add(this.detailScroll, { proportion: 1.4, expand: true });
+    }).setDepth(TAB_BASE_DEPTH);
+    const detailSizer = scene.rexUI.add.sizer({
+      orientation: "y",
+      height: contentHeight,
+    }).add(this.detailScroll, { proportion: 1, expand: true }).setDepth(TAB_BASE_DEPTH);
+    detailSizer.setMinSize(this.detailWidth, contentHeight);
+    root.add(detailSizer, { proportion: detailProportion, expand: true });
 
     this.listBody = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 10 } });
     this.scroll = this.scene.rexUI.add.scrollablePanel({
       width: this.listWidth,
-      height: 200,
+      height: contentHeight,
       scrollMode: 0,
       scrollDetectionMode: "rectBounds",
       background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
@@ -281,9 +300,15 @@ export default class ClayOvenTab {
       }),
       scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
       space: { left: 8, right: 8, top: 8, bottom: 8, panel: 10 },
-    });
-    root.add(this.scroll, { proportion: 1.6, expand: true });
+    }).setDepth(TAB_BASE_DEPTH);
+    const listSizer = scene.rexUI.add.sizer({
+      orientation: "y",
+      height: contentHeight,
+    }).add(this.scroll, { proportion: 1, expand: true }).setDepth(TAB_BASE_DEPTH);
+    listSizer.setMinSize(this.listWidth, contentHeight);
+    root.add(listSizer, { proportion: listProportion, expand: true });
     this.rebuildList();
+    root.layout();
     return root;
   }
 
@@ -321,21 +346,20 @@ export default class ClayOvenTab {
     const title = this.txt("Clay Oven", { fontSize: compact ? 16 : 18 });
     const hp = this.bar(Math.max(150, contentWidth - 112), 13);
     const fuel = this.pill("Fuel 0", 0x2c2817, 0xffcf88, "#ffe8b2");
+    const fixBtn = this.button("Fix", 0x27512d, 0x9df0ae, "#f3fff6");
+    fixBtn.setMinSize(compact ? 78 : 88, compact ? 28 : 30);
     const input = this.slot(compact ? 54 : 58);
     const output = this.slot(compact ? 54 : 58);
     const progress = this.bar(Math.max(98, burnerWidth - 172), 12);
-    const burnerStatus = this.txt("Read-only status. Automation handles cooking, fuel, and output hauling.", {
-      fontSize: compact ? 9 : 10, color: "#d9f5ff", wordWrap: { width: Math.max(110, burnerWidth - 176) }
-    });
     const pickup = this.pill("No pickup queued", 0x17354a, 0x93dfff, "#d7f5ff");
     const cookBubble = this.buildStatusBubble("Cook Status", 0x16384d, 0x6dd3ff, statusColumnWidth);
     const fuelBubble = this.buildStatusBubble("Fuel Status", 0x2a2517, 0xffcf88, statusColumnWidth);
     fuel.setMinSize(96, 0);
 
     const burnerMid = this.scene.rexUI.add.sizer({ orientation: "y", space: { item: 5 } })
-      .add(this.txt("Burner Lane", { fontSize: compact ? 10 : 11, color: "#effcff" }), { expand: false })
-      .add(progress, { expand: false })
-      .add(burnerStatus, { expand: false });
+      .add(this.txt("Burner Lane", { fontSize: compact ? 10 : 11, color: "#effcff" }), { expand: false, align: "center" })
+      .add(progress, { expand: false, align: "center" })
+      .add(pickup, { expand: false, align: "center" });
     const burnerRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 10 } })
       .add(input, { expand: false })
       .add(burnerMid, { proportion: 1, expand: true })
@@ -343,8 +367,10 @@ export default class ClayOvenTab {
       .add(output, { expand: false });
     const burnerCard = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 10, right: 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 5 : 6 } })
       .addBackground(burnerBg)
-      .add(burnerRow, { expand: true })
-      .add(pickup, { expand: false, align: "left" });
+      .add(burnerRow, { expand: true });
+    const headerRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
+      .add(title, { proportion: 1, expand: true, align: "left" })
+      .add(fixBtn, { proportion: 0, expand: false, align: "right" });
     const statRow = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
       .add(hp, { proportion: 1, expand: true })
       .add(fuel, { expand: false, align: "center" });
@@ -355,9 +381,10 @@ export default class ClayOvenTab {
       .add(burnerCard, { proportion: 1, expand: true })
       .add(queueColumn, { proportion: 0, expand: false, align: "top" });
     const panel = this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 4, right: 4, top: 2, bottom: 2, item: 6 } })
-      .add(title, { expand: false, align: "left" })
+      .add(headerRow, { expand: true, align: "left" })
       .add(statRow, { expand: true })
-      .add(workRow, { expand: true });
+      .add(workRow, { expand: true })
+      .setDepth(TAB_BASE_DEPTH);
 
     panel.setMinSize(contentWidth, 0);
     burnerCard.setMinSize(burnerWidth, 0);
@@ -372,7 +399,6 @@ export default class ClayOvenTab {
         input.setItem(null, 0, "");
         output.setItem(null, 0, "");
         progress.setValue(0, "", 0x49cf73);
-        burnerStatus.setText("");
         pickup.setValue("", 0x17354a, 0x93dfff, "#d7f5ff");
         cookBubble.set("", "", null, 0);
         fuelBubble.set("", "", null, 0);
@@ -393,11 +419,10 @@ export default class ClayOvenTab {
       fuel.setValue(`Fuel ${oven?.fuel || 0}`, 0x2c2817, 0xffcf88, "#ffe8b2");
       input.setItem(slot?.item || null, slot?.amount || 0, "Cook");
       output.setItem(out?.item || null, out?.amount || 0, "Out");
-      progress.setValue(pct, slot ? (pct > 0 ? `${Math.round(pct * 100)}%` : "Queued") : "Idle", 0x49cf73);
-      burnerStatus.setText(
-        slot
-          ? `${slot.item?.label || slot.item?.name || "Item"} is in the burner. Automation is handling the rest.`
-          : "Burner idle. Automation will supply inputs, fuel, and pickup when work exists."
+      progress.setValue(
+        pct,
+        slot ? `${slot.item?.label || slot.item?.name || "Cook"} ${Math.round(pct * 100)}%` : "Idle",
+        0x49cf73
       );
       pickup.setValue(
         pickupJob ? `Pickup queued | ${pickupJob.amount} ready` : (out?.amount > 0 ? "Output ready for auto pickup" : "No pickup queued"),
@@ -420,6 +445,12 @@ export default class ClayOvenTab {
       panel.layout();
     };
 
+    fixBtn.on("pointerup", () => {
+      const oven = this.selected;
+      if (!oven) return;
+      buildingManager.requestBuildingFix(oven, this.team, []);
+    });
+
     return { panel, setOven };
   }
 
@@ -436,7 +467,8 @@ export default class ClayOvenTab {
     const box = this.scene.rexUI.add.sizer({ orientation: "x", space: { left: 10, right: 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 8 : 10 } })
       .addBackground(bg)
       .add(icon, { expand: false })
-      .add(textCol, { proportion: 1, expand: true });
+      .add(textCol, { proportion: 1, expand: true })
+      .setDepth(TAB_BASE_DEPTH);
     box.setMinSize(contentWidth, 0);
     return {
       box,
@@ -503,14 +535,29 @@ export default class ClayOvenTab {
       .add(fuel, { expand: false, align: "center" });
     const bottom = this.scene.rexUI.add.sizer({ orientation: "x", space: { item: 8 } })
       .add(cook, { proportion: 1, expand: true }).add(fuelReq, { proportion: 1, expand: true }).add(pickup, { proportion: 1, expand: true });
-    const row = this.scene.rexUI.add.overlapSizer({ width, height: rowHeight })
+    const row = this.scene.rexUI.add.sizer({
+      orientation: "y",
+      width,
+      height: rowHeight,
+      space: { left: 12, right: 12, top: compact ? 8 : 10, bottom: compact ? 8 : 10, item: compact ? 6 : 8 }
+    })
       .addBackground(bg)
-      .add(this.scene.rexUI.add.sizer({ orientation: "y", space: { left: 12, right: 12, top: compact ? 8 : 10, bottom: compact ? 8 : 10, item: compact ? 6 : 8 } })
-        .add(top, { expand: true }).add(bottom, { expand: true }).add(hp, { expand: false }), { expand: true });
-    row.userData = { bg, input, output, progress, fuel, cook, fuelReq, pickup, hp };
+      .add(top, { expand: true })
+      .add(bottom, { expand: true })
+      .add(hp, { expand: false })
+      .setDepth(TAB_BASE_DEPTH);
+    row.setMinSize(width, rowHeight);
+    row.userData = { oven, row, bg, input, output, progress, fuel, cook, fuelReq, pickup, hp, titleLabel, hovered: false };
     row.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.selectOven(oven); this.centerCameraOnOven(oven); });
-    row.on("pointerover", () => bg.setFillStyle(0x13354a, 0.9));
-    row.on("pointerout", () => bg.setFillStyle(0x102a3b, 0.78));
+    row.on("pointerover", () => {
+      row.userData.hovered = true;
+      this.updateCardVisual(oven);
+    });
+    row.on("pointerout", () => {
+      row.userData.hovered = false;
+      this.updateCardVisual(oven);
+    });
+    this.updateCardVisual(oven);
     return row;
   }
 
@@ -527,7 +574,11 @@ export default class ClayOvenTab {
     const pct = dur > 0 ? Math.min(elapsed / dur, 1) : 0;
     row.userData.input.setItem(slot?.item || null, slot?.amount || 0, "Cook");
     row.userData.output.setItem(out?.item || null, out?.amount || 0, "Out");
-    row.userData.progress.setValue(pct, slot ? (pct > 0 ? `${Math.round(pct * 100)}%` : "Queued") : "Idle", 0x49cf73);
+    row.userData.progress.setValue(
+      pct,
+      slot ? `${slot.item?.label || slot.item?.name || "Cook"} ${Math.round(pct * 100)}%` : "Idle",
+      0x49cf73
+    );
     row.userData.fuel.setValue(`Fuel ${oven.fuel | 0}`, 0x2e2a18, 0xffcf88, "#ffe8b2");
     row.userData.cook.setValue(cookJob ? `${cookJob.item?.label || cookJob.item?.name} ${cookJob.remaining}/${cookJob.target}` : "No cook request");
     row.userData.fuelReq.setValue(fuelJob ? `Wood ${fuelJob.remaining}/${fuelJob.target}` : "No fuel request", 0x2a2417, 0xffcf88, "#ffe8b2");
@@ -538,6 +589,21 @@ export default class ClayOvenTab {
       out?.amount > 0 ? "#e5fff6" : "#d7f5ff"
     );
     row.userData.hp.setValue((oven.health || 0) / Math.max(1, oven.maxHealth || 1), "", 0x49cf73);
+    this.updateCardVisual(oven);
+  }
+
+  updateCardVisual(oven) {
+    const row = this.cardByOven.get(oven);
+    if (!row?.userData) return;
+    const { bg, titleLabel, hovered } = row.userData;
+    const selected = this.selected === oven;
+    const accent = selected ? 0xffd9a3 : 0x8fe5ff;
+    bg.setFillStyle(
+      mixColor(0x102a3b, accent, selected ? 0.18 : hovered ? 0.12 : 0.06),
+      selected ? 0.94 : hovered ? 0.9 : 0.78
+    );
+    bg.setStrokeStyle(selected ? 2.5 : hovered ? 2 : 1.5, accent, selected ? 0.34 : hovered ? 0.22 : 0.16);
+    titleLabel?.setColor?.(selected ? "#fff8eb" : "#f4fcff");
   }
 
   onShow() {
@@ -548,7 +614,11 @@ export default class ClayOvenTab {
     ovens.forEach((oven) => this.updateCard(oven));
   }
 
-  selectOven(oven) { this.selected = oven; this.detail?.setOven?.(oven); }
+  selectOven(oven) {
+    this.selected = oven;
+    this.detail?.setOven?.(oven);
+    this.cardByOven.forEach((_row, key) => this.updateCardVisual(key));
+  }
   selectFromWorld(oven) {
     if (oven && !this.cardByOven.has(oven)) this.rebuildList();
     this.selectOven(oven);

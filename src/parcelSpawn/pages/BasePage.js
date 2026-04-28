@@ -22,12 +22,19 @@ export class BasePage {
     const g = scene.add.graphics();
     g.setScrollFactor(1);
 
-    // "glass": low alpha, light stroke
-    const bg = cfg.bgColor ?? 0x0b1020;
-    g.fillStyle(bg, cfg.bgAlpha ?? 0.28);
-    g.fillRoundedRect(-innerW/2, -innerH/2+20, innerW, innerH-20, 12);
-    g.lineStyle(2, 0xffffff, 0.22);
-    g.strokeRoundedRect(-innerW/2, -innerH/2+20, innerW, innerH-20, 12);
+    const panelX = -innerW / 2;
+    const panelY = -innerH / 2 + 20;
+    const panelW = innerW;
+    const panelH = innerH - 20;
+    const bg = cfg.bgColor ?? 0x060b14;
+
+    // Dark backing first so all detailed contract pages read clearly.
+    g.fillStyle(0x02060d, cfg.baseBgAlpha ?? 0.86);
+    g.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
+    g.fillStyle(bg, cfg.bgAlpha ?? 0.42);
+    g.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
+    g.lineStyle(2, 0xdbeafe, 0.34);
+    g.strokeRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.container.add(g);
 
     const title = scene.add.text(0, -innerH/2 + 20, cfg.title ?? "Contract", {

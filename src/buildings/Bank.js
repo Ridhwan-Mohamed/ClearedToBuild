@@ -6,6 +6,15 @@ import { BLOCKDEPTH, ENEMY_BUILDING_HOVER_UI, SQUARESIZE, TILE_TYPES, UIDEPTH, s
 import { Map } from "../map";
 import { StageState } from "../parcelController/StageState";
 import { Teams } from "../Teams";
+import {
+  BUILDING_PANEL_TEXT_STYLES,
+  createBuildingHoverPanel,
+  destroyStructuralHealthBar,
+  ensureStructuralHealthBar,
+  getStructuralBarAnchor,
+  getStructuralHealthBarTargets,
+  layoutStructuralHealthBar,
+} from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 
@@ -51,6 +60,7 @@ export class Bank {
     this.isHovered = false;
 
     this.uiContainer = this.scene.add.container(0, 0).setDepth(UIDEPTH);
+    this.panelRoot = null;
     this.panelBg = null;
     this.panelText1 = null;
     this.panelText2 = null;
@@ -184,41 +194,39 @@ export class Bank {
   _showPanel() {
     this._ensurePanel();
     this._updatePanel();
-    this.panelBg.setVisible(true);
-    this.panelText1.setVisible(true);
-    this.panelText2.setVisible(true);
+    this.panelRoot.setVisible(true);
   }
 
   _hidePanel() {
-    if (!this.panelBg) return;
-    this.panelBg.setVisible(false);
-    this.panelText1.setVisible(false);
-    this.panelText2.setVisible(false);
+    this.panelRoot?.setVisible(false);
   }
 
   _ensurePanel() {
-    if (this.panelBg) return;
+    if (this.panelRoot) return;
 
     const scene = this.scene;
 
-    // Create at (0,0) inside container; we move container itself in _updatePanel()
-    this.panelBg = scene.add
-      .rectangle(0, 0, 140, 30, 0x000000, 0.6)
-      .setOrigin(0.5)
-      .setDepth(UIDEPTH)
-      .setStrokeStyle(1, 0xffffff, 0.4);
+    this.panelRoot = createBuildingHoverPanel(scene, {
+      width: 162,
+      height: 44,
+      depth: UIDEPTH,
+      accentColor: 0xd6a55c,
+    });
+    this.panelBg = this.panelRoot.panelBg;
 
     this.panelText1 = scene.add
-      .text(0, ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(0, ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", BUILDING_PANEL_TEXT_STYLES.title)
       .setOrigin(0.5, 0.5)
       .setDepth(UIDEPTH + 1);
 
     this.panelText2 = scene.add
-      .text(0, ENEMY_BUILDING_HOVER_UI.LINE2_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(0, ENEMY_BUILDING_HOVER_UI.LINE2_DY + 1, "", BUILDING_PANEL_TEXT_STYLES.body)
       .setOrigin(0.5, 0.5)
       .setDepth(UIDEPTH + 1);
 
-    this.uiContainer.add([this.panelBg, this.panelText1, this.panelText2]);
+    this.panelRoot.add([this.panelText1, this.panelText2]);
+    this.panelRoot.setVisible(false);
+    this.uiContainer.add(this.panelRoot);
 
   }
 
@@ -243,24 +251,7 @@ export class Bank {
   // ──────────────────────────
   ensureHealthBar() {
     if (!this.sprite || !this.scene) return;
-
-    const fullWidth = (this.tileType.lenX || 4) * SQUARESIZE;
-    const topY = this.sprite.y - 6;
-    const cx = this.sprite.x + fullWidth / 2;
-
-    if (!this.healthBarBg) {
-      this.healthBarBg = this.scene.add
-        .rectangle(cx, topY, fullWidth, 4, 0x000000, 0.6)
-        .setDepth(BLOCKDEPTH + 1);
-      Map.addToWorldStatic(this.healthBarBg);
-    }
-    if (!this.healthBar) {
-      // enemy bar: red
-      this.healthBar = this.scene.add
-        .rectangle(cx, topY, fullWidth, 2, 0xff0000, 1)
-        .setDepth(BLOCKDEPTH + 2);
-      Map.addToWorldStatic(this.healthBar);
-    }
+    ensureStructuralHealthBar(this, this.scene, { fillColor: 0xf45d48 });
   }
 
   updateHealthBar() {
@@ -268,21 +259,23 @@ export class Bank {
     this.ensureHealthBar();
     if (!this.healthBar || !this.healthBarBg) return;
 
-    const fullWidth = (this.tileType.lenX || 4) * SQUARESIZE;
-    const cx = this.sprite.x + fullWidth / 2;
-    const topY = this.sprite.y - 6;
-
     const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-    this.healthBarBg.setPosition(cx, topY);
-    this.healthBar.setPosition(cx - (fullWidth * (1 - ratio)) / 2, topY); // keep left-anchored feel
-    this.healthBarBg.setDisplaySize(fullWidth, 4);
-    this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+    const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+      widthScale: 1,
+      paddingX: 14,
+      yOffset: 14,
+    });
 
     const now = this.scene.time?.now ?? 0;
     const visible = this.isHovered || now < this._damageBarUntil;
-    this.healthBarBg.setVisible(visible);
-    this.healthBar.setVisible(visible);
+    layoutStructuralHealthBar(this, {
+      ratio,
+      centerX,
+      topY,
+      width,
+      visible,
+      fillColor: 0xf45d48,
+    });
 
     // keep hover panel current
     if (this.isHovered) this._updatePanel();
@@ -291,8 +284,7 @@ export class Bank {
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
     const targets = [this.sprite];
-    if (this.healthBarBg) targets.push(this.healthBarBg);
-    if (this.healthBar) targets.push(this.healthBar);
+    targets.push(...getStructuralHealthBarTargets(this));
 
     this.scene.tweens.add({
       targets,
@@ -367,8 +359,7 @@ export class Bank {
       this.collider = null;
     }
 
-    if (this.healthBarBg) this.healthBarBg.destroy();
-    if (this.healthBar) this.healthBar.destroy();
+    destroyStructuralHealthBar(this);
     if (this.visionId != null) {
       VisibilitySystem.removeVisionBubble(this.visionId);
       this.visionId = null;
@@ -381,5 +372,6 @@ export class Bank {
     // clear hover UI
     this.uiContainer?.destroy(true);
     this.uiContainer = null;
+    this.panelRoot = null;
   }
 }

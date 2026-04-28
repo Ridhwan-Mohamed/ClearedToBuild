@@ -6,6 +6,7 @@ import { UIDEPTH, SQUARESIZE, showAlert, TILE_TYPES } from "../../constants";
 import { Map as GameMap } from "../../map";
 import { Teams } from "../../Teams";
 import { buildingManager } from "../../Manager/buildingManager";
+import { AudioManager } from "../../Manager/AudioManager.js";
 import { House } from "../../buildings/House";
 import { Turret } from "../../buildings/Turret";
 import { Catapult } from "../../buildings/Catapult";
@@ -472,7 +473,7 @@ export default class BuildTab {
 
     // Local coordinate system: 0,0 is center of the page area (CardsTab-style)
     const centerX = 0;
-    const topY = -126;
+    const topY = -106;
 
     const toggleY = topY + 18;
     const buildToggleBg = makeGlassRoundRect(scene, 112, 30, 15, {
@@ -507,10 +508,22 @@ export default class BuildTab {
       strokeThickness: 2,
     }).setOrigin(0.5);
 
-    buildToggleBg.on("pointerdown", () => this._setMode("buildings"));
-    buildToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("buildings"));
-    unitToggleBg.on("pointerdown", () => this._setMode("units"));
-    unitToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => this._setMode("units"));
+    buildToggleBg.on("pointerdown", () => {
+      AudioManager.playBottomBarClick();
+      this._setMode("buildings");
+    });
+    buildToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
+      AudioManager.playBottomBarClick();
+      this._setMode("buildings");
+    });
+    unitToggleBg.on("pointerdown", () => {
+      AudioManager.playBottomBarClick();
+      this._setMode("units");
+    });
+    unitToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
+      AudioManager.playBottomBarClick();
+      this._setMode("units");
+    });
     applyBuildTabToggleVisual(buildToggleBg, buildToggleText, this.mode === "buildings", 0xff97c2);
     applyBuildTabToggleVisual(unitToggleBg, unitToggleText, this.mode === "units", 0x98e7ff);
 
@@ -561,6 +574,7 @@ export default class BuildTab {
     // Store for scrolling helpers
     this._cardsContainer = cardsContainer;
     this._cardsViewport = { left, top, w: viewportW, h: viewportH };
+    this._cardsViewportHit = viewportHit;
     this._cardsScrollX = 0;
     this._cardsContentW = 0;
 
@@ -630,7 +644,10 @@ export default class BuildTab {
       const hit = scene.add.zone(0, 0, CARD_W, CARD_H).setInteractive({ useHandCursor: true });
       const card = scene.add.container(x, y, [cardGlow, cardBg, cardShine, iconAura, icon, name, desc, cost, hit]);
 
-      hit.on("pointerdown", () => this._select(def.key));
+      hit.on("pointerdown", () => {
+        AudioManager.playBottomBarClick();
+        this._select(def.key);
+      });
 
       const cardRef = {
         def,
@@ -720,15 +737,17 @@ export default class BuildTab {
     // Mouse wheel / trackpad scroll:
     // translate whichever axis the device gives us into horizontal card motion.
     this._onCardsWheel = (pointer, gameObjects, dx, dy) => {
-      // only if mouse is over the viewport area
-      const { left, top, w, h } = this._cardsViewport || {};
-      if (left == null) return;
+      if (this.scene.uiBottomBar?.currentPage !== "build") return;
+      if (!this.scene.uiBottomBar?.expanded) return;
 
-      const mx = pointer.x;
-      const my = pointer.y;
-      const over =
-        mx >= left && mx <= left + w &&
-        my >= top  && my <= top + h;
+      const bounds = this._cardsViewportHit?.getBounds?.();
+      if (!bounds) return;
+
+      const overViewport = Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
+      const overCardHit = (gameObjects || []).some((gameObject) =>
+        this._cardRefs?.some((ref) => ref.hit === gameObject || ref.card === gameObject)
+      );
+      const over = overViewport || overCardHit;
 
       if (!over) return;
 
@@ -917,17 +936,16 @@ export default class BuildTab {
       if (isBlockBuild) {
         spendResources(this.scene, costObj);
 
-        Teams.teamLists["1"].blockBuildingStates.push({
+        buildingManager.queueBlockBuildTask({
           type: tile,
           x: gridX,
           y: gridY,
           teamNumber: 1,
           duration: 100,
           assigned: 0,
+          refundCost: { ...costObj },
           prepaid: Object.keys(costObj).length > 0,
-        });
-
-        buildingManager.assignTroopToBuildBlock(1);
+        }, 1);
         this._clearSelection(true);
         showAlert(this.scene, "Construction started!", "#aaffaa");
         return;

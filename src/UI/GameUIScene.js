@@ -10,6 +10,9 @@ import { Teams } from "../Teams.js";
 import { getNextHordeUnlock } from "../parcel_system/HordeUnlockTrack.js";
 import { applyPortraitKeyToSprite, getPlayerPortraitKey } from "../players/playerPortraits.js";
 import { MainMenu } from "../mainMenu.js";
+import { AudioManager } from "../Manager/AudioManager.js";
+import { SaveManager } from "../save/SaveManager.js";
+import { AchievementBoard } from "./AchievementBoard.js";
 
 export class GameUIScene extends Phaser.Scene {
   constructor() {
@@ -39,6 +42,7 @@ export class GameUIScene extends Phaser.Scene {
     this.raiderEdgeHud = null;
     this.raiderEdgeIndicators = null;
     this.contractHud = null;
+    this.achievementBoard = null;
     this.selectionCommandBar = null;
     this.uiBottomBar = null;
     this.playerTab = null;
@@ -55,6 +59,13 @@ export class GameUIScene extends Phaser.Scene {
     this._scaleResizeHandlers = [];
     this._stageMetaRecompute = null;
     this._stageMetaRefreshTimer = null;
+    this.pauseMenu = null;
+    this.pauseMenuButton = null;
+    this._pauseKeyboardHandlers = [];
+    this._pauseWorldInputState = null;
+    this._pauseBackdropFx = null;
+    this._pauseBlurFx = null;
+    this._menuHudIntroPlayed = false;
   }
 
   _teardownStageMetaHud() {
@@ -93,6 +104,41 @@ export class GameUIScene extends Phaser.Scene {
     this._scaleResizeHandlers.length = 0;
   }
 
+  _bindPauseControls() {
+    this._clearPauseControls();
+    const keyboard = this.input?.keyboard;
+    if (!keyboard) return;
+
+    const onPauseToggle = (event) => {
+      if (event?.repeat) return;
+      if (this.pauseMenu?.isOpen) {
+        this.closePauseMenu();
+        return;
+      }
+      this.openPauseMenu();
+    };
+
+    const onEscClose = (event) => {
+      if (event?.repeat) return;
+      if (!this.pauseMenu?.isOpen) return;
+      event?.stopPropagation?.();
+      this.closePauseMenu();
+    };
+
+    keyboard.on("keydown-P", onPauseToggle);
+    keyboard.on("keydown-ESC", onEscClose);
+    this._pauseKeyboardHandlers.push(["keydown-P", onPauseToggle], ["keydown-ESC", onEscClose]);
+  }
+
+  _clearPauseControls() {
+    const keyboard = this.input?.keyboard;
+    if (keyboard && Array.isArray(this._pauseKeyboardHandlers)) {
+      this._pauseKeyboardHandlers.forEach(([evt, fn]) => keyboard.off(evt, fn));
+    }
+    this._pauseKeyboardHandlers = [];
+    this._destroyPauseMenu(true);
+  }
+
   _canMutateText(node) {
     if (!node || node.active === false || node.scene !== this) return false;
     if ("canvas" in node && (!node.canvas || !node.context)) return false;
@@ -115,10 +161,12 @@ export class GameUIScene extends Phaser.Scene {
     if (!world) return;
     this._sceneShuttingDown = false;
     this.bindWorldScene(world);
+    this._bindPauseControls();
     this._tryOpenPendingMenu({ allowPausedFallback: true });
     this.events.once("shutdown", () => {
       this._sceneShuttingDown = true;
       this._clearWorldEventBridge();
+      this._clearPauseControls();
       if (this.worldScene?.uiScene === this) {
         this.worldScene.uiScene = null;
       }
@@ -130,8 +178,11 @@ export class GameUIScene extends Phaser.Scene {
 
   _destroyGameplayUi() {
     const world = this.worldScene;
+    this._destroyPauseMenu(true);
     this._teardownStageMetaHud();
     this._destroyTownXpRewardPresentation();
+    this.achievementBoard?.destroy?.();
+    this.achievementBoard = null;
     this.selectionCommandBar?.destroy?.();
     this.selectionCommandBar = null;
     this.contractHud?.destroy?.();
@@ -249,6 +300,8 @@ export class GameUIScene extends Phaser.Scene {
       "store:unlock-changed",
       "cards:updated",
       "mode:completed",
+      "achievements:changed",
+      "achievement:completed",
     ];
 
     passthrough.forEach((evt) => {
@@ -314,6 +367,7 @@ export class GameUIScene extends Phaser.Scene {
     this._buildAlertHud();
     this._buildTopHud();
     this._buildTownXpHud();
+    this._buildAchievementBoard();
     this._buildPhaseClock();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
@@ -324,6 +378,57 @@ export class GameUIScene extends Phaser.Scene {
 
     this._syncWorldUiRefs();
     this.worldScene?.setSimulationSpeedReady?.(true);
+  }
+
+  _ensureMenuHudIntroUi() {
+    if (!this.worldScene) return;
+    this._buildAlertHud();
+    this._buildTopHud();
+    this._buildTownXpHud();
+    this._buildAchievementBoard();
+    this._buildPhaseClock();
+    this._buildZoomControls();
+    this._buildRaiderEdgeHud();
+    this._buildContractHud();
+    this._syncWorldUiRefs();
+  }
+
+  _getMenuHudIntroTargets() {
+    return [
+      this.topHud,
+      this.townXpHud,
+      this.phaseClock,
+      this.zoomControls,
+      this.contractHud?.root || this.contractHud,
+    ].filter((target) => target && typeof target.setAlpha === "function" && typeof target.setVisible === "function");
+  }
+
+  playMenuHudIntro(force = false) {
+    this._ensureMenuHudIntroUi();
+    if (!force && this._menuHudIntroPlayed) return;
+    this._menuHudIntroPlayed = true;
+
+    const targets = this._getMenuHudIntroTargets();
+    if (!targets.length) return;
+
+    targets.forEach((target) => {
+      this.tweens.killTweensOf(target);
+      if (typeof target._menuIntroBaseY !== "number") {
+        target._menuIntroBaseY = target.y;
+      }
+      target.setVisible(true);
+      target.setAlpha(0);
+      target.y = target._menuIntroBaseY + 16;
+    });
+
+    this.tweens.add({
+      targets,
+      alpha: 1,
+      y: (_target) => _target._menuIntroBaseY,
+      duration: 420,
+      ease: "Cubic.easeOut",
+      stagger: 55,
+    });
   }
 
   _buildAlertHud() {
@@ -351,9 +456,41 @@ export class GameUIScene extends Phaser.Scene {
     });
   }
 
+  _parseAlertColor(color = "#ffffff") {
+    const hex = String(color || "").trim().replace(/^#/, "");
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+
+  _isErrorAlert(message = "", color = "#ffffff") {
+    const upper = String(message || "").toUpperCase();
+    if (
+      upper.includes("ERROR")
+      || upper.includes("FAILED")
+      || upper.includes("INVALID")
+      || upper.includes("COULD NOT")
+      || upper.includes("MISSED")
+      || upper.includes("REQUIRED")
+      || upper.includes("CANNOT")
+    ) {
+      return true;
+    }
+
+    const parsed = this._parseAlertColor(color);
+    if (!parsed) return false;
+    return parsed.r >= 180 && parsed.r > (parsed.g * 1.14) && parsed.r > (parsed.b * 1.14);
+  }
+
   showAlertMessage(message, color = "#ffffff", duration = 1400) {
     if (!message) return null;
     this._buildAlertHud();
+    if (this._isErrorAlert(message, color)) {
+      AudioManager.playError({ volume: 0.24 });
+    }
 
     const label = this.add
       .text(0, 0, String(message), {
@@ -370,7 +507,7 @@ export class GameUIScene extends Phaser.Scene {
     const width = Math.max(180, Math.ceil(label.width) + 30);
     const height = Math.max(34, Math.ceil(label.height) + 20);
     const shadow = this.add.rectangle(0, 4, width, height, 0x02060d, 0.34).setOrigin(0.5);
-    const bg = this.add.rectangle(0, 0, width, height, 0x10283a, 0.9).setOrigin(0.5).setStrokeStyle(2, 0x89d6ff, 0.28);
+    const bg = this.add.rectangle(0, 0, width, height, 0x156c99, 0.9).setOrigin(0.5).setStrokeStyle(2, 0x89d6ff, 0.28);
     const shine = this.add
       .rectangle(0, -Math.round(height * 0.18), Math.max(48, width - 18), Math.max(10, Math.floor(height * 0.34)), 0xffffff, 0.07)
       .setOrigin(0.5);
@@ -415,6 +552,10 @@ export class GameUIScene extends Phaser.Scene {
     });
 
     return root;
+  }
+
+  showSaveNotification() {
+    return this.showAlertMessage("World data saved", "#d9fbff", 1100);
   }
 
   _syncWorldUiRefs() {
@@ -609,6 +750,7 @@ export class GameUIScene extends Phaser.Scene {
 
     this.topHud = this.add.container(0, 0, [shadow, bg, inset, shine, ...this.topHudElements]).setDepth(UIDEPTH);
     this._refreshTopHudValues(true);
+    this._buildPauseMenuButton();
   }
 
   _getTopHudNeedCount() {
@@ -696,6 +838,7 @@ export class GameUIScene extends Phaser.Scene {
     const fillGlow = this.add.graphics().setAlpha(0.26);
     const badgeBg = this.add.graphics();
     const pendingBg = this.add.graphics();
+    const goalsBg = this.add.graphics();
     const levelText = this.add.text(0, -11, "", {
       fontFamily: "Bungee",
       fontSize: "17px",
@@ -724,8 +867,16 @@ export class GameUIScene extends Phaser.Scene {
       stroke: "#fffdf4",
       strokeThickness: 2,
     }).setOrigin(0.5);
+    const goalsText = this.add.text(0, 0, "", {
+      fontFamily: "Bungee",
+      fontSize: "9px",
+      color: "#d9f3ff",
+      stroke: "#07111b",
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+    const hitZone = this.add.zone(0, 0, 10, 10).setOrigin(0.5).setInteractive({ useHandCursor: true });
 
-    root.add([shadow, bg, shine, track, fillGlow, fill, badgeBg, pendingBg, levelText, detailText, badgeText, pendingText]);
+    root.add([shadow, bg, shine, track, fillGlow, fill, badgeBg, pendingBg, goalsBg, levelText, detailText, badgeText, pendingText, goalsText, hitZone]);
     root.shadow = shadow;
     root.bg = bg;
     root.shine = shine;
@@ -734,14 +885,22 @@ export class GameUIScene extends Phaser.Scene {
     root.fillGlow = fillGlow;
     root.badgeBg = badgeBg;
     root.pendingBg = pendingBg;
+    root.goalsBg = goalsBg;
     root.levelText = levelText;
     root.detailText = detailText;
     root.badgeText = badgeText;
     root.pendingText = pendingText;
+    root.goalsText = goalsText;
+    root.hitZone = hitZone;
     root.panelWidth = 0;
     root.panelHeight = 0;
     root.trackWidth = 0;
     root.progressRatio = 0;
+
+    hitZone.on("pointerdown", () => {
+      this.achievementBoard?.toggle?.();
+      root.refresh(true);
+    });
 
     const layout = () => {
       const width = Math.round(Phaser.Math.Clamp(this.scale.width * 0.23, 250, 360));
@@ -756,6 +915,8 @@ export class GameUIScene extends Phaser.Scene {
       levelText.setPosition(6, -11);
       detailText.setPosition(6, 12);
       pendingText.setPosition((width / 2) - 54, 0);
+      goalsText.setPosition((width / 2) - 54, 18);
+      hitZone.setSize(width, height);
 
       shadow.clear();
       shadow.fillStyle(0x03101a, 0.28);
@@ -782,11 +943,20 @@ export class GameUIScene extends Phaser.Scene {
       pendingBg.lineStyle(2, 0xffffff, 0.20);
       pendingBg.fillRoundedRect((width / 2) - 88, -14, 68, 28, 14);
       pendingBg.strokeRoundedRect((width / 2) - 88, -14, 68, 28, 14);
+
+      goalsBg.clear();
+      goalsBg.fillStyle(0x153246, 0.92);
+      goalsBg.lineStyle(2, 0xbdefff, 0.16);
+      goalsBg.fillRoundedRect((width / 2) - 96, 8, 84, 18, 9);
+      goalsBg.strokeRoundedRect((width / 2) - 96, 8, 84, 18, 9);
     };
 
     root.refresh = (force = false) => {
       const xp = this.worldScene?.getTownXpSnapshot?.();
       if (!xp) return;
+
+      const achievementSnapshot = this.worldScene?.getAchievementBoardSnapshot?.() || { activeGoals: [] };
+      const activeGoalCount = Array.isArray(achievementSnapshot.activeGoals) ? achievementSnapshot.activeGoals.length : 0;
 
       const signature = [
         this.scale.width,
@@ -795,6 +965,9 @@ export class GameUIScene extends Phaser.Scene {
         xp.xpForNextLevel,
         xp.pendingLevelRewards,
         xp.gainSerial,
+        Teams.teamLists?.["1"]?.name || "",
+        activeGoalCount,
+        this.achievementBoard?.expanded ? 1 : 0,
       ].join("|");
       if (!force && signature === this._townXpHudSignature) return;
       this._townXpHudSignature = signature;
@@ -827,12 +1000,24 @@ export class GameUIScene extends Phaser.Scene {
         fillGlow.fillRoundedRect(left + Math.max(4, Math.min(width - 20, fillWidth - 18)), top - 3, 20, trackHeight + 6, 9);
       }
 
-      levelText.setText(`Town Lv. ${xp.level}`);
+      const rawTownName = String(Teams.teamLists?.["1"]?.name || "").trim();
+      const townName = rawTownName
+        ? (rawTownName.length > 16 ? `${rawTownName.slice(0, 15)}...` : rawTownName)
+        : "Town";
+      levelText.setText(townName);
       detailText.setText(
         xp.pendingLevelRewards > 0
           ? `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP  •  reward ready`
           : `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP to next reward`
       );
+
+      goalsText.setText(this.achievementBoard?.expanded ? "GOALS v" : "GOALS ^");
+      detailText.setText(
+        xp.pendingLevelRewards > 0
+          ? `Level ${xp.level} - ${xp.xpIntoLevel}/${xp.xpForNextLevel} XP - reward ready`
+          : `Level ${xp.level} - ${xp.xpIntoLevel}/${xp.xpForNextLevel} XP to next reward`
+      );
+      goalsText.setText(`${activeGoalCount} GOALS ${this.achievementBoard?.expanded ? "v" : "^"}`);
 
       pendingBg.setVisible(xp.pendingLevelRewards > 0);
       pendingText.setVisible(xp.pendingLevelRewards > 0);
@@ -896,6 +1081,11 @@ export class GameUIScene extends Phaser.Scene {
 
   _refreshTownXpHud(force = false) {
     this.townXpHud?.refresh?.(force);
+  }
+
+  _buildAchievementBoard() {
+    if (this.achievementBoard || !this.worldScene) return;
+    this.achievementBoard = new AchievementBoard(this, this.worldScene);
   }
 
   _ensureTopHudHoverBubble() {
@@ -1160,7 +1350,7 @@ export class GameUIScene extends Phaser.Scene {
       shadow.fillRoundedRect(-PANEL_W / 2 + 3, -PANEL_H / 2 + 5, PANEL_W, PANEL_H, 20);
 
       bg.clear();
-      bg.fillStyle(0x10283a, 0.86);
+      bg.fillStyle(0x156c99, 0.86);
       bg.lineStyle(2, 0x89d6ff, 0.28);
       bg.fillRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 20);
       bg.strokeRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 20);
@@ -1365,6 +1555,7 @@ export class GameUIScene extends Phaser.Scene {
 
       bg.on("pointerover", () => {
         if (btn.disabled) return;
+        AudioManager.playUiHover({ volume: 0.16 });
         btn.setAlpha(ACTIVE_ALPHA);
       });
       bg.on("pointerout", () => {
@@ -1435,8 +1626,8 @@ export class GameUIScene extends Phaser.Scene {
       mixer.smoothCenterZoomTo(targetZoom);
     };
 
-    zoomInBtn.bg.on("pointerdown", () => triggerZoom(1));
-    zoomOutBtn.bg.on("pointerdown", () => triggerZoom(this.worldScene?.zoomMixer?.MIN_ZOOM ?? 0.3));
+    zoomInBtn.bg.on("pointerdown", () => triggerZoom(this.worldScene?.zoomMixer?.detailedZoom ?? 1));
+    zoomOutBtn.bg.on("pointerdown", () => triggerZoom(this.worldScene?.zoomMixer?.overviewZoom ?? 0.3));
     speedButtons.forEach((btn) => {
       btn.bg.on("pointerdown", () => {
         this.worldScene?.setSimulationSpeed?.(btn.speedMultiplier);
@@ -1809,6 +2000,690 @@ export class GameUIScene extends Phaser.Scene {
     }
 
     return target;
+  }
+
+  _buildPauseMenuButton() {
+    if (this.pauseMenuButton) return this.pauseMenuButton;
+
+    const root = this.add.container(0, 0).setDepth(UIDEPTH + 18);
+    const bg = this.add.rectangle(0, 0, 42, 30, 0x0b1c2a, 0.001)
+      .setInteractive({ useHandCursor: true });
+    const label = this.add.text(0, 0, "II", {
+      fontFamily: "Bungee",
+      fontSize: "15px",
+      color: "#effbff",
+      stroke: "#04111c",
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+    root.add([bg, label]);
+    root.bg = bg;
+    root.label = label;
+    root.refresh = () => {
+      const active = !!this.pauseMenu?.isOpen;
+      bg.setFillStyle(0x0b1c2a, 0.001);
+      label.setColor(active ? "#8fe7ff" : "#effbff");
+      label.setScale(1);
+    };
+    const layout = ({ width } = this.scale) => {
+      root.setPosition(Math.round(width - 34), 22);
+    };
+    layout();
+    this._trackScaleResize(layout);
+    bg.on("pointerover", () => {
+      if (this.pauseMenu?.isOpen) return;
+      AudioManager.playUiHover({ volume: 0.16 });
+      label.setColor("#c6f7ff");
+      label.setScale(1.05);
+    });
+    bg.on("pointerout", () => root.refresh?.());
+    bg.on("pointerdown", (pointer, lx, ly, event) => {
+      event?.stopPropagation?.();
+      AudioManager.playMenuClick();
+      if (this.pauseMenu?.isOpen) this.closePauseMenu();
+      else this.openPauseMenu();
+    });
+    root.refresh();
+    this.pauseMenuButton = root;
+    return root;
+  }
+
+  _setPauseWorldInputEnabled(enabled = true) {
+    const world = this.worldScene;
+    if (!world?.input) return;
+    if (enabled) {
+      if (this._pauseWorldInputState) {
+        world.input.enabled = this._pauseWorldInputState.enabled;
+        if (world.input.keyboard) world.input.keyboard.enabled = this._pauseWorldInputState.keyboardEnabled;
+      } else {
+        world.input.enabled = true;
+        if (world.input.keyboard) world.input.keyboard.enabled = true;
+      }
+      this._pauseWorldInputState = null;
+      return;
+    }
+
+    this._pauseWorldInputState = {
+      enabled: world.input.enabled !== false,
+      keyboardEnabled: world.input.keyboard?.enabled !== false,
+    };
+    world.input.enabled = false;
+    if (world.input.keyboard) world.input.keyboard.enabled = false;
+  }
+
+  _applyPauseBackdropFx() {
+    const world = this.worldScene;
+    if (!world) return;
+    const cam = world.cameras?.main;
+    if (!this._pauseBackdropFx) {
+      this._pauseBackdropFx = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x71d6ff, 0)
+        .setOrigin(0)
+        .setDepth(UIDEPTH + 118)
+        .setScrollFactor(0);
+    }
+    try {
+      this._clearPauseBackdropFx();
+      this._pauseBlurFx = cam?.postFX?.addBlur?.(0, 0, 1, 1, 0x79dcff, 5) || null;
+    } catch {
+      this._pauseBlurFx = null;
+    }
+  }
+
+  _clearPauseBackdropFx() {
+    const cam = this.worldScene?.cameras?.main;
+    if (cam?.postFX?.remove && this._pauseBlurFx) {
+      try {
+        cam.postFX.remove(this._pauseBlurFx);
+      } catch {}
+    }
+    this._pauseBlurFx?.destroy?.();
+    this._pauseBlurFx = null;
+  }
+
+  _buildPauseMenu() {
+    if (this.pauseMenu) return this.pauseMenu;
+
+    const root = this.add.container(0, 0).setDepth(UIDEPTH + 120).setAlpha(0).setVisible(false);
+    root.isOpen = false;
+
+    const blocker = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x02070d, 0)
+      .setOrigin(0)
+      .setInteractive({ useHandCursor: false })
+      .setScrollFactor(0);
+    const panel = this.add.container(this.scale.width * 0.5, this.scale.height * 0.54).setScale(0.92);
+    const blueWash = this._pauseBackdropFx || this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x71d6ff, 0)
+      .setOrigin(0)
+      .setDepth(UIDEPTH + 118)
+      .setScrollFactor(0);
+    this._pauseBackdropFx = blueWash;
+
+    const panelBg = this.add.graphics();
+    const panelInner = this.add.graphics();
+    const panelShine = this.add.graphics();
+    const accentOrbA = this.add.circle(-170, -86, 92, 0x8fe7ff, 0.10);
+    const accentOrbB = this.add.circle(176, 128, 116, 0x3ea4ff, 0.09);
+    const panelWidth = 560;
+    const panelHeight = 408;
+    this._drawRoundedPanel(panelBg, panelWidth, panelHeight, {
+      radius: 30,
+      fillColor: 0x0d2030,
+      fillAlpha: 0.96,
+      strokeColor: 0xa6ecff,
+      strokeAlpha: 0.22,
+      shadowColor: 0x02101a,
+      shadowAlpha: 0.36,
+      shadowOffsetY: 14,
+      topStripColor: 0x1d5473,
+      topStripAlpha: 0.9,
+      topStripHeight: 18,
+    });
+    panelInner.fillStyle(0x123148, 0.38);
+    panelInner.fillRoundedRect(-(panelWidth / 2) + 14, -(panelHeight / 2) + 18, panelWidth - 28, panelHeight - 32, 24);
+    panelShine.fillStyle(0xffffff, 0.07);
+    panelShine.fillRoundedRect(-(panelWidth / 2) + 42, -(panelHeight / 2) + 22, panelWidth - 84, 24, 14);
+
+    const logo = this.textures.exists("logoMini")
+      ? this.add.image(0, -(panelHeight / 2), "logoMini").setOrigin(0.5, 0.5).setScale(1.12)
+      : null;
+    const title = this.add.text(0, -134, "PAUSE MENU", {
+      fontFamily: "Bungee",
+      fontSize: "30px",
+      color: "#f3fbff",
+      stroke: "#04111a",
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+    const subtitle = this.add.text(0, -98, "Take a breath, tune the mix, save up, or head back out.", {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#b8d9ea",
+      stroke: "#051119",
+      strokeThickness: 3,
+      align: "center",
+      wordWrap: { width: panelWidth - 120 },
+    }).setOrigin(0.5);
+
+    const closeBg = this.add.rectangle((panelWidth / 2) - 34, -(panelHeight / 2) + 28, 36, 36, 0x163a50, 0.001)
+      .setInteractive({ useHandCursor: true });
+    const closeLabel = this.add.text(closeBg.x, closeBg.y, "X", {
+      fontFamily: "Bungee",
+      fontSize: "14px",
+      color: "#effbff",
+      stroke: "#04111a",
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+
+    const audioCard = this.add.graphics();
+    this._drawRoundedPanel(audioCard, panelWidth - 84, 128, {
+      radius: 22,
+      fillColor: 0x11293c,
+      fillAlpha: 0.94,
+      strokeColor: 0xffffff,
+      strokeAlpha: 0.10,
+      shadowAlpha: 0.16,
+      shadowOffsetY: 8,
+    });
+    audioCard.setPosition(0, -6);
+    const audioTitle = this.add.text(-(panelWidth / 2) + 78, -44, "MASTER VOLUME", {
+      fontFamily: "Bungee",
+      fontSize: "15px",
+      color: "#f3fbff",
+      stroke: "#04111a",
+      strokeThickness: 4,
+    }).setOrigin(0, 0.5);
+    const audioHint = this.add.text(audioTitle.x, -18, "All ambience, combat, UI, and world sound", {
+      fontFamily: "Bungee",
+      fontSize: "10px",
+      color: "#9cc3d7",
+      stroke: "#04111a",
+      strokeThickness: 3,
+    }).setOrigin(0, 0.5);
+    const volumeValue = this.add.text((panelWidth / 2) - 136, -30, "100%", {
+      fontFamily: "Bungee",
+      fontSize: "16px",
+      color: "#8fe7ff",
+      stroke: "#04111a",
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    const sliderTrack = this.add.rectangle(-18, 22, panelWidth - 244, 16, 0x09131d, 0.96)
+      .setStrokeStyle(2, 0xffffff, 0.10)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    const sliderFill = this.add.rectangle(sliderTrack.x - (sliderTrack.width / 2) + 2, 22, 1, 10, 0x7de7ff, 1)
+      .setOrigin(0, 0.5);
+    const sliderThumb = this.add.circle(0, 22, 12, 0xf7fdff, 1)
+      .setStrokeStyle(3, 0x7de7ff, 0.9)
+      .setInteractive({ draggable: true, useHandCursor: true });
+
+    const makeActionButton = (x, y, width, label, hint, palette, onClick) => {
+      const bg = this.add.graphics();
+      const draw = (hovered = false) => {
+        this._drawRoundedPanel(bg, width, 64, {
+          radius: 20,
+          fillColor: hovered ? palette.hoverFill : palette.fill,
+          fillAlpha: 0.98,
+          strokeColor: hovered ? palette.hoverStroke : palette.stroke,
+          strokeAlpha: hovered ? 0.34 : 0.20,
+          shadowColor: 0x03101a,
+          shadowAlpha: 0.24,
+          shadowOffsetY: 7,
+        });
+      };
+      draw(false);
+      bg.setPosition(x, y);
+      bg.setInteractive(new Phaser.Geom.Rectangle(-(width / 2), -32, width, 64), Phaser.Geom.Rectangle.Contains);
+      const titleText = this.add.text(x, y - 9, label, {
+        fontFamily: "Bungee",
+        fontSize: "16px",
+        color: palette.text,
+        stroke: "#04111a",
+        strokeThickness: 3,
+      }).setOrigin(0.5);
+      const hintText = this.add.text(x, y + 12, hint, {
+        fontFamily: "Bungee",
+        fontSize: "10px",
+        color: palette.subtext,
+        stroke: "#04111a",
+        strokeThickness: 2,
+      }).setOrigin(0.5);
+      bg.on("pointerover", () => {
+        AudioManager.playUiHover({ volume: 0.16 });
+        draw(true);
+        bg.setScale(1.02);
+      });
+      bg.on("pointerout", () => {
+        draw(false);
+        bg.setScale(1);
+      });
+      bg.on("pointerdown", (pointer, lx, ly, event) => {
+        event?.stopPropagation?.();
+        AudioManager.playMenuClick();
+        this.tweens.add({
+          targets: [bg, titleText, hintText],
+          scaleX: 0.98,
+          scaleY: 0.98,
+          yoyo: true,
+          duration: 80,
+        });
+        onClick?.();
+      });
+      return [bg, titleText, hintText];
+    };
+
+    const mutePalette = {
+      fill: 0x17344a,
+      hoverFill: 0x22506d,
+      stroke: 0xaeefff,
+      hoverStroke: 0xffffff,
+      text: "#effbff",
+      mutedFill: 0x4a1f2a,
+      mutedStroke: 0xffc4cf,
+      mutedText: "#ffd7de",
+    };
+    const muteBtn = this.add.graphics();
+    const muteIcon = this.add.text((panelWidth / 2) - 80, 22, "", {
+      fontFamily: "Segoe UI Emoji",
+      fontSize: "22px",
+      color: mutePalette.text,
+      stroke: "#04111a",
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+    muteBtn.setPosition(muteIcon.x, muteIcon.y);
+    muteBtn.setInteractive(new Phaser.Geom.Circle(0, 0, 21), Phaser.Geom.Circle.Contains);
+
+    const pauseMenu = {
+      root,
+      blocker,
+      panel,
+      panelBg,
+      panelInner,
+      panelShine,
+      blueWash,
+      closeBg,
+      closeLabel,
+      sliderTrack,
+      sliderFill,
+      sliderThumb,
+      volumeValue,
+      muteBtn,
+      muteIcon,
+      confirm: null,
+      isOpen: false,
+      draggingSlider: false,
+      panelBaseY: this.scale.height * 0.54,
+      setVolume: (nextValue, commit = true) => {
+        const value = Phaser.Math.Clamp(Number(nextValue ?? 1), 0, 1);
+        pauseMenu.volume = value;
+        const usableWidth = Math.max(8, sliderTrack.width - 8);
+        sliderFill.width = Math.max(8, usableWidth * value);
+        sliderThumb.x = sliderTrack.x - (sliderTrack.width / 2) + 4 + Math.max(0, usableWidth * value);
+        volumeValue.setText(`${Math.round(value * 100)}%`);
+        if (commit) AudioManager.setMasterVolume(value);
+      },
+      refreshMute: (hovered = false) => {
+        const muted = AudioManager.isMuted();
+        this._drawRoundedPanel(muteBtn, 42, 42, {
+          radius: 21,
+          fillColor: muted ? mutePalette.mutedFill : (hovered ? mutePalette.hoverFill : mutePalette.fill),
+          fillAlpha: hovered ? 1 : 0.96,
+          strokeColor: muted ? mutePalette.mutedStroke : (hovered ? mutePalette.hoverStroke : mutePalette.stroke),
+          strokeAlpha: muted ? 0.34 : (hovered ? 0.28 : 0.18),
+          shadowAlpha: 0.18,
+          shadowOffsetY: 5,
+        });
+        muteIcon.setText(muted ? "\uD83D\uDD07" : "\uD83D\uDD0A");
+        muteIcon.setColor(muted ? mutePalette.mutedText : mutePalette.text);
+      },
+    };
+
+    const sliderSetFromPointer = (pointer) => {
+      const localX = Phaser.Math.Clamp(pointer.x - panel.x, sliderTrack.x - sliderTrack.width / 2, sliderTrack.x + sliderTrack.width / 2);
+      const ratio = (localX - (sliderTrack.x - sliderTrack.width / 2)) / sliderTrack.width;
+      pauseMenu.setVolume(ratio, true);
+    };
+
+    sliderTrack.on("pointerdown", (pointer, lx, ly, event) => {
+      event?.stopPropagation?.();
+      sliderSetFromPointer(pointer);
+    });
+    sliderThumb.on("drag", (pointer) => {
+      sliderSetFromPointer(pointer);
+    });
+    muteBtn.on("pointerdown", (pointer, lx, ly, event) => {
+      event?.stopPropagation?.();
+      AudioManager.playMenuClick();
+      AudioManager.setMuted(!AudioManager.isMuted());
+      pauseMenu.refreshMute();
+    });
+    muteBtn.on("pointerover", () => {
+      AudioManager.playUiHover({ volume: 0.16 });
+      pauseMenu.refreshMute(true);
+    });
+    muteBtn.on("pointerout", () => pauseMenu.refreshMute());
+
+    const saveAction = () => {
+      SaveManager.attachScene(this.worldScene);
+      const ok = SaveManager.saveNow("manual", { silent: false });
+      if (!ok) {
+        this.showAlertMessage("SAVE MISSED", "#fca5a5", 1600);
+      }
+    };
+    const showLeavePrompt = () => this._showPauseExitConfirm();
+
+    const buttons = [
+      ...makeActionButton(-150, 138, 180, "SAVE", "Write a local continue save", {
+        fill: 0x1a5f57,
+        hoverFill: 0x238074,
+        stroke: 0xb9fff0,
+        hoverStroke: 0xffffff,
+        text: "#eafffb",
+        subtext: "#b8efe4",
+      }, saveAction),
+      ...makeActionButton(0, 218, 250, "BACK TO GAME", "Close the menu and resume play", {
+        fill: 0x6dd3f5,
+        hoverFill: 0x8de7ff,
+        stroke: 0xdff9ff,
+        hoverStroke: 0xffffff,
+        text: "#effbff",
+        subtext: "#d7f6ff",
+      }, () => this.closePauseMenu()),
+      ...makeActionButton(150, 138, 220, "MAIN MENU", "Choose whether to save first", {
+        fill: 0x3a2645,
+        hoverFill: 0x523164,
+        stroke: 0xf0c3ff,
+        hoverStroke: 0xffffff,
+        text: "#fff2ff",
+        subtext: "#e9c6f3",
+      }, showLeavePrompt),
+    ];
+
+    closeBg.on("pointerover", () => {
+      AudioManager.playUiHover({ volume: 0.16 });
+      closeLabel.setColor("#8fe7ff");
+      closeLabel.setScale(1.08);
+    });
+    closeBg.on("pointerout", () => {
+      closeLabel.setColor("#effbff");
+      closeLabel.setScale(1);
+    });
+    closeBg.on("pointerdown", (pointer, lx, ly, event) => {
+      event?.stopPropagation?.();
+      AudioManager.playMenuClick();
+      this.closePauseMenu();
+    });
+
+    panel.add([
+      panelBg,
+      accentOrbA,
+      accentOrbB,
+      panelInner,
+      panelShine,
+      ...(logo ? [logo] : []),
+      title,
+      subtitle,
+      closeBg,
+      closeLabel,
+      audioCard,
+      audioTitle,
+      audioHint,
+      volumeValue,
+      sliderTrack,
+      sliderFill,
+      sliderThumb,
+      muteBtn,
+      muteIcon,
+      ...buttons,
+    ]);
+
+    const buildConfirm = () => {
+      const confirm = this.add.container(0, 0).setVisible(false).setAlpha(0).setScale(0.95);
+      const shade = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x02070d, 0.54)
+        .setOrigin(0)
+        .setInteractive({ useHandCursor: false });
+      const card = this.add.container(this.scale.width * 0.5, this.scale.height * 0.54);
+      const cardBg = this.add.graphics();
+      this._drawRoundedPanel(cardBg, 420, 220, {
+        radius: 26,
+        fillColor: 0x0d2030,
+        fillAlpha: 0.98,
+        strokeColor: 0xcaf5ff,
+        strokeAlpha: 0.18,
+        shadowAlpha: 0.32,
+        shadowOffsetY: 10,
+      });
+      const qTitle = this.add.text(0, -58, "RETURN TO MAIN MENU?", {
+        fontFamily: "Bungee",
+        fontSize: "22px",
+        color: "#f3fbff",
+        stroke: "#04111a",
+        strokeThickness: 4,
+      }).setOrigin(0.5);
+      const qText = this.add.text(0, -12, "Save first so Continue keeps this run exactly where it is?", {
+        fontFamily: "Bungee",
+        fontSize: "11px",
+        color: "#c3dcea",
+        stroke: "#04111a",
+        strokeThickness: 3,
+        align: "center",
+        wordWrap: { width: 320 },
+      }).setOrigin(0.5);
+      const leave = () => {
+        this._destroyPauseMenu(true);
+        this.worldScene?.restartToMainMenu?.({ hostScene: this });
+      };
+      const promptButtons = [
+        ...makeActionButton(-118, 54, 144, "SAVE + EXIT", "Keep this run", {
+          fill: 0x1f6258,
+          hoverFill: 0x2b8477,
+          stroke: 0xc5fff3,
+          hoverStroke: 0xffffff,
+          text: "#eafffb",
+          subtext: "#b8efe4",
+        }, () => {
+          SaveManager.attachScene(this.worldScene);
+          SaveManager.saveNow("manual", { silent: false });
+          leave();
+        }),
+        ...makeActionButton(118, 54, 176, "EXIT WITHOUT SAVE", "Return immediately", {
+          fill: 0x5b2431,
+          hoverFill: 0x7a3244,
+          stroke: 0xffd0db,
+          hoverStroke: 0xffffff,
+          text: "#fff3f5",
+          subtext: "#f0c0cb",
+        }, leave),
+        ...makeActionButton(0, 122, 130, "CANCEL", "Stay here", {
+          fill: 0x22384a,
+          hoverFill: 0x2f4a62,
+          stroke: 0xd7f6ff,
+          hoverStroke: 0xffffff,
+          text: "#effbff",
+          subtext: "#b6d9e6",
+        }, () => this._hidePauseExitConfirm()),
+      ];
+      card.add([cardBg, qTitle, qText, ...promptButtons]);
+      confirm.add([shade, card]);
+      confirm.card = card;
+      confirm.shade = shade;
+      return confirm;
+    };
+
+    root.add([blueWash, blocker, panel]);
+    pauseMenu.confirm = buildConfirm();
+    root.add(pauseMenu.confirm);
+
+    blocker.on("pointerdown", () => {
+      if (pauseMenu.confirm?.visible) return;
+      this.closePauseMenu();
+    });
+
+    root.refresh = () => {
+      pauseMenu.setVolume(AudioManager.getMasterVolume(), false);
+      pauseMenu.refreshMute();
+      this.pauseMenuButton?.refresh?.();
+    };
+
+    const relayout = ({ width, height }) => {
+      pauseMenu.panelBaseY = height * 0.54;
+      blocker.setSize(width, height);
+      blueWash.setSize(width, height);
+      panel.setPosition(width * 0.5, pauseMenu.panelBaseY);
+      if (pauseMenu.confirm?.card) pauseMenu.confirm.card.setPosition(width * 0.5, pauseMenu.panelBaseY);
+      if (pauseMenu.confirm?.shade) pauseMenu.confirm.shade.setSize(width, height);
+    };
+    relayout(this.scale);
+    this._trackScaleResize(relayout);
+
+    this.pauseMenu = pauseMenu;
+    return pauseMenu;
+  }
+
+  _showPauseExitConfirm() {
+    const confirm = this.pauseMenu?.confirm;
+    if (!confirm || confirm.visible) return;
+    confirm.setVisible(true);
+    confirm.alpha = 0;
+    confirm.scale = 0.95;
+    this.tweens.add({
+      targets: confirm,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 180,
+      ease: "Back.Out",
+    });
+  }
+
+  _hidePauseExitConfirm() {
+    const confirm = this.pauseMenu?.confirm;
+    if (!confirm?.visible) return;
+    this.tweens.add({
+      targets: confirm,
+      alpha: 0,
+      scaleX: 0.95,
+      scaleY: 0.95,
+      duration: 150,
+      ease: "Quad.Out",
+      onComplete: () => confirm.setVisible(false),
+    });
+  }
+
+  openPauseMenu() {
+    const world = this.worldScene;
+    if (!world || this.pauseMenu?.isOpen) return false;
+    if (world._restartToMainMenuInProgress || world._townTowerLossInProgress || world.menu?.active) return false;
+
+    const pauseMenu = this._buildPauseMenu();
+    this.tweens.killTweensOf([pauseMenu.root, pauseMenu.panel, pauseMenu.blocker, pauseMenu.blueWash]);
+    this._clearPauseBackdropFx();
+    pauseMenu.root.setVisible(true);
+    pauseMenu.root.alpha = 0;
+    pauseMenu.panel.setAlpha(1);
+    pauseMenu.panel.setScale(0.92);
+    pauseMenu.panel.y = pauseMenu.panelBaseY + 16;
+    pauseMenu.isOpen = true;
+
+    this._setPauseWorldInputEnabled(false);
+    world.setSimulationPause?.("pause_menu", true);
+    this._applyPauseBackdropFx();
+    this._hidePauseExitConfirm();
+    pauseMenu.refresh?.();
+
+    this.tweens.add({
+      targets: pauseMenu.blueWash,
+      alpha: 0.16,
+      duration: 180,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: pauseMenu.blocker,
+      alpha: 0.60,
+      duration: 180,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: pauseMenu.root,
+      alpha: 1,
+      duration: 180,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: pauseMenu.panel,
+      scaleX: 1,
+      scaleY: 1,
+      y: pauseMenu.panelBaseY,
+      duration: 220,
+      ease: "Back.Out",
+    });
+    this.pauseMenuButton?.refresh?.();
+    return true;
+  }
+
+  closePauseMenu(immediate = false) {
+    const pauseMenu = this.pauseMenu;
+    const world = this.worldScene;
+    if (!pauseMenu?.isOpen && !immediate) return false;
+    pauseMenu.isOpen = false;
+    this._hidePauseExitConfirm();
+    world?.setSimulationPause?.("pause_menu", false);
+    this._setPauseWorldInputEnabled(true);
+    this.pauseMenuButton?.refresh?.();
+
+    const finish = () => {
+      pauseMenu.root.setVisible(false);
+      this._clearPauseBackdropFx();
+    };
+
+    if (immediate) {
+      pauseMenu.root.setAlpha(0).setVisible(false);
+      pauseMenu.blocker.setAlpha(0);
+      pauseMenu.blueWash.setAlpha(0);
+      pauseMenu.panel.setScale(1).setAlpha(1);
+      this._clearPauseBackdropFx();
+      return true;
+    }
+
+    this.tweens.add({
+      targets: pauseMenu.blueWash,
+      alpha: 0,
+      duration: 140,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: pauseMenu.blocker,
+      alpha: 0,
+      duration: 140,
+      ease: "Quad.Out",
+    });
+    this.tweens.add({
+      targets: pauseMenu.root,
+      alpha: 0,
+      duration: 150,
+      ease: "Quad.Out",
+      onComplete: finish,
+    });
+    this.tweens.add({
+      targets: pauseMenu.panel,
+      scaleX: 0.96,
+      scaleY: 0.96,
+      alpha: 0.96,
+      y: pauseMenu.panelBaseY + 12,
+      duration: 150,
+      ease: "Quad.Out",
+    });
+    return true;
+  }
+
+  _destroyPauseMenu(immediate = true) {
+    if (this.pauseMenu?.isOpen) {
+      this.worldScene?.setSimulationPause?.("pause_menu", false);
+      this._setPauseWorldInputEnabled(true);
+    }
+    this._clearPauseBackdropFx();
+    this._pauseBackdropFx?.destroy?.();
+    this._pauseBackdropFx = null;
+    this.pauseMenu?.root?.destroy?.(true);
+    this.pauseMenu = null;
+    this.pauseMenuButton?.destroy?.(true);
+    this.pauseMenuButton = null;
   }
 
   _stopRewardChestTimer(sprite) {
@@ -2942,8 +3817,10 @@ export class GameUIScene extends Phaser.Scene {
     }
     this._refreshTopHudValues();
     this._refreshTownXpHud();
+    this.achievementBoard?.update?.();
     this._refreshPhaseClock();
     this.zoomControls?.updateState?.();
+    this.pauseMenuButton?.refresh?.();
     this._updateRaiderEdgeHud();
     this._syncUiAnimationTimeScale();
     this.contractHud?.update?.();

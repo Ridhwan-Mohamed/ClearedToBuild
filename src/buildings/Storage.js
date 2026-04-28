@@ -3,6 +3,13 @@ import { Map } from '../map.js';
 import { Teams } from '../Teams.js';
 import { DailyNeedsTracker } from '../UI/DailyNeedsTracker.js';
 import { StorageUI } from '../UI/StorageUI.js';
+import {
+    destroyStructuralHealthBar,
+    ensureStructuralHealthBar,
+    getStructuralBarAnchor,
+    getStructuralHealthBarTargets,
+    layoutStructuralHealthBar,
+} from '../UI/BuildingTheme.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { buildingManager } from '../Manager/buildingManager.js';
@@ -87,6 +94,7 @@ export class StorageBuilding {
             StorageUI.hideMinor(this)
         });
         this.sprite.on('pointerdown', () => {
+            if (this.scene?.destroyWallMode) return;
             if (buildingManager.handleBuildingClickForBuilders(this, null, this.teamNumber)) return;
             StorageBuilding.scene.openDetailPage('storage', tab => tab.selectFromWorld(this));
         });
@@ -234,6 +242,59 @@ export class StorageBuilding {
         }
 
         return projected;
+    }
+
+    static _storageWorldPosition(storage) {
+        if (!storage) return { x: 0, y: 0 };
+
+        if (storage.sprite) {
+            return {
+                x: Number(storage.sprite.x) || 0,
+                y: Number(storage.sprite.y) || 0,
+            };
+        }
+
+        return {
+            x: ((Number(storage.x) || 0) + 0.5) * SQUARESIZE,
+            y: ((Number(storage.y) || 0) + 0.5) * SQUARESIZE,
+        };
+    }
+
+    static _distanceSqToStorage(storage, source = null) {
+        if (!source) return 0;
+
+        const sourceX = source.sprite?.x ?? source.x;
+        const sourceY = source.sprite?.y ?? source.y;
+        if (!Number.isFinite(sourceX) || !Number.isFinite(sourceY)) return 0;
+
+        const storagePos = this._storageWorldPosition(storage);
+        const dx = storagePos.x - sourceX;
+        const dy = storagePos.y - sourceY;
+        return dx * dx + dy * dy;
+    }
+
+    static sortStoragesByDistance(storages = [], source = null, preferredStorage = null) {
+        const ordered = [...(storages || [])].filter((storage) =>
+            storage &&
+            typeof storage.getAvailableForPickup === "function" &&
+            typeof storage.reservePickup === "function" &&
+            typeof storage.releasePickup === "function"
+        );
+        if (ordered.length <= 1) return ordered;
+
+        if (preferredStorage) {
+            ordered.sort((a, b) => {
+                if (a === preferredStorage) return -1;
+                if (b === preferredStorage) return 1;
+                return this._distanceSqToStorage(a, source) - this._distanceSqToStorage(b, source);
+            });
+            return ordered;
+        }
+
+        if (!source) return ordered;
+
+        ordered.sort((a, b) => this._distanceSqToStorage(a, source) - this._distanceSqToStorage(b, source));
+        return ordered;
     }
 
     compactItems() {
@@ -401,18 +462,53 @@ export class StorageBuilding {
             .reduce((sum, slot) => sum + slot.amount, 0);
     }
 
-    static canAcceptItem(itemType, team, preferredStorage = null) {
+    getAvailableForPickup(itemType) {
+        const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
+        if (!itemDef?.name) return 0;
+
+        const stored = this.storageItems.reduce((sum, slot) => {
+            if (!slot?.item || slot.item.name !== itemDef.name) return sum;
+            return sum + Math.max(0, Number(slot.amount) || 0);
+        }, 0);
+
+        const reserved = Math.max(0, Number(this.reservedPickup?.[itemDef.name]) || 0);
+        return Math.max(0, stored - reserved);
+    }
+
+    reservePickup(itemType, amount = 1) {
+        const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
+        const request = Math.max(0, Number(amount) || 0);
+        if (!itemDef?.name || request <= 0) return false;
+
+        if (this.getAvailableForPickup(itemDef) < request) return false;
+
+        this.reservedPickup[itemDef.name] = Math.max(0, Number(this.reservedPickup[itemDef.name]) || 0) + request;
+        return true;
+    }
+
+    releasePickup(itemType, amount = 1) {
+        const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
+        const release = Math.max(0, Number(amount) || 0);
+        if (!itemDef?.name || release <= 0) return;
+
+        const current = Math.max(0, Number(this.reservedPickup?.[itemDef.name]) || 0);
+        const next = Math.max(0, current - release);
+        if (next > 0) {
+            this.reservedPickup[itemDef.name] = next;
+        } else {
+            delete this.reservedPickup[itemDef.name];
+        }
+    }
+
+    static canAcceptItem(itemType, team, preferredStorage = null, source = null) {
         const itemDef = itemType;
         if (!itemDef) return null;
 
-        const storages = [...(Teams.teamLists[team]?.storageList || [])];
-        if (preferredStorage) {
-            storages.sort((a, b) => {
-                if (a === preferredStorage) return -1;
-                if (b === preferredStorage) return 1;
-                return 0;
-            });
-        }
+        const storages = this.sortStoragesByDistance(
+            Teams.teamLists[team]?.storageList || [],
+            source,
+            preferredStorage
+        );
 
         for (const storage of storages) {
             const projected = this._getProjectedSlots(storage, team);
@@ -424,128 +520,16 @@ export class StorageBuilding {
                 idx: placement.idx,
                 remaining: this._availableCapacity(projected, itemDef)
             };
-
-            let emptyCandidate = null;
-
-            for (let i = 0; i < storage.storageItems.length; i++) {
-                const slot = storage.storageItems[i];
-                const existingTask = storageDeliveryItems.find(task =>
-                    task.storage === storage && task.index === i
-                );
-
-                // Prefer stacking on existing matching items with room
-                if (slot && slot.item === itemDef && slot.amount < maxStack) {
-                    if (existingTask &&
-                        (existingTask.item.name !== itemType.name ||
-                        existingTask.remaining <= existingTask.assigned)) {
-                        continue;
-                    }
-                    const room = maxStack - slot.amount;
-                    return { storage, idx: i, remaining: room };
-                }
-
-                // Save empty slot as fallback, but don’t return yet
-                if (!slot && !emptyCandidate) {
-                    if (existingTask &&
-                        (existingTask.item.name !== itemType.name ||
-                        existingTask.remaining <= existingTask.assigned)) {
-                        continue;
-                    }
-                    emptyCandidate = { storage, idx: i, remaining: maxStack };
-                }
-            }
-
-            // If no stacking possible, return empty slot in the same building
-            if (emptyCandidate) return emptyCandidate;
         }
 
-        return null; // ❌ No space found
-    }
-
-    getReservedPickup(itemOrName) {
-        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
-        return this.reservedPickup[name] || 0;
-    }
-
-    reservePickup(itemOrName, amount = 1) {
-        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
-
-        // 🔒 Only reserve if there is enough unreserved stock
-        if (this.getAvailableForPickup(name) < amount) {
-            return false;
-        }
-
-        this.reservedPickup[name] = (this.reservedPickup[name] || 0) + amount;
-        return true;
-    }
-
-    releasePickup(itemOrName, amount = 1) {
-        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
-        const cur = this.reservedPickup[name] || 0;
-        const next = Math.max(0, cur - amount);
-        if (next === 0) {
-            delete this.reservedPickup[name];
-        } else {
-            this.reservedPickup[name] = next;
-        }
-    }
-
-    getAvailableForPickup(itemOrName) {
-        const name = typeof itemOrName === 'string' ? itemOrName : itemOrName.name;
-        const itemType = UI_ITEM_TYPES[name];
-        if (!itemType) return 0;
-
-        const total = this.getItemCount(itemType);
-        const reserved = this.getReservedPickup(name);
-        return Math.max(0, total - reserved);
-    }
-
-    static hasTeamMaterials(itemName, amount, teamNumber) {
-        const itemDef = UI_ITEM_TYPES[itemName];
-        if (!itemDef) return false;
-
-        let total = 0;
-        const storages = Teams.teamLists[teamNumber].storageList;
-        for (const storage of storages) {
-            total += storage.getItemCount(itemDef);
-            if (total >= amount) return true;
-        }
-        return false;
-    }
-
-    static removeTeamMaterials(itemName, amount, teamNumber) {
-        const storages = Teams.teamLists[teamNumber].storageList;
-        let remaining = amount;
-
-        for (const storage of storages) {
-            if (remaining <= 0) break;
-            const removed = storage.removeItem(itemName, remaining);
-            if (removed) remaining -= amount;
-        }
-
-        return remaining <= 0; // ✅ True if all removed
+        return null;
     }
 
     ensureHealthBar() {
         if (!this.sprite) return;
         const scene = StorageBuilding.scene;
         if (!scene) return;
-
-        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.storage.lenX * SQUARESIZE);
-        const y = this.sprite.y - this.sprite.displayHeight / 2 - 24;
-
-        if (!this.healthBarBg) {
-            this.healthBarBg = scene.add
-                .rectangle(this.sprite.x, y, fullWidth, 4, 0x000000, 0.6)
-                .setDepth(BLOCKDEPTH + 1);
-            Map.addToWorldStatic(this.healthBarBg);
-        }
-        if (!this.healthBar) {
-            this.healthBar = scene.add
-                .rectangle(this.sprite.x, y, fullWidth, 2, 0x00ff00, 1)
-                .setDepth(BLOCKDEPTH + 2);
-            Map.addToWorldStatic(this.healthBar);
-        }
+        ensureStructuralHealthBar(this, scene, { fillColor: 0x61d98f });
     }
 
     updateHealthBar() {
@@ -553,24 +537,30 @@ export class StorageBuilding {
         this.ensureHealthBar();
 
         if (!this.healthBar || !this.healthBarBg) return;
-        const fullWidth = this.sprite.displayWidth || (TILE_TYPES.storage.lenX * SQUARESIZE);
         const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-        this.healthBarBg.setDisplaySize(fullWidth, 4);
-        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+        const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+            widthScale: 1,
+            paddingX: 12,
+            yOffset: 13,
+        });
 
         const now = StorageBuilding.scene?.time?.now ?? 0;
         const visible = this.isHovered || now < this._damageBarUntil;
-        this.healthBarBg.setVisible(visible);
-        this.healthBar.setVisible(visible);
+        layoutStructuralHealthBar(this, {
+            ratio,
+            centerX,
+            topY,
+            width,
+            visible,
+            fillColor: 0x61d98f,
+        });
     }
 
     shakeAndFlash() {
         if (!this.sprite) return;
         const scene = StorageBuilding.scene;
         const targets = [this.sprite];
-        if (this.healthBarBg) targets.push(this.healthBarBg);
-        if (this.healthBar)   targets.push(this.healthBar);
+        targets.push(...getStructuralHealthBarTargets(this));
 
         scene.tweens.add({
             targets,
@@ -629,8 +619,7 @@ export class StorageBuilding {
         StorageManager.handleStorageDestroyed?.(this);
 
         this.sprite?.destroy();
-        if (this.healthBarBg) this.healthBarBg.destroy();
-        if (this.healthBar)   this.healthBar.destroy();
+        destroyStructuralHealthBar(this);
         StorageUI.hideStatus?.(this);
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);

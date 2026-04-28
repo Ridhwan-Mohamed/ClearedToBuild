@@ -203,7 +203,7 @@ export class Map{
                     lenX,
                     lenY,
                     this.placingItem,
-                    item?.block ? { padding: 1, protectFarmSpots: true } : {}
+                    item?.block ? { padding: 1, protectFarmSpots: true, paddingAllowWalls: true, paddingProtectFarmSpots: false } : {}
                 );
                 this.placingItem.setTint(tintColor);
                 this.placingItem.setPosition(x, y);
@@ -303,11 +303,14 @@ export class Map{
 
             const baseType = TILE_TYPES[TILE_MAP(baseVal)];
             const topType  = topVal != null ? TILE_TYPES[TILE_MAP(topVal)] : null;
+            const topIsWall = !!Map._wallStructureInfoAt?.(gx, gy);
 
-            // skip if a blocking top (building, wall, etc.)
-            if (topType?.block) return false;
+            // skip if a blocking top building is present, but allow painting road under walls/doors
+            if (topType?.block && !topIsWall) return false;
             // skip if base already road (no need to repaint)
             if (TILE_MAP(baseVal) === 'road') return false;
+            // leave crops / queued farm spots alone on the perimeter ring
+            if (Map._cellHasProtectedFarmSpot?.(gx, gy, team ?? 1)) return false;
             // skip if base itself is blocking
             if (baseType?.block) return false;
 
@@ -405,10 +408,15 @@ export class Map{
         const {
             protectFarmSpots = false,
             treatOutOfBoundsAsBlocked = true,
+            allowWallAdjacency = false,
         } = options;
 
         const row = this.grid?.[y];
         if (!row || row[x] == null) return treatOutOfBoundsAsBlocked;
+
+        if (allowWallAdjacency && this._wallStructureInfoAt?.(x, y)) {
+            return false;
+        }
 
         if (this._cellIsBlocking(x, y)) return true;
         if (protectFarmSpots && this._cellHasProtectedFarmSpot(x, y)) return true;
@@ -440,6 +448,8 @@ export class Map{
                     this._cellHasPlacementConflict(x, y, {
                         ...options,
                         treatOutOfBoundsAsBlocked: false,
+                        allowWallAdjacency: !!options?.paddingAllowWalls,
+                        protectFarmSpots: options?.paddingProtectFarmSpots ?? options?.protectFarmSpots ?? false,
                     })
                 ) {
                     return true;
@@ -705,24 +715,8 @@ export class Map{
         const startCfg = scene?.startCfg ?? scene?.draftStartCfg;
         const starterResources = startCfg?.resources ?? startCfg?.supplies;
 
-        if (starterResources) {
-            const team1 = Teams.teamLists["1"];
-            const storages = Array.isArray(team1?.storageList) ? team1.storageList : [];
-            if (storages.length) {
-                storages.forEach((storage) => storage?.clearStoredInventory?.(false));
-
-                const addStarterItems = (itemType, amount) => {
-                    const n = Math.max(0, Math.floor(Number(amount) || 0));
-                    if (n > 0) StorageManager.grantItemToTeam("1", itemType, n, scene);
-                };
-
-                addStarterItems("seedCrop", starterResources.seeds);
-                addStarterItems("seedBerry", starterResources.berries);
-                addStarterItems("food", starterResources.food);
-                addStarterItems("wood", starterResources.wood);
-                addStarterItems("stone", starterResources.stone);
-                addStarterItems("clean_water", starterResources.water ?? starterResources.clean_water);
-            }
+        if (starterResources && !scene?._skipStarterResourceSeed) {
+            this.seedStarterResources(scene, starterResources);
         }
         // map.js — after the draw loop inside drawBuildings(), add:
         const townLightSources = [];
@@ -775,6 +769,26 @@ export class Map{
         }
         // finally rebuild once
         VisibilitySystem._rebuildViewFull();
+    }
+
+    static seedStarterResources(scene, starterResources) {
+        const team1 = Teams.teamLists["1"];
+        const storages = Array.isArray(team1?.storageList) ? team1.storageList : [];
+        if (!storages.length) return;
+
+        storages.forEach((storage) => storage?.clearStoredInventory?.(false));
+
+        const addStarterItems = (itemType, amount) => {
+            const n = Math.max(0, Math.floor(Number(amount) || 0));
+            if (n > 0) StorageManager.grantItemToTeam("1", itemType, n, scene);
+        };
+
+        addStarterItems("seedCrop", starterResources.seeds);
+        addStarterItems("seedBerry", starterResources.berries);
+        addStarterItems("food", starterResources.food);
+        addStarterItems("wood", starterResources.wood);
+        addStarterItems("stone", starterResources.stone);
+        addStarterItems("clean_water", starterResources.water ?? starterResources.clean_water);
     }
 
     static deleteAllGridElements(){
@@ -833,21 +847,7 @@ export class Map{
         // Draw the full world grid.
         for (let y = topLeftY; y < bottomRightY; y++) {
             for (let x = topLeftX; x < bottomRightX; x++) {
-                if(this.grid[y][x] == TILE_TYPES.crops.grid){
-                    this.handleCrops(x,y);
-                } else if (Array.isArray(this.grid[y][x])) {
-                    const type = TILE_TYPES[TILE_MAP(this.grid[y][x][1])];
-                    const name = type.name;
-                    this.drawGridValue(x, y, 0);
-                    // Always draw top layer for walls/doors (even though they're not spread)
-                    if (Wall.isWallOrDoorCell(this.grid[y][x])) {
-                        buildingManager.makeWallNoBuild(x,y, this.grid[y][x][1]);
-                    } else if (type && type.spread) {
-                        this.drawGridValue(x, y, 1);
-                    }
-                } else {
-                    this.drawGridValue(x, y);
-                }
+                this._drawGridCell(x, y, { allowWallNavSync: true });
             }
         }
 
@@ -867,11 +867,76 @@ export class Map{
         this._uiIgnoreWorldLayer();
     }   
 
+    static redrawRect(x, y, w, h, pad = 1) {
+        const rect = this._normalizeGridRect(x, y, w, h, pad);
+        if (!rect) return;
+
+        this.refreshTerrainShapesInRect(x, y, w, h, pad);
+
+        for (let gy = rect.minY; gy <= rect.maxY; gy++) {
+            for (let gx = rect.minX; gx <= rect.maxX; gx++) {
+                this._clearStoredCellSprites(gx, gy);
+            }
+        }
+
+        for (let gy = rect.minY; gy <= rect.maxY; gy++) {
+            for (let gx = rect.minX; gx <= rect.maxX; gx++) {
+                this._drawGridCell(gx, gy, { allowWallNavSync: false });
+            }
+        }
+
+        this._uiIgnoreWorldLayer();
+    }
+
     static handleCrops(x,y){
         const key = `${x},${y}`;
         if(!this.cropDict[key]){
             this.drawGridValue(x, y);
         }
+    }
+
+    static _drawGridCell(x, y, opts = {}) {
+        const cell = this.grid?.[y]?.[x];
+        if (cell == null) return;
+
+        if (cell == TILE_TYPES.crops.grid) {
+            this.handleCrops(x, y);
+            return;
+        }
+
+        if (Array.isArray(cell)) {
+            const type = TILE_TYPES[TILE_MAP(cell[1])];
+            this.drawGridValue(x, y, 0);
+            if (Wall.isWallOrDoorCell(cell)) {
+                if (opts.allowWallNavSync === false) {
+                    this._redrawWallCell(x, y, cell);
+                } else {
+                    buildingManager.makeWallNoBuild(x, y, cell[1]);
+                }
+            } else if (type && type.spread) {
+                this.drawGridValue(x, y, 1);
+            }
+            return;
+        }
+
+        this.drawGridValue(x, y);
+    }
+
+    static _redrawWallCell(x, y, cell = null) {
+        const sourceCell = cell ?? this.grid?.[y]?.[x];
+        const overlayVal = Array.isArray(sourceCell) ? sourceCell[1] : sourceCell;
+        if (overlayVal == null) return;
+
+        const ownerWall = Wall.getAt?.(x, y);
+        const inferredOwnerTeam =
+            (this.navGrid?.[y]?.[x] === 0 && this.enemyNavGrid?.[y]?.[x] === 1) ? 0 :
+            (this.navGrid?.[y]?.[x] === 1 && this.enemyNavGrid?.[y]?.[x] === 0) ? 1 :
+            1;
+        const ownerTeam = ownerWall?.team ?? inferredOwnerTeam;
+
+        this.drawGridValue(x, y, 1);
+        Wall.ensureAt(this.scene, x, y, ownerTeam);
+        this.refreshWallShapesAround?.(x, y);
     }
 
     static _shapeAndAngle(def, val) {
@@ -1535,6 +1600,35 @@ static _clearStoredCellSprites(gx, gy) {
   this.blocks[idx] = null;
 }
 
+static _normalizeGridRect(x, y, w, h, pad = 0) {
+  if (!this.grid?.length || !this.grid[0]?.length) return null;
+
+  const startX = Math.floor(Number(x));
+  const startY = Math.floor(Number(y));
+  const width = Math.floor(Number(w));
+  const height = Math.floor(Number(h));
+  const extra = Math.max(0, Math.floor(Number(pad) || 0));
+
+  if (!Number.isFinite(startX) || !Number.isFinite(startY) || !Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+
+  const minX = Math.max(0, startX - extra);
+  const minY = Math.max(0, startY - extra);
+  const maxX = Math.min(this.grid[0].length - 1, startX + width - 1 + extra);
+  const maxY = Math.min(this.grid.length - 1, startY + height - 1 + extra);
+
+  if (maxX < minX || maxY < minY) return null;
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
 // Returns true if val (numeric tile code) maps to water
 static _isWaterVal(val) {
   return TILE_MAP(val) === "water";
@@ -1582,8 +1676,13 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             const slot = this.blocks[idx];
             if (slot && Array.isArray(slot)) {
                 // In normal (non-overview) mode this will be the old ground sprite
-                if (slot && slot[1] && slot[1].destroy) slot.destroy();
-                this.blocks[idx] = slot[0]
+                if (Array.isArray(slot[1])) {
+                    slot[1][0]?.destroy?.();
+                    slot[1][1]?.destroy?.();
+                } else {
+                    slot[1]?.destroy?.();
+                }
+                this.blocks[idx] = slot[0] ?? null;
             }
             if(Array.isArray(this.grid[y][x])){
                 this.grid[y][x] = this.grid[y][x][0];
@@ -1643,7 +1742,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             else{
                 this.blocks[y*WORLD_DIMENSIONX+x][0]?.destroy();
                 this.blocks[y*WORLD_DIMENSIONX+x][0] = block;
-                if(this.blocks[y*WORLD_DIMENSIONX+x][1].body){
+                if(this.blocks[y*WORLD_DIMENSIONX+x]?.[1]?.body){
                     Map.navGrid[y][x] = 0;
                     Map.enemyNavGrid[y][x] = 0;
                 }

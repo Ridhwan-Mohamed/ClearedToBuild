@@ -1,4 +1,3 @@
-import { makeButton } from "./ui/makeButton.js";
 import { BasePage } from "./pages/BasePage.js";
 import { ForestPage } from "./pages/ForestPage.js";
 import { RockPage } from "./pages/RockPage.js";
@@ -35,7 +34,7 @@ export class SlotPanel {
 
     this._buildFrame();
     this._buildDetailedProxy();
-    this._buildGrid();
+    this.gridObjects = [];
     this._buildOverviewGrid();
     this.setMode("detailed");
     this._onTownXpChanged = () => this.refreshMilitiaLockState();
@@ -155,26 +154,33 @@ export class SlotPanel {
     return "CONTRACT";
   }
 
+  _hasActiveContract() {
+    const slotToContractId = this.scene?.parcelManager?.slotToContractId;
+    return !!slotToContractId?.[this.id];
+  }
+
   _setDetailedProxyHovered(hovered) {
     this._detailHovered = !!hovered;
     this._refreshDetailedProxyVisual();
   }
 
   _refreshDetailedProxyVisual() {
+    const hasActiveContract = this._hasActiveContract();
     const isDetailed = this.mode !== "overview";
-    const visible = isDetailed && this.container.visible;
+    const visible = this.container.visible && !hasActiveContract && isDetailed;
     const isPressure = !!this._pressureMode;
     const hovered = !!this._detailHovered;
 
     this.header?.setVisible(false);
+    this.frameG?.setVisible(this.container.visible && !hasActiveContract);
     this.detailProxyGlow?.setVisible(visible);
     this.detailProxyBadge?.setVisible(visible);
     this.detailProxyLabel?.setVisible(visible);
     if (this.detailProxyLabel?.input) {
-      this.detailProxyLabel.input.enabled = visible;
+      this.detailProxyLabel.input.enabled = visible && isDetailed;
     }
     if (this.detailHitZone?.input) {
-      this.detailHitZone.input.enabled = visible;
+      this.detailHitZone.input.enabled = visible && isDetailed;
     }
 
     if (!visible) {
@@ -213,64 +219,7 @@ export class SlotPanel {
   }
 
   _buildGrid() {
-    const pad = 10;
-    const innerW = this.W - pad * 2;
-    const innerH = this.H - pad * 2;
-    const gridTop = -innerH / 2 + 24;
-
-    const btnW = Math.floor(innerW / 2) - 10;
-    const btnH = 34;
-    const gapX = 10;
-    const gapY = 10;
-
-    const militiaUnlocked = this._canAccessMilitia();
-    
-    const buttons = [
-      { label: "🌲 Forest",   type: "FOREST",   locked: false },
-      { label: "🪨 Rock",     type: "ROCK",     locked: false },
-      { label: "⚔️ Pressure", type: "PRESSURE", locked: false },
-      { label: "🏪 Market",   type: "MARKET",   locked: false },
-      { label: "🌾 Field",    type: "FARM",     locked: false },
-      militiaUnlocked
-        ? { label: "🛡 Militia", type: "MILITIA", locked: false }
-        : { label: this._getMilitiaLockedLabel(), type: null, locked: true },
-    ];
-
     this.gridObjects = [];
-
-    for (let i = 0; i < buttons.length; i++) {
-      const row = Math.floor(i / 2);
-      const col = i % 2;
-
-      const x = -innerW / 2 + (btnW / 2) + col * (btnW + gapX);
-      const y = gridTop + row * (btnH + gapY);
-      const def = buttons[i];
-
-      const b = makeButton(this.scene, {
-        x, y,
-        w: btnW, h: btnH,
-        label: def.label,
-        onClick: () => {
-          if (def.locked) {
-            this._showMilitiaLockedMessage();
-            return;
-          }
-          this.open(def.type);
-        },
-      });
-
-      b.setScrollFactor(1);
-      b.list?.forEach?.((go) => go.setScrollFactor?.(1));
-
-      if (def.locked) {
-        b.list?.forEach?.((go) => {
-          if (go?.setAlpha) go.setAlpha(0.72);
-        });
-      }
-
-      this.container.add(b);
-      this.gridObjects.push(b);
-    }
   }
 
   refreshMilitiaLockState() {
@@ -458,6 +407,15 @@ export class SlotPanel {
     });
     this.overviewGridObjects = [];
     this._overviewCards = [];
+    this._overviewPressureObjects?.forEach((o) => {
+      try { o.destroy?.(); } catch {}
+    });
+    this._overviewPressureObjects = [];
+    this._overviewPressureCards = [];
+    this._overviewStatusPrimary?.destroy?.();
+    this._overviewStatusSecondary?.destroy?.();
+    this._overviewStatusPrimary = null;
+    this._overviewStatusSecondary = null;
     this._buildOverviewGrid();
 
     if (this.mode !== "overview" || this._overviewMenu !== "GRID" || this._pressureMode) {
@@ -595,8 +553,25 @@ export class SlotPanel {
   }
 
   _syncOverviewVisibility() {
-    const showGrid = this.mode === "overview" && !this._pressureMode && this._overviewMenu !== "PRESSURE";
-    const showPressureMenu = this.mode === "overview" && !this._pressureMode && this._overviewMenu === "PRESSURE";
+    const hasActiveContract = this._hasActiveContract();
+    const showingStatus = !!(
+      this._overviewStatusPrimary?.visible ||
+      this._overviewStatusSecondary?.visible
+    );
+    const showGrid =
+      this.mode === "overview" &&
+      !this._pressureMode &&
+      !hasActiveContract &&
+      !showingStatus &&
+      this._state !== "PAGE" &&
+      this._overviewMenu === "GRID";
+    const showPressureMenu =
+      this.mode === "overview" &&
+      !this._pressureMode &&
+      !hasActiveContract &&
+      !showingStatus &&
+      this._state !== "PAGE" &&
+      this._overviewMenu === "PRESSURE";
 
     this.overviewGridObjects?.forEach(o => o.setVisible(showGrid));
     this._overviewPressureObjects?.forEach(o => o.setVisible(showPressureMenu));
@@ -616,9 +591,52 @@ export class SlotPanel {
     this._overviewStatusSecondary?.setVisible(false);
   }
 
+  _applyModeVisibilityState() {
+    const hasActiveContract = this._hasActiveContract();
+    const showPage = this._state === "PAGE" && !this._pressureMode;
+
+    if (hasActiveContract) {
+      this.frameG?.setVisible(false);
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      this.overviewGridObjects?.forEach(o => o.setVisible(false));
+      this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._hideOverviewStatus();
+      this._pressureText?.setVisible(false);
+      if (this._page?.container) this._page.container.setVisible(false);
+      this._refreshDetailedProxyVisual();
+      return;
+    }
+
+    if (this.mode !== "overview") {
+      this.frameG?.setVisible(this.container.visible);
+      this.overviewGridObjects?.forEach(o => o.setVisible(false));
+      this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._hideOverviewStatus();
+      this._pressureText?.setVisible(false);
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(showPage);
+      this._refreshDetailedProxyVisual();
+      return;
+    }
+
+    if (this._pressureMode) {
+      this.frameG?.setVisible(this.container.visible);
+      this.gridObjects?.forEach(o => o.setVisible(false));
+      if (this._page?.container) this._page.container.setVisible(false);
+      this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      return;
+    }
+
+    this.frameG?.setVisible(this.container.visible);
+    this.gridObjects?.forEach(o => o.setVisible(false));
+    if (this._page?.container) this._page.container.setVisible(showPage);
+    this._syncOverviewVisibility();
+  }
+
   setMode(mode) {
     this.mode = mode === "overview" ? "overview" : "detailed";
     const isOverview = this.mode === "overview";
+    const hasActiveContract = this._hasActiveContract();
     if (!isOverview) this._overviewMenu = "GRID";
 
     this.header?.setVisible(false);
@@ -652,18 +670,12 @@ export class SlotPanel {
     this._pressureText?.setVisible(false);
     this._hideOverviewStatus();
 
-    if (isOverview) {
-      this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
-      this._syncOverviewVisibility();
-    } else {
+    if (isOverview && hasActiveContract) {
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
-      this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
     }
 
-    this._refreshDetailedProxyVisual();
+    this._applyModeVisibilityState();
   }
 
   open(type) {
@@ -699,6 +711,7 @@ export class SlotPanel {
     this.container.add(this._page.container);
 
     this._state = "PAGE";
+    this._applyModeVisibilityState();
   }
 
   back() {
@@ -709,9 +722,9 @@ export class SlotPanel {
       this._syncOverviewVisibility();
     } else {
       this.gridObjects.forEach(o => o.setVisible(false));
-      this._refreshDetailedProxyVisual();
     }
     this._state = "GRID";
+    this._applyModeVisibilityState();
   }
 
   resetToGrid() {
@@ -730,7 +743,7 @@ export class SlotPanel {
       if (this.mode === "overview") this._syncOverviewVisibility();
       else this.gridObjects?.forEach(o => o.setVisible(false));
     }
-    this._refreshDetailedProxyVisual();
+    this._applyModeVisibilityState();
   }
 
   _canUseMilitiaParcel() {
@@ -831,7 +844,10 @@ export class SlotPanel {
       pm.markContractPermitCost?.(started, cost);
     }
 
-    this.playCloseTween(() => this.setVisible(false));
+    this.playCloseTween(() => {
+      this.resetUiState();
+      this.setVisible(true);
+    });
   }
 
   _ensurePressureText() {
@@ -986,7 +1002,7 @@ export class SlotPanel {
       this._detailHovered = false;
       this.scene?.uiScene?.contractHud?.setExternalHover?.(this.id, false);
     }
-    this._refreshDetailedProxyVisual();
+    this._applyModeVisibilityState();
 
     if (v && !was) {
       // if we're being shown after being hidden, open tween
@@ -1095,4 +1111,6 @@ export class SlotPanel {
   }
 
 }
+
+
 

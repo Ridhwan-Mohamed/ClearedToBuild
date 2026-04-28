@@ -44,6 +44,8 @@ export const STORE_UNLOCK_KEYS = Object.freeze({
   blademaster: "blademaster",
   gunslinger: "gunslinger",
   stoneWall: "stone_wall",
+  turret: "turret",
+  catapult: "catapult",
   militiaParcel: "militia_parcel",
 });
 

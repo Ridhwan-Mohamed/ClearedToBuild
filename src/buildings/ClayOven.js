@@ -5,6 +5,13 @@ import { Map } from "../map";
 import { Teams } from "../Teams";
 import { buildingManager } from "../Manager/buildingManager";
 import { ClayOvenUI } from "../UI/ClayOvenUI";
+import {
+    destroyStructuralHealthBar,
+    ensureStructuralHealthBar,
+    getStructuralBarAnchor,
+    getStructuralHealthBarTargets,
+    layoutStructuralHealthBar,
+} from "../UI/BuildingTheme";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 
@@ -78,6 +85,7 @@ export class ClayOven {
             ClayOvenUI.hideMinor(this)
         });
         this.sprite.on('pointerdown', () => {
+            if (this.scene?.destroyWallMode) return;
             if (buildingManager.handleBuildingClickForBuilders(this, null, this.teamNumber)) return;
             ClayOven.scene.openDetailPage('ovens', tab => tab.selectFromWorld(this));
         });
@@ -348,7 +356,7 @@ export class ClayOven {
                 gridY,
                 lenX,
                 lenY,
-                { padding: 1, protectFarmSpots: true }
+                { padding: 1, protectFarmSpots: true, paddingAllowWalls: true, paddingProtectFarmSpots: false }
             );
 
             ghost.setTint(isBlocked ? 0xff4444 : 0x44ff44);
@@ -367,14 +375,13 @@ export class ClayOven {
         const pointerUpHandler = () => {
             if (lastValidPos) {
                 const items = TILE_TYPES.clayOven
-                Teams.teamLists['1'].blockBuildingStates.push({
+                buildingManager.queueBlockBuildTask({
                     type: items,
                     x: lastValidPos.gridX,
                     y: lastValidPos.gridY, 
                     duration: 100,
                     assigned: 0
-                });
-                buildingManager.assignTroopToBuildBlock(1);
+                }, 1);
                 ghost.destroy();
                 ClayOven.scene.input.off('pointermove', pointerMoveHandler);
                 ClayOven.scene.input.off('pointerup', pointerUpHandler);
@@ -570,22 +577,7 @@ export class ClayOven {
         if (!this.sprite) return;
         const scene = ClayOven.scene;
         if (!scene) return;
-
-        const fullWidth = this.sprite.displayWidth || (4 * SQUARESIZE);
-        const y = this.sprite.y - (this.sprite.displayHeight) / 2 - 30;
-
-        if (!this.healthBarBg) {
-            this.healthBarBg = scene.add
-                .rectangle(this.sprite.x, y, fullWidth, 4, 0x000000, 0.6)
-                .setDepth(BLOCKDEPTH + 1);
-            Map.addToWorldStatic(this.healthBarBg);
-        }
-        if (!this.healthBar) {
-            this.healthBar = scene.add
-                .rectangle(this.sprite.x, y, fullWidth, 2, 0x00ff00, 1)
-                .setDepth(BLOCKDEPTH + 2);
-            Map.addToWorldStatic(this.healthBar);
-        }
+        ensureStructuralHealthBar(this, scene, { fillColor: 0x61d98f });
     }
 
     updateHealthBar() {
@@ -593,24 +585,30 @@ export class ClayOven {
         this.ensureHealthBar();
 
         if (!this.healthBar || !this.healthBarBg) return;
-        const fullWidth = this.sprite.displayWidth || (4 * SQUARESIZE);
         const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-        this.healthBarBg.setDisplaySize(fullWidth, 4);
-        this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+        const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+            widthScale: 1,
+            paddingX: 12,
+            yOffset: 14,
+        });
 
         const now = ClayOven.scene?.time?.now ?? 0;
         const visible = this.isHovered || now < this._damageBarUntil;
-        this.healthBarBg.setVisible(visible);
-        this.healthBar.setVisible(visible);
+        layoutStructuralHealthBar(this, {
+            ratio,
+            centerX,
+            topY,
+            width,
+            visible,
+            fillColor: 0x61d98f,
+        });
     }
 
     shakeAndFlash() {
         if (!this.sprite) return;
         const scene = ClayOven.scene;
         const targets = [this.sprite];
-        if (this.healthBarBg) targets.push(this.healthBarBg);
-        if (this.healthBar)   targets.push(this.healthBar);
+        targets.push(...getStructuralHealthBarTargets(this));
 
         scene.tweens.add({
             targets,
@@ -670,8 +668,7 @@ export class ClayOven {
         this.clearQueuedWork();
         this.clearStoredContents();
         ClayOven.scene.events.emit('oven:removed', this);
-        if (this.healthBarBg) this.healthBarBg.destroy();
-        if (this.healthBar)   this.healthBar.destroy();
+        destroyStructuralHealthBar(this);
         if (this.sprite) this.sprite.destroy();
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);

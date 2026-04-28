@@ -1,7 +1,7 @@
 // Manager/AudioManager.js
 // Simple mix: grass(day/night) + occluded(forest+rock) + water + ovenCooking + step SFX.
 // Updates happen only when you call updateFromRedraw(...) (i.e., on your redraw).
-import { TILE_MAP, TILE_TYPES, FLOORDEPTH } from "../constants";
+import { TILE_MAP, TILE_TYPES, FLOORDEPTH, SQUARESIZE } from "../constants";
 import day_ambience from 'url:../assets/audio/day-ambience.ogg';
 import night_ambience from 'url:../assets/audio/night-ambience.ogg';
 import occluded_ambience from 'url:../assets/audio/occluded-ambience.ogg';
@@ -28,9 +28,23 @@ import building_collapse from 'url:../assets/audio/building-collapse.ogg';
 import door_open from 'url:../assets/audio/door-opening.ogg';
 import door_close from 'url:../assets/audio/door-closing.ogg';
 import end_stage_explosions from 'url:../assets/audio/end_stage_explosions.ogg';
+import button_hover from 'url:../assets/audio/button_hover.ogg';
+import button_click_bubble from 'url:../assets/audio/button_click_bubble.ogg';
+import bottom_bar_click from 'url:../assets/audio/bottomBar_click.ogg';
+import bloop from 'url:../assets/audio/bloop.ogg';
+import whoosh from 'url:../assets/audio/whoosh.ogg';
+import swipe from 'url:../assets/audio/swipe.ogg';
+import swimming_sfx from 'url:../assets/audio/swimming.ogg';
+import error_sfx from 'url:../assets/audio/error.ogg';
+import type_sfx from 'url:../assets/audio/type.ogg';
+import thud_click from 'url:../assets/audio/thud_click.ogg';
 
 export class AudioManager {
   static scene = null;
+  static STORAGE_KEY = "processv2.audio_settings_v1";
+  static _settingsLoaded = false;
+  static _masterVolume = 1;
+  static _muted = false;
 
   // tweakables
   static FADE_MS = 500;
@@ -46,6 +60,14 @@ export class AudioManager {
   // footsteps
   static STEP_COOLDOWN_MS = 240; // tune later
   static STEP_VOL = 0.22;
+  static SWIM_COOLDOWN_MS = 290;
+  static SWIM_VOL = 0.20;
+  static OFFSCREEN_MOVE_FACTOR = 0.14;
+  static MOVE_SOUND_DISTANCE_SCREENS = 1.75;
+  static UI_HOVER_COOLDOWN_MS = 70;
+  static _nextUiHoverAt = 0;
+  static LAYOUT_MOVE_COOLDOWN_MS = 55;
+  static _nextLayoutMoveAt = 0;
 
   // construction loop
   static constructionWorkers = new Set(); // sprite.id numbers
@@ -59,6 +81,8 @@ export class AudioManager {
 
   static init(scene) {
     this.scene = scene;
+    this._loadSettings();
+    this._applySoundSettings();
 
     // You can load .wav — it’s fine — but for web builds you’ll usually want .ogg/.mp3 too.
     // Keep keys stable; swap file extensions later.
@@ -71,6 +95,7 @@ export class AudioManager {
     scene.load.audio("loop_oven_cook",  oven_cooking);
 
     scene.load.audio("sfx_step",        step_sfx);
+    scene.load.audio("sfx_swim",        swimming_sfx);
 
     scene.load.audio("sfx_axe_chop",    axe_chop);
     scene.load.audio("sfx_rock_hit",    rock_hit);
@@ -92,6 +117,74 @@ export class AudioManager {
     scene.load.audio("sfx_door_open",   door_open);
     scene.load.audio("sfx_door_close",  door_close);
     scene.load.audio("sfx_end_stage_explosions", end_stage_explosions);
+    scene.load.audio("amb_menu_ocean", ocean_ambience);
+    scene.load.audio("sfx_ui_hover", button_hover);
+    scene.load.audio("sfx_ui_click_menu", button_click_bubble);
+    scene.load.audio("sfx_ui_bottom_bar_click", bottom_bar_click);
+    scene.load.audio("sfx_ui_draft_bloop", bloop);
+    scene.load.audio("sfx_ui_whoosh", whoosh);
+    scene.load.audio("sfx_ui_swipe", swipe);
+    scene.load.audio("sfx_ui_error", error_sfx);
+    scene.load.audio("sfx_ui_type", type_sfx);
+    scene.load.audio("sfx_ui_thud_click", thud_click);
+  }
+
+  static _loadSettings() {
+    if (this._settingsLoaded) return;
+    this._settingsLoaded = true;
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(this.STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      this._masterVolume = this._clamp(Number(parsed?.masterVolume ?? 1), 0, 1);
+      this._muted = !!parsed?.muted;
+    } catch {}
+  }
+
+  static _persistSettings() {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(this.STORAGE_KEY, JSON.stringify({
+        masterVolume: this._masterVolume,
+        muted: this._muted,
+      }));
+    } catch {}
+  }
+
+  static _applySoundSettings() {
+    const sound = this.scene?.sound;
+    if (!sound) return;
+    if (typeof sound.setVolume === "function") sound.setVolume(this._masterVolume);
+    else sound.volume = this._masterVolume;
+    if ("setMute" in sound && typeof sound.setMute === "function") sound.setMute(this._muted);
+    else sound.mute = this._muted;
+  }
+
+  static getMasterVolume() {
+    this._loadSettings();
+    return this._masterVolume;
+  }
+
+  static setMasterVolume(value = 1) {
+    this._loadSettings();
+    this._masterVolume = this._clamp(Number(value ?? 1), 0, 1);
+    this._applySoundSettings();
+    this._persistSettings();
+    return this._masterVolume;
+  }
+
+  static isMuted() {
+    this._loadSettings();
+    return !!this._muted;
+  }
+
+  static setMuted(muted = false) {
+    this._loadSettings();
+    this._muted = !!muted;
+    this._applySoundSettings();
+    this._persistSettings();
+    return this._muted;
   }
 
   // Call once per redraw
@@ -107,7 +200,15 @@ export class AudioManager {
 
     this.isNight = !!isNight;
 
-    const tileMix = this._tallyTiles({ topLeftX, topLeftY, bottomRightX, bottomRightY, grid, width, height });
+    const tileMix = this._tallyTiles(this._getAmbientSampleRect({
+      topLeftX,
+      topLeftY,
+      bottomRightX,
+      bottomRightY,
+      grid,
+      width,
+      height,
+    }));
     this._applyAmbientMix(tileMix);
 
     this._applyOvenMix(cookingOvenCount);
@@ -134,21 +235,26 @@ export class AudioManager {
   // Throttled step SFX helper (safe to call every frame)
   static tryPlayStep(sprite) {
     if (!this.scene) return;
-    if (!this.scene.cache.audio.exists("sfx_step")) return;
+    const isSwimming = this._isSpriteSwimming(sprite);
+    const soundKey = isSwimming ? "sfx_swim" : "sfx_step";
+    if (!this.scene.cache.audio.exists(soundKey)) return;
 
     const now = this.scene.time.now;
-    if (sprite._phxNextStepAt == null) sprite._phxNextStepAt = 0;
-    if (now < sprite._phxNextStepAt) return;
+    if (sprite._phxNextMoveSfxAt == null) sprite._phxNextMoveSfxAt = 0;
+    if (now < sprite._phxNextMoveSfxAt) return;
 
     // Optional: make step rate mildly speed-dependent
     const speed = sprite.body?.velocity ? sprite.body.velocity.length() : 0;
     if (speed < 5) return;
 
-    sprite._phxNextStepAt = now + this.STEP_COOLDOWN_MS;
+    const volume = this._getMovementSoundVolume(sprite, isSwimming ? this.SWIM_VOL : this.STEP_VOL);
+    if (volume <= 0.01) return;
 
-    this.scene.sound.play("sfx_step", {
-      volume: this.STEP_VOL,
-      rate: 0.95 + Math.random() * 0.1
+    sprite._phxNextMoveSfxAt = now + (isSwimming ? this.SWIM_COOLDOWN_MS : this.STEP_COOLDOWN_MS);
+
+    this.scene.sound.play(soundKey, {
+      volume,
+      rate: isSwimming ? (0.97 + Math.random() * 0.06) : (0.95 + Math.random() * 0.1)
     });
   }
 
@@ -168,7 +274,7 @@ export class AudioManager {
         if (!this.scene.cache.audio.exists("sfx_plant_audio")) return;
 
         this.scene.sound.play("sfx_plant_audio", {
-            volume: opts.volume ?? 0.35,
+            volume: opts.volume ?? 0.50,
             rate: opts.rate ?? (0.95 + Math.random() * 0.1),
         });
     }
@@ -211,6 +317,96 @@ export class AudioManager {
         volume: opts.volume ?? 0.40,
         rate: opts.rate ?? (0.95 + Math.random() * 0.1),
         });
+    }
+
+    static playUiHover(opts = {}) {
+        if (!this.scene) return;
+        if (!this.scene.cache.audio.exists("sfx_ui_hover")) return;
+        const now = this.scene.time?.now ?? 0;
+        if (now < this._nextUiHoverAt) return;
+        this._nextUiHoverAt = now + (opts.cooldownMs ?? this.UI_HOVER_COOLDOWN_MS);
+        this.scene.sound.play("sfx_ui_hover", {
+            volume: opts.volume ?? 0.18,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.04),
+        });
+    }
+
+    static playMenuClick(opts = {}) {
+        this.playSound("sfx_ui_click_menu", {
+            volume: opts.volume ?? 0.23,
+            rate: opts.rate ?? (0.97 + Math.random() * 0.05),
+        });
+    }
+
+    static playBottomBarClick(opts = {}) {
+        this.playSound("sfx_ui_bottom_bar_click", {
+            volume: opts.volume ?? 0.23,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.04),
+        });
+    }
+
+    static playDraftDeckSelect(opts = {}) {
+        this.playSound("sfx_ui_draft_bloop", {
+            volume: opts.volume ?? 0.3,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playWhoosh(opts = {}) {
+        this.playSound("sfx_ui_whoosh", {
+            volume: opts.volume ?? 0.34,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playSwipe(opts = {}) {
+        this.playSound("sfx_ui_swipe", {
+            volume: opts.volume ?? 0.32,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playLayoutMove(opts = {}) {
+        if (!this.scene) return;
+        if (!this.scene.cache.audio.exists("sfx_ui_thud_click")) return;
+        const now = this.scene.time?.now ?? 0;
+        if (now < this._nextLayoutMoveAt) return;
+        this._nextLayoutMoveAt = now + (opts.cooldownMs ?? this.LAYOUT_MOVE_COOLDOWN_MS);
+        this.scene.sound.play("sfx_ui_thud_click", {
+            volume: opts.volume ?? 0.2,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playBuildingComplete(opts = {}) {
+        this.playSound("sfx_building_complete", {
+            volume: opts.volume ?? 0.24,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.04),
+        });
+    }
+
+    static playError(opts = {}) {
+        this.playSound("sfx_ui_error", {
+            volume: opts.volume ?? 0.26,
+            rate: opts.rate ?? (0.94 + Math.random() * 0.09),
+        });
+    }
+
+    static playUiType(opts = {}) {
+        this.playSound("sfx_ui_type", {
+            volume: opts.volume ?? 0.25,
+            rate: opts.rate ?? (0.96 + Math.random() * 0.12),
+        });
+    }
+
+    static startMenuOceanAmbience(opts = {}) {
+        if (!this.scene) return;
+        this._ensureLoop(this.loops, "amb_menu_ocean");
+        this._fadeTo(this.loops.get("amb_menu_ocean"), opts.volume ?? 0.2);
+    }
+
+    static stopMenuOceanAmbience() {
+        this._fadeTo(this.loops.get("amb_menu_ocean"), 0);
     }
 
     // AudioManager.js
@@ -392,19 +588,20 @@ export class AudioManager {
 
   static _applyAmbientMix(tileMix) {
     const r = tileMix.ratio;
+    const weighted = this._dominanceWeightMix({
+      grass: r.grass,
+      occluded: r.forest + r.rock,
+      water: r.water * 1.18,
+    });
 
-    // forest + rock both feed occluded
-    const occludedRatio = r.forest + r.rock;
-
-    // grass splits across day/night loops depending on time
-    const grassDayTarget   = (!this.isNight ? r.grass : 0) * this.AMBIENT_MASTER;
-    const grassNightTarget = ( this.isNight ? r.grass : 0) * this.AMBIENT_MASTER;
+    const grassDayTarget   = (!this.isNight ? weighted.grass : 0) * this.AMBIENT_MASTER;
+    const grassNightTarget = ( this.isNight ? weighted.grass : 0) * this.AMBIENT_MASTER;
 
     const targets = {
       amb_grass_day: grassDayTarget,
       amb_grass_night: grassNightTarget,
-      amb_occluded: occludedRatio * this.AMBIENT_MASTER,
-      amb_water: r.water * this.AMBIENT_MASTER,
+      amb_occluded: weighted.occluded * this.AMBIENT_MASTER,
+      amb_water: weighted.water * this.AMBIENT_MASTER,
     };
 
     for (const [key, vol] of Object.entries(targets)) {
@@ -535,6 +732,94 @@ export class AudioManager {
 
   static _clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
+  }
+
+  static _getAmbientSampleRect({ topLeftX, topLeftY, bottomRightX, bottomRightY, grid, width, height }) {
+    const sampleWidth = Number(width ?? grid?.[0]?.length ?? 0);
+    const sampleHeight = Number(height ?? grid?.length ?? 0);
+    const worldView = this.scene?.cameras?.main?.worldView;
+    if (!worldView || !sampleWidth || !sampleHeight) {
+      return { topLeftX, topLeftY, bottomRightX, bottomRightY, grid, width: sampleWidth, height: sampleHeight };
+    }
+
+    const padTiles = 2;
+    const camLeft = Math.floor(worldView.x / SQUARESIZE) - padTiles;
+    const camTop = Math.floor(worldView.y / SQUARESIZE) - padTiles;
+    const camRight = Math.ceil((worldView.x + worldView.width) / SQUARESIZE) + padTiles;
+    const camBottom = Math.ceil((worldView.y + worldView.height) / SQUARESIZE) + padTiles;
+
+    return {
+      topLeftX: camLeft,
+      topLeftY: camTop,
+      bottomRightX: camRight,
+      bottomRightY: camBottom,
+      grid,
+      width: sampleWidth,
+      height: sampleHeight,
+    };
+  }
+
+  static _dominanceWeightMix(ratios = {}) {
+    const shaped = {};
+    const dominancePower = 1.45;
+    let total = 0;
+
+    for (const [key, raw] of Object.entries(ratios)) {
+      const value = Math.max(0, Number(raw) || 0);
+      const weighted = Math.pow(value, dominancePower);
+      shaped[key] = weighted;
+      total += weighted;
+    }
+
+    if (total <= 0) {
+      return { grass: 0, occluded: 0, water: 0 };
+    }
+
+    for (const key of Object.keys(shaped)) {
+      shaped[key] /= total;
+    }
+    return shaped;
+  }
+
+  static _isSpriteSwimming(sprite) {
+    if (!sprite?.active) return false;
+    if (sprite._returnSwimActive === true) return true;
+    return this._tileTypeAtWorld(sprite.x, sprite.y) === "water";
+  }
+
+  static _tileTypeAtWorld(x, y) {
+    const grid = this.scene?.gridData ?? this.scene?.grid;
+    if (!Array.isArray(grid) || !Array.isArray(grid[0])) return null;
+    const gx = Math.floor(Number(x || 0) / SQUARESIZE);
+    const gy = Math.floor(Number(y || 0) / SQUARESIZE);
+    if (gx < 0 || gy < 0 || gy >= grid.length || gx >= grid[0].length) return null;
+    const cell = grid[gy][gx];
+    return this._classifyTileCell(cell);
+  }
+
+  static _getMovementSoundVolume(sprite, baseVolume) {
+    const cam = this.scene?.cameras?.main;
+    const worldView = cam?.worldView;
+    if (!worldView || !sprite) return baseVolume;
+
+    const centerX = worldView.x + worldView.width / 2;
+    const centerY = worldView.y + worldView.height / 2;
+    const dx = (sprite.x ?? centerX) - centerX;
+    const dy = (sprite.y ?? centerY) - centerY;
+    const distance = Math.hypot(dx, dy);
+    const maxDistance = Math.max(1, Math.hypot(worldView.width, worldView.height) * this.MOVE_SOUND_DISTANCE_SCREENS);
+    const normalized = this._clamp(1 - (distance / maxDistance), 0, 1);
+    if (normalized <= 0) return 0;
+
+    const inView =
+      sprite.x >= worldView.x &&
+      sprite.x <= worldView.x + worldView.width &&
+      sprite.y >= worldView.y &&
+      sprite.y <= worldView.y + worldView.height;
+
+    const proximityGain = 0.28 + (0.72 * Math.pow(normalized, 1.2));
+    const visibilityGain = inView ? 1 : this.OFFSCREEN_MOVE_FACTOR;
+    return baseVolume * proximityGain * visibilityGain;
   }
 
   static stopAll() {

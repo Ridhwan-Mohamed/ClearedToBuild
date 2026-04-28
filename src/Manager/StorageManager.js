@@ -23,6 +23,15 @@ export const STORAGE_SELL_PRICES = Object.freeze({
 export class StorageManager {
     static scene;
 
+    static _isUsableStorage(storage) {
+        return !!(
+            storage &&
+            typeof storage.getAvailableForPickup === "function" &&
+            typeof storage.reservePickup === "function" &&
+            typeof storage.releasePickup === "function"
+        );
+    }
+
     static _getTeam(teamNumber) {
         return Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber] ?? null;
     }
@@ -176,7 +185,7 @@ export class StorageManager {
         const existing = this.getDeliveryReservation(troop, itemDef);
         if (existing) return existing;
 
-        const result = StorageBuilding.canAcceptItem(itemDef, troop.body.team, preferredStorage);
+        const result = StorageBuilding.canAcceptItem(itemDef, troop.body.team, preferredStorage, troop);
         if (!result?.storage) return null;
 
         const team = this._getTeam(troop.body.team);
@@ -246,7 +255,7 @@ export class StorageManager {
             if (reserved) {
                 this.releaseDeliveryReservation(troop);
             }
-            const result = StorageBuilding.canAcceptItem(carryEntry, teamNumber);
+            const result = StorageBuilding.canAcceptItem(carryEntry, teamNumber, null, troop);
             if (!result) return false;
             storage = result.storage;
             idx = result.idx;
@@ -287,7 +296,10 @@ export class StorageManager {
         const team = Teams.teamLists[troop.body.team];
         if (!team) return false;
 
-        const storages = team.storageList;
+        const storages = StorageBuilding.sortStoragesByDistance(
+            (team.storageList || []).filter((storage) => this._isUsableStorage(storage)),
+            troop
+        );
         if (!storages || storages.length === 0) return false;
 
         for (const storage of storages) {
@@ -344,7 +356,10 @@ export class StorageManager {
 
         let success = task.storage.addItem(task.item, 1);
         if (!success) {
-            const storages = Teams.teamLists?.[troop.body.team]?.storageList || [];
+            const storages = StorageBuilding.sortStoragesByDistance(
+                Teams.teamLists?.[troop.body.team]?.storageList || [],
+                troop
+            );
             for (const storage of storages) {
                 if (!storage || storage === task.storage) continue;
                 if (!storage.canAcceptItem(task.item, 1)) continue;

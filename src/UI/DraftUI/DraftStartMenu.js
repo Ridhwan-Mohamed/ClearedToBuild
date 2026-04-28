@@ -12,6 +12,7 @@ import {
   createStarterPortraitUnit,
   REQUIRED_STARTER_TYPES,
 } from "./DraftStarterDecks.js";
+import { AudioManager } from "../../Manager/AudioManager.js";
 
 const RESOURCE_LAYOUT = [
   { key: "money", icon: "monies", label: "Cash" },
@@ -445,6 +446,25 @@ export class DraftStartMenu {
   _bindLayoutMapInput() {
     this._unbindLayoutMapInput?.();
 
+    const tryPlaceSelectedBuilding = (pointer, point) => {
+      if (!this.selectedPlacedBuilding || !point) return false;
+      const targetX = point.gridX - (this.selectedPlacedBuildingGrab?.x ?? 0);
+      const targetY = point.gridY - (this.selectedPlacedBuildingGrab?.y ?? 0);
+      if (targetX === this.selectedPlacedBuilding.x && targetY === this.selectedPlacedBuilding.y) {
+        return false;
+      }
+
+      const moved = this.preview.tryMoveSelected(this.selectedPlacedBuilding, this.state, targetX, targetY);
+      if (!moved?.ok) return false;
+
+      this.preview._refreshSpawnIfInvalid?.(this.state.crew);
+      const meta = this._getBuildingMeta(this.selectedPlacedBuilding.typeKey ?? this.selectedPlacedBuilding.type?.name);
+      AudioManager.playBuildingComplete();
+      this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label} placed`, meta.color);
+      this._clearSelectedPlacedBuilding();
+      return true;
+    };
+
     this._boundPointerMove = (pointer) => {
       if (this.phase !== "layout") return;
       if (this._isPointerOnLayoutUi(pointer)) {
@@ -495,6 +515,7 @@ export class DraftStartMenu {
 
       if (hitBuilding) {
         if (hitBuilding === this.selectedPlacedBuilding) {
+          if (tryPlaceSelectedBuilding(pointer, point)) return;
           this._clearSelectedPlacedBuilding();
           return;
         }
@@ -504,13 +525,7 @@ export class DraftStartMenu {
         return;
       }
 
-      const targetX = point.gridX - (this.selectedPlacedBuildingGrab?.x ?? 0);
-      const targetY = point.gridY - (this.selectedPlacedBuildingGrab?.y ?? 0);
-      const moved = this.preview.tryMoveSelected(this.selectedPlacedBuilding, this.state, targetX, targetY);
-      if (moved?.ok) {
-        this.preview._refreshSpawnIfInvalid?.(this.state.crew);
-        this._clearSelectedPlacedBuilding();
-      }
+      tryPlaceSelectedBuilding(pointer, point);
     };
 
     this.scene.input.on("pointermove", this._boundPointerMove);
@@ -617,6 +632,7 @@ export class DraftStartMenu {
 
   _confirmDraftStart() {
     if (!this.state.teamName.trim()) {
+      AudioManager.playError({ volume: 0.24 });
       this._setTeamNameValidationState(true);
       this._shakeTeamNameInput();
       this.teamNameInput?.focus?.();
@@ -756,6 +772,13 @@ export class DraftStartMenu {
       placeholder: "Name your town",
       initialValue: this.state.teamName,
       onChange: (value) => this.state.setTeamName(value),
+      onType: ({ changedCount, addedCount, removedCount }) => {
+        const fallbackCount = (Number(addedCount) || 0) + (Number(removedCount) || 0);
+        const playCount = Math.min(6, Math.max(0, Number(changedCount) || fallbackCount));
+        for (let index = 0; index < playCount; index++) {
+          AudioManager.playUiType();
+        }
+      },
       wrapperStyle: "display:flex; align-items:stretch;",
       inputStyle: `
         width:${layout.teamInputWidth}px;
@@ -1003,6 +1026,9 @@ export class DraftStartMenu {
     });
 
     hitArea.on("pointerdown", () => {
+      if (deck.id !== this.state.selectedDeckId) {
+        AudioManager.playDraftDeckSelect();
+      }
       this.state.selectStarterDeck(deck.id);
     });
 
@@ -1293,6 +1319,9 @@ export class DraftStartMenu {
     });
 
     hit.on("pointerdown", () => {
+      if (deck.id !== this.state.selectedDeckId) {
+        AudioManager.playDraftDeckSelect();
+      }
       this.state.selectStarterDeck(deck.id);
     });
 
@@ -1433,13 +1462,16 @@ export class DraftStartMenu {
     }).setOrigin(0.5);
 
     confirmButton.on("pointerdown", () => {
+      AudioManager.playMenuClick();
       this._confirmDraftStart();
     });
     backButton.on("pointerdown", () => {
+      AudioManager.playMenuClick();
       this._setPhase("deck");
     });
 
     confirmButton.on("pointerover", () => {
+      AudioManager.playUiHover({ volume: 0.18 });
       scene.tweens.add({
         targets: [confirmButton, confirmGlow],
         scaleX: 1.03,
@@ -1459,6 +1491,7 @@ export class DraftStartMenu {
       });
     });
     backButton.on("pointerover", () => {
+      AudioManager.playUiHover({ volume: 0.18 });
       scene.tweens.add({
         targets: [backButton, backLabel],
         scaleX: 1.03,

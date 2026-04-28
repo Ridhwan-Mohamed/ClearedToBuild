@@ -16,6 +16,7 @@
 
 import { StageState } from "../parcelController/StageState.js";
 import { PRESSURE } from "./ParcelConfig.js";
+import { Teams } from "../Teams.js";
 
 const SLOT_IDS = ["W", "E", "S"];
 
@@ -164,6 +165,69 @@ export class TowerPressureController {
       spawners,
       enemies,
     };
+  }
+
+  getSnapshot() {
+    const towers = [];
+    for (const [tower, st] of this._towerState.entries()) {
+      if (!tower || tower._destroyed) continue;
+      towers.push({
+        x: Number(tower.x || 0),
+        y: Number(tower.y || 0),
+        team: Number(tower.team ?? 0),
+        currentSlotId: st.currentSlotId ?? null,
+        preferredSlotId: st.preferredSlotId ?? null,
+        countdownEndsAt: Number(st.countdownEndsAt || 0),
+        waitingForContractToEnd: !!st.waitingForContractToEnd,
+      });
+    }
+    return {
+      countdownMs: Number(this.countdownMs || 0),
+      maxDifficulty: Number(this.maxDifficulty || 0),
+      towers,
+    };
+  }
+
+  restoreSnapshot(saved = null) {
+    if (!saved) return;
+    this.countdownMs = Number(saved.countdownMs ?? this.countdownMs ?? 45_000);
+    this.maxDifficulty = Number(saved.maxDifficulty ?? this.maxDifficulty ?? PRESSURE.maxDifficulty ?? 3);
+
+    for (const st of this._towerState.values()) {
+      this._cancelTimers(st);
+    }
+    this._towerState.clear();
+    this._slotLocks.clear();
+
+    const towers = Array.isArray(saved.towers) ? saved.towers : [];
+    for (const entry of towers) {
+      const registry = [
+        ...(Teams.teamLists?.["0"]?.townTowerList || []),
+        ...(Teams.teamLists?.["1"]?.townTowerList || []),
+      ];
+      const liveTower = (registry || []).find?.((candidate) => Number(candidate?.x) === Number(entry.x) && Number(candidate?.y) === Number(entry.y));
+      if (!liveTower) continue;
+      this.registerTower(liveTower, entry.preferredSlotId ?? null);
+      const st = this._towerState.get(liveTower);
+      if (!st) continue;
+      st.currentSlotId = entry.currentSlotId ?? st.currentSlotId;
+      st.countdownEndsAt = Number(entry.countdownEndsAt || 0);
+      st.waitingForContractToEnd = !!entry.waitingForContractToEnd;
+      if (st.currentSlotId) this._slotLocks.set(st.currentSlotId, liveTower);
+      this._cancelTimers(st);
+      const now = this._getSimulationNowMs();
+      const remaining = Math.max(0, st.countdownEndsAt - now);
+      if (st.waitingForContractToEnd) {
+        continue;
+      }
+      st.countdownEvent = this.scene.time.delayedCall(remaining, () => this._spawnWave(st), null, this);
+      st.uiTickEvent = this.scene.time.addEvent({
+        delay: 200,
+        loop: true,
+        callback: () => this._showCountdownUI(st.currentSlotId, st),
+      });
+      this._showCountdownUI(st.currentSlotId, st);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────

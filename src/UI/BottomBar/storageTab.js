@@ -4,6 +4,7 @@ import { UI_ITEM_TYPES } from "../UIConstants";
 import { Teams } from '../../Teams'
 import { TILE_TYPES, showAlert } from '../../constants'
 import { buildingManager } from '../../Manager/buildingManager.js';
+import { AudioManager } from '../../Manager/AudioManager.js';
 import { StorageManager } from '../../Manager/StorageManager.js';
 import { StorageBuilding } from '../../buildings/Storage.js';
 import {
@@ -11,6 +12,10 @@ import {
   makeGlassRoundRect,
   mixColor,
 } from "./BottomBarTheme";
+
+const TAB_BASE_DEPTH = 51;
+const TAB_BG_DEPTH = 0;
+const TAB_CONTENT_DEPTH = 1;
 
 export default class StorageTab {
     constructor(scene, teamNumber = 0) {
@@ -32,7 +37,7 @@ export default class StorageTab {
       if (!storage || storage.teamNumber !== this.team) return;
       const idx = (Teams.teamLists[this.team]?.storageList || []).indexOf(storage);
       const card = this.createCard(storage, idx >= 0 ? idx : this.cardByStorage.size);
-      this.listBody.add(card, { expand: false });
+      this.listBody.add(card, { expand: true });
       this.cardByStorage.set(storage, card);
       this.scroll.layout();
     };
@@ -82,7 +87,8 @@ export default class StorageTab {
 
     // Hide or clear detail panel
     if (this.detail?.setOven) this.detail.setOven(null);
-    if (this.detail?.setStorage) this.detail.setStorage(null);
+    if (this.detail?.hideDisplay) this.detail.hideDisplay();
+    else if (this.detail?.setStorage) this.detail.setStorage(null);
 
     // Hide any visible count texts / icons
     if (this.detail?.cells) {
@@ -118,14 +124,18 @@ export default class StorageTab {
   build() {
     const scene = this.scene;
     const CONTENT_H = 112;
+    this.contentHeight = CONTENT_H;
     const listWidth = Math.max(230, Math.floor(scene.scale.width * 0.38) - 28);
     const detailWidth = Math.max(360, scene.scale.width - listWidth - 42);
+    const detailProportion = 2;
+    const listProportion = 1;
     this.listWidth = listWidth;
+    this.detailWidth = detailWidth;
     const root = scene.rexUI.add.sizer({
       height: CONTENT_H,
       orientation: "x",
       space: { left: 8, right: 8, top: 4, bottom: 4, item: 10 },
-    });
+    }).setDepth(TAB_BASE_DEPTH);
     root.setMinSize(0, CONTENT_H);
 
     this.detail = this.buildDetailPanel();
@@ -133,9 +143,9 @@ export default class StorageTab {
     const detailSizer = scene.rexUI.add.sizer({
       orientation: "y",
       height: CONTENT_H,
-    }).add(this.detail.panel, { proportion: 1, expand: true });
+    }).add(this.detail.panel, { proportion: 1, expand: true }).setDepth(TAB_BASE_DEPTH);
     detailSizer.setMinSize(detailWidth, CONTENT_H);
-    root.add(detailSizer, { proportion: 1, expand: true });
+    root.add(detailSizer, { proportion: detailProportion, expand: true });
 
     this.listBody = scene.rexUI.add.sizer({ orientation: "y", space: { item: 8 } });
 
@@ -174,10 +184,10 @@ export default class StorageTab {
         rectBoundsInteractive: true,
       },
       space: { left: 6, right: 6, top: 6, bottom: 6, panel: 8 },
-    });
+    }).setDepth(TAB_BASE_DEPTH);
     this.scroll.setMinSize(0, CONTENT_H);
 
-    root.add(this.scroll, { proportion: 1, expand: true });
+    root.add(this.scroll, { proportion: listProportion, expand: true });
     this.rebuildList();
     root.layout();
     return root;
@@ -223,7 +233,7 @@ export default class StorageTab {
       const panelBg = (w = 0, h = 0, r = 14, c = 0x153248, a = 0.78, stroke = 0x95e4ff, sa = 0.16) => {
         const bg = rr(w, h, r, c, a);
         bg.setStrokeStyle(2, stroke, sa);
-        bg.setDepth(-1);
+        bg.setDepth(TAB_BG_DEPTH);
         return bg;
       };
       const text = (value, style = {}) => scene.add.text(0, 0, value, {
@@ -244,8 +254,10 @@ export default class StorageTab {
       const makeHpBarWithText = (width, height) => {
         const s = scene.rexUI.add.overlapSizer({ width, height });
         const bg = panelBg(width, height, height / 2, 0x08121a, 0.92, 0x92ddff, 0.08);
-        const fill = rr(Math.max(1, width - 4), Math.max(1, height - 4), (height - 4) / 2, 0x49cf73, 1).setOrigin(0, 0.5);
-        const label = text("HP 0/0", { fontSize: compact ? 10 : 11 });
+        const fill = rr(Math.max(1, width - 4), Math.max(1, height - 4), (height - 4) / 2, 0x49cf73, 1)
+          .setOrigin(0, 0.5)
+          .setDepth(TAB_CONTENT_DEPTH);
+        const label = text("HP 0/0", { fontSize: compact ? 10 : 11 }).setDepth(TAB_CONTENT_DEPTH);
         s.addBackground(bg);
         s.add(fill, { key: "fill", align: "left", expand: false, padding: { left: 2, right: 2 } });
         s.add(label, { key: "txt", align: "center", expand: false });
@@ -270,15 +282,56 @@ export default class StorageTab {
           space: { left: compact ? 8 : 10, right: compact ? 8 : 10, top: compact ? 4 : 6, bottom: compact ? 4 : 6 }
         });
         btn.labelText = labelText;
+        btn._enabled = true;
+        btn._hovered = false;
+        btn.applyVisualState = () => {
+          const enabled = btn._enabled !== false;
+          const hovered = !!btn._hovered && enabled;
+          bg.setFillStyle(fill, enabled ? (hovered ? 1 : 0.96) : 0.72);
+          bg.setStrokeStyle(2, stroke, enabled ? (hovered ? 0.34 : 0.18) : 0.1);
+          labelText.setColor(enabled ? "#ffffff" : "#b4c7d2");
+          btn.setAlpha(enabled ? 1 : 0.45);
+          btn.setScale(hovered ? 1.02 : 1);
+        };
         btn.setInteractive({ useHandCursor: true });
-        btn.on("pointerover", () => bg.setFillStyle(fill, 1));
-        btn.on("pointerout", () => bg.setFillStyle(fill, 0.96));
+        btn.on("pointerover", () => {
+          btn._hovered = true;
+          btn.applyVisualState();
+        });
+        btn.on("pointerout", () => {
+          btn._hovered = false;
+          btn.applyVisualState();
+        });
         btn.setEnabledState = (enabled) => {
+          btn._enabled = enabled;
           btn.disableInteractive();
           if (enabled) btn.setInteractive({ useHandCursor: true });
-          btn.setAlpha(enabled ? 1 : 0.35);
+          btn.applyVisualState();
         };
+        btn.applyVisualState();
         return btn;
+      };
+
+      const sectionHeight = Math.max(58, (this.contentHeight || 112) - (compact ? 40 : 42));
+      const buildPanelShell = (width, height, background, content, padding = {}) => {
+        const shell = scene.rexUI.add.scrollablePanel({
+          width,
+          height,
+          scrollMode: 0,
+          scrollDetectionMode: "rectBounds",
+          background,
+          panel: { child: content, mask: { padding: 1 } },
+          space: {
+            left: padding.left ?? 0,
+            right: padding.right ?? 0,
+            top: padding.top ?? 0,
+            bottom: padding.bottom ?? 0,
+            panel: 0,
+          },
+        }).setDepth(TAB_CONTENT_DEPTH);
+        content.setDepth(TAB_CONTENT_DEPTH);
+        shell.setMinSize(width, height);
+        return shell;
       };
 
       const title = text("Storage", { fontSize: 15 });
@@ -287,16 +340,18 @@ export default class StorageTab {
       const gridColumns = 4;
       const gridRows = Math.max(1, Math.ceil(slotCount / gridColumns));
       const contentWidth = Math.max(330, (this.detailWidth || 380) - 18);
-      const contentGap = compact ? 8 : 10;
-      const leftPaneWidth = Math.max(188, Math.floor(contentWidth * 0.64));
-      const rightPaneWidth = Math.max(132, contentWidth - leftPaneWidth - contentGap);
-      const hpWidth = Math.max(170, contentWidth - 108);
-      const storageHpBar = makeHpBarWithText(hpWidth, 16);
-      const cellGap = compact ? 4 : 6;
-      const maxCellByWidth = Math.floor((leftPaneWidth - 18 - cellGap * (gridColumns - 1)) / gridColumns);
-      const cellSize = Phaser.Math.Clamp(maxCellByWidth, compact ? 28 : 30, compact ? 32 : 34);
-      const previewSize = Phaser.Math.Clamp(Math.floor(rightPaneWidth * 0.42), compact ? 44 : 48, compact ? 54 : 60);
-      const descWrap = Math.max(110, rightPaneWidth - 14);
+      const contentGap = compact ? 6 : 8;
+      const paneWidth = Math.max(156, Math.floor((contentWidth - contentGap) / 2));
+      const leftPaneWidth = paneWidth;
+      const rightPaneWidth = Math.max(156, contentWidth - leftPaneWidth - contentGap);
+      const hpWidth = Math.max(188, contentWidth - 8);
+      const storageHpBar = makeHpBarWithText(hpWidth, compact ? 13 : 14);
+      const cellGap = compact ? 3 : 4;
+      const maxCellByWidth = Math.floor((leftPaneWidth - 10 - cellGap * (gridColumns - 1)) / gridColumns);
+      const cellSize = Phaser.Math.Clamp(maxCellByWidth, compact ? 34 : 38, compact ? 44 : 50);
+      const previewSize = Phaser.Math.Clamp(Math.floor(rightPaneWidth * 0.48), compact ? 56 : 60, compact ? 72 : 80);
+      const detailGap = compact ? 6 : 8;
+      const descWrap = Math.max(120, rightPaneWidth - previewSize - detailGap - 28);
 
       let currentStorage = null;
       let selectedSlotIndex = null;
@@ -307,16 +362,16 @@ export default class StorageTab {
         columnProportions: 1,
         rowProportions: 1,
         space: { column: cellGap, row: cellGap, left: 2, right: 2, top: 2, bottom: 2 },
-      });
+      }).setDepth(TAB_CONTENT_DEPTH);
 
       const makeCell = () => {
         const s = scene.rexUI.add.overlapSizer({ width: cellSize, height: cellSize });
         const bg = panelBg(cellSize, cellSize, 10, 0x102637, 0.95, 0x98e7ff, 0.12);
-        const shine = rr(cellSize - 12, 8, 4, 0xffffff, 0.08);
-        const icon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setVisible(false);
-        const ghostIcon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setAlpha(0.34).setVisible(false);
-        const count = text("", { fontSize: compact ? 8 : 9 }).setOrigin(1, 1);
-        const queued = text("", { fontSize: compact ? 7 : 8, color: "#9fdfff" }).setOrigin(0, 0).setVisible(false);
+        const shine = rr(cellSize - 12, 8, 4, 0xffffff, 0.08).setDepth(TAB_CONTENT_DEPTH);
+        const icon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setVisible(false).setDepth(TAB_CONTENT_DEPTH);
+        const ghostIcon = scene.add.image(0, 0, "blank").setDisplaySize(cellSize - 12, cellSize - 12).setAlpha(0.34).setVisible(false).setDepth(TAB_CONTENT_DEPTH);
+        const count = text("", { fontSize: compact ? 8 : 9 }).setOrigin(1, 1).setDepth(TAB_CONTENT_DEPTH);
+        const queued = text("", { fontSize: compact ? 7 : 8, color: "#9fdfff" }).setOrigin(0, 0).setVisible(false).setDepth(TAB_CONTENT_DEPTH);
 
         s.addBackground(bg);
         s.add(shine, { align: "top-center", padding: { top: 6 } });
@@ -329,6 +384,20 @@ export default class StorageTab {
         s.ghostIcon = ghostIcon;
         s.text = count;
         s.queueText = queued;
+        s._selected = false;
+        s._hovered = false;
+        s.applyVisualState = () => {
+          const selected = !!s._selected;
+          const hovered = !!s._hovered;
+          const active = selected || hovered;
+          const fillColor = selected ? 0x2a4f73 : hovered ? 0x19384f : 0x102637;
+          const fillAlpha = active ? 1 : 0.95;
+          const strokeColor = selected ? 0xffd28a : hovered ? 0xbaf1ff : 0x98e7ff;
+          const strokeAlpha = selected ? 0.42 : hovered ? 0.26 : 0.12;
+          bg.setFillStyle(fillColor, fillAlpha);
+          bg.setStrokeStyle(2, strokeColor, strokeAlpha);
+          shine.setFillStyle(0xffffff, selected ? 0.14 : hovered ? 0.11 : 0.08);
+        };
         s.setIcon = (key, amt, queuedKey = null, queuedAmount = 0) => {
           const hasIcon = key && scene.textures.exists(key);
           if (hasIcon) {
@@ -358,10 +427,14 @@ export default class StorageTab {
           }
         };
         s.setSelected = (active) => {
-          bg.setFillStyle(active ? 0x2a4f73 : 0x102637, active ? 1 : 0.95);
-          bg.setStrokeStyle(2, active ? 0xbaf1ff : 0x98e7ff, active ? 0.3 : 0.12);
+          s._selected = !!active;
+          s.applyVisualState();
         };
-        s.setSelected(false);
+        s.setHovered = (active) => {
+          s._hovered = !!active;
+          s.applyVisualState();
+        };
+        s.applyVisualState();
         return s;
       };
 
@@ -372,35 +445,42 @@ export default class StorageTab {
         cells.push(cell);
       }
 
-      const inventoryPanel = scene.rexUI.add.sizer({
+      const inventoryContent = scene.rexUI.add.sizer({
         orientation: "y",
         width: leftPaneWidth,
-        space: { left: 8, right: 8, top: 6, bottom: 6, item: 4 }
+        space: { item: 3 }
       })
-        .addBackground(panelBg(leftPaneWidth, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
-        .add(gridSizer, { proportion: 1, expand: true, align: "center" });
-      inventoryPanel.setMinSize(leftPaneWidth, 0);
+        .add(gridSizer, { proportion: 1, expand: true, align: "center" })
+        .setDepth(TAB_CONTENT_DEPTH);
+      inventoryContent.setMinSize(leftPaneWidth - 10, 0);
+      const inventoryPanel = buildPanelShell(
+        leftPaneWidth,
+        sectionHeight,
+        panelBg(leftPaneWidth, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12),
+        inventoryContent,
+        { left: 5, right: 5, top: 5, bottom: 5 }
+      );
 
       const previewSlot = scene.rexUI.add.overlapSizer({ width: previewSize, height: previewSize });
       const previewBg = panelBg(previewSize, previewSize, 18, 0x102637, 0.96, 0x8fe6ff, 0.16);
-      const previewShine = rr(previewSize - 16, 10, 5, 0xffffff, 0.08);
-      const previewIcon = scene.add.image(0, 0, "blank").setDisplaySize(previewSize - 18, previewSize - 18).setVisible(false);
-      const previewCount = text("", { fontSize: compact ? 9 : 10 }).setOrigin(1, 1).setVisible(false);
-      const previewEmpty = text("EMPTY", { fontSize: compact ? 10 : 11, color: "#7cb9ce" });
+      const previewShine = rr(previewSize - 16, 10, 5, 0xffffff, 0.08).setDepth(TAB_CONTENT_DEPTH);
+      const previewIcon = scene.add.image(0, 0, "blank").setDisplaySize(previewSize - 18, previewSize - 18).setVisible(false).setDepth(TAB_CONTENT_DEPTH);
+      const previewCount = text("", { fontSize: compact ? 9 : 10 }).setOrigin(1, 1).setVisible(false).setDepth(TAB_CONTENT_DEPTH);
+      const previewEmpty = text("EMPTY", { fontSize: compact ? 10 : 11, color: "#7cb9ce" }).setDepth(TAB_CONTENT_DEPTH);
       previewSlot.addBackground(previewBg);
       previewSlot.add(previewShine, { align: "top-center", padding: { top: 8 } });
       previewSlot.add(previewIcon, { align: "center" });
       previewSlot.add(previewEmpty, { align: "center" });
       previewSlot.add(previewCount, { align: "right-bottom", padding: { right: 8, bottom: 6 } });
 
-      const detailTitle = text("No Slot Selected", { fontSize: compact ? 10 : 11 });
+      const detailTitle = text("No Slot Selected", { fontSize: compact ? 13 : 15 });
       const detailMeta = text("Pick a filled slot to inspect it.", {
-        fontSize: compact ? 7 : 8,
+        fontSize: compact ? 9 : 11,
         color: "#9fdfff",
         wordWrap: { width: descWrap }
       });
       const detailDesc = text("", {
-        fontSize: compact ? 7 : 8,
+        fontSize: compact ? 9 : 10,
         color: "#d9eef8",
         wordWrap: { width: descWrap }
       });
@@ -411,47 +491,66 @@ export default class StorageTab {
       })
         .add(detailTitle, { expand: false, align: "left" })
         .add(detailMeta, { expand: false, align: "left" })
-        .add(detailDesc, { expand: false, align: "left" });
+        .add(detailDesc, { expand: false, align: "left" })
+        .setDepth(TAB_CONTENT_DEPTH);
 
       const detailBody = scene.rexUI.add.sizer({
-        orientation: "y",
-        space: { item: compact ? 5 : 6 }
+        orientation: "x",
+        space: { item: detailGap }
       })
-        .add(previewSlot, { proportion: 0, expand: false, align: "center" })
-        .add(detailCopy, { proportion: 1, expand: true, align: "left" });
+        .add(detailCopy, { proportion: 1, expand: true, align: "left" })
+        .add(previewSlot, { proportion: 0, expand: false, align: "right" })
+        .setDepth(TAB_CONTENT_DEPTH);
 
-      const detailPanel = scene.rexUI.add.sizer({
+      const detailContent = scene.rexUI.add.sizer({
         orientation: "y",
-        space: { left: 8, right: 8, top: 6, bottom: 6, item: 4 }
+        space: { item: 5 }
       })
-        .addBackground(panelBg(0, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12))
-        .add(detailBody, { proportion: 1, expand: true, align: "center" });
-      detailPanel.setMinSize(rightPaneWidth, 0);
-
-      const sellSummary = text("Select a filled slot to sell items.", {
-        fontSize: compact ? 7 : 8,
-        color: "#cfe8f4",
-        wordWrap: { width: descWrap }
-      });
+        .add(detailBody, { proportion: 1, expand: true, align: "center" })
+        .setDepth(TAB_CONTENT_DEPTH);
 
       const sellOneBtn = button("Sell 1", 0x7c3aed, 0xd8b4fe);
       const sellStackBtn = button("Sell Stack", 0xc86b1f, 0xfacc15);
+      sellOneBtn.setMinSize(0, compact ? 30 : 34);
+      sellStackBtn.setMinSize(0, compact ? 30 : 34);
       sellOneBtn.setEnabledState(false);
       sellStackBtn.setEnabledState(false);
 
       const actionsRow = scene.rexUI.add.sizer({
         orientation: "x",
-        space: { item: 4 }
+        space: { item: compact ? 8 : 10 }
       })
         .add(sellOneBtn, { proportion: 1, expand: true })
-        .add(sellStackBtn, { proportion: 1, expand: true });
+        .add(sellStackBtn, { proportion: 1, expand: true })
+        .setDepth(TAB_CONTENT_DEPTH);
 
-      detailPanel
-        .add(sellSummary, { expand: false, align: "left" })
-        .add(actionsRow, { expand: false, align: "left" });
+      const actionsContent = scene.rexUI.add.sizer({
+        orientation: "y",
+        space: {}
+      })
+        .add(actionsRow, { proportion: 1, expand: true })
+        .setDepth(TAB_CONTENT_DEPTH);
+      const actionsPanel = buildPanelShell(
+        Math.max(120, rightPaneWidth - 16),
+        compact ? 42 : 46,
+        panelBg(0, 0, 12, 0x102637, 0.78, 0x98e7ff, 0.12),
+        actionsContent,
+        { left: 6, right: 6, top: 6, bottom: 6 }
+      );
 
-      const fixBtn = button("Fix", 0x2f7d32, 0x95f5a6).setMinSize(92, compact ? 28 : 30);
+      detailContent.add(actionsPanel, { expand: true, align: "left" });
+
+      const detailPanel = buildPanelShell(
+        rightPaneWidth,
+        sectionHeight,
+        panelBg(rightPaneWidth, 0, 14, 0x17384c, 0.5, 0x98e7ff, 0.12),
+        detailContent,
+        { left: 8, right: 8, top: 6, bottom: 6 }
+      );
+
+      const fixBtn = button("Fix", 0x234c27, 0x7fd498).setMinSize(92, compact ? 28 : 30);
       fixBtn.on("pointerup", () => {
+        AudioManager.playBottomBarClick();
         const storage = this.selected;
         if (!storage) return;
         buildingManager.requestBuildingFix(storage, this.team, []);
@@ -461,8 +560,9 @@ export default class StorageTab {
         orientation: "x",
         space: { item: contentGap }
       })
-        .add(inventoryPanel, { proportion: 2, expand: true, align: "top" })
-        .add(detailPanel, { proportion: 1, expand: true, align: "top" });
+        .add(inventoryPanel, { proportion: 1, expand: true, align: "top" })
+        .add(detailPanel, { proportion: 1, expand: true, align: "top" })
+        .setDepth(TAB_CONTENT_DEPTH);
 
       const titleCol = scene.rexUI.add.sizer({
         orientation: "y",
@@ -476,7 +576,29 @@ export default class StorageTab {
         space: { item: 6 }
       })
         .add(titleCol, { proportion: 1, align: "left", expand: true })
-        .add(fixBtn, { proportion: 0, align: "right", expand: false });
+        .add(fixBtn, { proportion: 0, align: "right", expand: false })
+        .setDepth(TAB_CONTENT_DEPTH);
+
+      const setDetailVisibility = (visible) => {
+        const on = !!visible;
+        previewSlot.setVisible(on);
+        previewBg.setVisible(on);
+        previewShine.setVisible(on);
+        previewIcon.setVisible(on && previewIcon.visible);
+        previewCount.setVisible(on && previewCount.visible);
+        previewEmpty.setVisible(on && previewEmpty.visible);
+        detailTitle.setVisible(on);
+        detailMeta.setVisible(on);
+        detailDesc.setVisible(on);
+        detailCopy.setVisible(on);
+        detailBody.setVisible(on);
+        detailContent.setVisible(on);
+        actionsPanel.setVisible(on);
+        actionsContent.setVisible(on);
+        actionsRow.setVisible(on);
+        sellOneBtn.setVisible(on);
+        sellStackBtn.setVisible(on);
+      };
 
       const refreshSelectionUi = () => {
         const slot = currentStorage?.storageItems?.[selectedSlotIndex] || null;
@@ -492,7 +614,6 @@ export default class StorageTab {
           detailTitle.setText("No Slot Selected");
           detailMeta.setText("Pick a filled slot to inspect it.");
           detailDesc.setText("");
-          sellSummary.setText("Select a filled slot to sell items.");
           sellOneBtn.labelText.setText("Sell 1");
           sellStackBtn.labelText.setText("Sell Stack");
           sellOneBtn.setEnabledState(false);
@@ -519,7 +640,6 @@ export default class StorageTab {
         detailTitle.setText(item.label || item.name);
         detailMeta.setText(`Slot ${selectedSlotIndex + 1} | ${slot.amount}/${item.stacks || slot.amount} | $${price} each`);
         detailDesc.setText(item.description || "Stored supply item.");
-        sellSummary.setText(`Sell one for $${price}, or clear the whole stack for $${total}.`);
         sellOneBtn.labelText.setText(`Sell 1 ($${price})`);
         sellStackBtn.labelText.setText(`Sell Stack ($${total})`);
         sellOneBtn.setEnabledState(true);
@@ -528,6 +648,7 @@ export default class StorageTab {
 
       const setStorage = (storage) => {
         currentStorage = storage;
+        setDetailVisibility(true);
 
         if (!storage) {
           selectedSlotIndex = null;
@@ -572,6 +693,28 @@ export default class StorageTab {
         refreshSelectionUi();
       };
 
+      const hideDisplay = () => {
+        currentStorage = null;
+        selectedSlotIndex = null;
+        title.setText("Storage");
+        sub.setText("-");
+        storageHpBar.setValue(0, 1);
+        cells.forEach((cell) => {
+          cell.setIcon(null, 0, null, 0);
+          cell.setSelected(false);
+          cell.setHovered(false);
+        });
+        previewIcon.setVisible(false);
+        previewCount.setVisible(false);
+        previewEmpty.setVisible(false);
+        detailTitle.setText("");
+        detailMeta.setText("");
+        detailDesc.setText("");
+        sellOneBtn.setEnabledState(false);
+        sellStackBtn.setEnabledState(false);
+        setDetailVisibility(false);
+      };
+
       const sellSelectedSlot = (sellStack = false) => {
         const slot = currentStorage?.storageItems?.[selectedSlotIndex];
         if (!slot?.item) return;
@@ -584,12 +727,24 @@ export default class StorageTab {
         if (currentStorage) setStorage(currentStorage);
       };
 
-      sellOneBtn.on("pointerup", () => sellSelectedSlot(false));
-      sellStackBtn.on("pointerup", () => sellSelectedSlot(true));
+      sellOneBtn.on("pointerup", () => {
+        AudioManager.playBottomBarClick();
+        sellSelectedSlot(false);
+      });
+      sellStackBtn.on("pointerup", () => {
+        AudioManager.playBottomBarClick();
+        sellSelectedSlot(true);
+      });
 
       cells.forEach((cell, idx) => {
         cell
           .setInteractive({ useHandCursor: true })
+          .on("pointerover", () => {
+            cell.setHovered(true);
+          })
+          .on("pointerout", () => {
+            cell.setHovered(false);
+          })
           .on("pointerdown", () => {
             const slot = currentStorage?.storageItems?.[idx];
             selectedSlotIndex = slot?.item ? idx : null;
@@ -599,10 +754,13 @@ export default class StorageTab {
 
       const panel = scene.rexUI.add.sizer({ orientation: "y", space: { item: 4 } })
         .add(headerRow, 0, "left", 0, true)
-        .add(storageHpBar, 0, "left", 0, false)
-        .add(contentRow, { proportion: 1, expand: true });
+        .add(storageHpBar, 0, "left", 0, true)
+        .add(contentRow, { proportion: 1, expand: true })
+        .setDepth(TAB_BASE_DEPTH);
+      storageHpBar.setDepth(TAB_CONTENT_DEPTH);
+      // storageHpBar.setDepth(TAB_CONTENT_DEPTH);
 
-      return { panel, setStorage, cells };
+      return { panel, setStorage, hideDisplay, cells };
     }
     const scene = this.scene;
     const rr = (w, h, r, c, a = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, c, a);
@@ -809,11 +967,17 @@ export default class StorageTab {
 
     sellOneBtn
       .setInteractive({ useHandCursor: true })
-      .on("pointerup", () => sellSelectedSlot(false));
+      .on("pointerup", () => {
+        AudioManager.playBottomBarClick();
+        sellSelectedSlot(false);
+      });
 
     sellStackBtn
       .setInteractive({ useHandCursor: true })
-      .on("pointerup", () => sellSelectedSlot(true));
+      .on("pointerup", () => {
+        AudioManager.playBottomBarClick();
+        sellSelectedSlot(true);
+      });
 
     cells.forEach((cell, idx) => {
       cell
@@ -834,6 +998,7 @@ export default class StorageTab {
       .setInteractive({ useHandCursor: true });
 
     fixBtn.on('pointerup', () => {
+      AudioManager.playBottomBarClick();
       const b = this.selected; // storage
       if (!b) return;
       buildingManager.requestBuildingFix(b, this.team, []);
@@ -918,7 +1083,7 @@ export default class StorageTab {
 
     storages.forEach((storage, idx) => {
       const card = this.createCard(storage, idx);
-      this.listBody.add(card, { expand: false });
+      this.listBody.add(card, { expand: true });
       this.cardByStorage.set(storage, card);
     });
 
@@ -948,7 +1113,7 @@ export default class StorageTab {
 
     const iconsRow = scene.rexUI.add.sizer({
       orientation: "x",
-      space: { item: 6 },
+      space: { item: 4 },
     });
 
     const items = storage.storageItems
@@ -963,15 +1128,15 @@ export default class StorageTab {
         stroke: 0xffffff,
         strokeAlpha: 0.08,
         strokeWidth: 1,
-      });
-      const im = scene.add.image(0, 0, key).setDisplaySize(18, 18).setOrigin(0.5);
+      }).setDepth(TAB_BG_DEPTH);
+      const im = scene.add.image(0, 0, key).setDisplaySize(18, 18).setOrigin(0.5).setDepth(TAB_CONTENT_DEPTH);
       const tx = scene.add.text(0, 0, "", {
         fontSize: 10,
         color: "#ffffff",
         stroke: "#081621",
         strokeThickness: 2,
         fontFamily: "Bungee",
-      }).setOrigin(1, 1);
+      }).setOrigin(1, 1).setDepth(TAB_CONTENT_DEPTH);
       if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
       s.add(slotBg, { key: "bg", align: "center" });
       s.add(im, { key: "im", align: "center" });
@@ -979,15 +1144,15 @@ export default class StorageTab {
       iconsRow.add(s);
     });
 
-    const fullWidth = Math.max(220, (this.listWidth ?? Math.floor(scene.scale.width * 0.5)) - 24);
-    const bg = makeGlassRoundRect(scene, fullWidth, 56, 16, {
+    const fullWidth = Math.max(220, (this.listWidth ?? Math.floor(scene.scale.width * 0.5)) - 16);
+    const tint = 0xa5d8ff;
+    const bg = makeGlassRoundRect(scene, 0, 0, 14, {
       fill: mixColor(BOTTOM_BAR_THEME.cardFill, 0xffffff, 0.06),
       alpha: 0.86,
-      stroke: mixColor(0xffd08a, BOTTOM_BAR_THEME.shellStroke, 0.35),
-      strokeAlpha: selected ? 0.30 : 0.12,
-      strokeWidth: selected ? 2 : 1.5,
-    });
-    const shine = scene.add.rectangle(0, -11, fullWidth - 26, 16, 0xffffff, 0.08).setOrigin(0.5);
+      stroke: tint,
+      strokeAlpha: 0.12,
+      strokeWidth: 1.5,
+    })
 
     // helper: HP bar (no text)
     const makeHpBar = (width, height) => {
@@ -998,9 +1163,10 @@ export default class StorageTab {
         stroke: 0x98e7ff,
         strokeAlpha: 0.06,
         strokeWidth: 1,
-      });
+      }).setDepth(TAB_BG_DEPTH);
       const f = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), Math.max(1, height - 2), 4, 0x54d78b, 1)
-        .setOrigin(0, 0.5);
+        .setOrigin(0, 0.5)
+        .setDepth(TAB_CONTENT_DEPTH);
       s.addBackground(b);
       s.add(f, { key: "fill", align: "left", expand: false, padding: { left: 1, right: 1 } });
       s.layout();
@@ -1023,20 +1189,34 @@ export default class StorageTab {
       .add(nameText, { proportion: 0, expand: false, align: "left" })
       .add(countText, { proportion: 0, expand: false, align: "left" });
 
-    const content = scene.rexUI.add.sizer({
+    const topRow = scene.rexUI.add.sizer({
       orientation: "x",
-      space: { left: 12, right: 12, top: 8, bottom: 16, item: 10 },
+      space: { item: 8 },
     })
-      .add(textCol, { proportion: 1, expand: false, align: "left" })
-      .add(iconsRow, { proportion: 1, expand: false, align: "right" });
+      .add(textCol, { proportion: 1, expand: true, align: "left" })
+      .add(iconsRow, { proportion: 1, expand: true, align: "right" });
 
-    const card = scene.rexUI.add.overlapSizer({ width: fullWidth, height: 48 })
+    const content = scene.rexUI.add.sizer({
+      orientation: "y",
+      space: { item: 6 },
+    })
+      .add(topRow, { proportion: 1, expand: true })
+      .add(hpBar, 0, "left", 0, false)
+      .setDepth(TAB_CONTENT_DEPTH);
+
+    const card = scene.rexUI.add.overlapSizer({ width: fullWidth })
       .addBackground(bg)
-      .add(shine, { key: "shine", align: "top", expand: false, padding: { top: 8 } })
-      .add(content, { key: "content", align: "top", expand: false })
-      .add(hpBar, { key: "hp", align: "bottom", expand: false, padding: { left: 12, right: 12, bottom: 6 } });
+      .add(content, {
+        align: "center",
+        expand: true,
+        padding: { left: 12, right: 12, top: 8, bottom: 6 },
+      })
+      .setDepth(TAB_BASE_DEPTH);
 
-    card.userData = { storage, iconsRow, hpBar, nameText, countText, bg, shine, hovered: false };
+    bg.setDepth(50);
+
+    card.setMinSize(fullWidth, 52);
+    card.userData = { storage, iconsRow, hpBar, nameText, countText, bg, hovered: false };
     card.setInteractive({ useHandCursor: true })
       .on("pointerdown", () => this.selectFromCard(storage));
 
@@ -1071,11 +1251,11 @@ export default class StorageTab {
         stroke: 0xffffff,
         strokeAlpha: 0.08,
         strokeWidth: 1,
-      });
-      const im = this.scene.add.image(0, 0, key).setDisplaySize(18, 18).setOrigin(0.5);
+      }).setDepth(TAB_BG_DEPTH);
+      const im = this.scene.add.image(0, 0, key).setDisplaySize(18, 18).setOrigin(0.5).setDepth(TAB_CONTENT_DEPTH);
       const tx = this.scene.add.text(0, 0, "", {
         fontSize: 10, color: "#ffffff", stroke: "#081621", strokeThickness: 2, fontFamily: "Bungee",
-      }).setOrigin(1, 1);
+      }).setOrigin(1, 1).setDepth(TAB_CONTENT_DEPTH);
       if (slot.amount > 1) tx.setText("x" + slot.amount).setVisible(true);
       s.add(slotBg, { key: "bg", align: "center" });
       s.add(im, { key: "im", align: "center" });
@@ -1103,7 +1283,7 @@ export default class StorageTab {
   updateCardVisual(storage) {
     const card = this.cardByStorage.get(storage);
     if (!card || !card.userData) return;
-    const { bg, shine, nameText, countText, hovered } = card.userData;
+    const { bg, nameText, countText, hovered } = card.userData;
     const selected = storage === this.selected;
     const accent = selected ? 0xffd28a : mixColor(0xffd28a, 0x98e7ff, 0.35);
 
@@ -1112,7 +1292,6 @@ export default class StorageTab {
       selected ? 0.94 : hovered ? 0.9 : 0.86
     );
     bg.setStrokeStyle(selected ? 2.5 : hovered ? 2 : 1.5, accent, selected ? 0.36 : hovered ? 0.24 : 0.12);
-    shine.setAlpha(selected ? 0.12 : hovered ? 0.1 : 0.08);
     nameText.setColor(selected ? "#fff9ef" : BOTTOM_BAR_THEME.text);
     countText.setColor(selected ? "#ffe9be" : BOTTOM_BAR_THEME.textMuted);
     card.setScale(1, 1);

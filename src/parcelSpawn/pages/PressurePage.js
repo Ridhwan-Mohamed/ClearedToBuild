@@ -22,10 +22,16 @@ export class PressurePage {
 
     const g = scene.add.graphics();
     g.setScrollFactor(1);
-    g.fillStyle(0x7f1d1d, 0.22);
-    g.fillRoundedRect(-innerW / 2, -innerH / 2 + 20, innerW, innerH - 20, 12);
+    const panelX = -innerW / 2;
+    const panelY = -innerH / 2 + 20;
+    const panelW = innerW;
+    const panelH = innerH - 20;
+    g.fillStyle(0x120307, 0.88);
+    g.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
+    g.fillStyle(0x7f1d1d, 0.38);
+    g.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
     g.lineStyle(2, 0xffffff, 0.22);
-    g.strokeRoundedRect(-innerW / 2, -innerH / 2 + 20, innerW, innerH - 20, 12);
+    g.strokeRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.container.add(g);
 
     const title = scene.add.text(0, -innerH / 2 + 20, "💀 Pressure Contract", {

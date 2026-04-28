@@ -31,6 +31,7 @@ import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 import { OrderRunner } from "../orders/OrderRunner";
 import {
+    faceDirectionalTowardVector,
     shouldUseDirectionalFacing,
     syncDirectionalAnimationState,
     updateDirectionalAnimationFromVelocity
@@ -44,17 +45,17 @@ export class Player {
     static characters;
     static selected = [];
     // mini health/stamina bars config (segmented)
-    static MINI_BAR_HEIGHT     = 5;
-    static MINI_BAR_OFFSET_Y   = 8;      // below the feet
+    static MINI_BAR_HEIGHT     = 6;
+    static MINI_BAR_OFFSET_Y   = 10;      // below the feet
     static MINI_BAR_HIT_MS     = 2000;   // show for 2s after hit
 
     // Segmentation: each sub-rect represents this many points.
     // Last segment is truncated when max isn't divisible by this unit.
     static MINI_BAR_SEG_UNIT   = 20;
-    static MINI_BAR_GAP        = 1;
+    static MINI_BAR_GAP        = 2;
     static MINI_BAR_PAD        = 1;
-    static MINI_BAR_MAX_W      = 110;    // clamps on-screen width
-    static MINI_BAR_BASE_SEG_W = 4;      // pre-scale width per segment before clamping
+    static MINI_BAR_MAX_W      = 124;    // clamps on-screen width
+    static MINI_BAR_BASE_SEG_W = 5;      // pre-scale width per segment before clamping
     static CARRY_ICON_OFFSET_Y = 28;
     static CARRY_ICON_SIZE     = 18;
     static HIGHLIGHT_RING_OFFSET_Y = 10;
@@ -506,6 +507,30 @@ export class Player {
         troop.roam = false;
         troop._combatRoamDest = null;
         CombatSpacingCoordinator.clearRoamReservation(troop);
+    }
+
+    static _normalizeIdleMovementState(troop) {
+        if (!troop?.active) return;
+
+        const idleNoMotion =
+            !troop.currentPath?.length &&
+            !troop.task &&
+            !troop.track &&
+            !troop.timer;
+
+        if (troop.state === CONTROL_STATES.HEADING_TO_GUARD && idleNoMotion) {
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            troop.roam = false;
+        }
+
+        if (
+            troop.state === CONTROL_STATES.TRACK_MODE &&
+            troop.roam &&
+            idleNoMotion &&
+            !troop._roamResetTimer
+        ) {
+            this.resetRoamState(troop);
+        }
     }
 
     static _getPathArrivalRadius(sprite, currentSpeed = null) {
@@ -1183,6 +1208,7 @@ export class Player {
 
 
     static createAnim(key, image, start, end, repeat = -1, frameRate = 3){
+        if (this.scene.anims.exists(key)) return;
         this.scene.anims.create({
             key: key,
             frames: this.scene.anims.generateFrameNumbers(image, { start: start, end: end }),
@@ -1221,6 +1247,30 @@ export class Player {
         if (fallbackState && troop.active) {
             this.setAnimState(troop, fallbackState);
         }
+    }
+
+    static faceTowardPoint(troop, targetX, targetY, opts = {}) {
+        if (!troop?.active) return false;
+        if (!Number.isFinite(targetX) || !Number.isFinite(targetY)) return false;
+
+        const dx = targetX - troop.x;
+        const dy = targetY - troop.y;
+        if ((dx * dx) + (dy * dy) < 0.0001) return false;
+
+        if (faceDirectionalTowardVector(troop, dx, dy, opts)) {
+            return true;
+        }
+
+        troop.rotation = Phaser.Math.Angle.Between(0, 0, dx, dy);
+        return true;
+    }
+
+    static faceTarget(troop, target, opts = {}) {
+        if (!troop?.active || !target) return false;
+        const resolved = target?.gameObject || target?.buildingRef?.sprite || target?.sprite || target;
+        const targetX = Number.isFinite(resolved?.x) ? resolved.x : null;
+        const targetY = Number.isFinite(resolved?.y) ? resolved.y : null;
+        return this.faceTowardPoint(troop, targetX, targetY, opts);
     }
 
     static clearSelection() {
@@ -2007,6 +2057,7 @@ export class Player {
 
         this.setAnimState(troop, troop.swim || troop.idle);
         troop.body.setVelocity(vx, vy);
+        AudioManager.tryPlayStep(troop);
 
         const isMoving = Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01;
         updateDirectionalAnimationFromVelocity(troop, vx, vy, isMoving);
@@ -2043,6 +2094,7 @@ export class Player {
             }
 
             let skipTail = false;
+            this._normalizeIdleMovementState(troop);
 
             // Raiders get their own AI
             if (troop.isRaider) {
@@ -2250,15 +2302,15 @@ export class Player {
     const pad = this.MINI_BAR_PAD;
 
     const isEnemy = troop.body?.team === 0;
-    const hpFillColor = isEnemy ? 0xff3333 : 0x00ff00;
-    const stFillColor = 0x0088ff;
+    const hpFillColor = isEnemy ? 0xff5b57 : 0x74f08b;
+    const stFillColor = 0x4dc9ff;
 
-    const mkBg = () => scene.add.rectangle(0, 0, 1, H, 0x000000, 0.75)
+    const mkBg = () => scene.add.rectangle(0, 0, 1, H, 0x08131b, 0.88)
         .setOrigin(0, 0.5)
         .setDepth(BLOCKDEPTH + 2)
-        .setStrokeStyle(1, 0xffffff, 0.25);
+        .setStrokeStyle(1, 0xd6f4ff, 0.2);
 
-    const mkFill = (fillColor) => scene.add.rectangle(0, 0, 1, H - pad, fillColor, 1)
+    const mkFill = (fillColor) => scene.add.rectangle(0, 0, 1, Math.max(2, H - (pad * 2)), fillColor, 1)
         .setOrigin(0, 0.5)
         .setDepth(BLOCKDEPTH + 3);
 
@@ -2379,7 +2431,9 @@ export class Player {
         scene.uiBottomBar?.expanded &&
         scene.uiBottomBar?.currentPage === "players"
     );
-    const shouldShow = fromSelection || fromHover || fromTab;
+    const recentHitAt = Number(troop._miniBarLastHit) || 0;
+    const fromHit = recentHitAt > 0 && ((scene.time.now || 0) - recentHitAt) <= this.MINI_BAR_HIT_MS;
+    const shouldShow = fromSelection || fromHover || fromTab || fromHit;
 
     if (!shouldShow) {
         this._hideMiniBars(troop);
@@ -2435,7 +2489,7 @@ export class Player {
         bgArr: troop._stSegBg,
         fillArr: troop._stSegFill,
         xLeft,
-        y: baseY + H + 2,
+        y: baseY + H + 3,
         totalW,
         cur: troop.stamina ?? 0,
         max: maxST,

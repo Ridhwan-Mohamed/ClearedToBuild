@@ -111,17 +111,22 @@ export class NavMesh {
         return targetPolys;
     }
 
-    replacePolygons(polysToRemove, polysToAdd) {
+    replacePolygons(polysToRemove, polysToAdd, opts = {}) {
         const removedPolys = this._resolveNavPolys(polysToRemove);
         const removedSet = new Set(removedPolys);
+        const incomingPolys = Array.isArray(polysToAdd) ? polysToAdd : [polysToAdd];
+        const stagedAddedPolys = incomingPolys
+            .filter(Boolean)
+            .map((poly) => this._createNavPoly(poly));
         const neighborPolys = [];
         const seenNeighbors = new Set();
 
         for (const poly of removedPolys) {
-            for (const neighbor of poly.neighbors) {
+            for (const neighbor of poly.neighbors || []) {
                 if (removedSet.has(neighbor) || seenNeighbors.has(neighbor)) {
                     continue;
                 }
+
                 seenNeighbors.add(neighbor);
                 neighborPolys.push(neighbor);
             }
@@ -134,19 +139,84 @@ export class NavMesh {
             this.navPolygons = this.navPolygons.filter((poly) => !removedSet.has(poly));
         }
 
-        const incomingPolys = Array.isArray(polysToAdd) ? polysToAdd : [polysToAdd];
-        const addedPolys = incomingPolys
-            .filter(Boolean)
-            .map((poly) => this._createNavPoly(poly));
+        const mergedNeighborPolys = [];
+        let addedPolys = opts.allowMerge === true
+            ? this._mergeReplacementPolygons(stagedAddedPolys, neighborPolys, mergedNeighborPolys, {
+                mergeWithActive: opts.mergeWithActive === true
+            })
+            : stagedAddedPolys;
 
         if (addedPolys.length) {
             this.navPolygons.push(...addedPolys);
-            this._connectPolygonSet(addedPolys, addedPolys.concat(neighborPolys));
+            this._connectPolygonSet(addedPolys, this.navPolygons);
         }
 
         this.rebuild();
 
-        return { removedPolys, addedPolys, neighborPolys };
+        const removedResult = removedPolys.concat(mergedNeighborPolys);
+        let finalAddedPolys = addedPolys;
+
+        if (opts.compactAll === true) {
+            const compactResult = this.compactAlignedRectangles();
+            if (compactResult.removedPolys.length) {
+                const compactRemovedSet = new Set(compactResult.removedPolys);
+                removedResult.push(...compactResult.removedPolys);
+                finalAddedPolys = finalAddedPolys
+                    .filter((poly) => this.navPolygons.includes(poly) && !compactRemovedSet.has(poly))
+                    .concat(compactResult.addedPolys);
+            }
+        }
+
+        const finalNeighborPolys = neighborPolys.filter((poly) =>
+            this.navPolygons.includes(poly) && !mergedNeighborPolys.includes(poly)
+        );
+
+        return {
+            removedPolys: this._uniquePolys(removedResult),
+            addedPolys: this._uniquePolys(finalAddedPolys),
+            neighborPolys: finalNeighborPolys
+        };
+    }
+
+    compactAlignedRectangles() {
+        const removedPolys = [];
+        const addedPolys = [];
+        let changed = true;
+
+        while (changed) {
+            changed = false;
+
+            mergeLoop:
+            for (let i = 0; i < this.navPolygons.length; i++) {
+                for (let j = i + 1; j < this.navPolygons.length; j++) {
+                    const polyA = this.navPolygons[i];
+                    const polyB = this.navPolygons[j];
+                    const mergedPoly = this._mergeAxisAlignedRects(polyA, polyB);
+
+                    if (!mergedPoly) {
+                        continue;
+                    }
+
+                    this._disconnectPolygon(polyA);
+                    this._disconnectPolygon(polyB);
+                    this.navPolygons = this.navPolygons.filter((poly) => poly !== polyA && poly !== polyB);
+                    this.navPolygons.push(mergedPoly);
+                    removedPolys.push(polyA, polyB);
+                    addedPolys.push(mergedPoly);
+                    changed = true;
+                    break mergeLoop;
+                }
+            }
+        }
+
+        if (removedPolys.length) {
+            this._rebuildAllConnections();
+        }
+
+        return {
+            removedPolys: this._uniquePolys(removedPolys),
+            addedPolys: addedPolys.filter((poly) => this.navPolygons.includes(poly))
+        };
     }
     /**
      * Cleanup method to remove references.
@@ -403,13 +473,18 @@ export class NavMesh {
 
         if (poly instanceof Polygon) {
             const id = fallbackId ?? this._allocatePolyId();
-            return new NavPoly(id, poly);
+            const navPoly = new NavPoly(id, poly);
+            this._applyPolyMetadata(navPoly, poly);
+            return navPoly;
         }
 
-        const vectors = poly.map((point) => new Vector2(point.x, point.y));
+        const sourcePoints = Array.isArray(poly) ? poly : poly?.points;
+        const vectors = sourcePoints.map((point) => new Vector2(point.x, point.y));
         const polygon = new Polygon(vectors);
         const id = fallbackId ?? this._allocatePolyId();
-        return new NavPoly(id, polygon);
+        const navPoly = new NavPoly(id, polygon);
+        this._applyPolyMetadata(navPoly, poly);
+        return navPoly;
     }
 
     _createNavPoly(poly) {
@@ -552,5 +627,220 @@ export class NavMesh {
         }
 
         return new Line(p2.x, p2.y, p1.x, p1.y);
+    }
+
+    _mergeReplacementPolygons(addedPolys, neighborPolys, mergedNeighborPolys, opts = {}) {
+        const workingAdded = [...addedPolys];
+
+        for (let sourceIndex = 0; sourceIndex < workingAdded.length; sourceIndex += 1) {
+            let sourcePoly = workingAdded[sourceIndex];
+            let merged = true;
+
+            while (merged) {
+                merged = false;
+                const activeCandidates = opts.mergeWithActive === true
+                    ? this.navPolygons
+                    : neighborPolys.filter((poly) => this.navPolygons.includes(poly));
+                const candidates = this._uniquePolys([
+                    ...activeCandidates,
+                    ...workingAdded.filter((_, index) => index !== sourceIndex)
+                ]);
+
+                for (const candidate of candidates) {
+                    if (!candidate || candidate === sourcePoly) {
+                        continue;
+                    }
+
+                    const mergedPoly = this._mergeAxisAlignedRects(sourcePoly, candidate);
+                    if (!mergedPoly) {
+                        continue;
+                    }
+
+                    if (this.navPolygons.includes(candidate)) {
+                        this._disconnectPolygon(candidate);
+                        this.navPolygons = this.navPolygons.filter((poly) => poly !== candidate);
+                        if (!mergedNeighborPolys.includes(candidate)) {
+                            mergedNeighborPolys.push(candidate);
+                        }
+                    } else {
+                        const candidateIndex = workingAdded.indexOf(candidate);
+                        if (candidateIndex >= 0) {
+                            workingAdded.splice(candidateIndex, 1);
+                            if (candidateIndex < sourceIndex) {
+                                sourceIndex -= 1;
+                            }
+                        }
+                    }
+
+                    workingAdded[sourceIndex] = mergedPoly;
+                    sourcePoly = mergedPoly;
+                    merged = true;
+                    break;
+                }
+            }
+        }
+
+        return workingAdded;
+    }
+
+    _findMergeCandidateIndex(sourcePoly, candidatePolys, parcelTag = null) {
+        for (let i = 0; i < candidatePolys.length; i++) {
+            if (parcelTag != null && !this._polyHasParcelTag(candidatePolys[i], parcelTag)) {
+                continue;
+            }
+            if (this._getMergedRect(sourcePoly, candidatePolys[i])) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    _mergeAxisAlignedRects(a, b, parcelTag = null) {
+        const mergedRect = this._getMergedRect(a, b);
+        if (!mergedRect) {
+            return null;
+        }
+
+        const parcelTags = this._mergePolyParcelTags(a, b, parcelTag);
+        return this._createNavPoly({
+            points: this._rectToPoints(mergedRect),
+            parcelTags,
+            parcelTag: parcelTags.length === 1 ? parcelTags[0] : null,
+        });
+    }
+
+    _getMergedRect(a, b) {
+        const rectA = this._getAxisAlignedRectBounds(a);
+        const rectB = this._getAxisAlignedRectBounds(b);
+        if (!rectA || !rectB) {
+            return null;
+        }
+
+        const sameVerticalSpan = this._areNumbersEqual(rectA.minY, rectB.minY) && this._areNumbersEqual(rectA.maxY, rectB.maxY);
+        const sameHorizontalSpan = this._areNumbersEqual(rectA.minX, rectB.minX) && this._areNumbersEqual(rectA.maxX, rectB.maxX);
+        const touchesHorizontally = this._areNumbersEqual(rectA.maxX, rectB.minX) || this._areNumbersEqual(rectB.maxX, rectA.minX);
+        const touchesVertically = this._areNumbersEqual(rectA.maxY, rectB.minY) || this._areNumbersEqual(rectB.maxY, rectA.minY);
+
+        if (sameVerticalSpan && touchesHorizontally) {
+            return {
+                minX: Math.min(rectA.minX, rectB.minX),
+                minY: rectA.minY,
+                maxX: Math.max(rectA.maxX, rectB.maxX),
+                maxY: rectA.maxY,
+            };
+        }
+
+        if (sameHorizontalSpan && touchesVertically) {
+            return {
+                minX: rectA.minX,
+                minY: Math.min(rectA.minY, rectB.minY),
+                maxX: rectA.maxX,
+                maxY: Math.max(rectA.maxY, rectB.maxY),
+            };
+        }
+
+        return null;
+    }
+
+    _getAxisAlignedRectBounds(poly) {
+        const points = poly?.polygon?.points || poly?.points;
+        if (!Array.isArray(points) || points.length !== 4) {
+            return null;
+        }
+
+        const xs = [...new Set(points.map((point) => point.x))].sort((a, b) => a - b);
+        const ys = [...new Set(points.map((point) => point.y))].sort((a, b) => a - b);
+        if (xs.length !== 2 || ys.length !== 2) {
+            return null;
+        }
+
+        return { minX: xs[0], minY: ys[0], maxX: xs[1], maxY: ys[1] };
+    }
+
+    _rectToPoints(rect) {
+        return [
+            new Vector2(rect.minX, rect.minY),
+            new Vector2(rect.maxX, rect.minY),
+            new Vector2(rect.maxX, rect.maxY),
+            new Vector2(rect.minX, rect.maxY),
+        ];
+    }
+
+    _areNumbersEqual(a, b) {
+        return Math.abs(a - b) <= 0.000001;
+    }
+
+    _getPolyParcelTag(poly) {
+        const tags = this._getPolyParcelTags(poly);
+        return tags.length === 1 ? tags[0] : null;
+    }
+
+    _getPolyParcelTags(poly) {
+        if (!poly) return [];
+
+        const tags = [];
+        const addTag = (tag) => {
+            if (typeof tag === "string" && tag.length && !tags.includes(tag)) {
+                tags.push(tag);
+            }
+        };
+        const readMeta = (meta) => {
+            if (!meta) return;
+            if (Array.isArray(meta.parcelTags)) {
+                for (const tag of meta.parcelTags) addTag(tag);
+            }
+            addTag(meta.parcelTag);
+        };
+
+        readMeta(poly);
+        readMeta(poly.navMeta);
+        readMeta(poly.__navMeta);
+
+        return this._normalizeParcelTags(tags);
+    }
+
+    _polyHasParcelTag(poly, parcelTag) {
+        if (parcelTag == null) return true;
+        return this._getPolyParcelTags(poly).includes(parcelTag);
+    }
+
+    _mergePolyParcelTags(...entries) {
+        const tags = [];
+        for (const entry of entries) {
+            if (typeof entry === "string") {
+                tags.push(entry);
+                continue;
+            }
+            tags.push(...this._getPolyParcelTags(entry));
+        }
+        return this._normalizeParcelTags(tags);
+    }
+
+    _normalizeParcelTags(tags) {
+        const unique = [];
+        for (const tag of tags || []) {
+            if (typeof tag !== "string" || !tag.length || unique.includes(tag)) {
+                continue;
+            }
+            unique.push(tag);
+        }
+
+        unique.sort((a, b) => {
+            if (a === "main") return -1;
+            if (b === "main") return 1;
+            return a.localeCompare(b);
+        });
+        return unique;
+    }
+
+    _setPolyParcelTags(targetPoly, tags) {
+        const normalized = this._normalizeParcelTags(tags);
+        targetPoly.parcelTags = normalized;
+        targetPoly.parcelTag = normalized.length === 1 ? normalized[0] : null;
+    }
+
+    _applyPolyMetadata(targetPoly, sourcePoly) {
+        this._setPolyParcelTags(targetPoly, this._getPolyParcelTags(sourcePoly));
     }
 }

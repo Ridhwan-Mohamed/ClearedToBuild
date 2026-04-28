@@ -252,6 +252,27 @@ export function updateDirectionalAnimationFromVelocity(troop, vx, vy, moving = t
     return false;
 }
 
+export function faceDirectionalTowardVector(troop, vx, vy, opts = {}) {
+    const profile = troop?.directionalMove;
+    if (!profile) return false;
+
+    const speedSq = vx * vx + vy * vy;
+    if (speedSq < 0.0001) return false;
+
+    const forceSwim = opts.forceSwim === true;
+    const useSwimFacing = forceSwim || troop.animState === profile.swimStateKey;
+    if (useSwimFacing) {
+        const nextSwimDirection = pickSwimDirection(vx, vy, profile.lastSwimDirection);
+        profile.lastSwimDirection = nextSwimDirection;
+        profile.lastSwimFlipX = nextSwimDirection === "side" && vx < 0;
+        return showDirectionalSwimIdle(troop, nextSwimDirection);
+    }
+
+    const nextDirection = pickSixDirection(vx, vy, profile.lastDirection);
+    profile.lastDirection = nextDirection;
+    return showDirectionalIdle(troop, nextDirection);
+}
+
 export function shouldUseDirectionalFacing(troop) {
     const profile = troop?.directionalMove;
     if (!profile) return false;

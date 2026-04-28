@@ -1,11 +1,13 @@
 // ZoomMixer.js
 // Smooth pointer-centric zoom with crossfade between detailed and overview layers.
 
-import { colorFor, UIDEPTH } from "../constants";
+import { colorFor, UIDEPTH, SQUARESIZE } from "../constants";
 import { Map } from "../map";
 import { Player } from "../players/Player";
+import { AudioManager } from "../Manager/AudioManager";
 import { paintOverviewTexture } from "./OverviewStylePainter";
 import { VisibilitySystem } from "./VisibilitySystem";
+import { DEFAULT_PLAYER_PORTRAIT_KEY, getPlayerPortraitKey } from "../players/playerPortraits";
 
 export class ZoomMixer {
   /** assign once from your scene: ZoomMixer.scene = this */
@@ -140,6 +142,15 @@ export class ZoomMixer {
       tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 
+  ensureOverviewImage() {
+    const scene = ZoomMixer.scene;
+    if (this.overviewImage?.active) return this.overviewImage;
+    const grid = Map.grid;
+    if (!scene || !Array.isArray(grid) || !Array.isArray(grid[0])) return null;
+    this.buildOverviewTextureFromGrid(grid, SQUARESIZE, (cell) => colorFor(cell));
+    return this.overviewImage || null;
+  }
+
   _getOverviewMarkers() {
     const markers = [];
 
@@ -161,6 +172,9 @@ export class ZoomMixer {
     if (!scene) return;
     if (this.zoomOutLocked || scene.stageCompleteLock) return;
     const cam   = scene.cameras.main;
+    if (Math.abs((cam?.zoom ?? targetZoom) - targetZoom) < 0.01) return;
+
+    AudioManager.playWhoosh({ volume: 0.32 });
 
     const mid = cam.midPoint;
     const cx  = mid.x;
@@ -208,8 +222,11 @@ export class ZoomMixer {
       scene.parcelSpawnUI?.setVisible(true);
       VisibilitySystem.setOverviewMode(true);
 
-      this.overviewImage.setVisible(true);
-      scene.tweens.add({ targets: this.overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
+      const overviewImage = this.ensureOverviewImage();
+      if (overviewImage) {
+        overviewImage.setVisible(true);
+        scene.tweens.add({ targets: overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
+      }
 
       // fade in map icons
       if (ZoomMixer.mapIconContainer) {
@@ -225,13 +242,15 @@ export class ZoomMixer {
       Map.setDetailedWorldVisible?.(true);
       Map.reDraw();
       VisibilitySystem.setOverviewMode(false);
-      scene.tweens.add({
-        targets: this.overviewImage,
-        alpha: 0,
-        duration,
-        ease: 'Quad.easeInOut',
-        onComplete: () => this.overviewImage.setVisible(false)
-      });
+      if (this.overviewImage) {
+        scene.tweens.add({
+          targets: this.overviewImage,
+          alpha: 0,
+          duration,
+          ease: 'Quad.easeInOut',
+          onComplete: () => this.overviewImage?.setVisible(false)
+        });
+      }
       // fade out map icons
       if (ZoomMixer.mapIconContainer) {
         scene.tweens.add({
@@ -354,18 +373,90 @@ export class ZoomMixer {
     return icon;
   }
 
+  static createZoomInvariantPortrait(description, x, y, portraitKey, opts = {}) {
+    const scene = ZoomMixer.scene;
+    const cam = scene.cameras.main;
+    if (!ZoomMixer.mapIconContainer) ZoomMixer.initMapIconContainer();
+
+    const depth = opts.depth || UIDEPTH - 1;
+    const displayHeight = opts.displayHeight || 20;
+    const key = portraitKey || DEFAULT_PLAYER_PORTRAIT_KEY;
+    const frame = scene.textures.getFrame(key, 0);
+    const frameWidth = frame?.width ?? 54;
+    const frameHeight = frame?.height ?? 50;
+    const worldHeight = displayHeight / Math.max(0.0001, cam.zoom);
+    const worldWidth = Math.round((frameWidth / frameHeight) * worldHeight);
+
+    const icon = scene.add.sprite(x, y, key, 0)
+      .setOrigin(0.5)
+      .setDepth(depth)
+      .setInteractive({ cursor: 'pointer' });
+
+    icon.anims?.stop?.();
+    icon.setDisplaySize(worldWidth, worldHeight);
+
+    const label = scene.add.text(x, y - 20, description, {
+      fontSize: '14px',
+      fill: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3,
+      backgroundColor: 'rgba(0,0,0,0.3)',
+      padding: { x: 4, y: 2 }
+    }).setOrigin(0.5, 1).setDepth(depth + 1).setVisible(false);
+    label.setScale(1 / Math.max(0.0001, cam.zoom));
+
+    const onUpdateScale = () => {
+      if (!icon?.active || !label?.active) return;
+      const liveFrame = scene.textures.getFrame(key, 0);
+      const liveFrameWidth = liveFrame?.width ?? frameWidth;
+      const liveFrameHeight = liveFrame?.height ?? frameHeight;
+      const liveWorldHeight = displayHeight / Math.max(0.0001, cam.zoom);
+      const liveWorldWidth = Math.round((liveFrameWidth / liveFrameHeight) * liveWorldHeight);
+      icon.setDisplaySize(liveWorldWidth, liveWorldHeight);
+      label.setScale(1 / Math.max(0.0001, cam.zoom));
+    };
+
+    scene.events.on('update', onUpdateScale);
+    icon.on('pointerover', () => {
+      label.setVisible(true);
+      scene.tweens.add({ targets: label, alpha: 1, duration: 150 });
+    });
+    icon.on('pointerout', () => {
+      scene.tweens.add({
+        targets: label,
+        alpha: 0,
+        duration: 150,
+        onComplete: () => label.setVisible(false)
+      });
+    });
+
+    icon._zoomLabel = label;
+    icon.setDescription = (text) => {
+      label.setText(text ?? "");
+    };
+    icon.destroyWithLabel = () => {
+      scene.events.off('update', onUpdateScale);
+      if (label?.active) label.destroy();
+      if (icon?.active) icon.destroy();
+    };
+    icon.once('destroy', () => {
+      scene.events.off('update', onUpdateScale);
+      if (label?.active) label.destroy();
+    });
+
+    ZoomMixer.mapIconContainer.add([icon, label]);
+    return icon;
+  }
+
   static createPlayerMoniker(troop) {
     const scene = ZoomMixer.scene;
-    const color = troop.body.team === 1 ? 0x00ff00 : 0xff0000; // example team colors
-    const icon = ZoomMixer.createZoomInvariantIcon(
-      'playerIcon',
+    let portraitKey = getPlayerPortraitKey(troop) || DEFAULT_PLAYER_PORTRAIT_KEY;
+    const icon = ZoomMixer.createZoomInvariantPortrait(
       troop.name,   // description on hover
       troop.x, troop.y,
-      { baseScale: 0.8 }
+      portraitKey,
+      { displayHeight: 13 }
     );
-
-    // Tint per team
-    icon.setTint(troop.unitTint);
 
     // On click: select troop, open details window
     icon.on('pointerdown', () => {
@@ -385,6 +476,12 @@ export class ZoomMixer {
         if (!troop?.active) {
             cleanup();
             return;
+        }
+        const nextPortraitKey = getPlayerPortraitKey(troop) || DEFAULT_PLAYER_PORTRAIT_KEY;
+        if (nextPortraitKey !== portraitKey) {
+            portraitKey = nextPortraitKey;
+            icon.setTexture?.(portraitKey, 0);
+            icon.anims?.stop?.();
         }
         if (icon.followingHouse) {
             return;

@@ -6,6 +6,15 @@ import { buildingManager } from "../Manager/buildingManager";
 import { Map } from "../map";
 import { StageState } from "../parcelController/StageState";
 import { Teams } from "../Teams";
+import {
+  BUILDING_PANEL_TEXT_STYLES,
+  createBuildingHoverPanel,
+  destroyStructuralHealthBar,
+  ensureStructuralHealthBar,
+  getStructuralBarAnchor,
+  getStructuralHealthBarTargets,
+  layoutStructuralHealthBar,
+} from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 
 /**
@@ -67,6 +76,7 @@ export class TowerBuilding {
     this.isHovered = false;
     // Hover UI (Prison-style panel)
     this.uiContainer = this.scene.add.container(0, 0).setDepth(UIDEPTH);
+    this.panelRoot = null;
     this.panelBg = null;
     this.panelText1 = null;
     this.panelText2 = null;
@@ -135,6 +145,7 @@ export class TowerBuilding {
     this.sprite.on("pointerdown", () => {
       const playerTeam = 1;
       if (this.team === playerTeam || this.isTownTower) {
+        if (this.scene?.destroyWallMode) return;
         buildingManager.handleBuildingClickForBuilders(this, null, this.team);
         return;
       }
@@ -220,16 +231,11 @@ export class TowerBuilding {
   ensureHealthBar() {
     if (!this.sprite || !this.scene) return;
 
-    const tileType = TILE_TYPES.tower || { lenX: 1, lenY: 1 };
-    const fullWidth = (tileType.lenX || 1) * SQUARESIZE;
-    const topY = this.sprite.y - (tileType.lenY || 1) * SQUARESIZE / 2 - 6;
+    ensureStructuralHealthBar(this, this.scene, {
+      fillColor: this.isTownTower ? 0x61d98f : 0xf45d48,
+    });
+    return;
 
-    if (!this.healthBarBg) {
-      this.healthBarBg = this.scene.add
-        .rectangle(this.sprite.x, topY, fullWidth, 4, 0x000000, 0.6)
-        .setDepth(BLOCKDEPTH + 1);
-      Map.addToWorldStatic(this.healthBarBg);
-    }
     if (!this.healthBar) {
       // 🔴 enemy bar
       this.healthBar = this.scene.add
@@ -244,25 +250,30 @@ export class TowerBuilding {
     this.ensureHealthBar();
     if (!this.healthBar || !this.healthBarBg) return;
 
-    const tileType = TILE_TYPES.tower || { lenX: 1, lenY: 1 };
-    const fullWidth = (tileType.lenX || 1) * SQUARESIZE;
     const ratio = this.maxHealth > 0 ? Phaser.Math.Clamp(this.health / this.maxHealth, 0, 1) : 0;
-
-    this.healthBarBg.setDisplaySize(fullWidth, 4);
-    this.healthBar.setDisplaySize(fullWidth * ratio, 2);
+    const { centerX, topY, width } = getStructuralBarAnchor(this.sprite, {
+      widthScale: 1,
+      paddingX: 16,
+      yOffset: 13,
+    });
 
     const now = this.scene.time?.now ?? 0;
     const visible = this.isHovered || now < this._damageBarUntil;
-    this.healthBarBg.setVisible(visible);
-    this.healthBar.setVisible(visible);
+    layoutStructuralHealthBar(this, {
+      ratio,
+      centerX,
+      topY,
+      width,
+      visible,
+      fillColor: this.isTownTower ? 0x61d98f : 0xf45d48,
+    });
     if (this.isHovered) this._updatePanel();
   }
 
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
     const targets = [this.sprite];
-    if (this.healthBarBg) targets.push(this.healthBarBg);
-    if (this.healthBar) targets.push(this.healthBar);
+    targets.push(...getStructuralHealthBarTargets(this));
 
     this.scene.tweens.add({
       targets,
@@ -318,37 +329,37 @@ export class TowerBuilding {
   }
 
   _ensurePanel() {
-    if (this.panelBg) return;
+    if (this.panelRoot) return;
 
-    const { cx, y } = this._panelPos();
-
-    this.panelBg = this.scene.add
-      .rectangle(cx, y, 170, 28, 0x000000, 0.6)
-      .setOrigin(0.5)
-      .setDepth(UIDEPTH)
-      .setStrokeStyle(1, 0xffffff, 0.4);
+    this.panelRoot = createBuildingHoverPanel(this.scene, {
+      width: 182,
+      height: 44,
+      depth: UIDEPTH,
+      accentColor: this.isTownTower ? 0x6cc7ff : 0xff8a8a,
+    });
+    this.panelBg = this.panelRoot.panelBg;
 
     this.panelText1 = this.scene.add
-      .text(cx - 80, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(-76, ENEMY_BUILDING_HOVER_UI.LINE1_DY, "", BUILDING_PANEL_TEXT_STYLES.title)
       .setOrigin(0, 0.5)
       .setDepth(UIDEPTH + 1);
 
     this.panelText2 = this.scene.add
-      .text(cx - 80, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY, "", { fontSize: "10px", color: "#ffffff" })
+      .text(-76, ENEMY_BUILDING_HOVER_UI.LINE2_DY + 1, "", BUILDING_PANEL_TEXT_STYLES.body)
       .setOrigin(0, 0.5)
       .setDepth(UIDEPTH + 1);
 
-    this.uiContainer.add([this.panelBg, this.panelText1, this.panelText2]);
+    this.panelRoot.add([this.panelText1, this.panelText2]);
+    this.panelRoot.setVisible(false);
+    this.uiContainer.add(this.panelRoot);
 
   }
 
   _updatePanel() {
-    if (!this.panelBg) return;
+    if (!this.panelRoot) return;
 
     const { cx, y } = this._panelPos();
-    this.panelBg.setPosition(cx, y);
-    this.panelText1.setPosition(cx - 80, y + ENEMY_BUILDING_HOVER_UI.LINE1_DY);
-    this.panelText2.setPosition(cx - 80, y + ENEMY_BUILDING_HOVER_UI.LINE2_DY);
+    this.uiContainer.setPosition(cx, y);
 
     const hp = `HP: ${Math.max(0, this.health)}/${this.maxHealth}`;
     if (this.isTownTower) {
@@ -386,16 +397,11 @@ export class TowerBuilding {
   _showPanel() {
     this._ensurePanel();
     this._updatePanel();
-    this.panelBg.setVisible(true);
-    this.panelText1.setVisible(true);
-    this.panelText2.setVisible(true);
+    this.panelRoot.setVisible(true);
   }
 
   _hidePanel() {
-    if (!this.panelBg) return;
-    this.panelBg.setVisible(false);
-    this.panelText1.setVisible(false);
-    this.panelText2.setVisible(false);
+    this.panelRoot?.setVisible(false);
   }
 
   destroy() {
@@ -420,9 +426,9 @@ export class TowerBuilding {
 
     this.uiContainer?.destroy(true);
     this.uiContainer = null;
+    this.panelRoot = null;
 
-    if (this.healthBarBg) this.healthBarBg.destroy();
-    if (this.healthBar) this.healthBar.destroy();
+    destroyStructuralHealthBar(this);
     if (this.visionId != null) {
       VisibilitySystem.removeVisionBubble(this.visionId);
       this.visionId = null;

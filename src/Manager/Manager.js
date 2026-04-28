@@ -7,6 +7,42 @@ import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 export class Manager {
     static scene;
 
+    static _taskCenterWorld(task) {
+        if (!task) return null;
+        const width = Math.max(1, Number(task?.type?.lenX ?? task?.w ?? 1));
+        const height = Math.max(1, Number(task?.type?.lenY ?? task?.h ?? 1));
+        const x = Number(task?.x ?? task?.tx);
+        const y = Number(task?.y ?? task?.ty);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {
+            x: (x + (width / 2)) * SQUARESIZE,
+            y: (y + (height / 2)) * SQUARESIZE,
+        };
+    }
+
+    static _orderedTasksForTroop(troop, taskList, state) {
+        if (!Array.isArray(taskList) || taskList.length <= 1) return taskList;
+        if (state !== CONTROL_STATES.BUILD_MODE_T) return taskList;
+
+        const originX = Number(troop?.body?.x ?? troop?.x);
+        const originY = Number(troop?.body?.y ?? troop?.y);
+        if (!Number.isFinite(originX) || !Number.isFinite(originY)) return taskList;
+
+        return [...taskList].sort((a, b) => {
+            const aCenter = this._taskCenterWorld(a);
+            const bCenter = this._taskCenterWorld(b);
+            if (!aCenter && !bCenter) return 0;
+            if (!aCenter) return 1;
+            if (!bCenter) return -1;
+
+            const aDx = aCenter.x - originX;
+            const aDy = aCenter.y - originY;
+            const bDx = bCenter.x - originX;
+            const bDy = bCenter.y - originY;
+            return (aDx * aDx + aDy * aDy) - (bDx * bDx + bDy * bDy);
+        });
+    }
+
     static _troopEligibleForState(troop, state) {
         if (!troop) return false;
 
@@ -96,8 +132,9 @@ export class Manager {
         for(let troop of troopList){
             const {navMesh, navGrid} = Player._getNavForTroop(troop);
             const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
+            const orderedTasks = this._orderedTasksForTroop(troop, taskList, state);
             if(!force && !Player.playerAvailible(troop)) continue;
-            for(let task of taskList){
+            for(let task of orderedTasks){
                 if (state === CONTROL_STATES.BUILD_MODE_T && !task?.type && task?.buildType) {
                     task.type = task.buildType;
                 }
@@ -160,7 +197,8 @@ export class Manager {
     static assignOneTroopToAction(troop, taskList, state){
         const {navMesh, navGrid} = Player._getNavForTroop(troop);
         const arrayKey = this._resolveArrayKeyFromList(troop.body.team, taskList);
-        for(let task of taskList){
+        const orderedTasks = this._orderedTasksForTroop(troop, taskList, state);
+        for(let task of orderedTasks){
             if (state === CONTROL_STATES.BUILD_MODE_T && !task?.type && task?.buildType) {
                 task.type = task.buildType;
             }

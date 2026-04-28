@@ -6,6 +6,9 @@ const BUTTON_STYLES = {
   details: { fill: 0x14532d, text: "#86efac", glow: 0xbbf7d0 },
   return: { fill: 0x0f766e, text: "#5eead4", glow: 0xa7f3d0 },
   cancel: { fill: 0x9f1239, text: "#fb7185", glow: 0xfda4af },
+  confirm: { fill: 0x166534, text: "#bbf7d0", glow: 0xdcfce7 },
+  destroy: { fill: 0x991b1b, text: "#fca5a5", glow: 0xfecaca },
+  neutral: { fill: 0x334155, text: "#e2e8f0", glow: 0xf8fafc },
   auto: { fill: 0x1d4ed8, text: "#93c5fd", glow: 0xbfdbfe },
   sleep: { fill: 0x4338ca, text: "#c7d2fe", glow: 0xc4b5fd },
   berry: { fill: 0x6d28d9, text: "#e9d5ff", glow: 0xf5d0fe },
@@ -30,6 +33,8 @@ export class SelectionCommandBar {
     this.lastSelectionSignature = "";
     this.currentSelectionTroops = [];
     this.currentSelectionProfile = null;
+    this.externalContext = null;
+    this.contextButtons = {};
 
     this.container = scene.add.container(0, 0)
       .setDepth(UIDEPTH + 2)
@@ -160,6 +165,11 @@ export class SelectionCommandBar {
   }
 
   update() {
+    if (this.externalContext) {
+      this._updateExternalContext();
+      return;
+    }
+
     const profile = OrderRunner.getSelectionProfile(Player.selected);
     this.currentSelectionProfile = profile;
     this.currentSelectionTroops = [...profile.troops];
@@ -204,12 +214,7 @@ export class SelectionCommandBar {
       if (idx < visibleButtons.length - 1) totalWidth += gap;
     });
 
-    const bar = this.scene.uiBottomBar;
-    const progress = bar ? (bar.openProgress ?? (bar.expanded ? 1 : 0)) : 0;
-    const collapsedOffset = 80;
-    const expandedOffset = 348;
-    const centerY = this.scene.scale.height - Phaser.Math.Linear(collapsedOffset, expandedOffset, progress);
-    this.container.setPosition(this.scene.scale.width / 2, centerY);
+    this._positionContainer();
 
     const helper = `${profile.count} SELECTED`;
     this.helperText.setText(helper);
@@ -282,6 +287,113 @@ export class SelectionCommandBar {
     this.helperBg.strokeRoundedRect(x, y, w, h, 10);
   }
 
+  setContext(source, config = null) {
+    if (!source) return;
+    if (!config) {
+      this.clearContext(source);
+      return;
+    }
+    this.externalContext = {
+      source,
+      ...config,
+    };
+  }
+
+  clearContext(source = null) {
+    if (source && this.externalContext?.source !== source) return;
+    this.externalContext = null;
+    Object.values(this.contextButtons).forEach((btn) => {
+      btn.root.setVisible(false);
+      btn.hit.setActive(false).setVisible(false);
+    });
+  }
+
+  _getContextValue(value) {
+    return typeof value === "function" ? value() : value;
+  }
+
+  _getOrCreateContextButton(def) {
+    const key = `ctx:${def.id}`;
+    if (this.contextButtons[key]) return this.contextButtons[key];
+    const btn = this._makeButton(
+      key,
+      def.label || "",
+      (snapshot) => def.onClick?.(snapshot),
+      { styleKey: def.styleKey || "neutral" }
+    );
+    this.contextButtons[key] = btn;
+    this.container.add(btn.root);
+    return btn;
+  }
+
+  _updateExternalContext() {
+    const context = this.externalContext;
+    if (!context) return;
+
+    const buttons = (this._getContextValue(context.buttons) || [])
+      .map((def) => ({
+        ...def,
+        label: this._getContextValue(def.label),
+        disabled: !!this._getContextValue(def.disabled),
+        active: !!this._getContextValue(def.active),
+      }))
+      .filter((def) => def && def.id && def.label);
+
+    const helper = String(this._getContextValue(context.helperText) || "").trim();
+
+    this._show();
+    this._positionContainer();
+
+    this.helperText.setText(helper);
+    this.helperText.setPosition(0, -38);
+    this._drawHelperBg();
+
+    Object.values(this.buttons).forEach((btn) => {
+      btn.root.setVisible(false);
+      btn.hit.setActive(false).setVisible(false);
+    });
+
+    const gap = 6;
+    const visibleButtons = buttons.map((def) => {
+      const btn = this._getOrCreateContextButton(def);
+      btn.styleKey = def.styleKey || btn.styleKey || "neutral";
+      this._setButtonLabel(btn, def.label);
+      return { def, btn };
+    });
+
+    let totalWidth = 0;
+    visibleButtons.forEach(({ btn }, idx) => {
+      totalWidth += btn.width;
+      if (idx < visibleButtons.length - 1) totalWidth += gap;
+    });
+
+    let x = -totalWidth / 2;
+    visibleButtons.forEach(({ def, btn }) => {
+      btn.root.setVisible(true);
+      btn.hit.setActive(true).setVisible(true);
+      btn.root.setPosition(x + btn.width / 2, 0);
+      btn._contextOnClick = def.onClick;
+      btn._contextDisabled = def.disabled;
+      this._drawButton(btn, def.active, def.disabled);
+      x += btn.width + gap;
+    });
+
+    Object.values(this.contextButtons).forEach((btn) => {
+      if (visibleButtons.some((entry) => entry.btn === btn)) return;
+      btn.root.setVisible(false);
+      btn.hit.setActive(false).setVisible(false);
+    });
+  }
+
+  _positionContainer() {
+    const bar = this.scene.uiBottomBar;
+    const progress = bar ? (bar.openProgress ?? (bar.expanded ? 1 : 0)) : 0;
+    const collapsedOffset = 80;
+    const expandedOffset = 348;
+    const centerY = this.scene.scale.height - Phaser.Math.Linear(collapsedOffset, expandedOffset, progress);
+    this.container.setPosition(this.scene.scale.width / 2, centerY);
+  }
+
   _makeButton(key, label, onClick, opts = {}) {
     const root = this.scene.add.container(0, 0).setScrollFactor(0);
     const bg = this.scene.add.graphics().setScrollFactor(0);
@@ -313,6 +425,7 @@ export class SelectionCommandBar {
       hit,
       width,
       height,
+      styleKey: opts.styleKey || key,
       hovered: false,
       pressed: false,
       disabled: false,
@@ -345,7 +458,9 @@ export class SelectionCommandBar {
       event?.stopPropagation?.();
       btn.pressed = false;
       this._drawButton(btn, btn.active, btn.disabled);
-      onClick?.({
+      const handler = btn._contextOnClick || onClick;
+      if (btn._contextDisabled) return;
+      handler?.({
         troops: btn.selectionSnapshotTroops || [],
         profile: btn.selectionSnapshotProfile,
       });
@@ -362,7 +477,7 @@ export class SelectionCommandBar {
   }
 
   _drawButton(btn, active, disabled = false) {
-    const style = BUTTON_STYLES[btn.key] || BUTTON_STYLES.auto;
+    const style = BUTTON_STYLES[btn.styleKey || btn.key] || BUTTON_STYLES.auto;
     const glowColor = style.glow;
     btn.active = active;
     btn.disabled = disabled;

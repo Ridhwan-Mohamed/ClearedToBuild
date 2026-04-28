@@ -5,6 +5,7 @@ import { Teams } from '../../Teams';
 import { StaminaManager } from '../../Manager/staminaManager.js';
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, showAlert } from '../../constants';
 import { buildingManager } from '../../Manager/buildingManager.js';
+import { AudioManager } from '../../Manager/AudioManager.js';
 import {
   applyPortraitKeyToSprite,
   DEFAULT_PLAYER_PORTRAIT_KEY,
@@ -16,6 +17,10 @@ import {
   mixColor,
   setHoverLiftState,
 } from "./BottomBarTheme";
+
+const TAB_BASE_DEPTH = 51;
+const TAB_BG_DEPTH = 0;
+const TAB_CONTENT_DEPTH = 1;
 
 export default class HousesTab {
   constructor(scene, teamNumber = 1) {
@@ -52,23 +57,41 @@ export default class HousesTab {
   // ---------- UI ----------
   build() {
     const scene = this.scene;
+    const compact = scene.scale.width < 1180;
+    const detailWidth = Math.max(228, Math.floor(scene.scale.width / 3) - (compact ? 36 : 42));
+    const detailHeight = compact ? 112 : 118;
 
     const root = scene.rexUI.add.sizer({
       orientation: 'x',
-      space: { left: 8, right: 8, top: 8, bottom: 8, item: 10 },
-    });
+      space: { left: 8, right: 8, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 8 : 10 },
+    }).setDepth(TAB_BASE_DEPTH);
 
     // LEFT (details)
     this.detailCard = this.buildHouseDetailPanel(scene);
+    this.detailScroll = scene.rexUI.add.scrollablePanel({
+      width: detailWidth,
+      height: detailHeight,
+      scrollMode: 0,
+      scrollDetectionMode: 'rectBounds',
+      background: makeGlassRoundRect(scene, 0, 0, 16, {
+        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+        alpha: 0.74,
+        stroke: 0x98e7ff,
+        strokeAlpha: 0.12,
+      }),
+      panel: { child: this.detailCard.panel, mask: { padding: 1 } },
+      space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
+    }).setDepth(TAB_BASE_DEPTH);
     const detailSizer = scene.rexUI.add.sizer({ orientation: 'y' })
-      .add(this.detailCard.panel, { proportion: 1, expand: true });
+      .add(this.detailScroll, { proportion: 1, expand: true })
+      .setDepth(TAB_BASE_DEPTH);
 
     // RIGHT (list)
     this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
 
     this.scroll = scene.rexUI.add.scrollablePanel({
       width: Math.floor(scene.scale.width * (2 / 3)) - 48,
-      height: 200,
+      height: detailHeight,
       scrollMode: 0,
       scrollDetectionMode: 'rectBounds',
       background: makeGlassRoundRect(scene, 0, 0, 16, {
@@ -79,7 +102,7 @@ export default class HousesTab {
       }),
       panel: { child: this.listBody, mask: { padding: 1 } },
       sliderY: scene.rexUI.add.slider({
-        height: 160,
+        height: Math.max(72, detailHeight - 24),
         orientation: 'y',
         track: makeGlassRoundRect(scene, 10, 0, 5, {
           fill: 0x0b2230,
@@ -101,7 +124,7 @@ export default class HousesTab {
         rectBoundsInteractive: true,
       },
       space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
-    });
+    }).setDepth(TAB_BASE_DEPTH);
 
     root.add(detailSizer, { proportion: 1, expand: true });
     root.add(this.scroll,  { proportion: 2, expand: true });
@@ -124,9 +147,10 @@ export default class HousesTab {
       stroke: 0x98e7ff,
       strokeAlpha: 0.06,
       strokeWidth: 1,
-    });
+    }).setDepth(TAB_BG_DEPTH);
     const fill = scene.rexUI.add.roundRectangle(0, 0, Math.max(1, width - 2), height - 2, 4, fillColor, 1)
-      .setOrigin(0, 0.5);
+      .setOrigin(0, 0.5)
+      .setDepth(TAB_CONTENT_DEPTH);
 
     s.addBackground(bg);
     s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
@@ -143,6 +167,10 @@ export default class HousesTab {
 
   buildHouseDetailPanel(scene) {
     const rr = (w, h, r, color, alpha = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, color, alpha);
+    const compact = scene.scale.width < 1180;
+    const detailWidth = Math.max(228, Math.floor(scene.scale.width / 3) - (compact ? 36 : 42));
+    const slotGap = compact ? 6 : 8;
+    const slotWidth = Math.max(102, Math.floor((detailWidth - slotGap) / 2) - 6);
 
     // House HP bar with centered number (HP cur/max)
     const makeHpBarWithText = (width, height) => {
@@ -154,9 +182,10 @@ export default class HousesTab {
         stroke: 0x98e7ff,
         strokeAlpha: 0.06,
         strokeWidth: 1,
-      });
+      }).setDepth(TAB_BG_DEPTH);
       const fill = rr(Math.max(1, width - 2), height - 2, 5, 0x4caf50, 1)
-        .setOrigin(0, 0.5);
+        .setOrigin(0, 0.5)
+        .setDepth(TAB_CONTENT_DEPTH);
 
       const txt = scene.add.text(0, 0, 'HP —/—', {
         fontFamily: 'Bungee',
@@ -164,7 +193,7 @@ export default class HousesTab {
         color: BOTTOM_BAR_THEME.text,
         stroke: '#081621',
         strokeThickness: 2,
-      }).setOrigin(0.5, 0.5);
+      }).setOrigin(0.5, 0.5).setDepth(TAB_CONTENT_DEPTH);
 
       s.addBackground(bg);
       s.add(fill, { key: 'fill', align: 'left', expand: false, padding: { left: 1, right: 1 } });
@@ -183,33 +212,35 @@ export default class HousesTab {
       return s;
     };
 
-    const title = scene.add.text(0, 0, 'House', { fontFamily: 'Bungee', fontSize: '16px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
+    const title = scene.add.text(0, 0, 'House', { fontFamily: 'Bungee', fontSize: compact ? '14px' : '15px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
     const sub = scene.add.text(0, 0, '—', { fontFamily: 'Bungee', fontSize: '11px', color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 });
-    const houseHpBar = makeHpBarWithText(240, 14);
+    const houseHpBar = makeHpBarWithText(Math.max(188, detailWidth - 20), compact ? 13 : 14);
 
-    const occSizer = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 8 } });
+    const occSizer = scene.rexUI.add.sizer({ orientation: 'x', space: { item: slotGap } });
 
     // two occupant slots
-    const slot0 = this.buildOccupantSlot(scene, 0);
-    const slot1 = this.buildOccupantSlot(scene, 1);
-    occSizer.add(slot0.panel, 0, 'left', 0, true);
-    occSizer.add(slot1.panel, 0, 'left', 0, true);
+    const slot0 = this.buildOccupantSlot(scene, 0, slotWidth);
+    const slot1 = this.buildOccupantSlot(scene, 1, slotWidth);
+    occSizer.add(slot0.panel, { proportion: 1, expand: true, align: 'top' });
+    occSizer.add(slot1.panel, { proportion: 1, expand: true, align: 'top' });
 
     const fixBtn = this.makeButton(scene, '🛠 Fix', () => {
       const b = this.selected; // house
       if (!b) return;
       buildingManager.requestBuildingFix(b, this.team, []);
-    }, 0x2f7d32, 28);
+    }, 0x2f7d32, compact ? 24 : 26);
 
-    const panel = scene.rexUI.add.sizer({
-      orientation: 'y',
-      space: { left: 10, right: 10, top: 8, bottom: 8, item: 10 },
-    }).addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
+    const panelBg = makeGlassRoundRect(scene, 0, 0, 18, {
       fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.06),
       alpha: 0.82,
       stroke: 0xa6e9ff,
       strokeAlpha: 0.16,
-    }));
+    }).setDepth(TAB_BG_DEPTH);
+    const panel = scene.rexUI.add.sizer({
+      orientation: 'y',
+      space: { left: compact ? 8 : 10, right: compact ? 8 : 10, top: compact ? 6 : 8, bottom: compact ? 6 : 8, item: compact ? 6 : 8 },
+    });
+    panel.setMinSize(detailWidth, 0);
 
     const titleCol = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 2 } })
       .add(title, 0, 'left', 0, false)
@@ -221,7 +252,9 @@ export default class HousesTab {
 
     const header = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } })
       .add(headerRow,  0, 'left', 0, true)
-      .add(houseHpBar, 0, 'left', 0, false);
+      .add(houseHpBar, 0, 'left', 0, true)
+      .setDepth(TAB_CONTENT_DEPTH);
+    occSizer.setDepth(TAB_CONTENT_DEPTH);
 
     panel.add(header, 0, 'left', 0, true);
     panel.add(occSizer, 0, 'left', 0, true);
@@ -252,6 +285,7 @@ export default class HousesTab {
   }
 
   makeButton(scene, labelText, onClick, bgColor = 0x2a5bd8, h = 28) {
+    const compact = h <= 24;
     const label = scene.rexUI.add.label({
       background: makeGlassRoundRect(scene, 0, h, 10, {
         fill: mixColor(BOTTOM_BAR_THEME.panelFill, bgColor, 0.24),
@@ -260,13 +294,16 @@ export default class HousesTab {
         strokeAlpha: 0.22,
         strokeWidth: 1.5,
       }),
-      text: scene.add.text(0, 0, labelText, { fontFamily: 'Bungee', fontSize: 13, color: '#ffffff', stroke: '#081621', strokeThickness: 2 }),
-      space: { left: 10, right: 10, top: 5, bottom: 5 },
+      text: scene.add.text(0, 0, labelText, { fontFamily: 'Bungee', fontSize: compact ? 11 : 12, color: '#ffffff', stroke: '#081621', strokeThickness: 2 }),
+      space: { left: compact ? 8 : 10, right: compact ? 8 : 10, top: compact ? 4 : 5, bottom: compact ? 4 : 5 },
     });
 
-    label.setMinSize(92, h);
+    label.setMinSize(compact ? 80 : 88, h);
     label.setInteractive({ useHandCursor: true })
-      .on('pointerup', () => onClick?.())
+      .on('pointerup', () => {
+        AudioManager.playBottomBarClick();
+        onClick?.();
+      })
       .on('pointerover', () => {
         label.__baseY ??= label.y;
         setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
@@ -278,8 +315,11 @@ export default class HousesTab {
     return label;
   }
 
-  buildOccupantSlot(scene, idx) {
-    const rr = (w, h, r, color, alpha = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, color, alpha);
+  buildOccupantSlot(scene, idx, slotWidth = 120) {
+    const compact = scene.scale.width < 1180 || slotWidth < 126;
+    const innerWidth = Math.max(92, slotWidth - (compact ? 10 : 12));
+    const portraitSize = compact ? 28 : 32;
+    const barWidth = Math.max(78, innerWidth - 4);
 
     const bg = makeGlassRoundRect(scene, 0, 0, 12, {
       fill: mixColor(BOTTOM_BAR_THEME.panelSoftFill, 0xffffff, 0.04),
@@ -287,36 +327,49 @@ export default class HousesTab {
       stroke: 0xffffff,
       strokeAlpha: 0.08,
       strokeWidth: 1,
-    });
+    }).setDepth(TAB_BG_DEPTH);
 
     const portrait = scene.add.sprite(0, 0, DEFAULT_PLAYER_PORTRAIT_KEY)
-      .setDisplaySize(44, 44)
+      .setDisplaySize(portraitSize, portraitSize)
       .setOrigin(0.5, 0.5);
     portrait.setVisible(false);
 
-    const name = scene.add.text(0, 0, `Slot ${idx + 1}: —`, { fontFamily: 'Bungee', fontSize: '12px', color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
+    const name = scene.add.text(0, 0, `Slot ${idx + 1}: —`, {
+      fontFamily: 'Bungee',
+      fontSize: compact ? '9px' : '10px',
+      color: BOTTOM_BAR_THEME.text,
+      stroke: '#081621',
+      strokeThickness: 2,
+      align: 'center',
+      wordWrap: { width: innerWidth }
+    }).setOrigin(0.5, 0);
 
-    const hp = this.makeBar(160, 8, 0x4caf50); // green
-    const st = this.makeBar(160, 8, 0x2196f3); // blue
+    const hp = this.makeBar(barWidth, 6, 0x4caf50);
+    const st = this.makeBar(barWidth, 6, 0x2196f3);
 
-    const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 4 } })
-      .add(hp.sizer, 0, 'left', 0, false)
-      .add(st.sizer, 0, 'left', 0, false);
+    const bars = scene.rexUI.add.sizer({ orientation: 'y', space: { item: compact ? 3 : 4 } })
+      .add(hp.sizer, 0, 'center', 0, false)
+      .add(st.sizer, 0, 'center', 0, false);
 
-    const btn = this.makeButton(scene, 'Sleep', () => {}, 0x2a5bd8);
+    const btn = this.makeButton(scene, 'Sleep', () => {}, 0x2a5bd8, compact ? 22 : 24);
+    btn.setMinSize(innerWidth, compact ? 22 : 24);
 
-    const right = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } })
-      .add(name, 0, 'left', 0, false)
-      .add(bars, 0, 'left', 0, false)
-      .add(btn, 0, 'left', 0, false);
+    const content = scene.rexUI.add.sizer({ orientation: 'y', space: { item: compact ? 4 : 5 } })
+      .add(portrait, 0, 'center', 0, false)
+      .add(name, 0, 'center', 0, true)
+      .add(bars, 0, 'center', 0, false)
+      .add(btn, 0, 'center', 0, true)
+      .setDepth(TAB_CONTENT_DEPTH);
+    portrait.setDepth(TAB_CONTENT_DEPTH);
 
     const panel = scene.rexUI.add.sizer({
-      orientation: 'x',
-      space: { left: 6, right: 6, top: 6, bottom: 6, item: 8 }, // was 8/8/8/8 item 10
+      orientation: 'y',
+      space: { left: compact ? 5 : 6, right: compact ? 5 : 6, top: compact ? 5 : 6, bottom: compact ? 5 : 6, item: compact ? 4 : 5 },
     })
       .addBackground(bg)
-      .add(portrait, 0, 'center', 0, false)
-      .add(right, { proportion: 1, expand: true });
+      .add(content, { proportion: 1, expand: true, align: 'center' })
+      .setDepth(TAB_BASE_DEPTH);
+    panel.setMinSize(slotWidth, 0);
 
     const setBtnLabel = (text) => {
       const t = btn.getElement?.('text');
@@ -369,7 +422,7 @@ export default class HousesTab {
         name.setText(`Slot ${idx + 1}: ${troop.name || 'Unnamed'}`);
 
         const portraitKey = getPlayerPortraitKey(troop);
-        applyPortraitKeyToSprite(scene, portrait, portraitKey, 44);
+        applyPortraitKeyToSprite(scene, portrait, portraitKey, portraitSize);
 
         const hpPct = (troop.health ?? 0) / (troop.maxHealth || 100);
         const stPct = (troop.stamina ?? 0) / (troop.maxStamina || 100);
@@ -440,7 +493,7 @@ export default class HousesTab {
       stroke: tint,
       strokeAlpha: 0.12,
       strokeWidth: 1.5,
-    });
+    }).setDepth(TAB_BG_DEPTH);
 
     const gx = Math.floor((house.x ?? 0) / SQUARESIZE);
     const gy = Math.floor((house.y ?? 0) / SQUARESIZE);
@@ -460,14 +513,16 @@ export default class HousesTab {
     const right = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 3 } })
       .add(title, 0, 'left', 0, false)
       .add(occText, 0, 'left', 0, false)
-      .add(hp.sizer, 0, 'left', 0, false);
+      .add(hp.sizer, 0, 'left', 0, false)
+      .setDepth(TAB_CONTENT_DEPTH);
 
     const row = scene.rexUI.add.sizer({
       orientation: 'x',
       space: { left: 8, right: 8, top: 6, bottom: 6, item: 10 },
     })
       .addBackground(bg)
-      .add(right, { proportion: 1, expand: true });
+      .add(right, { proportion: 1, expand: true })
+      .setDepth(TAB_BASE_DEPTH);
 
     row.setMinSize(fullWidth, 6);
 

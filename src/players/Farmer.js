@@ -25,7 +25,7 @@ import farmerSwimSidewards from 'url:../assets/players/farmer/farmer_swim_sidewa
 
 export class Farmer {
 
-    static speed = 80;
+    static speed = 85;
     static stamina = 0.005;
     static maxWaterPailCarry = 3;
 

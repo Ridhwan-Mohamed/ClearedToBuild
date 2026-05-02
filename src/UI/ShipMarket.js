@@ -1,616 +1,446 @@
-
 // src/UI/ShipMarket.js
 //
-// World-space "market ship" that docks beside the parcel that bought the Market contract.
-// - No navgrid: ship is a sprite + pile sprites.
-// - Hover a pile -> tiny world-space buy widget above it.
-// - UI is rendered on the active world camera.
-// - Current ship offers seeds, berries, and one rotating card offer.
-//
-// Usage:
-//   1) In your scene preload: loadShipMarketAssets(this);
-//   2) On Market contract spawn: spawnMarketShip(this, { parcelCenterWorld: {x,y}, teamNumber: 1, durationMs: 60000 });
-//   3) On contract complete: destroy returned handle or call handle.destroy().
+// World-space parcel market. The market itself is the storefront UI that
+// occupies the bought parcel; no separate ship, cargo piles, or screen modal.
 
 import Phaser from "phaser";
-import shipPng from "url:../assets/ship/ship.png";
-import foodPilePng from "url:../assets/ship/food_pile.png";
-import waterPilePng from "url:../assets/ship/water_pile.png";
-import cropPilePng from "url:../assets/ship/crop_pile.png";
-import berryPilePng from "url:../assets/ship/berry_pile.png";
-import woodPilePng from "url:../assets/ship/wood_pile.png";
-import stonePilePng from "url:../assets/ship/stone_pile.png";
-import shipMiniCardPng from "url:../assets/ship/mini_card.png";
+import { UIDEPTH, SQUARESIZE, showAlert } from "../constants";
+import { AudioManager } from "../Manager/AudioManager";
+import { addCardToInventory } from "../Cards/CardInventory";
+import {
+  MARKET_CARD_OFFERS,
+  MARKET_CARD_SECTIONS,
+  MARKET_CARDS_BY_SECTION,
+  MARKET_PLACEHOLDER_ASSETS,
+  loadMarketCardPlaceholderAssets,
+} from "../Cards/MarketCards";
+import { getCardOutlineTint } from "./CardPreview";
 
-import { showAlert, UIDEPTH } from "../constants";
-import { Teams } from "../Teams";
-import { POWERUP_CARDS } from "../Cards/PowerupCards";
-import { addCardToHand, getCardHand } from "./Powerups";
-import { createWorldCardPreview, getCardOutlineTint } from "./CardPreview";
-import { StorageManager } from "../Manager/StorageManager";
-import { UI_ITEM_TYPES } from "./UIConstants";
+export const DEFAULT_MARKET_PRICES = Object.freeze(
+  Object.fromEntries(MARKET_CARD_OFFERS.map((card) => [card.id, card.price]))
+);
 
-// Default prices should match DraftStartState.prices.supplies.
-// If you have a live DraftStartState instance on scene, pass it in spawnMarketShip({ prices }).
-export const DEFAULT_SUPPLY_PRICES = Object.freeze({
-  seeds: 2,
-  berries: 3,
-  card: 80,
-});
-
-const BASE_GOODS = [
-  { key: "seeds", label: "Seeds", texture: "ship_crop_pile", priceKey: "seeds", kind: "counter", maxQty: 99 },
-  { key: "berries", label: "Berries", texture: "ship_berry_pile", priceKey: "berries", kind: "counter", maxQty: 99 },
-];
-
-export function loadShipMarketAssets(scene) {
-  scene.load.image("market_ship", shipPng);
-  scene.load.image("ship_food_pile", foodPilePng);
-  scene.load.image("ship_water_pile", waterPilePng);
-  scene.load.image("ship_crop_pile", cropPilePng);
-  scene.load.image("ship_berry_pile", berryPilePng);
-  scene.load.image("ship_wood_pile", woodPilePng);
-  scene.load.image("ship_stone_pile", stonePilePng);
-  scene.load.image("ship_mini_card", shipMiniCardPng);
+export function loadParcelMarketAssets(scene) {
+  loadMarketCardPlaceholderAssets(scene);
 }
 
 function getPriceTable(pricesMaybe) {
-  if (pricesMaybe && typeof pricesMaybe === "object") {
-    return { ...DEFAULT_SUPPLY_PRICES, ...pricesMaybe };
-  }
-  return { ...DEFAULT_SUPPLY_PRICES };
+  return { ...DEFAULT_MARKET_PRICES, ...(pricesMaybe || {}) };
 }
 
-function getEligibleShipCards(teamNumber, excludeIds = []) {
-  const blocked = new Set(excludeIds.filter(Boolean));
-  return POWERUP_CARDS.filter(card => card?.id && !blocked.has(card.id));
-}
-
-function pickShipCard(teamNumber, excludeIds = []) {
-  const pool = getEligibleShipCards(teamNumber, excludeIds);
-  if (!pool.length) return null;
-  return Phaser.Utils.Array.GetRandom(pool);
-}
-
-function createShipGoods(teamNumber) {
-  const goods = BASE_GOODS.map(good => ({ ...good }));
-  const card = pickShipCard(teamNumber);
-  if (card) {
-    goods.push({
-      key: `card:${card.id}`,
-      label: card.name,
-      texture: "ship_mini_card",
-      priceKey: "card",
-      kind: "card",
-      maxQty: 1,
-      card,
-      soldOut: false,
-    });
-  }
-  return goods;
-}
-
-// ---------- Storage capacity helpers (block overfill purchases) ----------
-
-function getStorageItemForGood(goodKey) {
-  switch (goodKey) {
-    case "seeds":
-      return UI_ITEM_TYPES.seedCrop;
-    case "berries":
-      return UI_ITEM_TYPES.seedBerry;
-    default:
-      return null;
-  }
-}
-
-// Compute how many of itemDef we can still fit in this specific storage.
-function storageFreeForItem(storageBuilding, itemDef) {
-  if (!storageBuilding || !itemDef) return 0;
-  const maxStack = itemDef.stacks ?? 1;
-  let free = 0;
-
-  for (const slot of (storageBuilding.storageItems ?? [])) {
-    if (!slot) {
-      free += maxStack;
-      continue;
-    }
-    if (slot.item === itemDef && (slot.amount ?? 0) < maxStack) {
-      free += (maxStack - slot.amount);
-    }
-  }
-  return free;
-}
-
-function teamFreeForItem(teamNumber, itemDef) {
-  const storages = Teams.teamLists?.[String(teamNumber)]?.storageList ?? Teams.teamLists?.[teamNumber]?.storageList ?? [];
-  let free = 0;
-  for (const st of storages) {
-    free += storageFreeForItem(st, itemDef);
-  }
-  return free;
-}
-
-function teamCanAcceptAmount(teamNumber, itemDef, amount) {
-  return teamFreeForItem(teamNumber, itemDef) >= amount;
-}
-
-function addToTeamStorage(teamNumber, itemDef, amount, scene) {
-  return StorageManager.grantItemToTeam(String(teamNumber), itemDef, amount, scene);
-}
-
-// ---------- Money helpers ----------
 function getMoney(scene) {
-  // Prefer existing scene API if present
-  if (typeof scene.getMoney === "function") return scene.getMoney();
-  if (typeof scene.money === "number") return scene.money;
-  // fallback: 0
-  return 0;
+  if (typeof scene?.getMoney === "function") return scene.getMoney();
+  return Number(scene?.money || 0);
 }
 
 function canAfford(scene, cost) {
-  if (typeof scene.checkSufficientFunds === "function") return scene.checkSufficientFunds(cost);
+  if (typeof scene?.checkSufficientFunds === "function") return scene.checkSufficientFunds(cost);
   return getMoney(scene) >= cost;
 }
 
 function spend(scene, cost) {
-  if (typeof scene.updateMoney === "function") {
-    scene.updateMoney(-cost);
-    return;
-  }
-  if (typeof scene.money === "number") scene.money -= cost;
+  if (typeof scene?.updateMoney === "function") scene.updateMoney(-cost);
+  else if (scene && typeof scene.money === "number") scene.money -= cost;
 }
 
-// ---------- Hover buy widget ----------
-function createHoverMenu(scene) {
-  const c = scene.add.container(0, 0).setDepth((UIDEPTH ?? 2000) + 200);
-  c.setVisible(false);
+function worldMode(scene) {
+  return scene?.zoomMixer?.mode || "detailed";
+}
 
-  c._hoveringMenu = false;
-  c._hoveringPile = false;
-  c._activePreview = null;
+function setInteractiveEnabled(zone, enabled) {
+  if (!zone?.input) return;
+  zone.input.enabled = !!enabled;
+  zone.setActive?.(!!enabled);
+}
 
-  const MENU_W = 220;
-  const MENU_H = 72;
+function mixIntColor(colorA, colorB, t = 0.5) {
+  const a = Phaser.Display.Color.IntegerToColor(colorA);
+  const b = Phaser.Display.Color.IntegerToColor(colorB);
+  const mixed = Phaser.Display.Color.Interpolate.ColorWithColor(
+    a,
+    b,
+    100,
+    Math.round(Phaser.Math.Clamp(t, 0, 1) * 100)
+  );
+  return Phaser.Display.Color.GetColor(mixed.r, mixed.g, mixed.b);
+}
 
-  const zone = scene.add.zone(0, 0, MENU_W, MENU_H).setOrigin(0.5);
-  zone.setInteractive({ useHandCursor: false });
+function drawGlassRect(graphics, x, y, w, h, radius = 12, {
+  fill = 0x14384c,
+  alpha = 0.84,
+  stroke = 0x98e7ff,
+  strokeAlpha = 0.28,
+  shineAlpha = 0.08,
+  shadowAlpha = 0.16,
+} = {}) {
+  graphics.clear();
+  if (shadowAlpha > 0) {
+    graphics.fillStyle(0x020812, shadowAlpha);
+    graphics.fillRoundedRect(x + 4, y + 8, w, h, radius);
+  }
+  graphics.fillStyle(fill, alpha);
+  graphics.fillRoundedRect(x, y, w, h, radius);
+  if (shineAlpha > 0) {
+    graphics.fillStyle(0xffffff, shineAlpha);
+    graphics.fillRoundedRect(x + 8, y + 8, Math.max(12, w - 16), Math.max(10, Math.floor(h * 0.24)), Math.max(4, radius - 4));
+  }
+  graphics.lineStyle(2, stroke, strokeAlpha);
+  graphics.strokeRoundedRect(x, y, w, h, radius);
+  graphics.lineStyle(1, 0xffffff, 0.12);
+  graphics.strokeRoundedRect(x + 2, y + 2, w - 4, h - 4, Math.max(4, radius - 2));
+}
 
-  zone.on("pointerover", () => { c._hoveringMenu = true; });
-  zone.on("pointerout", () => {
-    c._hoveringMenu = false;
-    c.maybeHide?.(250);
+function makeWorldButton(scene, x, y, width, height, label, {
+  onClick = null,
+  fill = 0x1f5c42,
+  stroke = 0x9dffa5,
+  disabled = false,
+  depth = 0,
+} = {}) {
+  const root = scene.add.container(x, y).setDepth(depth);
+  const bg = scene.add.graphics();
+  const text = scene.add.text(0, 0, label, {
+    fontFamily: "Bungee",
+    fontSize: "10px",
+    color: disabled ? "#a8b5bd" : "#fff9ef",
+    stroke: "#081621",
+    strokeThickness: 3,
+    align: "center",
+  }).setOrigin(0.5);
+  const hit = scene.add.zone(0, 0, width, height).setInteractive({ useHandCursor: !disabled });
+
+  const redraw = (hovered = false, pressed = false) => {
+    bg.clear();
+    bg.fillStyle(fill, disabled ? 0.16 : pressed ? 0.56 : hovered ? 0.44 : 0.32);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.lineStyle(2, stroke, disabled ? 0.16 : hovered ? 0.72 : 0.42);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+    text.setAlpha(disabled ? 0.52 : 1);
+  };
+
+  redraw();
+  hit.on("pointerover", () => {
+    if (disabled) return;
+    AudioManager.playMarketHover?.();
+    redraw(true, false);
+  });
+  hit.on("pointerout", () => redraw(false, false));
+  hit.on("pointerdown", (_pointer, _lx, _ly, event) => {
+    event?.stopPropagation?.();
+    if (disabled) return;
+    redraw(true, true);
+  });
+  hit.on("pointerup", (_pointer, _lx, _ly, event) => {
+    event?.stopPropagation?.();
+    if (disabled) return;
+    redraw(true, false);
+    onClick?.();
   });
 
-  c.add(zone);
-
-  const bg = scene.add.rectangle(0, 0, MENU_W, MENU_H, 0x000000, 0.72).setOrigin(0.5);
-  bg.setStrokeStyle(2, 0xffffff, 0.65);
-
-  const title = scene.add.text(0, -18, "Buy", {
-    fontFamily: "Bungee",
-    fontSize: "12px",
-    color: "#ffffff",
-  }).setOrigin(0.5);
-
-  const qtyText = scene.add.text(0, 4, "x1", {
-    fontFamily: "Bungee",
-    fontSize: "14px",
-    color: "#ffffaa",
-  }).setOrigin(0.5);
-
-  const costText = scene.add.text(0, 22, "$0", {
-    fontFamily: "Bungee",
-    fontSize: "12px",
-    color: "#aaffaa",
-  }).setOrigin(0.5);
-
-  const mkBtn = (x, y, w, h, label) => {
-    const r = scene.add.rectangle(x, y, w, h, 0x222222, 0.9).setOrigin(0.5);
-    r.setStrokeStyle(1, 0xffffff, 0.5);
-    const t = scene.add.text(x, y, label, {
-      fontFamily: "Bungee",
-      fontSize: "14px",
-      color: "#ffffff",
-    }).setOrigin(0.5);
-    return { r, t };
-  };
-
-  const minus = mkBtn(-70, 6, 28, 24, "-");
-  const plus  = mkBtn(-36, 6, 28, 24, "+");
-  const buy   = mkBtn(70,  6, 86, 36, "BUY");
-
-  title.setY(-22);
-  qtyText.setY(6);
-  costText.setY(28);
-
-  [minus.r, minus.t, plus.r, plus.t, buy.r, buy.t].forEach(o => o.setInteractive({ useHandCursor: true }));
-
-  c.add([bg, title, qtyText, costText, minus.r, minus.t, plus.r, plus.t, buy.r, buy.t]);
-
-  c._state = {
-    qty: 1,
-    maxQty: 1,
-    unitPrice: 0,
-    label: "",
-    teamNumber: 1,
-    good: null,
-    availableQty: 0,
-    storageFull: false,
-  };
-
-  function refresh() {
-    const s = c._state;
-    title.setText(s.label || "Buy");
-    if (s.good?.kind === "counter" && s.storageFull) {
-      qtyText.setText("Full");
-      costText.setText("No storage room");
-    } else {
-      qtyText.setText(s.good?.kind === "card" ? "Unique" : `x${s.qty}`);
-      costText.setText(`$${s.qty * s.unitPrice}`);
-    }
-    const allowQty = s.good?.kind !== "card";
-    [minus.r, minus.t, plus.r, plus.t].forEach(node => {
-      node.setVisible(allowQty);
-      if (node.input) node.input.enabled = allowQty;
-    });
-    buy.r.setAlpha(s.storageFull ? 0.5 : 1);
-    buy.t.setAlpha(s.storageFull ? 0.5 : 1);
-  }
-
-  function shake(go) {
-    const ox = go.x;
-    scene.tweens.add({
-      targets: go,
-      x: ox + 6,
-      duration: 45,
-      yoyo: true,
-      repeat: 4,
-      onComplete: () => { go.x = ox; }
-    });
-  }
-
-  function flash(btnRect, btnText, ok) {
-    const origFill = btnRect.fillColor;
-    const origText = btnText.style.color;
-
-    btnRect.setFillStyle(ok ? 0x1f7a1f : 0x7a1f1f, 0.95);
-    btnText.setColor(ok ? "#aaffaa" : "#ffaaaa");
-
-    scene.time.delayedCall(220, () => {
-      btnRect.setFillStyle(origFill, 0.9);
-      btnText.setColor(origText || "#ffffff");
-    });
-  }
-
-  c._refreshPreviewPosition = () => {
-    if (!c._activePreview) return;
-    c._activePreview.setPosition(c.x + 150, c.y - 58);
-  };
-
-  c._setPreviewForGood = (good) => {
-    c._activePreview?.hide?.();
-    c._activePreview = null;
-
-    if (good?.kind !== "card" || !good.card) return;
-
-    if (!good.preview) {
-      good.preview = createWorldCardPreview(scene, good.card, c.x + 150, c.y - 58, { depth: (UIDEPTH ?? 2000) + 240 });
-    }
-    c._activePreview = good.preview;
-    c._refreshPreviewPosition();
-    c._activePreview.show();
-  };
-
-  c.hidePreview = () => {
-    c._activePreview?.hide?.();
-    c._activePreview = null;
-  };
-
-  const onMinus = () => {
-    if (c._state.good?.kind === "card") return;
-    c._state.qty = Math.max(1, c._state.qty - 1);
-    refresh();
-  };
-
-  const onPlus = () => {
-    if (c._state.good?.kind === "card") return;
-    c._state.qty = Math.min(c._state.maxQty, c._state.qty + 1);
-    refresh();
-  };
-
-  minus.r.on("pointerdown", onMinus);
-  minus.t.on("pointerdown", onMinus);
-
-  plus.r.on("pointerdown", onPlus);
-  plus.t.on("pointerdown", onPlus);
-
-  const doBuy = () => {
-    const s = c._state;
-    const good = s.good;
-    if (!good) return;
-
-    const totalCost = s.qty * s.unitPrice;
-    if (!canAfford(scene, totalCost)) {
-      showAlert(scene, "Not enough money", "#ff5555");
-      flash(buy.r, buy.t, false);
-      shake(buy.r);
-      shake(buy.t);
-      return;
-    }
-
-    if (good.kind === "counter") {
-      const itemDef = getStorageItemForGood(good.key);
-      if (!itemDef) {
-        showAlert(scene, "That market item is not configured", "#ff5555");
-        flash(buy.r, buy.t, false);
-        return;
-      }
-      if (s.storageFull || !teamCanAcceptAmount(s.teamNumber, itemDef, s.qty)) {
-        showAlert(scene, "Not enough storage space", "#ff5555");
-        flash(buy.r, buy.t, false);
-        shake(buy.r);
-        shake(buy.t);
-        return;
-      }
-
-      spend(scene, totalCost);
-      const added = addToTeamStorage(s.teamNumber, itemDef, s.qty, scene);
-      if (added <= 0) {
-        spend(scene, -totalCost);
-        showAlert(scene, "Not enough storage space", "#ff5555");
-        flash(buy.r, buy.t, false);
-        shake(buy.r);
-        shake(buy.t);
-        return;
-      }
-
-      if (added < s.qty) {
-        spend(scene, -((s.qty - added) * s.unitPrice));
-      }
-
-      showAlert(scene, `Bought x${added} ${good.label}`, "#aaffaa");
-      flash(buy.r, buy.t, true);
-      return;
-    }
-
-    if (good.kind === "card") {
-      if (!good.card || good.soldOut) {
-        showAlert(scene, "No card available", "#ff5555");
-        flash(buy.r, buy.t, false);
-        return;
-      }
-
-      spend(scene, totalCost);
-      const added = addCardToHand(good.card, String(s.teamNumber));
-      if (!added) {
-        spend(scene, -totalCost);
-        showAlert(scene, "Couldn't add card", "#ff5555");
-        flash(buy.r, buy.t, false);
-        return;
-      }
-
-      good.soldOut = true;
-      good.onSoldOut?.();
-      scene.events.emit("cards:updated");
-      showAlert(scene, `Bought card: ${good.card.name}`, "#aaffaa");
-      flash(buy.r, buy.t, true);
-      c.hidePreview();
-      c.setVisible(false);
-      return;
-    }
-  };
-
-  buy.r.on("pointerdown", doBuy);
-  buy.t.on("pointerdown", doBuy);
-
-  c.setStateFor = (pileSprite, good, teamNumber, prices) => {
-    const unit = prices[good.priceKey] ?? 1;
-    const itemDef = good.kind === "counter" ? getStorageItemForGood(good.key) : null;
-    const availableQty = itemDef ? teamFreeForItem(teamNumber, itemDef) : 0;
-    c._state.unitPrice = unit;
-    c._state.label = good.label;
-    c._state.teamNumber = teamNumber;
-    c._state.good = good;
-    c._state.availableQty = availableQty;
-    c._state.storageFull = good.kind === "counter" && availableQty <= 0;
-    c._state.maxQty = good.kind === "counter"
-      ? Math.max(1, Math.min(good.maxQty ?? 1, Math.max(0, availableQty)))
-      : Math.max(1, good.maxQty ?? 1);
-    c._state.qty = 1;
-
-    c.x = pileSprite.x;
-    c.y = pileSprite.y - 46;
-    c._setPreviewForGood(good);
-    refresh();
-  };
-
-  function pointerInsideMenu() {
-    const p = scene.input.activePointer;
-    const x = p.worldX;
-    const y = p.worldY;
-    const halfW = MENU_W / 2;
-    const halfH = MENU_H / 2;
-    return (x >= c.x - halfW && x <= c.x + halfW && y >= c.y - halfH && y <= c.y + halfH);
-  }
-
-  c.maybeHide = (delayMs = 300) => {
-    scene.time.delayedCall(delayMs, () => {
-      if (c._hoveringMenu) return;
-      if (c._hoveringPile) return;
-      if (pointerInsideMenu()) return;
-      c.hidePreview();
-      c.setVisible(false);
-    });
-  };
-
-  return c;
+  root.add([bg, text, hit]);
+  root._marketHit = hit;
+  return root;
 }
 
-// ---------- Main spawn ----------
-export function spawnMarketShip(scene, {
-  parcelCenterWorld,
-  slotId = null,        // "W" | "E" | "S"
+function makeCardOffer(scene, card, {
+  x,
+  y,
+  w,
+  h,
+  price,
+  sold,
+  teamNumber,
+  onSold,
+}) {
+  const tint = getCardOutlineTint(card);
+  const root = scene.add.container(x, y);
+  const bg = scene.add.graphics();
+  drawGlassRect(bg, -w / 2, -h / 2, w, h, 8, {
+    fill: mixIntColor(0x17384d, tint, 0.12),
+    alpha: sold ? 0.34 : 0.78,
+    stroke: tint,
+    strokeAlpha: sold ? 0.14 : 0.38,
+    shineAlpha: sold ? 0.02 : 0.06,
+    shadowAlpha: 0.06,
+  });
+
+  const iconPlate = scene.add.rectangle(-w / 2 + 30, -14, 42, 42, 0x0b1c27, 0.58)
+    .setStrokeStyle(2, tint, 0.38);
+  const icon = scene.textures.exists(card.image)
+    ? scene.add.image(-w / 2 + 30, -14, card.image).setDisplaySize(30, 30)
+    : scene.add.rectangle(-w / 2 + 30, -14, 28, 28, tint, 0.3);
+  icon.setAlpha(sold ? 0.35 : 1);
+
+  const name = scene.add.text(-w / 2 + 58, -33, card.name, {
+    fontFamily: "Bungee",
+    fontSize: "10px",
+    color: sold ? "#8fa1aa" : "#fff9ef",
+    stroke: "#081621",
+    strokeThickness: 3,
+    wordWrap: { width: w - 70 },
+  }).setOrigin(0, 0);
+
+  const desc = scene.add.text(-w / 2 + 58, -12, card.text, {
+    fontFamily: "Bungee",
+    fontSize: "7px",
+    color: sold ? "#6f8895" : "#d3edf9",
+    stroke: "#081621",
+    strokeThickness: 2,
+    lineSpacing: 1,
+    wordWrap: { width: w - 70 },
+  }).setOrigin(0, 0);
+
+  const priceText = scene.add.text(-w / 2 + 14, h / 2 - 20, `$${price}`, {
+    fontFamily: "Bungee",
+    fontSize: "11px",
+    color: sold ? "#8fa1aa" : "#fff1b3",
+    stroke: "#081621",
+    strokeThickness: 3,
+  }).setOrigin(0, 0.5);
+
+  const buyButton = makeWorldButton(scene, w / 2 - 42, h / 2 - 20, 74, 26, sold ? "SOLD" : "BUY", {
+    fill: sold ? 0x2b3238 : 0x1f5c42,
+    stroke: sold ? 0x74838c : 0x9dffa5,
+    disabled: sold,
+    onClick: () => {
+      if (sold) return;
+      if (!canAfford(scene, price)) {
+        AudioManager.playError?.();
+        return;
+      }
+      spend(scene, price);
+      const added = addCardToInventory(card, String(teamNumber), 1);
+      if (!added) {
+        scene.updateMoney?.(price);
+        showAlert(scene, "Couldn't add card to inventory", "#ff5555");
+        AudioManager.playError?.();
+        return;
+      }
+      scene.events.emit("cards:updated");
+      AudioManager.playMarketPurchase?.();
+      showAlert(scene, `Bought ${card.name}`, "#aaffaa");
+      onSold?.(card.id);
+    },
+  });
+
+  root.add([bg, iconPlate, icon, name, desc, priceText, buyButton]);
+  root._marketHitZones = [buyButton._marketHit].filter(Boolean);
+  return root;
+}
+
+export function spawnParcelMarketStorefront(scene, {
+  origin = null,
+  parcelCenterWorld = null,
+  slotId = null,
   teamNumber = 1,
   durationMs = 60_000,
   prices = null,
+  soldIds = [],
+  onSoldIdsChanged = null,
 } = {}) {
+  loadMarketCardPlaceholderAssets(scene);
+
   const priceTable = getPriceTable(prices);
-  const shipGoods = createShipGoods(teamNumber);
+  const sold = new Set(soldIds instanceof Set ? Array.from(soldIds) : (soldIds || []));
+  const center = parcelCenterWorld ?? {
+    x: (origin?.x ?? 0) * SQUARESIZE + (25 * SQUARESIZE) / 2,
+    y: (origin?.y ?? 0) * SQUARESIZE + (25 * SQUARESIZE) / 2,
+  };
 
-  const dock = parcelCenterWorld ?? { x: scene.cameras.main.centerX, y: scene.cameras.main.centerY };
+  const rootDepth = (UIDEPTH ?? 10) + 1;
+  const parcelPx = 25 * SQUARESIZE;
+  const panelW = parcelPx - 54;
+  const panelH = parcelPx - 58;
+  const columnGap = 14;
+  const colW = Math.floor((panelW - 56 - columnGap * 2) / 3);
+  const rowH = 96;
 
-  const DOCK_OFFSET = 90;   // distance from parcel center to "dock" point
-  const OFFSCREEN   = 750;  // spawn/leave distance
+  let destroyed = false;
+  let currentMode = worldMode(scene);
+  const hitZones = [];
 
-  let angleDeg = 0;
-  let startX = dock.x, startY = dock.y;
-  let endX = dock.x, endY = dock.y;
-  let leaveX = dock.x, leaveY = dock.y;
+  const container = scene.add.container(center.x, center.y)
+    .setDepth(rootDepth)
+    .setAlpha(0);
 
-  // Shipping lanes (exactly as requested):
-  // W: from SOUTH -> dock near parcel, front faces UP
-  // S: from EAST  -> dock near parcel, front faces WEST
-  // E: from NORTH -> dock near parcel, front faces SOUTH
-  if (slotId === "W") {
-    angleDeg = 0; // front up
-    endX = dock.x - DOCK_OFFSET;
-    endY = dock.y;
-    startX = endX;
-    startY = endY + OFFSCREEN;   // from south
-    leaveX = endX;
-    leaveY = endY + OFFSCREEN;
-  } else if (slotId === "S") {
-    angleDeg = -90; // front west
-    endX = dock.x;
-    endY = dock.y + DOCK_OFFSET;
-    startX = endX + OFFSCREEN;   // from east
-    startY = endY;
-    leaveX = endX + OFFSCREEN;
-    leaveY = endY;
-  } else if (slotId === "E") {
-    angleDeg = 180; // front south
-    endX = dock.x + DOCK_OFFSET;
-    endY = dock.y;
-    startX = endX;
-    startY = endY - OFFSCREEN;   // from north
-    leaveX = endX;
-    leaveY = endY - OFFSCREEN;
-  } else {
-    // fallback: behave like E
-    angleDeg = 180;
-    endX = dock.x + DOCK_OFFSET;
-    endY = dock.y;
-    startX = endX;
-    startY = endY - OFFSCREEN;
-    leaveX = endX;
-    leaveY = endY - OFFSCREEN;
+  const shell = scene.add.graphics();
+  drawGlassRect(shell, -panelW / 2, -panelH / 2, panelW, panelH, 16, {
+    fill: 0x102f42,
+    alpha: 0.9,
+    stroke: 0x98e7ff,
+    strokeAlpha: 0.36,
+    shineAlpha: 0.08,
+  });
+
+  const detailedLayer = scene.add.container(0, 0);
+  const overviewLayer = scene.add.container(0, 0).setVisible(false);
+
+  const title = scene.add.text(-panelW / 2 + 28, -panelH / 2 + 30, "PARCEL MARKET", {
+    fontFamily: "Bungee",
+    fontSize: "18px",
+    color: "#fff9ef",
+    stroke: "#081621",
+    strokeThickness: 4,
+  }).setOrigin(0, 0.5);
+
+  const subtitle = scene.add.text(-panelW / 2 + 28, -panelH / 2 + 56, "Cards bought here move to your card inventory.", {
+    fontFamily: "Bungee",
+    fontSize: "8px",
+    color: "#d3edf9",
+    stroke: "#081621",
+    strokeThickness: 2,
+  }).setOrigin(0, 0.5);
+
+  detailedLayer.add([title, subtitle]);
+
+  function rebuildOffers() {
+    detailedLayer._offerNodes?.forEach((node) => node.destroy(true));
+    detailedLayer._offerNodes = [];
+    hitZones.length = 0;
+
+    const topY = -panelH / 2 + 96;
+    const leftX = -panelW / 2 + 28;
+    MARKET_CARD_SECTIONS.forEach((section, sectionIndex) => {
+      const colX = leftX + sectionIndex * (colW + columnGap);
+      const headerBg = scene.add.graphics();
+      drawGlassRect(headerBg, colX, topY - 34, colW, 30, 8, {
+        fill: 0x1b536d,
+        alpha: 0.72,
+        stroke: sectionIndex === 0 ? 0x7cffb2 : sectionIndex === 1 ? 0xffad73 : 0x98e7ff,
+        strokeAlpha: 0.28,
+        shineAlpha: 0.05,
+        shadowAlpha: 0.04,
+      });
+      const headerText = scene.add.text(colX + 12, topY - 19, section.label, {
+        fontFamily: "Bungee",
+        fontSize: "10px",
+        color: "#fff9ef",
+        stroke: "#081621",
+        strokeThickness: 3,
+      }).setOrigin(0, 0.5);
+      detailedLayer.add([headerBg, headerText]);
+      detailedLayer._offerNodes.push(headerBg, headerText);
+
+      const cards = MARKET_CARDS_BY_SECTION[section.key] || [];
+      cards.forEach((card, index) => {
+        const price = Number(priceTable[card.id] ?? card.price ?? 0);
+        const offer = makeCardOffer(scene, card, {
+          x: colX + colW / 2,
+          y: topY + index * (rowH + 10) + rowH / 2,
+          w: colW,
+          h: rowH,
+          price,
+          sold: sold.has(card.id),
+          teamNumber,
+          onSold: (cardId) => {
+            sold.add(cardId);
+            onSoldIdsChanged?.(Array.from(sold));
+            rebuildOffers();
+            applyMode(currentMode);
+          },
+        });
+        detailedLayer.add(offer);
+        detailedLayer._offerNodes.push(offer);
+        hitZones.push(...(offer._marketHitZones || []));
+      });
+    });
   }
 
-  const container = scene.add.container(startX, startY).setDepth((UIDEPTH ?? 2000) + 50);
+  const overviewStore = scene.add.image(0, -24, MARKET_PLACEHOLDER_ASSETS.storefront)
+    .setDisplaySize(SQUARESIZE * 12, SQUARESIZE * 8)
+    .setAlpha(0.94);
+  const overviewSignBg = scene.add.rectangle(0, -SQUARESIZE * 5.1, SQUARESIZE * 7.2, 34, 0x102f42, 0.86)
+    .setStrokeStyle(2, 0x98e7ff, 0.45);
+  const overviewSign = scene.add.text(0, -SQUARESIZE * 5.1, "MARKET", {
+    fontFamily: "Bungee",
+    fontSize: "17px",
+    color: "#fff9ef",
+    stroke: "#081621",
+    strokeThickness: 4,
+  }).setOrigin(0.5);
+  const overviewHint = scene.add.text(0, SQUARESIZE * 4.7, "Zoom in to shop", {
+    fontFamily: "Bungee",
+    fontSize: "9px",
+    color: "#d3edf9",
+    stroke: "#081621",
+    strokeThickness: 3,
+  }).setOrigin(0.5);
+  overviewLayer.add([overviewStore, overviewSignBg, overviewSign, overviewHint]);
 
-  const ship = scene.add.image(0, 0, "market_ship").setOrigin(0.5).setAngle(angleDeg);
-  container.add(ship);
+  container.add([shell, detailedLayer, overviewLayer]);
+  rebuildOffers();
 
-  // Layout piles on the deck (relative to container center).
-  const pilePositions = [
-    { x: -60, y: -40 },
-    { x:  10, y: -40 },
-    { x:  80, y: -40 },
-    { x: -60, y:  30 },
-    { x:  10, y:  30 },
-    { x:  80, y:  30 },
-  ];
-
-  const hoverMenu = createHoverMenu(scene);
-
-  const pileSprites = [];
-  shipGoods.forEach((good, i) => {
-    const pos = pilePositions[i % pilePositions.length];
-    const spr = scene.add.image(pos.x, pos.y, good.texture).setOrigin(0.5).setScale(1);
-    if (good.kind === "card" && good.card) {
-      spr.setTint(getCardOutlineTint(good.card));
-      spr.setScale(1.15);
-    }
-    spr.setInteractive({ useHandCursor: true });
-
-    good.onSoldOut = () => {
-      spr.disableInteractive();
-      spr.setAlpha(0.32);
-      spr.clearTint();
-    };
-
-    spr.on("pointerover", () => {
-      if (good.kind === "card" && good.soldOut) return;
-
-      hoverMenu._hoveringPile = true;
-
-      const worldX = container.x + spr.x;
-      const worldY = container.y + spr.y;
-
-      hoverMenu.setStateFor({ x: worldX, y: worldY }, good, teamNumber, priceTable);
-      hoverMenu.setVisible(true);
-    });
-
-    spr.on("pointermove", () => {
-      if (!hoverMenu.visible) return;
-      const worldX = container.x + spr.x;
-      const worldY = container.y + spr.y;
-      hoverMenu.x = worldX;
-      hoverMenu.y = worldY - 46;
-      hoverMenu._refreshPreviewPosition?.();
-    });
-
-    spr.on("pointerout", () => {
-      hoverMenu._hoveringPile = false;
-      hoverMenu.maybeHide?.(350);
-    });
-
-    container.add(spr);
-    pileSprites.push(spr);
-  });
-
-  // Tween ship to dock
   scene.tweens.add({
     targets: container,
-    x: endX,
-    y: endY,
-    duration: 900,
-    ease: "Sine.easeOut",
+    alpha: 1,
+    scaleX: { from: 0.96, to: 1 },
+    scaleY: { from: 0.96, to: 1 },
+    duration: 220,
+    ease: "Quad.easeOut",
   });
 
-  // Leave after duration
-  const depart = (onDone) => {
-    hoverMenu.setVisible(false);
-    hoverMenu.hidePreview?.();
+  function applyMode(mode) {
+    currentMode = mode || "detailed";
+    const isOverview = currentMode === "overview";
+    detailedLayer.setVisible(!isOverview);
+    overviewLayer.setVisible(isOverview);
+    hitZones.forEach((zone) => setInteractiveEnabled(zone, !isOverview));
+  }
 
+  applyMode(currentMode);
+
+  const modeTimer = scene.time.addEvent({
+    delay: 250,
+    loop: true,
+    callback: () => {
+      const nextMode = worldMode(scene);
+      if (nextMode !== currentMode) applyMode(nextMode);
+    },
+  });
+
+  const depart = (onDone) => {
+    if (destroyed) {
+      onDone?.();
+      return;
+    }
     scene.tweens.add({
       targets: container,
-      x: leaveX,
-      y: leaveY,
-      duration: 900,
-      ease: "Sine.easeIn",
+      alpha: 0,
+      scaleX: 0.96,
+      scaleY: 0.96,
+      duration: 220,
+      ease: "Quad.easeIn",
       onComplete: () => {
-        shipGoods.forEach(good => good.preview?.destroy?.());
-        hoverMenu.destroy(true);
-        container.destroy(true);
+        handle.destroy();
         onDone?.();
-      }
+      },
     });
   };
 
-  const leaveTimer = scene.time.delayedCall(durationMs, () => depart(), null, scene);
-
-  return {
+  const handle = {
     container,
-    hoverMenu,
-    leaveTimer,
-    depart, // <---
+    durationMs,
+    slotId,
+    get soldIds() {
+      return Array.from(sold);
+    },
+    setMode: applyMode,
+    openPanel: () => {},
+    closePanel: () => {},
+    depart,
     destroy: () => {
-      leaveTimer?.remove(false);
-      shipGoods.forEach(good => good.preview?.destroy?.());
-      hoverMenu?.destroy(true);
-      container?.destroy(true);
-    }
+      if (destroyed) return;
+      destroyed = true;
+      modeTimer?.remove(false);
+      scene.tweens.killTweensOf(container);
+      container.destroy(true);
+    },
   };
+
+  return handle;
 }
 
+// Compatibility exports for older imports while call sites are migrated.
+export const DEFAULT_SUPPLY_PRICES = DEFAULT_MARKET_PRICES;
+export const loadShipMarketAssets = loadParcelMarketAssets;
+export const spawnMarketShip = spawnParcelMarketStorefront;

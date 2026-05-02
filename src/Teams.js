@@ -154,6 +154,10 @@ export class Teams {
         townTowerList: [],
         stateLists: {},
         cardHand: [],
+        cardInventory: {
+          deck: {},
+          consumables: {},
+        },
         townAutomation: this.createTownAutomationState(),
         buildings: [],
         buildingFixTasks: [],

@@ -11,7 +11,10 @@ export class PathRepair {
     const stitched = this.tryStitch(unit, removedPolyIds, navMesh);
     if (stitched) {
       const moved = Player.moveTo(unit, stitched.points);
-      if (!moved) return false;
+      if (!moved) {
+        Player.handlePathInvalidated?.(unit, navMesh, { reason: "navmesh_stitch_move_failed", removedPolyIds });
+        return false;
+      }
       PathRegistry.registerUnitPath(navMesh, unit, stitched.polyIds);
       return true;
     }
@@ -20,11 +23,18 @@ export class PathRepair {
     const repathed = this.fullRepath(unit, navMesh);
     if (repathed) {
       const moved = Player.moveTo(unit, repathed.points);
-      if (!moved) return false;
+      if (!moved) {
+        Player.handlePathInvalidated?.(unit, navMesh, { reason: "navmesh_repath_move_failed", removedPolyIds });
+        return false;
+      }
       PathRegistry.registerUnitPath(navMesh, unit, repathed.polyIds);
       return true;
     }
 
+    Player.handlePathInvalidated?.(unit, navMesh, {
+      reason: "navmesh_repair_failed",
+      removedPolyIds,
+    });
     return false;
   }
 

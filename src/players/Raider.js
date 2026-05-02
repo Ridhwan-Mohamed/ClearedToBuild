@@ -303,34 +303,47 @@ export class Raider {
 
             if (!breachTiles || breachTiles.length === 0) return false;
 
-            // Raider.js — inside beginSiegeForTask(task), right before the for-loop push :contentReference[oaicite:1]{index=1}
             const team0 = Teams.teamLists["0"];
             if (!Array.isArray(team0.siegeTileStates)) team0.siegeTileStates = [];
 
             // ✅ Put “seen” on the TEAM so all raiders share it (global dedupe)
             if (!team0._siegeSeen) team0._siegeSeen = new Set();
 
-            for (const t of breachTiles) {
+            const now = troop.scene?.getSimulationNow?.() ?? troop.scene?.simNowMs ?? troop.scene?.time?.now ?? Date.now();
+            const breachPlanId = `siege-${troop.id ?? "raider"}-${Math.round(now)}`;
+            const queuedTasks = [];
+
+            for (let i = 0; i < breachTiles.length; i++) {
+                const t = breachTiles[i];
                 const key = `${t.x},${t.y}`;
                 if (team0._siegeSeen.has(key)) continue;
                 team0._siegeSeen.add(key);
 
-                team0.siegeTileStates.push({
+                const siegeTask = {
                     x: t.x,
                     y: t.y,
                     duration: 500,
                     assigned: 0,
                     siege: true,
                     type: Raider._tileTypeAt(t.x, t.y) ?? { lenX: 1, lenY: 1, name: "wallTile" },
-                });
+                    breachPlanId,
+                    breachOrder: i,
+                    breachChainLength: breachTiles.length,
+                    eligibleTroopIds: [troop.id],
+                };
+
+                team0.siegeTileStates.push(siegeTask);
+                queuedTasks.push(siegeTask);
             }
 
+            if (!queuedTasks.length) return false;
 
             // Mark the raider as in “siege posture” (no specific tile yet)
-            troop.__postSiegeTask = task;
+            troop._postSiegeTask = task;
+            troop._siegeQueue = queuedTasks.slice(1);
             troop.task = null;
-            Teams.movePlayerState(troop, CONTROL_STATES.SIEGE_MODE);
-            const taskObtained = Manager.assignOneTroopToAction(troop, team0.siegeTileStates, CONTROL_STATES.DESTROY_MODE_T);
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            const taskObtained = Manager.assignTaskToTroop(troop, queuedTasks[0], CONTROL_STATES.DESTROY_MODE_T);
 
             // Let update() pick up a distributed tile via Manager
             return taskObtained;
@@ -353,7 +366,7 @@ export class Raider {
             }
 
             // 2) If unreachable by path, attempt siege breach plan for this POI
-            if (beginSiegeForTask(task)) return true;
+            if (Raider.beginSiegeForTask(troop, task)) return true;
 
             // 3) If no siege plan possible, fall back to roaming
             roamToCenterEnemy();
@@ -495,6 +508,110 @@ export class Raider {
         return null;
     }
 
+    static _releaseSiegeTasks(troop) {
+        const team0 = Teams.teamLists?.["0"];
+        if (!team0) return;
+
+        const release = (task) => {
+            if (!task?.siege) return;
+            Teams.removeFromStateArray("0", "siegeTileStates", task);
+            task.assigned = Math.max(0, Number(task.assigned || 0) - 1);
+            team0._siegeSeen?.delete?.(`${task.x},${task.y}`);
+        };
+
+        release(troop.task);
+        if (Array.isArray(troop._siegeQueue)) {
+            for (const task of troop._siegeQueue) release(task);
+        }
+        troop._siegeQueue = [];
+    }
+
+    static beginSiegeForTask(troop, task) {
+        if (!troop?.active || !task || task.siege) return false;
+
+        const fp = { x: task.x, y: task.y, w: task.type?.lenX ?? 1, h: task.type?.lenY ?? 1 };
+        const gridH = Map.enemyNavGrid?.length ?? 0;
+        const gridW = gridH ? (Map.enemyNavGrid[0]?.length ?? 0) : 0;
+        if (!gridW || !gridH) return false;
+
+        const targets = SiegePlanner.buildPerimeterTargets(fp.x, fp.y, fp.w, fp.h, gridW, gridH);
+        const planner = Raider._ensureSiegePlanner?.();
+        const breachTiles = planner?.planBreach?.(troop.x, troop.y, targets);
+        if (!breachTiles?.length) return false;
+
+        const team0 = Teams.teamLists["0"];
+        if (!Array.isArray(team0.siegeTileStates)) team0.siegeTileStates = [];
+        if (!team0._siegeSeen) team0._siegeSeen = new Set();
+
+        const now = troop.scene?.getSimulationNow?.() ?? troop.scene?.simNowMs ?? troop.scene?.time?.now ?? Date.now();
+        const breachPlanId = `siege-${troop.id ?? "raider"}-${Math.round(now)}`;
+        const queuedTasks = [];
+
+        for (let i = 0; i < breachTiles.length; i++) {
+            const t = breachTiles[i];
+            const key = `${t.x},${t.y}`;
+            if (team0._siegeSeen.has(key)) continue;
+            team0._siegeSeen.add(key);
+
+            const siegeTask = {
+                x: t.x,
+                y: t.y,
+                duration: 500,
+                assigned: 0,
+                siege: true,
+                type: Raider._tileTypeAt(t.x, t.y) ?? { lenX: 1, lenY: 1, name: "wallTile" },
+                breachPlanId,
+                breachOrder: i,
+                breachChainLength: breachTiles.length,
+                eligibleTroopIds: [troop.id],
+            };
+
+            team0.siegeTileStates.push(siegeTask);
+            queuedTasks.push(siegeTask);
+        }
+
+        if (!queuedTasks.length) return false;
+
+        troop._postSiegeTask = task;
+        troop._siegeQueue = queuedTasks.slice(1);
+        troop.task = null;
+        troop.currentPath = [];
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+
+        const taskObtained = Manager.assignTaskToTroop(troop, queuedTasks[0], CONTROL_STATES.DESTROY_MODE_T);
+        if (taskObtained) return true;
+
+        for (const siegeTask of queuedTasks) {
+            Teams.removeFromStateArray("0", "siegeTileStates", siegeTask);
+            team0._siegeSeen.delete(`${siegeTask.x},${siegeTask.y}`);
+        }
+        troop._siegeQueue = [];
+        return false;
+    }
+
+    static handlePathInvalidated(troop) {
+        if (troop?.body?.team !== 0) return false;
+
+        const activeTask = troop.task;
+        if (activeTask?.siege) {
+            const postTask = troop._postSiegeTask;
+            Raider._releaseSiegeTasks(troop);
+            troop.task = null;
+            if (postTask && Raider.beginSiegeForTask(troop, postTask)) return true;
+        } else if (activeTask) {
+            if (Raider.beginSiegeForTask(troop, activeTask)) return true;
+        } else if (troop._postSiegeTask) {
+            const postTask = troop._postSiegeTask;
+            Raider._releaseSiegeTasks(troop);
+            if (Raider.beginSiegeForTask(troop, postTask)) return true;
+        }
+
+        troop.task = null;
+        troop._siegeQueue = [];
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        return false;
+    }
+
     static _tileToWorldCenter(tx, ty) {
         return { x: tx * SQUARESIZE + SQUARESIZE / 2, y: ty * SQUARESIZE + SQUARESIZE / 2 };
     }
@@ -514,7 +631,7 @@ export class Raider {
             next.assigned = next.assigned ?? 0;
 
             // Manager owns state + pathing
-            Manager.assignTaskToTroop(troop, next, CONTROL_STATES.SIEGE_MODE);
+            Manager.assignTaskToTroop(troop, next, CONTROL_STATES.DESTROY_MODE_T);
             return;
         }
 

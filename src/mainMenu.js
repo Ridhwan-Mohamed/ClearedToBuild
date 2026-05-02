@@ -780,7 +780,7 @@ export class MainMenu {
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
         const logoY = centerY - 30;
         const logo = overlayScene.add.image(centerX, logoY, 'logo').setOrigin(0.5).setScale(logoScale);
-        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.8', {
+        const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.9', {
             fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
         }).setOrigin(0,1);
         menu.add([logo, versionText]);

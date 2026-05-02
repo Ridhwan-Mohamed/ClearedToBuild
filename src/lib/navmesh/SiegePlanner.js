@@ -1,8 +1,9 @@
 // SiegePlanner.js
-// Uses enemyNavGrid for movement feasibility AND chooses wall/door tiles to break via 0-1 BFS.
-// - walkable tile (1) cost = 0
-// - breachable tile (wall/door) cost = 1
-// - hard blocked (buildings etc.) cost = INF (ignored)
+// Uses RegionSystem's cached breach graph to choose wall/door chains to break.
+// Thick walls are represented as weighted region edges whose cost is the number
+// of wall tiles in a chain through a connected wall component. RegionSystem can
+// expose many breach options for the same region pair; the planner keeps wall
+// break count primary and uses tile distance only as a tie-breaker.
 
 export class SiegePlanner {
   constructor(opts) {
@@ -19,12 +20,12 @@ export class SiegePlanner {
   // targets = array of {x,y} grid tiles (usually POI perimeter tiles)
   planBreach(startWorldX, startWorldY, targets) {
     const rs = this.regionSystem;
-    if (!rs?.getRegionIdForWorldPoint || !rs?.borderWalls || !rs?.regionGraph) {
-      // Fallback to old behavior if RegionSystem not wired (keeps game from breaking)
-      return this._planBreach01BFS(startWorldX, startWorldY, targets);
+    if (!rs?.getRegionIdForWorldPoint || !rs?.regionGraph) {
+      return null;
     }
 
     const key = (a, b) => `${Math.min(a, b)}|${Math.max(a, b)}`;
+    const startTile = this._worldToTile(startWorldX, startWorldY);
 
     const worldCenterOfTile = (tx, ty) => ({
       x: tx * this.squareSize + this.squareSize / 2,
@@ -71,86 +72,71 @@ export class SiegePlanner {
     // If already in a target region: no breach needed
     if (targetRegions.has(startRid)) return [];
 
-    // ---- BFS over regionGraph (each edge = 1 breach) ----
-    const q = [startRid];
-    const prev = new Map(); // region -> prevRegion
-    prev.set(startRid, null);
+    // ---- Dijkstra over weighted breach edges ----
+    const open = [startRid];
+    const dist = new Map([[startRid, 0]]);
+    const prev = new Map([[startRid, null]]);
+    const prevEdge = new Map();
+    const closed = new Set();
 
     let goal = null;
-    while (q.length) {
-      const r = q.shift();
+    while (open.length) {
+      open.sort((a, b) => (dist.get(a) ?? Infinity) - (dist.get(b) ?? Infinity));
+      const r = open.shift();
+      if (closed.has(r)) continue;
+      closed.add(r);
+
       if (targetRegions.has(r)) { goal = r; break; }
 
       const neigh = rs.regionGraph.get(r);
       if (!neigh) continue;
 
       for (const n of neigh) {
-        if (prev.has(n)) continue;
+        if (closed.has(n)) continue;
+        const edge = this._chooseBreachOption(rs, key(r, n), r, n, startTile, targets);
+        if (!edge?.breachTiles?.length) continue;
+
+        const cost = Math.max(1, Number(edge.planCost || edge.cost || edge.breachTiles.length || 1));
+        const nextDist = (dist.get(r) ?? Infinity) + cost;
+        if (nextDist >= (dist.get(n) ?? Infinity)) continue;
+
+        dist.set(n, nextDist);
         prev.set(n, r);
-        q.push(n);
+        prevEdge.set(n, { edge, fromRegion: r, toRegion: n });
+        open.push(n);
       }
     }
 
     if (goal == null) {
-      // No region-path to any target region (means borderWalls/graph not indexed properly)
       return null;
     }
 
-    // Reconstruct region path: start -> ... -> goal
-    const regionPath = [];
-    for (let cur = goal; cur != null; cur = prev.get(cur)) regionPath.push(cur);
-    regionPath.reverse();
+    // Reconstruct weighted wall-chain edges: start region -> ... -> goal region.
+    const edgePath = [];
+    for (let cur = goal; cur !== startRid; cur = prev.get(cur)) {
+      const step = prevEdge.get(cur);
+      if (!step) return null;
+      edgePath.push(step);
+    }
+    edgePath.reverse();
 
-    // For each region-to-region hop, choose ONE wall tile on that border (closest greedy)
     const breachTiles = [];
-    let lastWX = startWorldX;
-    let lastWY = startWorldY;
+    for (const step of edgePath) {
+      const edge = step.edge;
+      const forward =
+        step.fromRegion === edge.fromRegion &&
+        step.toRegion === edge.toRegion;
+      const tiles = forward ? edge.breachTiles : [...edge.breachTiles].reverse();
 
-    for (let i = 0; i + 1 < regionPath.length; i++) {
-      const a = regionPath[i];
-      const b = regionPath[i + 1];
-      const k = key(a, b);
-
-      const set = rs.borderWalls.get(k);
-      if (!set || set.size === 0) {
-        // Graph says edge exists but no tiles indexed => indexing bug upstream
-        return null;
+      for (const tile of tiles) {
+        if (!tile) continue;
+        if (!this.isBreachableTile(tile.x, tile.y)) continue;
+        if (this.isHardBlockedTile(tile.x, tile.y)) continue;
+        breachTiles.push({ x: tile.x, y: tile.y });
       }
-
-      // Pick the best wall tile on this border (nearest to our current "breach front")
-      let best = null;
-      let bestD = Infinity;
-
-      for (const s of set) {
-        const comma = s.indexOf(",");
-        if (comma === -1) continue;
-        const tx = parseInt(s.slice(0, comma), 10);
-        const ty = parseInt(s.slice(comma + 1), 10);
-        if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
-
-        // Only consider actually breachable tiles (walls/doors)
-        if (!this.isBreachableTile(tx, ty)) continue;
-        if (this.isHardBlockedTile(tx, ty)) continue;
-
-        const w = worldCenterOfTile(tx, ty);
-        const d = (w.x - lastWX) * (w.x - lastWX) + (w.y - lastWY) * (w.y - lastWY);
-        if (d < bestD) {
-          bestD = d;
-          best = { x: tx, y: ty };
-        }
-      }
-
-      if (!best) return null;
-
-      breachTiles.push(best);
-
-      // advance the "front" to that breach tile
-      const bw = worldCenterOfTile(best.x, best.y);
-      lastWX = bw.x;
-      lastWY = bw.y;
     }
 
-    return this._uniqTiles(breachTiles);
+    return breachTiles.length ? this._uniqTiles(breachTiles) : null;
   }
 
   // Build POI perimeter target tiles (grid coords) for a footprint rectangle (x,y,lenX,lenY).
@@ -173,6 +159,63 @@ export class SiegePlanner {
       x: Math.floor(wx / this.squareSize),
       y: Math.floor(wy / this.squareSize),
     };
+  }
+
+  _orientedTilesForOption(option, fromRegion, toRegion) {
+    if (!option?.breachTiles?.length) return null;
+    const forward =
+      fromRegion === option.fromRegion &&
+      toRegion === option.toRegion;
+    return forward ? option.breachTiles : [...option.breachTiles].reverse();
+  }
+
+  _tileManhattan(a, b) {
+    if (!a || !b) return 0;
+    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  }
+
+  _nearestTargetTileDistance(tile, targets) {
+    if (!tile || !Array.isArray(targets) || !targets.length) return 0;
+    let best = Infinity;
+    for (const target of targets) {
+      const d = this._tileManhattan(tile, target);
+      if (d < best) best = d;
+    }
+    return Number.isFinite(best) ? best : 0;
+  }
+
+  _chooseBreachOption(regionSystem, edgeKey, fromRegion, toRegion, startTile, targets) {
+    const options = regionSystem.breachEdgeOptions?.get?.(edgeKey) ?? [];
+    const fallback = regionSystem.breachEdges?.get?.(edgeKey);
+    const candidates = options.length ? options : (fallback ? [fallback] : []);
+    if (!candidates.length) return null;
+
+    let best = null;
+    let bestScore = Infinity;
+    for (const option of candidates) {
+      const tiles = this._orientedTilesForOption(option, fromRegion, toRegion);
+      if (!tiles?.length) continue;
+
+      const first = tiles[0];
+      const last = tiles[tiles.length - 1];
+      const wallCost = Math.max(1, Number(option.cost || tiles.length || 1));
+      const tieBreakDistance =
+        this._tileManhattan(startTile, first) +
+        this._nearestTargetTileDistance(last, targets);
+      const score = wallCost + Math.min(999, tieBreakDistance) * 0.001;
+
+      if (score >= bestScore) continue;
+      bestScore = score;
+      best = {
+        ...option,
+        fromRegion,
+        toRegion,
+        breachTiles: tiles,
+        planCost: score,
+      };
+    }
+
+    return best;
   }
 
   _inBounds(x, y) {

@@ -22,7 +22,24 @@ export class Manager {
 
     static _orderedTasksForTroop(troop, taskList, state) {
         if (!Array.isArray(taskList) || taskList.length <= 1) return taskList;
+        if (state === CONTROL_STATES.DESTROY_MODE_T) {
+            const hasBreachOrder = taskList.some(task => task?.breachPlanId);
+            if (hasBreachOrder) {
+                return [...taskList].sort((a, b) => {
+                    const aPlan = a?.breachPlanId ?? "";
+                    const bPlan = b?.breachPlanId ?? "";
+                    if (aPlan && bPlan && aPlan === bPlan) {
+                        return Number(a?.breachOrder ?? 0) - Number(b?.breachOrder ?? 0);
+                    }
+                    if (aPlan !== bPlan) return aPlan ? -1 : 1;
+                    return 0;
+                });
+            }
+        }
         if (state !== CONTROL_STATES.BUILD_MODE_T) return taskList;
+
+        const wallOrdered = buildingManager.orderBuildTileTasksForTroop?.(troop, taskList);
+        if (Array.isArray(wallOrdered)) return wallOrdered;
 
         const originX = Number(troop?.body?.x ?? troop?.x);
         const originY = Number(troop?.body?.y ?? troop?.y);
@@ -59,6 +76,19 @@ export class Manager {
     static _troopEligibleForTask(troop, task, state) {
         if (!troop || !task) return false;
         if (!this._troopEligibleForState(troop, state)) return false;
+        if (
+            (state === CONTROL_STATES.BUILD_MODE_T || state === CONTROL_STATES.BUILD_MODE_B) &&
+            buildingManager.isQueuedBuildTaskDeferred?.(task, troop)
+        ) {
+            return false;
+        }
+        if (
+            state === CONTROL_STATES.FARM_MODE &&
+            buildingManager.isFarmTaskBlockedByBuildReservation?.(task, troop.body?.team)
+        ) {
+            task.canceled = true;
+            return false;
+        }
         if (Array.isArray(task.eligibleTroopIds) && task.eligibleTroopIds.length) {
             return task.eligibleTroopIds.includes(troop.id);
         }
@@ -103,7 +133,7 @@ export class Manager {
 
     static _resolveApproachTileForTask(troop, task, state) {
         if (state == CONTROL_STATES.BUILD_MODE_T || state == CONTROL_STATES.DESTROY_MODE_T) {
-            return buildingManager.findBuildApproachTile(task.x, task.y, troop);
+            return buildingManager.findBuildApproachTile(task.x, task.y, troop, task);
         }
         if (!this.blockType(state)) {
             return null;
@@ -159,6 +189,7 @@ export class Manager {
                         troop.destX = approachTile.tx;
                         troop.destY = approachTile.ty;
                         this._setTaskMeta(troop, task, state, arrayKey);
+                        if (approachTile.polyIds?.length) troop.__pendingPolyIds = approachTile.polyIds;
                         Player.moveTo(troop, approachTile.path)
                         break;
                     }
@@ -169,25 +200,15 @@ export class Manager {
                     continue;
                 }else {
                     if(this.tooManyAssigned(task, state)) continue;
+                    const path = Player.pathTo(troop, task.x, task.y, true);
+                    if (!path?.length) continue;
                     if(force) Player.handleStateIntteruptStart(troop)
                     Teams.movePlayerState(troop, state)
                     troop.roam = false;
                     task.assigned += 1;
                     troop.task = task
                     this._setTaskMeta(troop, task, state, arrayKey);
-                    let troopX = Math.floor(troop.body.x/SQUARESIZE);
-                    let troopY = Math.floor(troop.body.y/SQUARESIZE);
-                    if(!navGrid[troopX][troopY]){
-                        let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                        if (newX === -1) {
-                            console.log("No valid start tile nearby");
-                        } else {
-                            troopX = newX;
-                            troopY = newY;
-                            console.log("New valid tile:", newX, newY);
-                        }
-                    }
-                    Player.moveTo(troop, navMesh.findPath({ x: troopX*SQUARESIZE, y: troopY*SQUARESIZE }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+                    Player.moveTo(troop, path);
                     break;
                 }
             }
@@ -222,6 +243,7 @@ export class Manager {
                     troop.destX = approachTile.tx;
                     troop.destY = approachTile.ty;
                     this._setTaskMeta(troop, task, state, arrayKey);
+                    if (approachTile.polyIds?.length) troop.__pendingPolyIds = approachTile.polyIds;
                     Player.moveTo(troop, approachTile.path)
                     return true;
                 }
@@ -229,28 +251,14 @@ export class Manager {
                 return this._assignTrackTargetTask(troop, taskList, false);
             }else{
                 if(this.tooManyAssigned(task, state)) continue;
+                const path = Player.pathTo(troop, task.x, task.y, true);
+                if (!path?.length) continue;
                 Teams.movePlayerState(troop, state)
                 troop.roam = false;
                 task.assigned += 1;
                 troop.task = task
                 this._setTaskMeta(troop, task, state, arrayKey);
-                let troopX = Math.floor(troop.body.x/SQUARESIZE);
-                let troopY = Math.floor(troop.body.y/SQUARESIZE);
-                if(!navGrid[troopX][troopY]){
-                    let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                    if (newX === -1) {
-                        console.log("No valid start tile nearby");
-                        return false;
-                    } else {
-                        troopX = newX*SQUARESIZE+SQUARESIZE/2;
-                        troopY = newY*SQUARESIZE+SQUARESIZE/2;
-                        console.log("New valid tile:", newX, newY);
-                    }
-                }else{
-                    troopX = troop.x;
-                    troopY = troop.y
-                }
-                Player.moveTo(troop, navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+                Player.moveTo(troop, path);
                 return true;
             }
         }
@@ -285,6 +293,7 @@ export class Manager {
                 troop.destX = approachTile.tx;
                 troop.destY = approachTile.ty;
                 this._setTaskMeta(troop, task, state, null);
+                if (approachTile.polyIds?.length) troop.__pendingPolyIds = approachTile.polyIds;
                 Player.moveTo(troop, approachTile.path)
                 return true;
             }
@@ -292,28 +301,14 @@ export class Manager {
             return this._assignTrackTargetTask(troop, [task], false);
         }else{
             if(this.tooManyAssigned(task, state)) return;
+            const path = Player.pathTo(troop, task.x, task.y, true);
+            if (!path?.length) return false;
             Teams.movePlayerState(troop, state)
             troop.roam = false;
             task.assigned += 1;
             troop.task = task
             this._setTaskMeta(troop, task, state, null);
-            let troopX = Math.floor(troop.body.x/SQUARESIZE);
-            let troopY = Math.floor(troop.body.y/SQUARESIZE);
-            if(!navGrid[troopX][troopY]){
-                let [newX, newY] = Player.findBestStartPos(troop, troopX, troopY);
-                if (newX === -1) {
-                    console.log("No valid start tile nearby");
-                    return false;
-                } else {
-                    troopX = newX*SQUARESIZE+SQUARESIZE/2;
-                    troopY = newY*SQUARESIZE+SQUARESIZE/2;
-                    console.log("New valid tile:", newX, newY);
-                }
-            }else{
-                troopX = troop.x;
-                troopY = troop.y
-            }
-            Player.moveTo(troop, navMesh.findPath({ x: troopX, y: troopY }, { x: task.x*SQUARESIZE+SQUARESIZE/2, y: task.y*SQUARESIZE+SQUARESIZE/2 }));
+            Player.moveTo(troop, path);
             return true;
         }
         if(!Player.playerAvailible(troop)) Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
@@ -326,10 +321,15 @@ export class Manager {
         if(troop.task && troop.task.hasOwnProperty('duration') && troop.task.duration <= 0){
             switch (troop.state) {
                 case CONTROL_STATES.BUILD_MODE_B:
-                    Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].blockBuildingStates, CONTROL_STATES.BUILD_MODE_B)
-                    break;
                 case CONTROL_STATES.DESTROY_MODE:
-                    Manager.assignOneTroopToAction(troop, Teams.teamLists[`${troop.body.team}`].destroyStates, CONTROL_STATES.DESTROY_MODE)
+                    if (troop.timer) {
+                        troop.timer.remove(false);
+                        troop.timer = null;
+                    }
+                    troop.task = null;
+                    troop.body?.setVelocity?.(0, 0);
+                    troop.play?.(troop.idle);
+                    Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
                     break;
                 default:
                     break;

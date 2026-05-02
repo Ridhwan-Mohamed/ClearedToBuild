@@ -47,10 +47,10 @@ const CONTRACT_DEFS = {
   MARKET: {
     emoji: "🏪",
     title: "Market Contract",
-    color: 0x92400e,
+    color: 0x14384c,
     lines: () => [
-      "Temporary traveling market.",
-      "Ship docks at the parcel.",
+      "Temporary parcel storefront.",
+      "Sells bailout cards only.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("MARKET"))}`,
     ],

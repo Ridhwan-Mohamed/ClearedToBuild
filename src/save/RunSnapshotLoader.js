@@ -15,6 +15,7 @@ import { validateRunSnapshot } from "./saveSchema.js";
 import { Scheduler } from "../ai/scheduler/Scheduler.js";
 import { spawnNorthFort } from "../parcel_system/FortRaidParcel.js";
 import { buildingManager } from "../Manager/buildingManager.js";
+import { restoreCardInventorySnapshot } from "../Cards/CardInventory.js";
 
 function cloneSimple(value, fallback) {
   if (value == null) return fallback;
@@ -200,6 +201,7 @@ function restoreTeamSnapshots(snapshot) {
     team.TeamFarmSpots = assignPlain(null, saved.TeamFarmSpots, []);
     team.townAutomation = assignPlain(null, saved.townAutomation, {});
     team.cardHand = (saved.cardIds || []).map((id) => CARD_REGISTRY.get(id)).filter(Boolean);
+    team.cardInventory = restoreCardInventorySnapshot(saved.cardInventory);
   }
 }
 

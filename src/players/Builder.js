@@ -23,7 +23,7 @@ import builderSwimSidewards from 'url:../assets/players/builder/builder_swim_sid
 
 export class Builder {
 
-    static speed = 80;
+    static speed = 85;
     static stamina = 0.01;
 
     static preload(scene) {

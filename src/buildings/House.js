@@ -388,15 +388,19 @@ export class House {
 
     shakeAndFlash() {
         if (!this.sprite) return;
-        const targets = [this.sprite];
-        targets.push(...getStructuralHealthBarTargets(this));
+        const baseAngle = this.sprite.angle || 0;
+        this._damageShakeTween?.stop?.();
 
-        this.scene.tweens.add({
-            targets,
-            x: "+=3",
+        this._damageShakeTween = this.scene.tweens.add({
+            targets: this.sprite,
+            angle: baseAngle + 2,
             yoyo: true,
             duration: 40,
-            repeat: 2
+            repeat: 2,
+            onComplete: () => {
+                if (this.sprite) this.sprite.angle = baseAngle;
+                this._damageShakeTween = null;
+            }
         });
 
         this.sprite.setTint(0xff6666);

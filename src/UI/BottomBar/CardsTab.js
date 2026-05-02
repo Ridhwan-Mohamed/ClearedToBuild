@@ -1,56 +1,168 @@
 import Phaser from "phaser";
-import { getCardHand } from "../Powerups";
+import { UIDEPTH, showAlert } from "../../constants";
+import {
+  getCardInventoryEntries,
+  removeCardFromInventory,
+} from "../../Cards/CardInventory";
+import {
+  MARKET_PLACEHOLDER_ASSETS,
+  loadMarketCardPlaceholderAssets,
+} from "../../Cards/MarketCards";
 import { getCardOutlineTint } from "../CardPreview";
+import { getCardHand } from "../Powerups";
+import {
+  getMarketCardUseController,
+  useConsumableCard,
+} from "../MarketCardUseController";
+import { AudioManager } from "../../Manager/AudioManager";
 import {
   BOTTOM_BAR_THEME,
   makeGlassRoundRect,
   mixColor,
 } from "./BottomBarTheme";
 
-const CARD_W = 196;
-const MIN_CARD_H = 94;
-const CARD_GAP = 12;
-const TAB_H = 120;
-const STRIP_H = 98;
-const TAB_BASE_DEPTH = 51;
+const TAB_BASE_DEPTH = UIDEPTH + 42;
 const MIN_TAB_W = 420;
+const CARD_W = 272;
+const CARD_H = 156;
+const CARD_GAP = 18;
+const VIEWPORT_H = CARD_H + 18;
+
+const TARGETED_STORE_ACTIVATIONS = new Set([
+  "auto_wall",
+  "chain_zapper",
+  "meteor_drop",
+  "decoy_beacon",
+  "fortify_patch",
+  "shock_mine",
+]);
+
+const MODES = Object.freeze({
+  deck: {
+    key: "deck",
+    label: "Deck Cards",
+    accent: 0x7bd9ff,
+    asset: MARKET_PLACEHOLDER_ASSETS.deckTab,
+    emptyTitle: "NO DECK CARDS",
+  },
+  consumables: {
+    key: "consumables",
+    label: "Consumables",
+    accent: 0x7cffb2,
+    asset: MARKET_PLACEHOLDER_ASSETS.consumablesTab,
+    emptyTitle: "NO CONSUMABLES",
+  },
+});
+
+function makeText(scene, x, y, text, style = {}) {
+  return scene.add.text(x, y, text, {
+    fontFamily: "Bungee",
+    fontSize: style.fontSize ?? "10px",
+    color: style.color ?? BOTTOM_BAR_THEME.text,
+    stroke: style.stroke ?? "#081621",
+    strokeThickness: style.strokeThickness ?? 2,
+    align: style.align ?? "left",
+    wordWrap: style.wordWrap,
+  }).setOrigin(style.originX ?? 0, style.originY ?? 0.5);
+}
+
+function applyToggleVisual(bg, text, selected, accent, hovered = false) {
+  bg.setFillStyle(
+    selected ? mixColor(accent, 0xffffff, 0.12) : mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, hovered ? 0.12 : 0.06),
+    selected ? 0.94 : hovered ? 0.9 : 0.82
+  );
+  bg.setStrokeStyle(selected ? 2 : 1.5, selected ? accent : mixColor(accent, 0x98e7ff, 0.35), selected ? 0.52 : 0.16);
+  text.setColor(selected ? "#fff9ef" : BOTTOM_BAR_THEME.textSoft);
+}
+
+function makePillButton(scene, x, y, w, h, label, {
+  accent = 0x98e7ff,
+  fill = 0x17384d,
+  onClick = null,
+  disabled = false,
+} = {}) {
+  const root = scene.add.container(x, y);
+  const bg = makeGlassRoundRect(scene, w, h, 9, {
+    fill,
+    alpha: disabled ? 0.28 : 0.82,
+    stroke: accent,
+    strokeAlpha: disabled ? 0.18 : 0.42,
+    strokeWidth: 1.5,
+  });
+  const text = makeText(scene, 0, 0, label, {
+    fontSize: "8px",
+    color: disabled ? "#7c8d96" : "#fff9ef",
+    originX: 0.5,
+    originY: 0.5,
+  });
+  const hit = scene.add.zone(0, 0, w, h).setInteractive({ useHandCursor: !disabled });
+
+  hit.on("pointerover", () => {
+    if (disabled) return;
+    AudioManager.playUiHover?.();
+    root.setScale(1.03);
+  });
+  hit.on("pointerout", () => root.setScale(1));
+  hit.on("pointerdown", (_pointer, _lx, _ly, event) => {
+    event?.stopPropagation?.();
+    if (disabled) return;
+    onClick?.();
+  });
+
+  root.add([bg, text, hit]);
+  return root;
+}
 
 export default class CardsTab {
   constructor(scene, teamNumber = 1) {
     this.scene = scene;
     this.teamNumber = String(teamNumber);
+    this.mode = "deck";
+    this.pendingUseId = null;
+    this.armedCardId = null;
     this._cardRefs = [];
-    this._onWheel = null;
+    this._toggles = {};
+    this._scrollX = 0;
+    this._contentW = 0;
+    this._dragging = false;
+    this._dragStartX = 0;
+    this._dragStartScrollX = 0;
+
+    loadMarketCardPlaceholderAssets(scene);
+
+    this.view = scene.add.container(0, 0)
+      .setDepth(TAB_BASE_DEPTH)
+      .setScrollFactor(0);
+
     this._onResize = () => {
-      if (!this.view) return;
       this.buildShell();
       this.rebuild();
     };
+    this._onCardsUpdated = () => {
+      if (this.scene.uiBottomBar?.currentPage === "cards") this.rebuild();
+    };
+    this._onWheel = (pointer, _gameObjects, dx, dy) => this._handleWheel(pointer, dx, dy);
+    this._onPointerMove = (pointer) => this._handlePointerMove(pointer);
+    this._onPointerUp = () => this._stopDrag();
 
-    this.view = scene.rexUI.add.sizer({
-      orientation: "y",
-      width: this.getTabWidth(),
-      height: TAB_H,
-      space: { left: 8, right: 8, top: 4, bottom: 2, item: 4 },
-    }).setDepth(TAB_BASE_DEPTH);
+    this.scene.scale.on("resize", this._onResize);
+    this.scene.events.on("cards:updated", this._onCardsUpdated);
+    this.scene.input.on("wheel", this._onWheel);
+    this.scene.input.on("pointermove", this._onPointerMove);
+    this.scene.input.on("pointerup", this._onPointerUp);
 
     this.buildShell();
-    this.bindScrollInput();
-    this.scene.scale.on("resize", this._onResize);
     this.rebuild();
   }
 
   destroy() {
     this.scene.scale.off("resize", this._onResize);
-    if (this._onWheel) {
-      this.scene.input.off("wheel", this._onWheel);
-      this._onWheel = null;
-    }
+    this.scene.events.off("cards:updated", this._onCardsUpdated);
+    this.scene.input.off("wheel", this._onWheel);
+    this.scene.input.off("pointermove", this._onPointerMove);
+    this.scene.input.off("pointerup", this._onPointerUp);
     this.view?.destroy(true);
     this.view = null;
-    this.listBody = null;
-    this.scroll = null;
-    this._cardRefs = [];
   }
 
   onShow() {
@@ -67,320 +179,409 @@ export default class CardsTab {
     return Math.max(MIN_TAB_W, this.scene.scale.width - 20);
   }
 
-  getStripWidth() {
-    return Math.max(MIN_TAB_W - 16, this.scene.scale.width - 36);
-  }
-
-  getCardHeight() {
-    const boundsHeight = this.scroll?.getBounds?.()?.height;
-    const scrollHeight = boundsHeight ?? this.scroll?.height ?? STRIP_H;
-    return Math.max(MIN_CARD_H, Math.floor(scrollHeight - 8));
-  }
-
   buildShell() {
     const scene = this.scene;
-    const tabWidth = this.getTabWidth();
-    const stripWidth = this.getStripWidth();
+    const width = this.getTabWidth();
+    const topY = -104;
+    const viewportW = Math.max(320, width - 32);
+    const viewportX = 0;
+    const viewportY = topY + 40;
 
     this.view.removeAll(true);
-    this.view.setMinSize(tabWidth, TAB_H);
-    this.view.addBackground(makeGlassRoundRect(scene, 0, 0, 18, {
+    this._toggles = {};
+
+    const shell = makeGlassRoundRect(scene, width, 222, 18, {
       fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
       alpha: 0.78,
       stroke: 0x98e7ff,
       strokeAlpha: 0.14,
-    }));
+    }).setPosition(0, 5);
+    this.view.add(shell);
 
-    const titleLabel = scene.rexUI.add.label({
-      background: makeGlassRoundRect(scene, 0, 0, 12, {
-        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.16),
-        alpha: 0.9,
-        stroke: 0x9fe7ff,
-        strokeAlpha: 0.24,
-      }),
-      text: scene.add.text(0, 0, "CARD DECK", {
-        fontFamily: "Bungee",
-        fontSize: "13px",
-        color: BOTTOM_BAR_THEME.text,
-        stroke: "#081621",
-        strokeThickness: 3,
-        letterSpacing: 0.6,
-      }),
-      space: { left: 14, right: 14, top: 6, bottom: 6 },
+    const titleBg = makeGlassRoundRect(scene, 150, 28, 12, {
+      fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.16),
+      alpha: 0.9,
+      stroke: 0x9fe7ff,
+      strokeAlpha: 0.24,
+    }).setPosition(-width / 2 + 86, topY + 18);
+    const title = makeText(scene, -width / 2 + 86, topY + 18, "CARD INVENTORY", {
+      fontSize: "12px",
+      originX: 0.5,
+      originY: 0.5,
     });
 
-    this.countText = scene.add.text(0, 0, "0 CARDS", {
-      fontFamily: "Bungee",
-      fontSize: "11px",
+    let toggleX = -width / 2 + 242;
+    Object.values(MODES).forEach((mode) => {
+      const bg = makeGlassRoundRect(scene, 132, 28, 12, {
+        fill: BOTTOM_BAR_THEME.tabIdleFill,
+        alpha: BOTTOM_BAR_THEME.tabIdleAlpha,
+        stroke: 0x98e7ff,
+        strokeAlpha: 0.18,
+      }).setPosition(toggleX, topY + 18);
+      const icon = scene.textures.exists(mode.asset)
+        ? scene.add.image(toggleX - 48, topY + 18, mode.asset).setDisplaySize(16, 16)
+        : null;
+      const text = makeText(scene, toggleX + (icon ? 8 : 0), topY + 18, mode.label, {
+        fontSize: "9px",
+        color: BOTTOM_BAR_THEME.textSoft,
+        originX: 0.5,
+        originY: 0.5,
+      });
+      const hit = scene.add.zone(toggleX, topY + 18, 132, 28).setInteractive({ useHandCursor: true });
+      hit.on("pointerover", () => {
+        this._toggles[mode.key].hovered = true;
+        AudioManager.playUiHover?.();
+        this._applyToggleVisuals();
+      });
+      hit.on("pointerout", () => {
+        this._toggles[mode.key].hovered = false;
+        this._applyToggleVisuals();
+      });
+      hit.on("pointerdown", (_pointer, _lx, _ly, event) => {
+        event?.stopPropagation?.();
+        this.setMode(mode.key);
+      });
+      this._toggles[mode.key] = { bg, text, mode, hovered: false };
+      this.view.add([bg]);
+      if (icon) this.view.add(icon);
+      this.view.add([text, hit]);
+      toggleX += 142;
+    });
+
+    this.countBg = makeGlassRoundRect(scene, 96, 24, 10, {
+      fill: mixColor(0xffd47c, 0xffffff, 0.14),
+      alpha: 0.92,
+      stroke: 0xfff1b3,
+      strokeAlpha: 0.26,
+    }).setPosition(width / 2 - 62, topY + 18);
+    this.countText = makeText(scene, width / 2 - 62, topY + 18, "0 CARDS", {
+      fontSize: "10px",
       color: "#000000",
       stroke: "#ffffff",
       strokeThickness: 1,
-    }).setAlpha(1);
-    this.countText.setColor("#000000");
+      originX: 0.5,
+      originY: 0.5,
+    });
     this.countText.setTint(0x000000);
 
-    const countLabel = scene.rexUI.add.label({
-      background: makeGlassRoundRect(scene, 0, 0, 11, {
-        fill: mixColor(0xffd47c, 0xffffff, 0.14),
-        alpha: 0.92,
-        stroke: 0xfff1b3,
-        strokeAlpha: 0.26,
-      }),
-      text: this.countText,
-      space: { left: 12, right: 12, top: 4, bottom: 4 },
-    });
-    this.countText.setDepth(this.countText.depth + 1 || 10);
-    const header = scene.rexUI.add.sizer({
-      orientation: "x",
-      space: { left: 4, right: 4, item: 8 },
-    });
-    header.add(titleLabel, { proportion: 0, expand: false, align: "left" });
-    header.add(scene.add.zone(0, 0, 1, 1), { proportion: 1, expand: true });
-    header.add(countLabel, { proportion: 0, expand: false, align: "right" });
-
-    this.listBody = scene.rexUI.add.sizer({
-      orientation: "x",
-      space: { left: 6, right: 6, top: 1, bottom: 1, item: CARD_GAP },
+    const viewportFrame = makeGlassRoundRect(scene, viewportW, VIEWPORT_H, 18, {
+      fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
+      alpha: 0.76,
+      stroke: 0x98e7ff,
+      strokeAlpha: 0.16,
+      strokeWidth: 1.5,
+    }).setOrigin(0.5, 0).setPosition(viewportX, viewportY);
+    const viewportGlow = scene.add.rectangle(viewportX, viewportY + 16, viewportW - 24, 18, 0xffffff, 0.08)
+      .setOrigin(0.5, 0);
+    const viewportHit = scene.add.rectangle(viewportX, viewportY, viewportW, VIEWPORT_H, 0x000000, 0.001)
+      .setOrigin(0.5, 0)
+      .setInteractive({ useHandCursor: true });
+    viewportHit.on("pointerdown", (pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      this._dragging = true;
+      this._dragStartX = pointer.x;
+      this._dragStartScrollX = this._scrollX;
     });
 
-    this.scroll = scene.rexUI.add.scrollablePanel({
-      width: stripWidth,
-      height: STRIP_H,
-      scrollMode: 1,
-      scrollDetectionMode: "rectBounds",
-      background: makeGlassRoundRect(scene, 0, 0, 18, {
-        fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
-        alpha: 0.76,
-        stroke: 0x98e7ff,
-        strokeAlpha: 0.16,
-      }),
-      panel: { child: this.listBody, mask: { padding: 1 } },
-      scrollerX: {
-        pointerOutRelease: true,
-        rectBoundsInteractive: true,
-      },
-      space: { left: 6, right: 6, top: 2, bottom: 2, panel: 8 },
-    }).setDepth(TAB_BASE_DEPTH);
-
-    this.view.add(header, { proportion: 0, expand: true });
-    this.view.add(this.scroll, { proportion: 1, expand: true });
-    this.view.layout();
-  }
-
-  bindScrollInput() {
-    if (this._onWheel) return;
-
-    this._onWheel = (pointer, _gameObjects, dx, dy) => {
-      if (this.scene.uiBottomBar?.currentPage !== "cards") return;
-      if (!this.scene.uiBottomBar?.expanded) return;
-      if (!this.scroll?.isOverflowX) return;
-      if (!this.isPointerOverScroll(pointer)) return;
-
-      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      if (Math.abs(dominantDelta) < 0.1) return;
-
-      this.scroll.addChildOX(-dominantDelta * 0.8, true);
-      this.scene.input.stopPropagation();
+    this._cardsViewport = {
+      left: viewportX - viewportW / 2,
+      top: viewportY,
+      w: viewportW,
+      h: VIEWPORT_H,
     };
+    this._cardsViewportHit = viewportHit;
+    this._cardsContainer = scene.add.container(this._cardsViewport.left, viewportY + 9);
 
-    this.scene.input.on("wheel", this._onWheel);
+    this.view.add([titleBg, title, this.countBg, this.countText, viewportFrame, viewportGlow, viewportHit, this._cardsContainer]);
+    this._applyToggleVisuals();
   }
 
-  isPointerOverScroll(pointer) {
-    if (!pointer || !this.scroll?.getBounds) return false;
-    const bounds = this.scroll.getBounds();
-    return Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
+  setMode(mode) {
+    if (!MODES[mode] || this.mode === mode) return;
+    this.mode = mode;
+    this.pendingUseId = null;
+    this._scrollX = 0;
+    AudioManager.playBottomBarClick?.();
+    this.rebuild();
   }
 
   rebuild() {
-    if (!this.listBody || !this.scroll) return;
-    this.view.layout();
+    if (!this._cardsContainer) return;
+    const { entries, total } = this._getEntriesForMode();
 
-    const hand = getCardHand(this.teamNumber) || [];
-    const cardHeight = this.getCardHeight();
-
-    this.listBody.removeAll(true);
-    this.listBody.setMinSize(0, cardHeight);
+    this._cardsContainer.removeAll(true);
     this._cardRefs = [];
-    this.countText?.setText(`${hand.length} ${hand.length === 1 ? "CARD" : "CARDS"}`);
-    this.countText?.setColor?.("#000000");
-    this.countText?.setTint?.(0x000000);
-    this.countText?.setAlpha?.(1);
+    this.countText?.setText(`${total} ${total === 1 ? "CARD" : "CARDS"}`);
+    this.countText?.setTint(0x000000);
+    this._applyToggleVisuals();
 
-    if (hand.length === 0) {
-      this.listBody.add(this.createEmptyState(cardHeight), { proportion: 0, expand: true, align: "center" });
-      this.scroll.setChildOX?.(0, true);
-      this.scroll.layout();
-      this.view.layout();
+    if (!entries.length) {
+      this._contentW = this._cardsViewport.w;
+      this._cardsContainer.add(this._makeEmptyState());
+      this._clampScroll();
       return;
     }
 
-    hand.forEach((card, index) => {
-      const ref = this.createCard(card, index, cardHeight);
-      this._cardRefs.push(ref);
-      this.listBody.add(ref.card, { proportion: 0, expand: true, align: "center" });
+    let xCursor = 8;
+    entries.forEach((entry) => {
+      const card = this._makeCard(entry, xCursor + CARD_W / 2, CARD_H / 2);
+      this._cardsContainer.add(card);
+      xCursor += CARD_W + CARD_GAP;
     });
-
-    this.scroll.setChildOX?.(0, true);
-    this.scroll.layout();
-    this.view.layout();
+    this._contentW = Math.max(0, xCursor - CARD_GAP + 8);
+    this._clampScroll();
   }
 
-  createEmptyState(cardHeight = this.getCardHeight()) {
-    const scene = this.scene;
-    const shell = scene.rexUI.add.sizer({
-      orientation: "y",
-      width: Math.max(280, this.getStripWidth() - 32),
-      height: cardHeight,
-      space: { left: 14, right: 14, top: 12, bottom: 10, item: 4 },
+  _getEntriesForMode() {
+    if (this.mode !== "deck") {
+      const entries = getCardInventoryEntries(this.teamNumber, this.mode)
+        .map((entry) => ({ ...entry, source: "inventory" }));
+      const total = entries.reduce((sum, entry) => sum + Math.max(0, Number(entry.quantity || 0)), 0);
+      return { entries, total };
+    }
+
+    const handEntries = (getCardHand(this.teamNumber) || [])
+      .filter(Boolean)
+      .map((card, index) => ({
+        card,
+        cardId: card.id ?? card.name ?? `deck-${index}`,
+        quantity: 1,
+        bucket: "hand",
+        source: "hand",
+        index,
+      }));
+
+    const inventoryEntries = getCardInventoryEntries(this.teamNumber, "deck")
+      .map((entry) => ({ ...entry, source: "inventory" }));
+    const total = handEntries.length + inventoryEntries.reduce((sum, entry) => sum + Math.max(0, Number(entry.quantity || 0)), 0);
+
+    return {
+      entries: [...handEntries, ...inventoryEntries],
+      total,
+    };
+  }
+
+  _applyToggleVisuals() {
+    Object.values(this._toggles || {}).forEach(({ bg, text, mode, hovered }) => {
+      applyToggleVisual(bg, text, this.mode === mode.key, mode.accent, hovered);
     });
-    shell.setMinSize(Math.max(280, this.getStripWidth() - 32), cardHeight);
-    shell.addBackground(makeGlassRoundRect(scene, 0, 0, 16, {
-      fill: mixColor(BOTTOM_BAR_THEME.cardFill, 0x72d8ff, 0.08),
+  }
+
+  _makeEmptyState() {
+    const scene = this.scene;
+    const mode = MODES[this.mode] || MODES.deck;
+    const w = Math.max(280, this._cardsViewport.w - 24);
+    const root = scene.add.container(w / 2 + 8, CARD_H / 2);
+    const bg = makeGlassRoundRect(scene, w, CARD_H, 14, {
+      fill: mixColor(BOTTOM_BAR_THEME.cardFill, mode.accent, 0.08),
       alpha: 0.9,
-      stroke: 0x98e7ff,
+      stroke: mode.accent,
       strokeAlpha: 0.18,
-    }));
-
-    shell.add(scene.add.text(0, 0, "NO CARDS YET", {
-      fontFamily: "Bungee",
+    });
+    const title = makeText(scene, 0, -10, mode.emptyTitle, {
       fontSize: "12px",
-      color: BOTTOM_BAR_THEME.text,
-      stroke: "#081621",
-      strokeThickness: 3,
-    }), { proportion: 0, expand: false, align: "center" });
-
-    shell.add(scene.add.text(0, 0, "Earn or buy town powerups to fill this deck.", {
-      fontFamily: "Bungee",
+      originX: 0.5,
+      originY: 0.5,
+    });
+    const sub = makeText(scene, 0, 14, this.mode === "deck" ? "Starter and market deck cards appear here." : "Market purchases appear here.", {
       fontSize: "8px",
       color: BOTTOM_BAR_THEME.textMuted,
-      stroke: "#081621",
-      strokeThickness: 2,
-      align: "center",
-      wordWrap: { width: Math.max(240, this.getStripWidth() - 72) },
-    }), { proportion: 0, expand: false, align: "center" });
-
-    return shell;
+      originX: 0.5,
+      originY: 0.5,
+    });
+    root.add([bg, title, sub]);
+    return root;
   }
 
-  createCard(card, index, cardHeight = this.getCardHeight()) {
+  _makeCard(entry, x, y) {
     const scene = this.scene;
+    const card = entry.card;
     const tint = getCardOutlineTint(card);
-    const softTint = mixColor(tint, 0xffffff, 0.35);
+    const isPending = this.pendingUseId === card.id;
+    const isArmed = this.armedCardId === card.id;
+    const isPassiveDeckCard = entry.source === "hand";
+    const root = scene.add.container(x, y);
 
-    const shell = scene.rexUI.add.overlapSizer({
-      width: CARD_W,
-      height: cardHeight,
-    });
-    shell.setMinSize(CARD_W, cardHeight);
-
-    const bg = makeGlassRoundRect(scene, CARD_W, cardHeight, 18, {
-      fill: mixColor(BOTTOM_BAR_THEME.cardFill, tint, 0.12),
-      alpha: 0.94,
+    const bg = makeGlassRoundRect(scene, CARD_W, CARD_H, 16, {
+      fill: mixColor(BOTTOM_BAR_THEME.cardFill, tint, isPending || isArmed ? 0.22 : 0.12),
+      alpha: isPending || isArmed ? 0.98 : 0.94,
       stroke: tint,
-      strokeAlpha: 0.4,
-      strokeWidth: 2,
+      strokeAlpha: isPending || isArmed ? 0.74 : 0.4,
+      strokeWidth: isPending || isArmed ? 3 : 2,
     });
-
-    const shine = scene.add.rectangle(0, (-cardHeight / 2) + 14, CARD_W - 24, 14, 0xffffff, 0.06)
+    const shine = scene.add.rectangle(0, -CARD_H / 2 + 18, CARD_W - 28, 18, 0xffffff, 0.08)
       .setOrigin(0.5);
-
-    const iconPlate = scene.rexUI.add.overlapSizer({ width: 44, height: 44 });
-    iconPlate.addBackground(makeGlassRoundRect(scene, 44, 44, 12, {
-      fill: mixColor(BOTTOM_BAR_THEME.panelFill, tint, 0.15),
-      alpha: 0.84,
-      stroke: softTint,
-      strokeAlpha: 0.18,
-      strokeWidth: 1.5,
-    }));
-    const icon = scene.textures.exists(card?.image)
-      ? scene.add.image(0, 0, card.image).setDisplaySize(24, 24)
-      : scene.add.rectangle(0, 0, 24, 24, softTint, 0.25).setStrokeStyle(2, tint, 0.4);
-    iconPlate.add(icon, { align: "center" });
-
-    const tagLabel = scene.rexUI.add.label({
-      background: makeGlassRoundRect(scene, 0, 0, 8, {
-        fill: mixColor(tint, 0x0c1a24, 0.2),
-        alpha: 0.96,
-        stroke: 0xffffff,
-        strokeAlpha: 0.12,
-        strokeWidth: 1,
-      }),
-      text: scene.add.text(0, 0, `#${index + 1}`, {
-        fontFamily: "Bungee",
-        fontSize: "9px",
-        color: "#fff9df",
-        stroke: "#081621",
-        strokeThickness: 2,
-      }),
-      space: { left: 8, right: 8, top: 3, bottom: 3 },
+    const iconPlate = scene.add.rectangle(-CARD_W / 2 + 56, 0, 76, 76, 0x0b1c27, 0.58)
+      .setStrokeStyle(2, tint, 0.32);
+    const icon = scene.textures.exists(card.image)
+      ? scene.add.image(-CARD_W / 2 + 56, 0, card.image).setDisplaySize(48, 48)
+      : scene.add.rectangle(-CARD_W / 2 + 56, 0, 42, 42, tint, 0.3);
+    const qty = makeText(scene, -CARD_W / 2 + 18, CARD_H / 2 - 26, isPassiveDeckCard ? `#${Number(entry.index ?? 0) + 1}` : `x${entry.quantity}`, {
+      fontSize: "10px",
+      color: "#fff9df",
+      originX: 0,
+      originY: 0.5,
     });
-
-    const name = scene.add.text(0, 0, String(card?.name || "Card"), {
-      fontFamily: "Bungee",
-      fontSize: "12px",
-      color: BOTTOM_BAR_THEME.text,
-      stroke: "#081621",
-      strokeThickness: 2,
-      wordWrap: { width: CARD_W - 88 },
+    const name = makeText(scene, -CARD_W / 2 + 102, -CARD_H / 2 + 22, card.name, {
+      fontSize: "16px",
+      wordWrap: { width: CARD_W - 124 },
+      originY: 0,
     });
-
-    const body = scene.add.text(0, 0, String(card?.text || ""), {
-      fontFamily: "Bungee",
-      fontSize: "13px",
+    const body = makeText(scene, -CARD_W / 2 + 102, -CARD_H / 2 + 55, card.text, {
+      fontSize: "10px",
       color: BOTTOM_BAR_THEME.textSoft,
-      stroke: "#081621",
-      strokeThickness: 2,
       lineSpacing: 2,
-      wordWrap: { width: CARD_W - 88 },
+      wordWrap: { width: CARD_W - 124 },
+      originY: 0,
+    });
+    const isTargetedStoreItem = TARGETED_STORE_ACTIVATIONS.has(card.activation);
+    const statusText = isPassiveDeckCard
+      ? "ACTIVE"
+      : isArmed
+        ? "TARGETING"
+        : (isTargetedStoreItem ? "TARGET MODE" : "CLICK TO ARM");
+    const status = makeText(scene, -CARD_W / 2 + 102, CARD_H / 2 - 26, statusText, {
+      fontSize: "9px",
+      color: isPending || isArmed ? "#fff1b3" : "#d3edf9",
+      originY: 0.5,
     });
 
-    const right = scene.rexUI.add.sizer({
-      orientation: "y",
-      space: { item: 4 },
+    const cardHit = scene.add.zone(0, 0, CARD_W, CARD_H).setInteractive({ useHandCursor: !isPassiveDeckCard });
+    cardHit.on("pointerover", () => {
+      AudioManager.playUiHover?.();
+      this._applyCardHover(root, bg, tint, true, isPending || isArmed);
     });
-    right.add(tagLabel, { proportion: 0, expand: false, align: "left" });
-    right.add(name, { proportion: 0, expand: false, align: "left" });
-
-    const top = scene.rexUI.add.sizer({
-      orientation: "x",
-      space: { item: 8 },
+    cardHit.on("pointerout", () => this._applyCardHover(root, bg, tint, false, isPending || isArmed));
+    cardHit.on("pointerdown", (_pointer, _lx, _ly, event) => {
+      event?.stopPropagation?.();
+      if (isPassiveDeckCard) {
+        showAlert(this.scene.worldScene || this.scene, `${card.name} is already active`, "#d3edf9");
+        return;
+      }
+      if (this.mode === "consumables" && !isTargetedStoreItem) this.armConsumable(entry);
+      else this.armTargetCard(entry);
     });
-    top.add(iconPlate, { proportion: 0, expand: false, align: "center" });
-    top.add(right, { proportion: 1, expand: true, align: "center" });
 
-    const content = scene.rexUI.add.sizer({
-      orientation: "y",
-      width: CARD_W - 20,
-      height: cardHeight - 18,
-      space: { left: 10, right: 10, top: 10, bottom: 10, item: 6 },
-    });
-    content.setMinSize(CARD_W - 20, cardHeight - 18);
-    content.add(top, { proportion: 0, expand: true });
-    content.add(body, { proportion: 1, expand: true, align: "left" });
+    root.add([bg, shine, iconPlate, icon, qty, name, body, status, cardHit]);
 
-    const hit = scene.add.zone(0, 0, CARD_W, cardHeight).setInteractive({ useHandCursor: true });
-    shell.addBackground(bg);
-    shell.add(shine, { align: "center" });
-    shell.add(content, { align: "center" });
-    shell.add(hit, { align: "center", expand: true });
-
-    const applyState = (hovered) => {
-      scene.tweens.killTweensOf(shell);
-      scene.tweens.add({
-        targets: shell,
-        scaleX: hovered ? 1.02 : 1,
-        scaleY: hovered ? 1.02 : 1,
-        duration: 140,
-        ease: "Quad.easeOut",
+    if (this.mode === "consumables" && isPending) {
+      const veil = scene.add.rectangle(0, 0, CARD_W - 8, CARD_H - 8, 0x000000, 0.14).setOrigin(0.5);
+      const confirm = makePillButton(scene, CARD_W / 2 - 94, CARD_H / 2 - 26, 74, 24, "CONFIRM", {
+        accent: 0x9dffa5,
+        fill: 0x1f5c42,
+        onClick: () => this.confirmConsumable(entry),
       });
-      bg.setFillStyle(mixColor(BOTTOM_BAR_THEME.cardFill, tint, hovered ? 0.18 : 0.12), hovered ? 0.98 : 0.94);
-      bg.setStrokeStyle(hovered ? 3 : 2, tint, hovered ? 0.8 : 0.4);
-    };
+      const cancel = makePillButton(scene, CARD_W / 2 - 26, CARD_H / 2 - 26, 54, 24, "CANCEL", {
+        accent: 0xff9fb5,
+        fill: 0x5a2230,
+        onClick: () => this.cancelPending(),
+      });
+      root.add([veil, confirm, cancel]);
+    }
 
-    hit.on("pointerover", () => applyState(true));
-    hit.on("pointerout", () => applyState(false));
+    return root;
+  }
 
-    return { card: shell, hit };
+  _applyCardHover(root, bg, tint, hovered, active) {
+    this.scene.tweens.killTweensOf(root);
+    this.scene.tweens.add({
+      targets: root,
+      scaleX: hovered ? 1.02 : 1,
+      scaleY: hovered ? 1.02 : 1,
+      duration: 120,
+      ease: "Quad.easeOut",
+    });
+    bg.setFillStyle(mixColor(BOTTOM_BAR_THEME.cardFill, tint, hovered || active ? 0.2 : 0.12), hovered || active ? 0.98 : 0.94);
+    bg.setStrokeStyle(hovered || active ? 3 : 2, tint, hovered || active ? 0.8 : 0.4);
+  }
+
+  armConsumable(entry) {
+    if (this.pendingUseId === entry.card.id) return;
+    this.pendingUseId = entry.card.id;
+    this.armedCardId = null;
+    AudioManager.playCardArm?.();
+    this.rebuild();
+  }
+
+  cancelPending() {
+    this.pendingUseId = null;
+    AudioManager.playBottomBarClick?.();
+    this.rebuild();
+  }
+
+  confirmConsumable(entry) {
+    const world = this.scene.worldScene;
+    if (!world) return;
+    const result = useConsumableCard(world, entry.card);
+    if (!result.ok) {
+      showAlert(world, result.message || "Card could not be used", "#ffaaaa");
+      AudioManager.playError?.();
+      return;
+    }
+
+    removeCardFromInventory(entry.card.id, this.teamNumber, 1);
+    this.pendingUseId = null;
+    AudioManager.playCardConfirmUse?.();
+    showAlert(world, result.message, "#aaffaa");
+    world.events.emit("cards:updated");
+    this.scene.events.emit("cards:updated");
+    this.rebuild();
+  }
+
+  armTargetCard(entry) {
+    const world = this.scene.worldScene;
+    if (!world) return;
+    const controller = getMarketCardUseController(world);
+    const started = controller?.begin(entry.card, {
+      onComplete: (card) => {
+        removeCardFromInventory(card.id, this.teamNumber, 1);
+        this.armedCardId = null;
+        world.events.emit("cards:updated");
+        this.scene.events.emit("cards:updated");
+        this.rebuild();
+      },
+      onCancel: () => {
+        this.armedCardId = null;
+        this.rebuild();
+      },
+    });
+    if (!started) return;
+    this.pendingUseId = null;
+    this.armedCardId = entry.card.id;
+    this.rebuild();
+  }
+
+  _handleWheel(pointer, dx, dy) {
+    if (this.scene.uiBottomBar?.currentPage !== "cards") return;
+    if (!this.scene.uiBottomBar?.expanded) return;
+    if (!this._pointerInViewport(pointer)) return;
+    const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
+    if (Math.abs(dominantDelta) < 0.1) return;
+    this._scrollX -= dominantDelta * 0.8;
+    this._clampScroll();
+    this.scene.input.stopPropagation();
+  }
+
+  _handlePointerMove(pointer) {
+    if (!this._dragging) return;
+    this._scrollX = this._dragStartScrollX + (pointer.x - this._dragStartX);
+    this._clampScroll();
+  }
+
+  _stopDrag() {
+    this._dragging = false;
+  }
+
+  _pointerInViewport(pointer) {
+    if (!pointer || !this._cardsViewport) return false;
+    const bounds = this._cardsViewportHit?.getBounds?.();
+    return !!bounds && Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y);
+  }
+
+  _clampScroll() {
+    if (!this._cardsContainer || !this._cardsViewport) return;
+    const minScroll = Math.min(0, this._cardsViewport.w - this._contentW);
+    this._scrollX = Phaser.Math.Clamp(this._scrollX, minScroll, 0);
+    this._cardsContainer.x = this._cardsViewport.left + this._scrollX;
   }
 }

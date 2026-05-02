@@ -18,7 +18,12 @@ export class Scheduler {
     };
 
     static stepUnit(troop) {
-        if (!troop?.active || troop.task || troop?._sleepQueued) return false;        const role = this._roleForTroop(troop);
+        if (!troop?.active || troop.task || troop?._sleepQueued) return false;
+        if (troop._buildEvacuating) {
+            if (troop.currentPath?.length) return false;
+            troop._buildEvacuating = false;
+        }
+        const role = this._roleForTroop(troop);
         if (!role || !this.enabledRoles[role]) return false;
 
         if (this._tryCarryRecovery(troop)) return true;
@@ -32,8 +37,13 @@ export class Scheduler {
 
         candidates.sort((a, b) => policy.score(troop, b) - policy.score(troop, a));
 
+        const triedAssignmentGroups = new Set();
         for (const candidate of candidates) {
-            const ok = this._assignCandidate(troop, candidate);
+            const groupKey = this._assignmentGroupKey(candidate);
+            if (triedAssignmentGroups.has(groupKey)) continue;
+            triedAssignmentGroups.add(groupKey);
+
+            const ok = this._assignCandidate(troop, candidate, candidates);
             if (ok) return true;
         }
 
@@ -84,7 +94,45 @@ export class Scheduler {
         return false;
     }
 
-    static _assignCandidate(troop, candidate) {
+    static _assignmentGroupKey(candidate) {
+        if (candidate?.kind === "build_tile") {
+            return `${candidate.kind}:${candidate.arrayKey ?? ""}`;
+        }
+        if (candidate?.ref?.breachPlanId) {
+            return `${candidate.kind}:breach:${candidate.ref.breachPlanId}`;
+        }
+        return candidate?.id ?? `${candidate?.kind}:${candidate?.x},${candidate?.y}`;
+    }
+
+    static _taskListForCandidate(candidate, candidatePool = []) {
+        if (candidate?.ref?.breachPlanId && Array.isArray(candidatePool)) {
+            const tasks = candidatePool
+                .filter(other =>
+                    other?.kind === candidate.kind &&
+                    other.ref?.breachPlanId === candidate.ref.breachPlanId
+                )
+                .map(other => other.ref)
+                .filter(Boolean);
+
+            return tasks.length ? tasks : [candidate.ref].filter(Boolean);
+        }
+
+        if (candidate?.kind !== "build_tile" || !Array.isArray(candidatePool)) {
+            return [candidate?.ref].filter(Boolean);
+        }
+
+        const tasks = candidatePool
+            .filter(other =>
+                other?.kind === candidate.kind &&
+                other.arrayKey === candidate.arrayKey
+            )
+            .map(other => other.ref)
+            .filter(Boolean);
+
+        return tasks.length ? tasks : [candidate.ref].filter(Boolean);
+    }
+
+    static _assignCandidate(troop, candidate, candidatePool = []) {
         if (!candidate?.kind) return false;
 
         switch (candidate.kind) {
@@ -112,7 +160,11 @@ export class Scheduler {
             default: {
                 const state = this._stateForTicket(candidate.kind);
                 if (state == null) return false;
-                return Manager.assignOneTroopToAction(troop, [candidate.ref], state);
+                return Manager.assignOneTroopToAction(
+                    troop,
+                    this._taskListForCandidate(candidate, candidatePool),
+                    state
+                );
             }
         }
     }

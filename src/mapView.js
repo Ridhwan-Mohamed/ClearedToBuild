@@ -79,7 +79,7 @@ import { Bank } from './buildings/Bank.js';
 import { Prison } from './buildings/Prison.js';
 import { TowerPressureController } from './parcel_system/TowerPressureController.js';
 import { StageState } from './parcelController/StageState.js';
-import { loadShipMarketAssets } from './UI/ShipMarket.js';
+import { loadParcelMarketAssets } from './UI/ShipMarket.js';
 import { clearNorthFort, spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { GameUIScene } from './UI/GameUIScene.js';
 import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
@@ -2413,7 +2413,7 @@ export class mapView extends Phaser.Scene {
         Prison.scene = this;
         WallPlacementController.preload(this);
         loadCardData(this);
-        loadShipMarketAssets(this);
+        loadParcelMarketAssets(this);
     }
 
     _enableGlobalTextFont() {
@@ -2675,12 +2675,17 @@ export class mapView extends Phaser.Scene {
 
         // pointer move
         this.input.on("pointermove", (pointer) => {
+            if (this.marketCardUseController?.active) this.marketCardUseController.onPointerMove(pointer);
             if (this.wallPlacer?.active) this.wallPlacer.onPointerMove(pointer);
             if (this.wallDestroyer?.active) this.wallDestroyer.onPointerMove(pointer);
         });
 
         // ESC
         this.input.keyboard.on("keydown-ESC", () => {
+            if (this.marketCardUseController?.active) {
+                this.marketCardUseController.cancel();
+                return;
+            }
             if (this.wallPlacer?.active) this.wallPlacer.onEsc();
             if (this.wallDestroyer?.active) this.wallDestroyer.onEsc();
         });
@@ -2707,6 +2712,9 @@ export class mapView extends Phaser.Scene {
                     return;
                 }
                 this._cancelTrackpadTapDrag();
+            }
+            if (this.marketCardUseController?.active && pointer.button === 0) {
+                if (this.marketCardUseController.onPointerDown(pointer)) return;
             }
             // ✅ WALL MODE CONSUMES INPUT
             if (this.wallPlacer?.active && pointer.button === 0) {
@@ -3634,6 +3642,7 @@ setFarmInstructionPhase2(previewData) {
 // Valid start tile rules (matches your getSelectedCells(1) behavior)
 getFarmTilePlacementType(x, y) {
     if (!this.isFarmTileInWorld(x, y)) return null;
+    if (buildingManager.isFarmTileBlockedByBuildReservation?.(x, y, 1)) return null;
 
     const cell = GameMap.grid?.[y]?.[x];
     if (cell == null) return null;

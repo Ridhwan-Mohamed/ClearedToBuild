@@ -595,14 +595,17 @@ finalize() {
     const sameFamilyQueued = this._sameWallFamilyName(queuedTile?.buildTypeName);
     const hasPlacedWall = !!info;
     const hasQueuedTile = !!queuedTile;
+    const hasQueuedFarm = !!buildingManager.isTileReservedForFarm?.(x, y, "1");
     const canBuildNew =
       !!Map.navGrid[y]?.[x] &&
       !hasPlacedWall &&
-      !hasQueuedTile;
+      !hasQueuedTile &&
+      !hasQueuedFarm;
 
     return {
       info,
       queuedTile,
+      hasQueuedFarm,
       sameFamilyPlaced,
       sameFamilyQueued,
       incorporated: sameFamilyPlaced || sameFamilyQueued,
@@ -701,6 +704,7 @@ finalize() {
 
     // also don’t collide with our own committed
     if (this._isInCommitted(x, y)) return false;
+    if (buildingManager.isTileReservedForFarm?.(x, y, "1")) return false;
 
     return true;
   }

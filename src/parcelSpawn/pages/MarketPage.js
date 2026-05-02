@@ -6,14 +6,15 @@ export class MarketPage extends BasePage {
     const cost = getContractPermitCost("MARKET");
 
     super(scene, slot, {
-      bgColor: 0x7c2d12,
-      title: "🏪 Market Contract",
+      bgColor: 0x14384c,
+      title: "Market Contract",
       lines: [
-        "Temporary traveling market.",
-        "Buy seeds, berries, and one card later.",
+        "Builds a temporary parcel storefront.",
+        "Sells expensive bailout cards only.",
+        "Purchased cards go to card inventory.",
         "",
         `Permit Cost: ${formatPermitCostText(cost)}`,
-        "Items priced separately once the ship arrives.",
+        "No food, water, seeds, or berries sold here.",
       ],
       primaryLabel: "Open",
       onPrimary: () => slot.commit({ type: "MARKET" }),

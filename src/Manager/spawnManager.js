@@ -1,6 +1,5 @@
 import { buildingManager } from "./buildingManager";
-import { CONTROL_STATES, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "../constants";
-import { Manager } from "./Manager";
+import { SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY } from "../constants";
 import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { spawnPoints } from "../town";
@@ -76,13 +75,7 @@ export function pickRaidApproachForPOI(poiX, poiY, type, raiderTroop) {
 
 export function spawnAndSend() {
     const [x, y] = Phaser.Utils.Array.GetRandom(spawnPoints);
-    const player = Player.addPlayer(x, y, 0);
-
-    Manager.assignOneTroopToAction(
-        player,
-        Teams.teamLists["0"].destroyStates,
-        CONTROL_STATES.DESTROY_MODE
-    );
+    Player.addPlayer(x, y, 0);
 }
 
 export function spawnRaiderAtWorld(worldX, worldY, teamNumber = 0) {

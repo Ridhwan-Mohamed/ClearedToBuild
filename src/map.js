@@ -1358,12 +1358,12 @@ export class Map{
     this.fillGroundRect(x, y, w, h, tileType);
     }
 
-    static setWater(x, y) {
-    this.setGroundTile(x, y, "water");
+    static setWater(x, y, opts = {}) {
+    this.setGroundTile(x, y, "water", opts);
     }
 
-    static setWaterRect(x, y, w, h) {
-    this.fillGroundRect(x, y, w, h, "water");
+    static setWaterRect(x, y, w, h, opts = {}) {
+    this.fillGroundRect(x, y, w, h, "water", opts);
     }
     
     static drawGridValue(x, y, index = -1) {
@@ -1635,7 +1635,7 @@ static _isWaterVal(val) {
 }
 
 // map.js
-static setGroundTile(gx, gy, tileType) {
+static setGroundTile(gx, gy, tileType, opts = {}) {
   const def = TILE_TYPES[tileType];
   if (!def) return;
   if (!this.grid?.[gy] || this.grid[gy][gx] == null) return;
@@ -1653,7 +1653,8 @@ static setGroundTile(gx, gy, tileType) {
     this._refreshTerrainShapesAround(gx, gy);
   }
 
-  const blocks = (tileType === "water" || tileType === "wall" || tileType === "woodWall");
+  const walkableWater = tileType === "water" && opts.walkable === true;
+  const blocks = ((tileType === "water" && !walkableWater) || tileType === "wall" || tileType === "woodWall");
   this.navGrid[gy][gx] = blocks ? 0 : 1;
   this.enemyNavGrid[gy][gx] = blocks ? 0 : 1;
 }

@@ -14,8 +14,11 @@ export class RegionSystem {
     this.polyToRegion = new Map();   // polyId -> regionId
     this.regionToPolys = new Map();  // regionId -> array(polyId)
     // RegionSystem.js (add to constructor)
-    this.borderWalls = new Map(); // key "a|b" -> Set("x,y") of WALL tiles separating regions a and b
+    this.borderWalls = new Map(); // key "a|b" -> Set("x,y") of WALL tiles that can participate in a breach between regions a and b
     this.regionGraph = new Map(); // regionId -> Set(neighborRegionId)
+    this.wallComponents = new Map(); // componentId -> { id, tiles, regionTouches }
+    this.breachEdges = new Map(); // key "a|b" -> weighted wall-chain edge between regions
+    this.breachEdgeOptions = new Map(); // key "a|b" -> all weighted wall-chain options between regions
     this._regionCount = 0;
     this.dirty = true;
   }
@@ -30,8 +33,6 @@ export class RegionSystem {
   }
 
   recompute() {
-    const prevRegionCount = this._regionCount;
-
     this.polyToRegion.clear();
     this.regionToPolys.clear();
     this._regionCount = 0;
@@ -63,16 +64,7 @@ export class RegionSystem {
     }
 
     this.dirty = false;
-    const newRegionCount = this.regionCount;
-    const topologyChanged = newRegionCount !== prevRegionCount;
-    if (topologyChanged) {
-      this.borderWalls.clear();
-      this.regionGraph.clear();
-      for (const key of Wall.byCell.keys()) {
-        const [x, y] = key.split(",").map(Number);
-        this._indexWallBorderTileInternal(x, y);
-      }
-    }
+    this._rebuildWallBreachGraph();
   }
 
   getRegionCount() {
@@ -105,6 +97,210 @@ export class RegionSystem {
     if (!this.regionGraph.has(b)) this.regionGraph.set(b, new Set());
     this.regionGraph.get(a).add(b);
     this.regionGraph.get(b).add(a);
+  }
+
+  _dirs4() {
+    return [[1,0],[-1,0],[0,1],[0,-1]];
+  }
+
+  _wallKey(x, y) {
+    return `${x},${y}`;
+  }
+
+  _parseWallKey(key) {
+    const comma = key.indexOf(",");
+    if (comma === -1) return null;
+    const x = parseInt(key.slice(0, comma), 10);
+    const y = parseInt(key.slice(comma + 1), 10);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  _activeWallKeys() {
+    const out = new Set();
+    for (const [key, wall] of Wall.byCell.entries()) {
+      if (!wall?.active) continue;
+      out.add(key);
+    }
+    return out;
+  }
+
+  _touchingRegionsForWallTile(x, y) {
+    const regions = new Set();
+    for (const [dx, dy] of this._dirs4()) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (this.navGrid?.[ny]?.[nx] !== 1) continue;
+
+      const wx = nx * SQUARESIZE + SQUARESIZE / 2;
+      const wy = ny * SQUARESIZE + SQUARESIZE / 2;
+      const rid = this.getRegionIdForWorldPoint(wx, wy);
+      if (rid !== -1) regions.add(rid);
+    }
+    return regions;
+  }
+
+  _collectWallComponent(startKey, activeWalls, visited, componentId) {
+    const tiles = new Set();
+    const regionTouches = new Map();
+    const stack = [startKey];
+    visited.add(startKey);
+
+    while (stack.length) {
+      const key = stack.pop();
+      tiles.add(key);
+
+      const cell = this._parseWallKey(key);
+      if (!cell) continue;
+
+      const touchingRegions = this._touchingRegionsForWallTile(cell.x, cell.y);
+      for (const rid of touchingRegions) {
+        if (!regionTouches.has(rid)) regionTouches.set(rid, new Set());
+        regionTouches.get(rid).add(key);
+      }
+
+      for (const [dx, dy] of this._dirs4()) {
+        const nextKey = this._wallKey(cell.x + dx, cell.y + dy);
+        if (visited.has(nextKey) || !activeWalls.has(nextKey)) continue;
+        visited.add(nextKey);
+        stack.push(nextKey);
+      }
+    }
+
+    return { id: componentId, tiles, regionTouches };
+  }
+
+  _wallPathBetweenTileSets(component, starts, goals) {
+    if (!starts?.size || !goals?.size) return null;
+
+    const q = [];
+    const prev = new Map();
+    const seen = new Set();
+
+    for (const key of starts) {
+      q.push(key);
+      seen.add(key);
+      prev.set(key, null);
+    }
+
+    let goalKey = null;
+    while (q.length) {
+      const key = q.shift();
+      if (goals.has(key)) {
+        goalKey = key;
+        break;
+      }
+
+      const cell = this._parseWallKey(key);
+      if (!cell) continue;
+
+      for (const [dx, dy] of this._dirs4()) {
+        const nextKey = this._wallKey(cell.x + dx, cell.y + dy);
+        if (seen.has(nextKey) || !component.tiles.has(nextKey)) continue;
+        seen.add(nextKey);
+        prev.set(nextKey, key);
+        q.push(nextKey);
+      }
+    }
+
+    if (!goalKey) return null;
+
+    const path = [];
+    for (let cur = goalKey; cur != null; cur = prev.get(cur)) {
+      path.push(cur);
+    }
+    path.reverse();
+    return path;
+  }
+
+  _wallBreachOptionsInComponent(component, fromRegion, toRegion) {
+    const fromTouches = component.regionTouches.get(fromRegion);
+    const toTouches = component.regionTouches.get(toRegion);
+    if (!fromTouches?.size || !toTouches?.size) return [];
+
+    const out = [];
+    const seenPaths = new Set();
+    const addPath = (path) => {
+      if (!path?.length) return;
+      const key = path.join(";");
+      if (seenPaths.has(key)) return;
+      seenPaths.add(key);
+      out.push(path);
+    };
+
+    for (const startKey of fromTouches) {
+      addPath(this._wallPathBetweenTileSets(component, new Set([startKey]), toTouches));
+    }
+
+    for (const endKey of toTouches) {
+      const reversePath = this._wallPathBetweenTileSets(component, new Set([endKey]), fromTouches);
+      if (reversePath?.length) addPath([...reversePath].reverse());
+    }
+
+    out.sort((a, b) => a.length - b.length);
+    return out;
+  }
+
+  _storeBreachEdgeOption(a, b, component, breachTileKeys) {
+    if (!breachTileKeys?.length) return;
+    const key = this._key(a, b);
+
+    const breachTiles = breachTileKeys
+      .map(tileKey => this._parseWallKey(tileKey))
+      .filter(Boolean);
+
+    const option = {
+      fromRegion: a,
+      toRegion: b,
+      wallComponentId: component.id,
+      cost: breachTiles.length,
+      breachTiles,
+    };
+
+    if (!this.breachEdgeOptions.has(key)) this.breachEdgeOptions.set(key, []);
+    this.breachEdgeOptions.get(key).push(option);
+
+    if (!this.borderWalls.has(key)) this.borderWalls.set(key, new Set());
+    const borderSet = this.borderWalls.get(key);
+    for (const tileKey of breachTileKeys) borderSet.add(tileKey);
+
+    const existing = this.breachEdges.get(key);
+    if (!existing || option.cost < existing.cost) {
+      this.breachEdges.set(key, option);
+    }
+
+    this._addEdge(a, b);
+  }
+
+  _rebuildWallBreachGraph() {
+    this.borderWalls.clear();
+    this.regionGraph.clear();
+    this.wallComponents.clear();
+    this.breachEdges.clear();
+    this.breachEdgeOptions.clear();
+
+    const activeWalls = this._activeWallKeys();
+    const visited = new Set();
+    let componentId = 0;
+
+    for (const startKey of activeWalls) {
+      if (visited.has(startKey)) continue;
+
+      const component = this._collectWallComponent(startKey, activeWalls, visited, componentId++);
+      this.wallComponents.set(component.id, component);
+
+      const regions = [...component.regionTouches.keys()].sort((a, b) => a - b);
+      if (regions.length < 2) continue;
+
+      for (let i = 0; i < regions.length; i++) {
+        for (let j = i + 1; j < regions.length; j++) {
+          const paths = this._wallBreachOptionsInComponent(component, regions[i], regions[j]);
+          for (const path of paths) {
+            this._storeBreachEdgeOption(regions[i], regions[j], component, path);
+          }
+        }
+      }
+    }
   }
 
   _indexWallBorderTileInternal(x, y) {
@@ -140,28 +336,13 @@ export class RegionSystem {
   // RegionSystem.js
   rebuildBorderWallsInBounds(bounds, navGrid, squareSize, allWalls) {
     // bounds = { minX, minY, maxX, maxY } in GRID coords
-    this.borderWalls.clear();
-    this.regionGraph.clear();
-
-    for (const key of allWalls) {
-      const [x, y] = key.split(",").map(Number);
-
-      if (
-        x < bounds.minX || x > bounds.maxX ||
-        y < bounds.minY || y > bounds.maxY
-      ) {
-        continue;
-      }
-
-      this.indexWallBorderTile(x, y, navGrid, squareSize);
-    }
+    this._rebuildWallBreachGraph();
   }
 
   // If a wall is destroyed / becomes walkable, remove it from all buckets.
   // (Cheapest: just delete "x,y" from every Set; faster: keep a reverse index wall->keys)
   removeWallFromBorderIndex(x, y) {
-    const t = `${x},${y}`;
-    for (const set of this.borderWalls.values()) set.delete(t);
+    this._rebuildWallBreachGraph();
   }
 
   // Convenience for "is path possible at all (topology-wise)" checks.

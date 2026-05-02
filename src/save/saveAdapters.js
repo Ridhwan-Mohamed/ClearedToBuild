@@ -1,6 +1,7 @@
 import { TILE_TYPES } from "../constants.js";
 import { UI_ITEM_TYPES } from "../UI/UIConstants.js";
 import { POWERUP_CARDS } from "../Cards/PowerupCards.js";
+import { MARKET_CARDS } from "../Cards/MarketCards.js";
 import { Farmer } from "../players/Farmer.js";
 import { Builder } from "../players/Builder.js";
 import { Forager } from "../players/Forager.js";
@@ -25,6 +26,7 @@ export const TROOP_TYPE_REGISTRY = Object.freeze({
 });
 
 export const CARD_REGISTRY = new Map((POWERUP_CARDS || []).map((card) => [card.id, card]));
+export const MARKET_CARD_REGISTRY = new Map((MARKET_CARDS || []).map((card) => [card.id, card]));
 
 const CARD_DEFAULTS = Object.freeze({
   Farmer: { speed: Farmer.speed, stamina: Farmer.stamina, maxWaterPailCarry: Farmer.maxWaterPailCarry },

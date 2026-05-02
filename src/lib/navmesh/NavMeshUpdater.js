@@ -225,14 +225,14 @@ export class NavMeshUpdater {
 
         const polygons = this.navMesh.getPolygons ? this.navMesh.getPolygons() : this.navMesh.navPolygons;
         const allowCrossTag = opts.allowCrossTagMerge === true || opts.allowMerge === true;
-        const affectedPolys = polygons.filter((poly) => {
-            if (!allowCrossTag && !this._polyMatchesParcelTag(poly, parcelTag)) {
-                return false;
-            }
-            return this._polygonIntersectsRect(poly.polygon.points, requestedWorldRect);
-        });
-
-        const rebuildBounds = this._expandGridBoundsForPolygons(normalized, affectedPolys, sourceGrid);
+        const { rebuildBounds, affectedPolys } = this._resolveReplacementClosure(
+            normalized,
+            polygons,
+            sourceGrid,
+            requestedWorldRect,
+            parcelTag,
+            allowCrossTag
+        );
         const worldRect = {
             x: rebuildBounds.minX * SQUARESIZE,
             y: rebuildBounds.minY * SQUARESIZE,
@@ -263,6 +263,56 @@ export class NavMeshUpdater {
             addedPolyIds: addedPolys.map((poly) => poly.id),
             neighborPolyIds: neighborPolys.map((poly) => poly.id)
         };
+    }
+
+    _resolveReplacementClosure(initialBounds, polygons, sourceGrid, requestedWorldRect, parcelTag, allowCrossTag) {
+        let rebuildBounds = initialBounds;
+        let closureRect = requestedWorldRect;
+        let affectedPolys = [];
+
+        for (let i = 0; i < 64; i++) {
+            affectedPolys = polygons.filter((poly) => {
+                if (!allowCrossTag && !this._polyMatchesParcelTag(poly, parcelTag)) {
+                    return false;
+                }
+                return this._polygonIntersectsRect(poly.polygon.points, closureRect);
+            });
+
+            const nextBounds = this._expandGridBoundsForPolygons(rebuildBounds, affectedPolys, sourceGrid);
+            if (
+                nextBounds.minX === rebuildBounds.minX &&
+                nextBounds.minY === rebuildBounds.minY &&
+                nextBounds.maxX === rebuildBounds.maxX &&
+                nextBounds.maxY === rebuildBounds.maxY
+            ) {
+                rebuildBounds = nextBounds;
+                break;
+            }
+
+            rebuildBounds = nextBounds;
+            closureRect = {
+                x: rebuildBounds.minX * SQUARESIZE,
+                y: rebuildBounds.minY * SQUARESIZE,
+                w: rebuildBounds.width * SQUARESIZE,
+                h: rebuildBounds.height * SQUARESIZE
+            };
+        }
+
+        const finalWorldRect = {
+            x: rebuildBounds.minX * SQUARESIZE,
+            y: rebuildBounds.minY * SQUARESIZE,
+            w: rebuildBounds.width * SQUARESIZE,
+            h: rebuildBounds.height * SQUARESIZE
+        };
+
+        affectedPolys = polygons.filter((poly) => {
+            if (!allowCrossTag && !this._polyMatchesParcelTag(poly, parcelTag)) {
+                return false;
+            }
+            return this._polygonIntersectsRect(poly.polygon.points, finalWorldRect);
+        });
+
+        return { rebuildBounds, affectedPolys };
     }
 
     _getPolygonsBounds(allPoints) {

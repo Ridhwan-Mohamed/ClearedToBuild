@@ -319,6 +319,19 @@ export class AudioManager {
         });
     }
 
+    static playOptionalSound(soundKey, fallbackKey = null, opts = {}) {
+        if (!this.scene) return;
+        const key = this.scene.cache.audio.exists(soundKey)
+            ? soundKey
+            : (fallbackKey && this.scene.cache.audio.exists(fallbackKey) ? fallbackKey : null);
+        if (!key) return;
+
+        this.scene.sound.play(key, {
+        volume: opts.volume ?? 0.32,
+        rate: opts.rate ?? (0.95 + Math.random() * 0.1),
+        });
+    }
+
     static playUiHover(opts = {}) {
         if (!this.scene) return;
         if (!this.scene.cache.audio.exists("sfx_ui_hover")) return;
@@ -349,6 +362,41 @@ export class AudioManager {
         this.playSound("sfx_ui_draft_bloop", {
             volume: opts.volume ?? 0.3,
             rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playMarketOpen(opts = {}) {
+        this.playOptionalSound("sfx_market_open", "sfx_ui_whoosh", {
+            volume: opts.volume ?? 0.28,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playMarketHover(opts = {}) {
+        this.playOptionalSound("sfx_market_hover", "sfx_ui_hover", {
+            volume: opts.volume ?? 0.16,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.04),
+        });
+    }
+
+    static playMarketPurchase(opts = {}) {
+        this.playOptionalSound("sfx_market_purchase", "sfx_pickup", {
+            volume: opts.volume ?? 0.34,
+            rate: opts.rate ?? (0.96 + Math.random() * 0.08),
+        });
+    }
+
+    static playCardArm(opts = {}) {
+        this.playOptionalSound("sfx_card_arm", "sfx_ui_draft_bloop", {
+            volume: opts.volume ?? 0.28,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
+    static playCardConfirmUse(opts = {}) {
+        this.playOptionalSound("sfx_card_confirm_use", "sfx_ui_thud_click", {
+            volume: opts.volume ?? 0.3,
+            rate: opts.rate ?? (0.96 + Math.random() * 0.07),
         });
     }
 

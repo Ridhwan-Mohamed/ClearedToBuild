@@ -304,15 +304,19 @@ export class Catapult {
     buildingManager.queueAutoFixForBuilding(this, this.teamNumber);
 
     const scene = this.scene;
-    const targets = [this.baseSprite, this.topSprite];
-    targets.push(...getStructuralHealthBarTargets(this));
+    const baseAngle = this.baseSprite?.angle || 0;
+    this._damageShakeTween?.stop?.();
 
-    scene.tweens.add({
-      targets,
-      x: "+=3",
+    this._damageShakeTween = scene.tweens.add({
+      targets: this.baseSprite,
+      angle: baseAngle + 2,
       yoyo: true,
       duration: 40,
       repeat: 2,
+      onComplete: () => {
+        if (this.baseSprite) this.baseSprite.angle = baseAngle;
+        this._damageShakeTween = null;
+      },
     });
 
     this.baseSprite.setTint(0xff6666);

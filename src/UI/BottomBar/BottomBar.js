@@ -147,6 +147,7 @@ export function CreateBottomBar(scene) {
     if (key !== 'storage') scene.storageTab?.hide?.();
     if (key !== 'houses')  scene.housesTab?.hide?.();
     if (key !== 'build') scene.buildTab?.hide?.();
+    if (key !== 'cards') scene.cardsTab?.hide?.();
 
     if (key === 'functions') scene.functionTab?.onShow?.();
     if (key === 'ovens')   scene.clayTab?.onShow?.();
@@ -154,6 +155,7 @@ export function CreateBottomBar(scene) {
     if (key === 'players') scene.playerTab?.onShow?.();
     if (key === 'houses')  scene.housesTab?.onShow?.();
     if (key === 'build') scene.buildTab?.onShow?.();
+    if (key === 'cards') scene.cardsTab?.onShow?.();
     updateTabButtonStyles(tabs, key);
   };
   const onSpaceToggle = () => toggleBottomBar();
@@ -181,6 +183,7 @@ export function CreateBottomBar(scene) {
       (pageKey === 'storage') ? scene.storageTab :
       (pageKey === 'players') ? scene.playerTab :
       (pageKey === 'houses')  ? scene.housesTab :
+      (pageKey === 'cards')   ? scene.cardsTab :
       null;
 
     if (pageKey !== 'players') {

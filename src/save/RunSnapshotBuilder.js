@@ -5,6 +5,7 @@ import { StageState } from "../parcelController/StageState.js";
 import { buildingArray, townBounds, townRoads, spawnPoints } from "../town.js";
 import { Wall } from "../buildings/Wall.js";
 import { getStoreUnlockSnapshot } from "../parcel_system/StoreUnlockSystem.js";
+import { getCardInventorySnapshot } from "../Cards/CardInventory.js";
 import { SAVE_BUILD_LABEL, SAVE_SCHEMA_VERSION } from "./saveSchema.js";
 import {
   cloneSimple,
@@ -188,6 +189,7 @@ function snapshotTeamState(teamId, team) {
     buildingRefs: buildings.map((entry) => entry.ref),
     buildings,
     cardIds: getCardIdsFromHand(team.cardHand),
+    cardInventory: getCardInventorySnapshot(team.cardInventory),
     townAutomation: cloneSimple(team.townAutomation, {}),
   };
 }

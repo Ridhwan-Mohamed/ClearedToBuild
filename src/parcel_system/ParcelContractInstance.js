@@ -6,7 +6,7 @@ import { createPressureSpawners } from "./PressureSpawner.js";
 import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
 import { Map as GameMap } from "../map.js";
 import { TILE_TYPES, TILE_MAP, SQUARESIZE, removeFromArray } from "../constants.js";
-import { spawnMarketShip, DEFAULT_SUPPLY_PRICES } from "../UI/ShipMarket";
+import { spawnParcelMarketStorefront, DEFAULT_MARKET_PRICES } from "../UI/ShipMarket";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { FarmBushNode } from "../buildings/FarmBushNode";
 
@@ -253,6 +253,27 @@ export class ParcelContractInstance {
     }
   }
 
+  _markParcelWaterWalkable() {
+    const minX = this.origin.x;
+    const minY = this.origin.y;
+    const maxX = this.origin.x + PARCEL_SIZE - 1;
+    const maxY = this.origin.y + PARCEL_SIZE - 1;
+
+    for (let gy = minY; gy <= maxY; gy++) {
+      for (let gx = minX; gx <= maxX; gx++) {
+        const cell = GameMap.grid?.[gy]?.[gx];
+        if (cell == null) continue;
+        const water =
+          Array.isArray(cell)
+            ? cell.some((val) => TILE_MAP(val) === "water")
+            : TILE_MAP(cell) === "water";
+        if (!water) continue;
+        if (GameMap.navGrid?.[gy]) GameMap.navGrid[gy][gx] = 1;
+        if (GameMap.enemyNavGrid?.[gy]) GameMap.enemyNavGrid[gy][gx] = 1;
+      }
+    }
+  }
+
   _paintMilitiaIslands() {
     // Fill full parcel with water first.
     paintWaterRect({
@@ -373,11 +394,27 @@ export class ParcelContractInstance {
     };
   }
 
+  _paintMarketParcel() {
+    const M = this.map;
+
+    if (this.scene?.refreshParcelArea) {
+      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
+        waterSourceUpdate: {
+          excludeParcelId: this.id,
+        },
+      });
+    } else {
+      if (this.scene?.zoomMixer?.mode !== "overview") M.reDraw?.();
+      this.scene?.rebuildBothNavMeshes?.();
+    }
+  }
+
   spawn() {
     const M = this.map;
 
     const setGroundRect = M.setGroundRect.bind(M);
     const setWater = M.setWater.bind(M);
+    const setWalkableWater = (x, y) => M.setWater?.(x, y, { walkable: true });
 
     if (this.type === "FOREST" || this.type === "ROCK") {
       paintResourceParcel({
@@ -385,11 +422,12 @@ export class ParcelContractInstance {
         size: PARCEL_SIZE,
         rng: this.rng,
         setGroundRect,
-        setWater,
+        setWater: setWalkableWater,
         groundType: "dirt",
         pondTiles: this.type === "FOREST" ? 32 : 26,
         edgeBuffer: 2,
       });
+      this._markParcelWaterWalkable();
 
       if (this.type === "FOREST") {
         this._spawnResourceNodes("pine", 32);
@@ -463,23 +501,30 @@ export class ParcelContractInstance {
       const ms = 60_000;
       this.expireAt = this._getSimulationNowMs() + ms;
 
+      this._paintMarketParcel();
       this._startUITick();
 
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
-      const prices = { ...DEFAULT_SUPPLY_PRICES };
+      const prices = { ...DEFAULT_MARKET_PRICES };
       this._marketPrices = { ...prices };
+      this._marketSoldIds = new Set();
 
-      this._marketShipHandle = spawnMarketShip(this.scene, {
+      this._marketHandle = spawnParcelMarketStorefront(this.scene, {
+        origin: this.origin,
         parcelCenterWorld: { x: cx, y: cy },
         slotId: this.slotId,
         teamNumber: 1,
         durationMs: ms,
         prices,
+        soldIds: this._marketSoldIds,
+        onSoldIdsChanged: (nextSoldIds = []) => {
+          this._marketSoldIds = new Set(nextSoldIds);
+        },
       });
 
       this.timerEvent = this.scene.time.delayedCall(ms, () => {
-        const handle = this._marketShipHandle;
+        const handle = this._marketHandle;
         if (handle?.depart) handle.depart(() => this.complete("timeout"));
         else this.complete("timeout");
       }, null, this);
@@ -510,6 +555,7 @@ export class ParcelContractInstance {
       pressureHordeIndex: this.pressureHordeIndex ?? null,
       militiaConfig: this.militiaConfig ? { ...this.militiaConfig } : null,
       marketPrices: this._marketPrices ? { ...this._marketPrices } : null,
+      marketSoldIds: this._marketSoldIds ? Array.from(this._marketSoldIds) : null,
       permitCost: this.permitCost ?? 0,
       placedObjects: (this.placedObjects || [])
         .filter((obj) => obj && obj.active !== false)
@@ -544,6 +590,7 @@ export class ParcelContractInstance {
     this.spawnerCount = Number(saved.spawnerCount ?? this.spawnerCount ?? 0);
     this.permitCost = Number(saved.permitCost ?? this.permitCost ?? 0);
     this._marketPrices = saved.marketPrices ? { ...saved.marketPrices } : this._marketPrices;
+    this._marketSoldIds = new Set(Array.isArray(saved.marketSoldIds) ? saved.marketSoldIds : []);
     this.militiaConfig = saved.militiaConfig ? { ...saved.militiaConfig } : this.militiaConfig;
     this.pressureModifier = saved.pressureModifier ? { ...saved.pressureModifier } : this.pressureModifier;
     this.pressureModifierKey = saved.pressureModifierKey ?? this.pressureModifierKey;
@@ -582,6 +629,7 @@ export class ParcelContractInstance {
     }
 
     if (this.type === "FOREST" || this.type === "ROCK") {
+      this._markParcelWaterWalkable();
       const entries = Array.isArray(saved.placedObjects) ? saved.placedObjects : [];
       this.placedObjects = [];
       for (const entry of entries) {
@@ -626,19 +674,25 @@ export class ParcelContractInstance {
     }
 
     if (this.type === "MARKET") {
+      this._paintMarketParcel();
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
       const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
       this._startUITick();
-      this._marketShipHandle = spawnMarketShip(this.scene, {
+      this._marketHandle = spawnParcelMarketStorefront(this.scene, {
+        origin: this.origin,
         parcelCenterWorld: { x: cx, y: cy },
         slotId: this.slotId,
         teamNumber: 1,
         durationMs: remaining,
-        prices: this._marketPrices || { ...DEFAULT_SUPPLY_PRICES },
+        prices: this._marketPrices || { ...DEFAULT_MARKET_PRICES },
+        soldIds: this._marketSoldIds,
+        onSoldIdsChanged: (nextSoldIds = []) => {
+          this._marketSoldIds = new Set(nextSoldIds);
+        },
       });
       this.timerEvent = this.scene.time.delayedCall(remaining, () => {
-        const handle = this._marketShipHandle;
+        const handle = this._marketHandle;
         if (handle?.depart) handle.depart(() => this.complete("timeout"));
         else this.complete("timeout");
       }, null, this);
@@ -727,8 +781,8 @@ export class ParcelContractInstance {
     this.placedObjects = [];
 
     if (this.type === "MARKET") {
-      this._marketShipHandle?.destroy?.();
-      this._marketShipHandle = null;
+      this._marketHandle?.destroy?.();
+      this._marketHandle = null;
     }
 
     for (const spawner of this.spawners) {

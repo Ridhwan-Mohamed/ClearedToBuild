@@ -495,6 +495,64 @@ export class Player {
         return true;
     }
 
+    static _worldTileIsWalkableForTroop(troop, worldX, worldY) {
+        const { navGrid } = this._getNavForTroop(troop);
+        const tx = Math.floor(worldX / SQUARESIZE);
+        const ty = Math.floor(worldY / SQUARESIZE);
+        return navGrid?.[ty]?.[tx] === 1;
+    }
+
+    static _pathSegmentBlockedForTroop(troop, nextPoint) {
+        if (!troop || !nextPoint) return false;
+        const { navGrid } = this._getNavForTroop(troop);
+        if (!Array.isArray(navGrid)) return false;
+
+        const dx = nextPoint.x - troop.x;
+        const dy = nextPoint.y - troop.y;
+        const dist = Math.hypot(dx, dy);
+        const samples = Math.max(1, Math.ceil(dist / Math.max(1, SQUARESIZE / 3)));
+
+        for (let i = 1; i <= samples; i++) {
+            const t = i / samples;
+            const wx = troop.x + dx * t;
+            const wy = troop.y + dy * t;
+            const tx = Math.floor(wx / SQUARESIZE);
+            const ty = Math.floor(wy / SQUARESIZE);
+            if (navGrid?.[ty]?.[tx] !== 1) return true;
+        }
+
+        return false;
+    }
+
+    static handlePathInvalidated(troop, navMesh = null, details = {}) {
+        if (!troop?.active) return false;
+
+        const nav = navMesh ?? this._getNavForTroop(troop).navMesh;
+        if (nav) PathRegistry.unregisterUnit(nav, troop);
+        troop.__pendingPolyIds = [];
+        troop.currentPath = [];
+        troop.body?.setVelocity?.(0, 0);
+        PathDebugDrawer.onPathEnd(troop);
+
+        if (troop.body?.team === 0) {
+            Map.enemyRegionSystem?.markDirty?.();
+            Map.enemyRegionSystem?.ensureUpToDate?.();
+        } else {
+            Map.regionSystem?.markDirty?.();
+            Map.regionSystem?.ensureUpToDate?.();
+        }
+
+        if (troop.body?.team === 0 && Raider.handlePathInvalidated?.(troop, details)) {
+            return true;
+        }
+
+        if (!troop.task && !troop.track) {
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        }
+
+        return false;
+    }
+
     static _clearRoamResetTimer(troop) {
         if (!troop?._roamResetTimer) return;
         troop._roamResetTimer.remove(false);
@@ -750,8 +808,17 @@ export class Player {
         PathRegistry.updateUnitProgress(sprite.body.team ? Map.navMesh : Map.enemyNavMesh, sprite, new Phaser.Math.Vector2(sprite.x, sprite.y));
         // after movement update, each tick while walking
         PathDebugDrawer.tickUnit(sprite, this.scene.time.now);
-        this.setAnimState(sprite, sprite.walk);
+        const onWater = this._isOnWater(sprite);
+        this.setAnimState(sprite, onWater ? (sprite.swim || sprite.walk) : sprite.walk);
         let nextPoint = sprite.currentPath[0];
+        if (this._pathSegmentBlockedForTroop(sprite, nextPoint)) {
+            this.handlePathInvalidated(
+                sprite,
+                sprite.body.team ? Map.navMesh : Map.enemyNavMesh,
+                { reason: "path_segment_blocked" }
+            );
+            return;
+        }
         // Team 0 units (raiders/grunts) do not use stamina for movement.
         const baseSpeed = sprite?.type?.speed ?? sprite.speed ?? 0;
         let currentSpeed = baseSpeed;
@@ -1702,8 +1769,10 @@ export class Player {
         if (!team?.enemyDestroyTileStates) return false;
         if (!team._breachSeen) team._breachSeen = new Set();
 
+        const breachPlanId = `breach-${troop.id ?? "unit"}-${Math.round(now)}`;
         let added = 0;
-        for (const t of breachTiles) {
+        for (let i = 0; i < breachTiles.length; i++) {
+            const t = breachTiles[i];
             const cell = Map.grid?.[t.y]?.[t.x];
             if (cell == null) continue;
             const top = Array.isArray(cell) ? cell[1] : cell;
@@ -1721,6 +1790,10 @@ export class Player {
                 assigned: 0,
                 forced: !!troop.forcedTarget,
                 type: TILE_TYPES[typeName],
+                breachPlanId,
+                breachOrder: i,
+                breachChainLength: breachTiles.length,
+                eligibleTroopIds: [troop.id],
             });
             added++;
         }
@@ -2011,6 +2084,9 @@ export class Player {
 
         const onWater = this._isOnWater(troop);
         const swimming = troop._returnSwimActive === true;
+        if (onWater && !swimming && this._worldTileIsWalkableForTroop(troop, troop.x, troop.y)) {
+            return false;
+        }
         if (!onWater && !swimming) return false;
 
         if (onWater && !swimming) {

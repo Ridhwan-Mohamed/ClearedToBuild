@@ -20,14 +20,21 @@ import { townRoads } from "../town";
 import {
   MARKET_CARD_KIND,
   MARKET_PLACEHOLDER_ASSETS,
+  MARKET_REAL_ASSETS,
   getMarketCardDefinition,
   loadMarketCardPlaceholderAssets,
 } from "../Cards/MarketCards";
+import {
+  clearExpiredMarketAdrenalineBuff,
+  setMarketAdrenalineBuff,
+} from "../Cards/MarketBuffs";
+import { playSmokeClearing } from "../FX/SmokeClearing";
 
 const CONTEXT_SOURCE = "market-card-use";
 const PLAYER_TEAM = "1";
 const ADRENALINE_MS = 45_000;
 const FORTIFY_MS = 120_000;
+const HEAL_PARTICLE_DEPTH = (UIDEPTH ?? 10) + 125;
 const TARGETED_MARKET_ACTIVATIONS = new Set([
   "auto_wall",
   "chain_zapper",
@@ -97,7 +104,39 @@ function getLiveEnemies() {
   );
 }
 
-function healTroops(scene, troops, fraction, label) {
+function textureOrFallback(scene, preferred, fallback) {
+  if (preferred && scene?.textures?.exists?.(preferred)) return preferred;
+  return fallback;
+}
+
+function emitHealParticles(scene, target, color = 0x7cffb2, count = 10) {
+  if (!scene || !target) return;
+  const baseX = Number(target.sprite?.x ?? target.x ?? 0);
+  const baseY = Number(target.sprite?.y ?? target.y ?? 0);
+  const spreadX = Math.max(10, Number(target.displayWidth ?? target.sprite?.displayWidth ?? SQUARESIZE) * 0.45);
+  const spreadY = Math.max(8, Number(target.displayHeight ?? target.sprite?.displayHeight ?? SQUARESIZE) * 0.35);
+  for (let i = 0; i < count; i++) {
+    const dot = scene.add.circle(
+      baseX + Phaser.Math.Between(-spreadX, spreadX),
+      baseY + Phaser.Math.Between(-spreadY, spreadY),
+      Phaser.Math.Between(2, 4),
+      color,
+      0.88
+    ).setDepth(HEAL_PARTICLE_DEPTH);
+    scene.tweens.add({
+      targets: dot,
+      y: dot.y - Phaser.Math.Between(20, 42),
+      x: dot.x + Phaser.Math.Between(-8, 8),
+      alpha: 0,
+      scale: 0.25,
+      duration: Phaser.Math.Between(520, 820),
+      ease: "Sine.easeOut",
+      onComplete: () => dot.destroy(),
+    });
+  }
+}
+
+function healTroops(scene, troops, fraction, label, particleColor = 0x7cffb2, textColor = "#7cffb2") {
   let healed = 0;
   for (const troop of troops) {
     const max = Math.max(1, Number(troop.maxHealth ?? troop.health ?? 1));
@@ -106,7 +145,8 @@ function healTroops(scene, troops, fraction, label) {
     if (next <= before) continue;
     troop.health = next;
     Player.showMiniBarsOnHit?.(troop);
-    showGhostText(scene, troop.x, troop.y - 12, label, 1, false, false, "#7cffb2");
+    emitHealParticles(scene, troop, particleColor, 9);
+    showGhostText(scene, troop.x, troop.y - 12, label, 1, false, false, textColor);
     healed++;
   }
   return healed;
@@ -341,6 +381,7 @@ function applyFortify(scene, target) {
     obj.maxHp = Math.ceil(originalMax * 1.25);
     obj.hp = obj.maxHp;
     obj._applyVisuals?.();
+    emitHealParticles(scene, { x: (obj.x + 0.5) * SQUARESIZE, y: (obj.y + 0.5) * SQUARESIZE }, 0x72f7d0, 14);
     showGhostText(scene, (obj.x + 0.5) * SQUARESIZE, (obj.y + 0.5) * SQUARESIZE - 12, "FORTIFIED", 1, false, false, "#9dffa5");
     scene.time.delayedCall(FORTIFY_MS, () => {
       if (!obj.active) return;
@@ -359,6 +400,7 @@ function applyFortify(scene, target) {
   if ("hp" in obj) obj.hp = boosted;
   obj.updateHealthBar?.();
   obj.onDamaged?.(0, boosted, boosted);
+  emitHealParticles(scene, obj, 0x72f7d0, 16);
   showGhostText(scene, obj.sprite?.x ?? ((target.x + 0.5) * SQUARESIZE), (obj.sprite?.y ?? ((target.y + 0.5) * SQUARESIZE)) - 12, "FORTIFIED", 1, false, false, "#9dffa5");
   scene.time.delayedCall(FORTIFY_MS, () => {
     if (obj.sprite && obj.sprite.active === false) return;
@@ -393,13 +435,61 @@ function buildChain(startEnemy) {
   return chain;
 }
 
+function ensureMarketAnimations(scene) {
+  if (!scene?.anims) return;
+  const zapKey = MARKET_REAL_ASSETS.world.chainZapper;
+  if (scene.textures?.exists?.(zapKey) && !scene.anims.exists("market_chain_zapper_anim")) {
+    scene.anims.create({
+      key: "market_chain_zapper_anim",
+      frames: scene.anims.generateFrameNumbers(zapKey, { start: 0, end: 2 }),
+      frameRate: 18,
+      repeat: 2,
+    });
+  }
+  const meteorKey = MARKET_REAL_ASSETS.world.meteorDrop;
+  if (scene.textures?.exists?.(meteorKey) && !scene.anims.exists("market_meteor_drop_anim")) {
+    scene.anims.create({
+      key: "market_meteor_drop_anim",
+      frames: scene.anims.generateFrameNumbers(meteorKey, { start: 0, end: 2 }),
+      frameRate: 12,
+      repeat: -1,
+    });
+  }
+}
+
+function drawZapSegment(scene, a, b) {
+  const key = textureOrFallback(scene, MARKET_REAL_ASSETS.world.chainZapper, null);
+  if (!key) {
+    const graphics = scene.add.graphics().setDepth((UIDEPTH ?? 10) + 120);
+    graphics.lineStyle(5, 0xa7f0ff, 0.8);
+    graphics.strokeLineShape(new Phaser.Geom.Line(a.x, a.y, b.x, b.y));
+    scene.time.delayedCall(180, () => graphics.destroy());
+    return;
+  }
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  const length = Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y);
+  const zap = scene.add.sprite(midX, midY, key)
+    .setDepth((UIDEPTH ?? 10) + 122)
+    .setRotation(Phaser.Math.Angle.Between(a.x, a.y, b.x, b.y))
+    .setDisplaySize(Math.max(SQUARESIZE * 0.5, length), SQUARESIZE * 0.42)
+    .setAlpha(0.95);
+  zap.play?.("market_chain_zapper_anim");
+  scene.tweens.add({
+    targets: zap,
+    alpha: 0,
+    duration: 300,
+    ease: "Sine.easeOut",
+    onComplete: () => zap.destroy(),
+  });
+}
+
 function applyChainZapper(scene, startEnemy) {
   const chain = buildChain(startEnemy);
   if (!chain.length) return 0;
-  const graphics = scene.add.graphics().setDepth((UIDEPTH ?? 10) + 120);
-  graphics.lineStyle(5, 0xa7f0ff, 0.8);
+  ensureMarketAnimations(scene);
   for (let i = 0; i < chain.length - 1; i++) {
-    graphics.strokeLineShape(new Phaser.Geom.Line(chain[i].x, chain[i].y, chain[i + 1].x, chain[i + 1].y));
+    drawZapSegment(scene, chain[i], chain[i + 1]);
   }
   chain.forEach((enemy, index) => {
     scene.tweens.add({
@@ -416,12 +506,14 @@ function applyChainZapper(scene, startEnemy) {
       color: "#a7f0ff",
     });
   });
-  scene.time.delayedCall(180, () => graphics.destroy());
   return chain.length;
 }
 
-function applyMeteor(scene, target) {
-  const radius = SQUARESIZE * 3.2;
+function applyMeteorImpact(scene, target, radius = SQUARESIZE * 3.2) {
+  playSmokeClearing(scene, target.x, target.y, {
+    width: radius * 1.15,
+    height: radius * 1.15,
+  });
   const graphics = scene.add.graphics().setDepth((UIDEPTH ?? 10) + 120);
   graphics.fillStyle(0xff743d, 0.28);
   graphics.fillCircle(target.x, target.y, radius);
@@ -439,7 +531,8 @@ function applyMeteor(scene, target) {
   for (const troop of (Player.troops || []).slice()) {
     if (!troop?.active || Number(troop.health ?? 0) <= 0) continue;
     if (Phaser.Math.Distance.Between(target.x, target.y, troop.x, troop.y) > radius) continue;
-    damageTroop(scene, troop, 160, { sourceTeam: 1, color: "#ffad73" });
+    const team = Number(troop.body?.team ?? troop._teamNumber ?? 0);
+    damageTroop(scene, troop, team === 0 ? 210 : 28, { sourceTeam: 1, color: "#ffad73" });
     hits++;
   }
 
@@ -452,9 +545,48 @@ function applyMeteor(scene, target) {
     const hy = hit.y ?? targetObj.sprite?.y ?? ((targetObj.y + 0.5) * SQUARESIZE);
     if (Phaser.Math.Distance.Between(target.x, target.y, hx, hy) > radius) continue;
     seen.add(targetObj);
-    damageStructure(scene, targetObj, 170, "#ffad73");
+    damageStructure(scene, targetObj, 28, "#ffad73");
     hits++;
   }
+  return hits;
+}
+
+function applyMeteor(scene, target) {
+  const radius = SQUARESIZE * 3.2;
+  ensureMarketAnimations(scene);
+  const key = textureOrFallback(scene, MARKET_REAL_ASSETS.world.meteorDrop, null);
+  if (!key) return applyMeteorImpact(scene, target, radius);
+
+  const start = {
+    x: target.x - SQUARESIZE * 5.2,
+    y: target.y - SQUARESIZE * 5.7,
+  };
+  const meteor = scene.add.sprite(start.x, start.y, key)
+    .setDepth((UIDEPTH ?? 10) + 130)
+    .setRotation(Phaser.Math.Angle.Between(start.x, start.y, target.x, target.y))
+    .setScale(2.35)
+    .setAlpha(0.98);
+  meteor.play?.("market_meteor_drop_anim");
+
+  const shadow = scene.add.ellipse(target.x, target.y, SQUARESIZE * 0.5, SQUARESIZE * 0.22, 0x000000, 0.26)
+    .setDepth((UIDEPTH ?? 10) + 2)
+    .setScale(0.35);
+  scene.tweens.add({ targets: shadow, scaleX: 1.8, scaleY: 1.2, alpha: 0.42, duration: 520, ease: "Quad.easeIn" });
+
+  let hits = 0;
+  scene.tweens.add({
+    targets: meteor,
+    x: target.x,
+    y: target.y,
+    scale: 0.74,
+    duration: 560,
+    ease: "Quad.easeIn",
+    onComplete: () => {
+      meteor.destroy();
+      shadow.destroy();
+      hits = applyMeteorImpact(scene, target, radius);
+    },
+  });
   return hits;
 }
 
@@ -469,8 +601,11 @@ function removeTeamBuildingRef(building) {
 
 function spawnDecoyBeacon(scene, gx, gy) {
   const pos = centerOfCell(gx, gy);
-  const sprite = scene.add.image(pos.x, pos.y, MARKET_PLACEHOLDER_ASSETS.ghosts.decoyBeacon)
-    .setDisplaySize(SQUARESIZE * 1.4, SQUARESIZE * 1.4)
+  const spriteKey = textureOrFallback(scene, MARKET_REAL_ASSETS.world.decoyBeacon, MARKET_PLACEHOLDER_ASSETS.ghosts.decoyBeacon);
+  const previousPlayerNav = GameMap.navGrid?.[gy]?.[gx];
+  const previousEnemyNav = GameMap.enemyNavGrid?.[gy]?.[gx];
+  const sprite = scene.add.image(pos.x, pos.y, spriteKey)
+    .setDisplaySize(SQUARESIZE, SQUARESIZE)
     .setDepth((UIDEPTH ?? 10) + 2)
     .setInteractive({ useHandCursor: true });
   sprite.team = 1;
@@ -479,6 +614,10 @@ function spawnDecoyBeacon(scene, gx, gy) {
     .setAlpha(0);
   collider.refreshBody();
   GameMap.structureBarrier?.add(collider);
+  if (GameMap.navGrid?.[gy]) GameMap.navGrid[gy][gx] = 0;
+  if (GameMap.enemyNavGrid?.[gy]) GameMap.enemyNavGrid[gy][gx] = 0;
+  scene.navMeshUpdater?.blockTile?.(gx, gy);
+  scene.enemyNavMeshUpdater?.blockTile?.(gx, gy);
 
   const decoy = {
     x: gx,
@@ -512,6 +651,10 @@ function spawnDecoyBeacon(scene, gx, gy) {
       }
       removeTeamBuildingRef(this);
       GameMap.structureBarrier?.remove(collider, true, true);
+      if (GameMap.navGrid?.[gy]) GameMap.navGrid[gy][gx] = previousPlayerNav ?? 1;
+      if (GameMap.enemyNavGrid?.[gy]) GameMap.enemyNavGrid[gy][gx] = previousEnemyNav ?? 1;
+      scene.navMeshUpdater?.blockTiles?.([{ x: gx, y: gy }], true);
+      scene.enemyNavMeshUpdater?.blockTiles?.([{ x: gx, y: gy }], true);
       collider.destroy?.();
       sprite.destroy?.();
     },
@@ -551,10 +694,20 @@ function explodeDecoy(scene, x, y) {
 
 function spawnShockMine(scene, gx, gy) {
   const pos = centerOfCell(gx, gy);
-  const sprite = scene.add.image(pos.x, pos.y, MARKET_PLACEHOLDER_ASSETS.ghosts.shockMine)
-    .setDisplaySize(SQUARESIZE * 1.1, SQUARESIZE * 1.1)
+  const spriteKey = textureOrFallback(scene, MARKET_REAL_ASSETS.world.shockMine, MARKET_PLACEHOLDER_ASSETS.ghosts.shockMine);
+  const sprite = scene.add.image(pos.x, pos.y, spriteKey)
+    .setDisplaySize(SQUARESIZE * 0.9, SQUARESIZE * 0.9)
     .setDepth((UIDEPTH ?? 10) + 2)
     .setAlpha(0.94);
+  scene.tweens.add({
+    targets: sprite,
+    alpha: 0.62,
+    scale: 1.08,
+    duration: 720,
+    yoyo: true,
+    repeat: -1,
+    ease: "Sine.easeInOut",
+  });
   const mine = { active: true, sprite, timer: null };
   const trigger = () => {
     if (!mine.active) return;
@@ -608,45 +761,38 @@ export function useConsumableCard(scene, cardOrId) {
   }
 
   if (card.activation === "team_heal") {
-    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM), 0.5, "+HP");
+    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM), 0.5, "+HP", 0x6da8ff, "#8fbaff");
     return { ok: healed > 0, message: healed > 0 ? `Healed ${healed} team members` : "No team members needed healing" };
   }
 
   if (card.activation === "fighter_heal") {
-    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM).filter(isFriendlyFighter), 0.7, "+HP");
+    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM).filter(isFriendlyFighter), 0.7, "+HP", 0xff5b6e, "#ff8ba8");
     return { ok: healed > 0, message: healed > 0 ? `Healed ${healed} fighters` : "No fighters needed healing" };
   }
 
   if (card.activation === "worker_heal") {
-    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM).filter(isFriendlyWorker), 0.7, "+HP");
+    const healed = healTroops(scene, getLiveTeamTroops(PLAYER_TEAM).filter(isFriendlyWorker), 0.7, "+HP", 0x61f28e, "#7cffb2");
     return { ok: healed > 0, message: healed > 0 ? `Healed ${healed} workers` : "No workers needed healing" };
   }
 
   if (card.activation === "adrenaline_draft") {
     let buffed = 0;
     const now = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
+    const until = now + ADRENALINE_MS;
     for (const troop of getLiveTeamTroops(PLAYER_TEAM)) {
       if (!troop.active) continue;
-      if (troop._marketAdrenalineBaseMoveMultiplier == null) {
-        troop._marketAdrenalineBaseMoveMultiplier = Number(troop.moveSpeedMultiplier ?? 1) || 1;
-      }
-      troop._marketAdrenalineUntil = now + ADRENALINE_MS;
-      troop.moveSpeedMultiplier = Math.max(
-        Number(troop.moveSpeedMultiplier ?? 1) || 1,
-        troop._marketAdrenalineBaseMoveMultiplier * 1.22
-      );
+      setMarketAdrenalineBuff(troop, until);
       buffed++;
+      emitHealParticles(scene, troop, 0xfff17a, 7);
       showGhostText(scene, troop.x, troop.y - 12, "TEMPO", 1, false, false, "#fff17a");
     }
     scene.time.delayedCall(ADRENALINE_MS, () => {
       const checkNow = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
       for (const troop of getLiveTeamTroops(PLAYER_TEAM)) {
-        if (!troop?._marketAdrenalineUntil || troop._marketAdrenalineUntil > checkNow) continue;
-        troop.moveSpeedMultiplier = troop._marketAdrenalineBaseMoveMultiplier ?? 1;
-        delete troop._marketAdrenalineBaseMoveMultiplier;
-        delete troop._marketAdrenalineUntil;
+        clearExpiredMarketAdrenalineBuff(troop, checkNow);
       }
     });
+    if (buffed > 0) scene.events?.emit?.("market:adrenaline-changed", { until, duration: ADRENALINE_MS });
     return { ok: buffed > 0, message: buffed > 0 ? "Adrenaline Draft active" : "No team members to buff" };
   }
 

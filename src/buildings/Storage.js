@@ -14,6 +14,7 @@ import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { buildingManager } from '../Manager/buildingManager.js';
 import { StorageManager } from '../Manager/StorageManager.js';
+import { playBuildingCollapseSmoke } from '../FX/SmokeClearing.js';
 
 export class StorageBuilding {
     static scene;
@@ -559,8 +560,10 @@ export class StorageBuilding {
     shakeAndFlash() {
         if (!this.sprite) return;
         const scene = StorageBuilding.scene;
-        const baseAngle = this.sprite.angle || 0;
+        const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+        this._damageRestAngle = baseAngle;
         this._damageShakeTween?.stop?.();
+        this.sprite.angle = baseAngle;
 
         this._damageShakeTween = scene.tweens.add({
             targets: this.sprite,
@@ -609,6 +612,9 @@ export class StorageBuilding {
     }
 
     destroy() {
+        if (this._destroyed) return;
+        this._destroyed = true;
+        this.health = 0;
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
 
@@ -622,6 +628,7 @@ export class StorageBuilding {
         Teams.removeFromStateArray(this.teamNumber, 'storageList', this);
         StorageManager.handleStorageDestroyed?.(this);
 
+        playBuildingCollapseSmoke(this, { scene: StorageBuilding.scene });
         this.sprite?.destroy();
         destroyStructuralHealthBar(this);
         StorageUI.hideStatus?.(this);

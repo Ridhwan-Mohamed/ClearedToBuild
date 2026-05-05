@@ -27,6 +27,7 @@ import { Scheduler } from "../ai/scheduler/Scheduler"
 import { InterruptController } from "../ai/scheduler/InterruptController"
 import { updateDirectionalAnimationFromVelocity } from "../players/PlayerDirectionalAnimator"
 import { fightManager } from "./fightManager"
+import { getMarketWorkDuration } from "../Cards/MarketBuffs"
 
 export class buildingManager{
 
@@ -43,6 +44,86 @@ export class buildingManager{
     static _hoveredWallJobTeamNumber = 1;
     static _selectedConstructionTask = null;
     static _selectedConstructionTeamNumber = 1;
+
+    static _destroyTargetForTask(task) {
+        return task?.value?.buildingRef || task?.value || null;
+    }
+
+    static _destroyTargetHealth(target) {
+        if (!target) return { current: 0, max: 1, key: "health" };
+        const key = ("health" in target) ? "health" : (("hp" in target) ? "hp" : "health");
+        const rawMax = Number(target.maxHealth ?? target.maxHp ?? target[key] ?? 1);
+        const max = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 1;
+        const rawCurrent = Number(target[key] ?? max);
+        const current = Number.isFinite(rawCurrent) ? Math.max(0, rawCurrent) : max;
+        return { current, max, key };
+    }
+
+    static _isDestroyTargetAlive(taskOrTarget) {
+        const target = taskOrTarget?.value ? this._destroyTargetForTask(taskOrTarget) : taskOrTarget;
+        if (!target || target._destroyed || target._isDestroyed || target.sprite?._destroyed) return false;
+        if (target.sprite && target.sprite.active === false) return false;
+        if (target.baseSprite && target.baseSprite.active === false) return false;
+        return this._destroyTargetHealth(target).current > 0;
+    }
+
+    static _syncDestroyTaskHealth(task) {
+        const target = this._destroyTargetForTask(task);
+        if (!target) return null;
+        const health = this._destroyTargetHealth(target);
+        task.duration = health.current;
+        task.totalDuration = health.max;
+        return { target, ...health };
+    }
+
+    static applyDestroyDamage(task, damage) {
+        const target = this._destroyTargetForTask(task);
+        if (!target || !this._isDestroyTargetAlive(target)) {
+            if (task) task.duration = 0;
+            return { target, destroyed: true, current: 0, max: 1 };
+        }
+
+        const amount = Math.max(0, Number(damage) || 0);
+        let { current, max, key } = this._destroyTargetHealth(target);
+        let destroyed = false;
+
+        if (typeof target.takeDamage === "function") {
+            destroyed = !!target.takeDamage(amount);
+            ({ current, max, key } = this._destroyTargetHealth(target));
+        } else {
+            const next = Math.max(0, current - amount);
+            target[key] = next;
+            if ("maxHealth" in target) target.maxHealth = max;
+            else if ("maxHp" in target) target.maxHp = max;
+            target.onDamaged?.(amount, next, max);
+            current = next;
+            destroyed = current <= 0;
+        }
+
+        if (task) {
+            task.duration = Math.max(0, current);
+            task.totalDuration = max;
+        }
+
+        return { target, destroyed: destroyed || current <= 0, current, max };
+    }
+
+    static _clearInvalidDestroyTask(sprite, task) {
+        if (sprite?.timer) {
+            sprite.timer.remove(false);
+            sprite.timer = null;
+        }
+        const teamNumber = sprite?.body?.team;
+        if (teamNumber != null && task) {
+            Teams.removeFromStateArray(teamNumber, "destroyStates", task);
+            Teams.removeFromStateArray(teamNumber, "enemyDestroyStates", task);
+        }
+        if (sprite) {
+            if (sprite.task === task) sprite.task = null;
+            sprite.play?.(sprite.idle);
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+        }
+    }
     static _wallJobSeed = 1;
 
     static createBuildTileStateArray(tiles, teamNumber, buildTypeName = null) {
@@ -465,7 +546,7 @@ export class buildingManager{
 
     static _destroyAttackDuration(sprite) {
         const duration = Number(sprite?.weapon?.duration);
-        return Number.isFinite(duration) && duration > 0 ? duration : 700;
+        return getMarketWorkDuration(sprite, Number.isFinite(duration) && duration > 0 ? duration : 700);
     }
 
     static isQueuedBuildTaskDeferred(task, troop = null) {
@@ -1943,14 +2024,17 @@ export class buildingManager{
 
         tasks.forEach((task) => {
             if (!task?.type || task?.value == null) return;
+            const target = this._destroyTargetForTask(task);
+            const health = this._destroyTargetHealth(target);
+            if (!target || !this._isDestroyTargetAlive(target)) return;
             team.destroyStates.push({
                 x: task.x,
                 y: task.y,
                 assigned: 0,
                 type: task.type,
                 value: task.value,
-                duration: Math.max(1, Number(task.duration || task.totalDuration || task.value?.health || task.value?.hp || 100)),
-                totalDuration: Math.max(1, Number(task.totalDuration || task.duration || task.value?.maxHealth || task.value?.maxHp || 100)),
+                duration: Math.max(1, health.current),
+                totalDuration: Math.max(1, health.max),
                 refundCost: task.refundCost ?? task.type?.cost ?? task.type?.price ?? null,
             });
         });
@@ -2028,10 +2112,11 @@ export class buildingManager{
             return;
         }
 
+        const buildDuration = getMarketWorkDuration(troop, this.tileBuildingDuration);
         AudioManager.setConstructionActive(troop, true);
-        this._startBuilderBuildPresentation(troop, task, this.tileBuildingDuration);
+        this._startBuilderBuildPresentation(troop, task, buildDuration);
 
-        troop.timer = this.scene.time.delayedCall(this.tileBuildingDuration, () => {
+        troop.timer = this.scene.time.delayedCall(buildDuration, () => {
             if (!troop.active || troop.state !== CONTROL_STATES.BUILD_MODE_T) {
                 this._clearBuilderBuildPresentation(troop);
                 AudioManager.setConstructionActive(troop, false);
@@ -2494,9 +2579,10 @@ export class buildingManager{
         AudioManager.setConstructionActive(sprite, true);
 
         if (!sprite.timer) {
-            this._startBuilderBuildPresentation(sprite, task, this.blockBuildingDuration);
+            const buildDuration = getMarketWorkDuration(sprite, this.blockBuildingDuration);
+            this._startBuilderBuildPresentation(sprite, task, buildDuration);
 
-            sprite.timer = this.scene.time.delayedCall(this.blockBuildingDuration, () => {
+            sprite.timer = this.scene.time.delayedCall(buildDuration, () => {
                 if (!sprite.active || sprite.state != CONTROL_STATES.BUILD_MODE_B) {
                     this._clearBuilderBuildPresentation(sprite);
                     AudioManager.setConstructionActive(sprite, false);
@@ -2622,29 +2708,23 @@ export class buildingManager{
 
     static beginDestroyingBlock(sprite) {
         let task = sprite.task;
-        if (!task || task.duration <= 0) {
+        const synced = task ? this._syncDestroyTaskHealth(task) : null;
+        if (!task || !synced || synced.current <= 0 || !this._isDestroyTargetAlive(task)) {
             console.log(`sprite: ${sprite.id} delete mode outside of timer with duration: ${task?.duration}`)
             if (task) {
-                Teams.removeFromStateArray(sprite.body.team, "destroyStates", sprite.task);
+                this._clearInvalidDestroyTask(sprite, task);
+                return;
             }
-            sprite.task = null
-            sprite.timer = null; 
-            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            sprite.play(sprite.idle);
+            this._clearInvalidDestroyTask(sprite, task);
             return;
         }
 
-        sprite.timer = this.scene.time.delayedCall(1000, () => {
+        sprite.timer = this.scene.time.delayedCall(getMarketWorkDuration(sprite, 1000), () => {
             if(!sprite.active || sprite.state != CONTROL_STATES.DESTROY_MODE) return;
-            if (!task || task.duration <= 0){
+            const live = task ? this._syncDestroyTaskHealth(task) : null;
+            if (!task || !live || live.current <= 0 || !this._isDestroyTargetAlive(task)){
                 console.log(`sprite: ${sprite.id} delete mode within timer `)
-                sprite.task = null;
-                if(sprite.timer){
-                    sprite.timer.remove(false);
-                    sprite.timer = null;
-                }
-                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-                sprite.play(sprite.idle);
+                this._clearInvalidDestroyTask(sprite, task);
                 return;
             }
 
@@ -2694,18 +2774,13 @@ export class buildingManager{
                     damage = this.playerBuildingDemolitionDamage;
                 }
 
-                // Apply damage to the task duration
-                task.duration = Math.max(0, task.duration - damage);
-
                 // Resolve building instance: prefer value.buildingRef, fall back to value
                 const targetObj = task.value?.buildingRef || task.value;
                 if (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger)) {
                     fightManager.playAttackPresentation(sprite, targetObj?.sprite || targetObj);
                 }
 
-                if (targetObj && typeof targetObj.onDamaged === "function") {
-                    targetObj.onDamaged(damage, task.duration, task.totalDuration);
-                }
+                this.applyDestroyDamage(task, damage);
             }
 
             if (task.duration <= 0) {
@@ -2830,6 +2905,9 @@ export class buildingManager{
 
         if (targetObj && typeof targetObj.destroy === "function") {
             targetObj.destroy(); // calls ClayOven/House/StorageBuilding.destroy
+            targetObj._destroyed = true;
+            if ("health" in targetObj) targetObj.health = 0;
+            if ("hp" in targetObj) targetObj.hp = 0;
             if (task.type == TILE_TYPES.pine) {
                 removeFromArray(Map.worldPines, targetObj);
             }
@@ -3009,7 +3087,18 @@ export class buildingManager{
                 if (team.buildings.length !== before && Array.isArray(team.destroyStates)) {
                     team.destroyStates = team.destroyStates.filter(t => t.x !== x || t.y !== y);
                 }
+                if (team.buildings.length !== before && Array.isArray(team.enemyDestroyStates)) {
+                    team.enemyDestroyStates = team.enemyDestroyStates.filter(t => t.x !== x || t.y !== y);
+                }
             }
+        }
+
+        for (const troop of Player.troops || []) {
+            const task = troop?.task;
+            if (!task || task.x !== x || task.y !== y) continue;
+            const target = this._destroyTargetForTask(task);
+            if (target && this._isDestroyTargetAlive(target)) continue;
+            this._clearInvalidDestroyTask(troop, task);
         }
 
         return true;
@@ -3017,11 +3106,15 @@ export class buildingManager{
 
     static beginFixingBuilding(sprite) {
         const task = sprite.task;
+        const repairTickDuration = 1000;
 
         if (!task || !task.value) {
             this.clearFixTaskVisual(task);
+            this._clearBuilderBuildPresentation(sprite);
+            AudioManager.setConstructionActive(sprite, false);
             sprite.task = null;
             sprite.timer = null;
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
             sprite.play(sprite.idle);
             return;
         }
@@ -3033,6 +3126,8 @@ export class buildingManager{
 
         if (b._destroyed || b.sprite?._destroyed || b.sprite?.active === false || buildingHp <= 0) {
             this.clearFixTaskVisual(task);
+            this._clearBuilderBuildPresentation(sprite);
+            AudioManager.setConstructionActive(sprite, false);
             Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", task);
             sprite.task = null;
             sprite.timer = null;
@@ -3044,6 +3139,8 @@ export class buildingManager{
         if (buildingHp >= maxHp) {
             // already fixed
             this.clearFixTaskVisual(task);
+            this._clearBuilderBuildPresentation(sprite);
+            AudioManager.setConstructionActive(sprite, false);
             Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", task);
             sprite.task = null;
             sprite.timer = null;
@@ -3053,14 +3150,26 @@ export class buildingManager{
         }
 
         if (!sprite.timer) {
-            sprite.timer = this.scene.time.delayedCall(1000, () => {
-            if (!sprite.active || sprite.state !== CONTROL_STATES.FIX_BUILDING) return;
+            const adjustedRepairDuration = getMarketWorkDuration(sprite, repairTickDuration);
+            AudioManager.setConstructionActive(sprite, true);
+            this._startBuilderBuildPresentation(sprite, task, adjustedRepairDuration);
+
+            sprite.timer = this.scene.time.delayedCall(adjustedRepairDuration, () => {
+            if (!sprite.active || sprite.state !== CONTROL_STATES.FIX_BUILDING) {
+                this._clearBuilderBuildPresentation(sprite);
+                AudioManager.setConstructionActive(sprite, false);
+                if (sprite) sprite.timer = null;
+                return;
+            }
 
             // building might have been destroyed mid-task
             if (!sprite.task || !sprite.task.value) {
                 this.clearFixTaskVisual(sprite.task);
+                this._clearBuilderBuildPresentation(sprite);
+                AudioManager.setConstructionActive(sprite, false);
                 sprite.task = null;
                 sprite.timer = null;
+                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
                 sprite.play(sprite.idle);
                 return;
             }
@@ -3069,9 +3178,22 @@ export class buildingManager{
             const maxHealth = (building.maxHealth ?? 100);
             const key = ("health" in building) ? "health" : (("hp" in building) ? "hp" : "health");
 
+            if (building._destroyed || building.sprite?._destroyed || building.sprite?.active === false || (building[key] ?? 0) <= 0) {
+                this.clearFixTaskVisual(sprite.task);
+                Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", sprite.task);
+                this._clearBuilderBuildPresentation(sprite);
+                AudioManager.setConstructionActive(sprite, false);
+                sprite.task = null;
+                sprite.timer = null;
+                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+                sprite.play(sprite.idle);
+                return;
+            }
+
             const before = (building[key] ?? 0);
             const healed = Math.min(5, maxHealth - before);
             building[key] = Math.min(maxHealth, before + healed);
+            building.updateHealthBar?.();
 
             // green flash + shake
             if (building.sprite) {
@@ -3097,12 +3219,15 @@ export class buildingManager{
                 this.clearFixTaskVisual(sprite.task);
                 Teams.removeFromStateArray(sprite.body.team, "buildingFixTasks", sprite.task);
                 sprite.task = null;
+                this._clearBuilderBuildPresentation(sprite);
+                AudioManager.setConstructionActive(sprite, false);
 
                 if (sprite.timer) {
                 sprite.timer.remove(false);
                 sprite.timer = null;
                 }
 
+                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
                 sprite.play(sprite.idle);
                 return;
             }
@@ -3110,6 +3235,7 @@ export class buildingManager{
             // continue ticking
             sprite.timer.remove(false);
             sprite.timer = null;
+            this._clearBuilderBuildPresentation(sprite);
             this.beginFixingBuilding(sprite);
             });
         }

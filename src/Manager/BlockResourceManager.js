@@ -11,6 +11,7 @@ import { seedManager } from "./seedManager"
 import { updateDirectionalAnimationFromVelocity } from "../players/PlayerDirectionalAnimator"
 import { ORDER_KINDS } from "../orders/OrderTypes"
 import { OrderRunner } from "../orders/OrderRunner"
+import { getMarketWorkDuration } from "../Cards/MarketBuffs"
 
 export class blockResourceManager{
 
@@ -527,7 +528,7 @@ export class blockResourceManager{
         }
 
         if (!sprite.timer) {
-            const duration = this._getGatherDuration(sprite.task);
+            const duration = getMarketWorkDuration(sprite, this._getGatherDuration(sprite.task));
             this._setHarvestLoop(sprite, sprite.task, true);
             this._startGatherPresentation(sprite, sprite.task, duration);
             sprite.timer = this.scene.time.delayedCall(duration, () => {

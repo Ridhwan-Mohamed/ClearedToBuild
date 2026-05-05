@@ -118,7 +118,7 @@ export default class FunctionTab {
     });
 
     REST_GROUPS.forEach((cfg) => {
-      const button = this._createMainButton(cfg.key, cfg.color, () => this._runRestAction(cfg.group, cfg.mode));
+      const button = this._createMainButton(cfg.key, cfg.color, () => this._runRestAction(cfg.key, this._getRestButtonMode(cfg.key)));
       button.height = REST_BUTTON_HEIGHT;
       this.restButtons[cfg.key] = button;
       this.restButtonOrder.push(button);
@@ -764,6 +764,7 @@ export default class FunctionTab {
   _wakeTroopNow(troop) {
     if (!troop?.active) return false;
 
+    const hadQueuedSleep = !!troop._sleepQueued;
     troop._sleepQueued = false;
     troop._sleepQueuedAt = 0;
 
@@ -772,7 +773,7 @@ export default class FunctionTab {
       return !!result?.ok;
     }
 
-    return false;
+    return hadQueuedSleep;
   }
 
   _getRestGroupState(groupKey) {
@@ -807,12 +808,14 @@ export default class FunctionTab {
 
   _getRestButtonMode(groupKey) {
     const state = this._getRestGroupState(groupKey);
+    if (state.total <= 0) return "none";
     return state.awake > 0 ? "sleep" : "wake";
   }
 
   _getRestButtonLabel(groupKey) {
     const cfg = REST_GROUPS.find((g) => g.key === groupKey);
     const state = this._getRestGroupState(groupKey);
+    if (state.total <= 0) return `NO\n${cfg?.label || groupKey.toUpperCase()}`;
     const action = state.awake > 0 ? "SLEEP" : "WAKE";
     return `${action}\n${cfg?.label || groupKey.toUpperCase()}`;
   }
@@ -823,7 +826,8 @@ export default class FunctionTab {
 
     const troops = this._getRestTroops(groupKey, team);
     if (!troops.length) {
-      showAlert(this.scene, "No troops matched that rest group", "#fecaca");
+      const label = REST_GROUPS.find((g) => g.key === groupKey)?.label?.toLowerCase() || "troops";
+      showAlert(this.scene, `No ${label} available`, "#fecaca");
       return;
     }
 

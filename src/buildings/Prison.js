@@ -23,6 +23,7 @@ import {
   layoutStructuralHealthBar,
 } from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 
 const DEFAULT_LOCKED_TYPES = [
@@ -397,8 +398,10 @@ export class Prison {
 
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
-    const baseAngle = this.sprite.angle || 0;
+    const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+    this._damageRestAngle = baseAngle;
     this._damageShakeTween?.stop?.();
+    this.sprite.angle = baseAngle;
 
     this._damageShakeTween = this.scene.tweens.add({
       targets: this.sprite,
@@ -451,10 +454,14 @@ export class Prison {
 
   // Called when buildingManager destroys it
   destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this.health = 0;
     this._damageBarTimer?.remove(false);
     this._damageBarTimer = null;
 
     if (this.sprite?.active) {
+      playBuildingCollapseSmoke(this);
       this.sprite.setTexture("prison_opened", 0);
       this.sprite.play("prison_opened_idle");
       this.sprite.disableInteractive();

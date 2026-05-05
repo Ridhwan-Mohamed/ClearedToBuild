@@ -175,6 +175,7 @@ export class PineTree {
 
     // hover: darken the 3 layers
     this.hit.on('pointerover', () => {
+      scene.setForagerRouteHover?.(this, "wood", true);
       // only show hover when not placing/breaking builds unless you want both
       if (!scene.breakItems || scene.breakItems.text !== "Place") {
         this.base.setTint(0xaaaaaa);
@@ -189,6 +190,7 @@ export class PineTree {
     });
 
     this.hit.on('pointerout', () => {
+      scene.setForagerRouteHover?.(this, "wood", false);
       this.base.clearTint();
       this.mid.clearTint();
       this.top.clearTint();
@@ -200,6 +202,10 @@ export class PineTree {
       const team = Teams.teamLists['1'];
       if (!team) return;
       const selection = OrderRunner.getSelectionProfile();
+
+      if (scene.tryIssueForagerRouteToNode?.(this, "wood")) {
+        return;
+      }
 
       // --- double click detect ---
       const now = scene.time.now;

@@ -16,6 +16,7 @@ import {
   layoutStructuralHealthBar,
 } from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 /**
  * TowerBuilding
@@ -272,8 +273,10 @@ export class TowerBuilding {
 
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
-    const baseAngle = this.sprite.angle || 0;
+    const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+    this._damageRestAngle = baseAngle;
     this._damageShakeTween?.stop?.();
+    this.sprite.angle = baseAngle;
 
     this._damageShakeTween = this.scene.tweens.add({
       targets: this.sprite,
@@ -450,6 +453,7 @@ export class TowerBuilding {
 
     // ✅ keep sprite, swap to destroyed anim, disable interaction
     if (this.sprite?.active) {
+      playBuildingCollapseSmoke(this);
       this.sprite._destroyed = true;
       this.sprite.setTexture("tower_destroyed", 0);
       this.sprite.play("tower_destroyed_idle");

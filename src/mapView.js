@@ -22,11 +22,14 @@ import { Brawler } from './players/Brawler.js';
 import { Blademaster } from './players/Blademaster.js';
 import { Gunslinger } from './players/Gunslinger.js';
 import { Raider } from './players/Raider.js';
+import { Hunter } from './players/Hunter.js';
+import { Bomber } from './players/Bomber.js';
 import { Projectile } from './Projectile.js';
 import player from 'url:./assets/Players/player.png'
 import gun1 from 'url:./assets/Players/gun1.png'
 import playerAction from 'url:./assets/Players/playerAction.png'
 import playerCarry from 'url:./assets/Players/playerCarry.png'
+import playerDeath from 'url:./assets/Players/player_death.png'
 import { playerDict, setupTownBoundsToggle, townBounds, townRoads, clearBuildingArray, clearPlayerDict, spawnPoints } from './town.js';
 import { tillManager } from './Manager/tillManager.js'
 import { Teams } from './Teams.js';
@@ -118,6 +121,38 @@ const TOWN_XP_SOURCE_VALUES = Object.freeze({
     hordeSurvived: 55,
     fortCleared: 95,
 });
+const DEBUG_BOMBER_START_HORDE_INDEX = 1;
+const NIGHT_HORDE_BOMBER_RATIO = 0.2;
+const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
+    wood: {
+        action: "Cut down",
+        target: "trees",
+        color: 0x34d399,
+        textColor: "#86efac",
+        alert: "Routed forager to trees",
+    },
+    stone: {
+        action: "Mine",
+        target: "rocks",
+        color: 0x93c5fd,
+        textColor: "#bfdbfe",
+        alert: "Routed forager to rocks",
+    },
+    seed: {
+        action: "Gather",
+        target: "seeds",
+        color: 0xfacc15,
+        textColor: "#fde68a",
+        alert: "Routed forager to seed bushes",
+    },
+    berry: {
+        action: "Gather",
+        target: "berries",
+        color: 0xc084fc,
+        textColor: "#e9d5ff",
+        alert: "Routed forager to berry bushes",
+    },
+});
 const DEBUG_SHOW_MILITIA_LEVEL3_UNLOCK_ON_START = false;
 const TOWN_XP_RECRUIT_DEFS = Object.freeze([
     { key: "farmer", title: "Fresh Farmer", subtitle: "Recruit 1 Farmer for your village", accentColor: 0x8b5a2b, ctor: Farmer },
@@ -201,6 +236,11 @@ export class mapView extends Phaser.Scene {
             gainSerial: Math.max(0, Number(state.gainSerial || 0)),
             lastGainAmount: Math.max(0, Number(state.lastGainAmount || 0)),
             lastGainLabel: String(state.lastGainLabel || "Town XP"),
+            lastGainSource: state.lastGainSource
+                && Number.isFinite(state.lastGainSource.x)
+                && Number.isFinite(state.lastGainSource.y)
+                ? { x: state.lastGainSource.x, y: state.lastGainSource.y }
+                : null,
             progress: Math.max(
                 0,
                 Math.min(
@@ -292,7 +332,7 @@ export class mapView extends Phaser.Scene {
         this.woodWallMode = false;
         // Farm plot selection state (laptop-friendly, 2-click)
         this._prevFarmMode = false;
-        this.farmConsumeNextClick = false; // eat the UI click that toggled farm mode
+        this.farmConsumeNextClick = false;
         this.farmSelectActive = false;     // true while choosing plot corners
         this.farmSelectPhase = 0;          // 0=inactive, 1=pick start, 2=pick end
         this.farmHover = null;             // phase-1 hover outline graphic
@@ -305,6 +345,16 @@ export class mapView extends Phaser.Scene {
         this.farmInstrSeedCount = null;
         this.farmInstrSeedIcon = null;
         this.farmInstrRight = null;
+        this.foragerRouteGlow = null;
+        this.foragerRouteInstructionUI = null;
+        this.foragerRouteInstructionBg = null;
+        this.foragerRouteInstructionLeft = null;
+        this.foragerRouteInstructionTarget = null;
+        this.foragerRouteInstructionRight = null;
+        this.foragerRouteHoverNode = null;
+        this.foragerRouteHoverType = null;
+        this._foragerRouteAssistSignature = "";
+        this._foragerRouteLastDrawAt = 0;
         this.harvestMode = false;
         this.money = 400; // Starting fallback amount
         this.seeds = 10;
@@ -482,9 +532,16 @@ export class mapView extends Phaser.Scene {
         if (troop?.isRaider) {
             this.achievementSystem?.addStat?.("raidersKilled", 1);
         }
+        const sourceX = Number.isFinite(opts?.sourceX) ? opts.sourceX : Number(troop?.x);
+        const sourceY = Number.isFinite(opts?.sourceY) ? opts.sourceY : Number(troop?.y);
         this.addTownXp(
             troop?.isFortGrunt ? TOWN_XP_SOURCE_VALUES.fortGruntKill : TOWN_XP_SOURCE_VALUES.raiderKill,
-            troop?.isFortGrunt ? "Fort Grunt Defeated" : "Raider Defeated"
+            troop?.isFortGrunt ? "Fort Grunt Defeated" : "Raider Defeated",
+            {
+                sourceX,
+                sourceY,
+                sourceKind: "player_death",
+            }
         );
     }
 
@@ -1041,6 +1098,11 @@ export class mapView extends Phaser.Scene {
         state.gainSerial = Math.max(0, Number(state.gainSerial || 0)) + 1;
         state.lastGainAmount = normalized;
         state.lastGainLabel = String(reason || "Town XP");
+        const sourceX = Number(opts?.sourceX);
+        const sourceY = Number(opts?.sourceY);
+        state.lastGainSource = Number.isFinite(sourceX) && Number.isFinite(sourceY)
+            ? { x: sourceX, y: sourceY, kind: String(opts?.sourceKind || "") }
+            : null;
 
         let levelsGained = 0;
         while (state.xpIntoLevel >= Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1)))) {
@@ -1388,7 +1450,12 @@ export class mapView extends Phaser.Scene {
             Math.round(baseIntervalMs * Math.max(0.4, Number(modifier?.intervalMultiplier ?? 1) || 1))
         );
         const enemyMods = this._getNightHordeEnemyMods(modifier);
-        const enemyTypeLabel = this._getNightHordeEnemyLabel(modifier);
+        const hunterRatio = hordeIndex >= 1 ? 0.25 : 0;
+        const bomberRatio = hordeIndex >= DEBUG_BOMBER_START_HORDE_INDEX ? NIGHT_HORDE_BOMBER_RATIO : 0;
+        const enemyTypes = ["Raiders"];
+        if (hunterRatio > 0) enemyTypes.push("Hunters");
+        if (bomberRatio > 0) enemyTypes.push("Bombers");
+        const enemyTypeLabel = enemyTypes.length > 1 ? enemyTypes.join(" + ") : this._getNightHordeEnemyLabel(modifier);
 
         return {
             edgeKey,
@@ -1399,6 +1466,8 @@ export class mapView extends Phaser.Scene {
             spawnIntervalMs,
             swimSpeed: Math.max(180, Math.round(220 * Math.max(1, Number(enemyMods.speedMultiplier ?? 1) || 1))),
             enemyType: "raider",
+            hunterRatio,
+            bomberRatio,
             enemyTypeLabel,
             enemyMods,
             modifierKey: modifier?.key ?? null,
@@ -1421,6 +1490,11 @@ export class mapView extends Phaser.Scene {
             return this._estimateNightLaneDetails(edgeKey, laneDifficulty, horde, modifier);
         });
         const totalEnemies = laneDetails.reduce((sum, lane) => sum + lane.enemies, 0);
+        const includesHunters = laneDetails.some((lane) => Number(lane.hunterRatio || 0) > 0);
+        const includesBombers = laneDetails.some((lane) => Number(lane.bomberRatio || 0) > 0);
+        const enemyLabelParts = ["Raiders"];
+        if (includesHunters) enemyLabelParts.push("Hunters");
+        if (includesBombers) enemyLabelParts.push("Bombers");
 
         return {
             hordeIndex: horde,
@@ -1428,7 +1502,7 @@ export class mapView extends Phaser.Scene {
             baseDifficulty,
             edgeKeys,
             modifier,
-            enemyLabel: this._getNightHordeEnemyLabel(modifier),
+            enemyLabel: enemyLabelParts.length > 1 ? enemyLabelParts.join(" + ") : this._getNightHordeEnemyLabel(modifier),
             laneDetails,
             totalEnemies,
         };
@@ -1911,11 +1985,12 @@ export class mapView extends Phaser.Scene {
         Object.keys(townRoads).forEach((key) => delete townRoads[key]);
     }
 
-    _spawnNightlyHordeTroop(active, lane) {
+    _spawnNightlyHordeTroop(active, lane, enemyType = lane?.enemyType ?? "raider") {
         if (!active || this._activeNightHorde?.id !== active.id) return null;
 
         const troop = spawnSeaRaider(this, {
             edge: lane.edgeKey,
+            enemyType,
             targetPoint: this._getMainIslandCenterWorld(),
             swimSpeed: lane.swimSpeed,
             modifier: lane.enemyMods,
@@ -1944,8 +2019,22 @@ export class mapView extends Phaser.Scene {
                 const streamOffset = initialDelay + laneIndex * 180 + spawnerIndex * 320;
                 for (let enemyIndex = 0; enemyIndex < Math.max(1, Number(lane.enemiesPerSpawner || 1)); enemyIndex++) {
                     const delay = Math.max(0, streamOffset + enemyIndex * intervalMs);
+                    const hunterEvery = lane.hunterRatio > 0
+                        ? Math.max(3, Math.round(1 / lane.hunterRatio))
+                        : 0;
+                    const bomberEvery = lane.bomberRatio > 0
+                        ? Math.max(4, Math.round(1 / lane.bomberRatio))
+                        : 0;
+                    const streamIndex = enemyIndex + spawnerIndex + laneIndex;
+                    const enemyType = bomberEvery > 0
+                        && (streamIndex % bomberEvery === bomberEvery - 1)
+                        ? "bomber"
+                        : hunterEvery > 0
+                        && (streamIndex % hunterEvery === hunterEvery - 1)
+                        ? "hunter"
+                        : "raider";
                     events.push(this.time.delayedCall(delay, () => {
-                        this._spawnNightlyHordeTroop(active, lane);
+                        this._spawnNightlyHordeTroop(active, lane, enemyType);
                     }));
                 }
             }
@@ -2359,6 +2448,7 @@ export class mapView extends Phaser.Scene {
         this.load.spritesheet('gun1', gun1, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('playerAction', playerAction, { frameWidth: 16, frameHeight: 16});
         this.load.spritesheet('playerCarry', playerCarry, { frameWidth: 16, frameHeight: 16});
+        this.load.spritesheet('player_death', playerDeath, { frameWidth: 32, frameHeight: 44});
         this.load.image('barrier', gray);  // Load a barrier image
         this.load.image('worldMap', worldMap);
         this.load.image('cube', black);  // Make sure the path and filename are correct
@@ -2395,6 +2485,8 @@ export class mapView extends Phaser.Scene {
         Blademaster.preload(this);
         Gunslinger.preload(this);
         Raider.preload(this);
+        Hunter.preload(this);
+        Bomber.preload(this);
         preloadPlayerPortraits(this);
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
@@ -2747,12 +2839,6 @@ export class mapView extends Phaser.Scene {
             }
             // 🌾 FARM MODE: laptop-friendly 2-click plot selection (left click)
             else if (this.farmMode && pointer.button === 0) {
-                // Consume the UI click that toggled farm mode on
-                if (this.farmConsumeNextClick) {
-                    this.farmConsumeNextClick = false;
-                    this.beginFarmSelectionIfNeeded();
-                    return;
-                }
                 this.handleFarmPointerDown(pointer);
                 return;
             }
@@ -3476,6 +3562,312 @@ export class mapView extends Phaser.Scene {
         this.onPointerUp({ button: 0, _skipTrackpadTapArm: true });
     }
 
+    _getForagerRouteSelectionProfile() {
+        const profile = OrderRunner.getSelectionProfile(Player.selected);
+        if (!profile.allForagers) return null;
+        if (
+            this.gridPlace ||
+            this.harvestMode ||
+            this.seedGridMode ||
+            this.farmMode ||
+            this.isBrushMode ||
+            this.wallPlacer?.active ||
+            this.wallDestroyer?.active ||
+            (this.breakItems?.text ?? "") === "Place"
+        ) {
+            return null;
+        }
+        return profile;
+    }
+
+    _foragerRouteSelectionSignature(profile = this._getForagerRouteSelectionProfile()) {
+        if (!profile) return "";
+        return profile.troops
+            .filter(troop => troop?.active)
+            .map(troop => troop.id)
+            .sort((a, b) => a - b)
+            .join("|");
+    }
+
+    _getForagerRouteNodeResourceType(node) {
+        return OrderRunner._nodeResourceKind?.(node) || node?.resourceKind || null;
+    }
+
+    _getForagerRouteNodes(resourceType = null) {
+        const types = resourceType ? [resourceType] : Object.keys(FORAGER_ROUTE_RESOURCE_UI);
+        const nodes = [];
+
+        types.forEach((type) => {
+            const list = OrderRunner._resourceNodesForType?.(type) || [];
+            list.forEach((node) => {
+                if (!OrderRunner._nodeActive?.(node)) return;
+                if (this._getForagerRouteNodeResourceType(node) !== type) return;
+                const health = Math.max(0, Number(node?.health ?? node?.task?.remaining ?? 0));
+                if (health <= 0) return;
+                nodes.push(node);
+            });
+        });
+
+        return nodes;
+    }
+
+    _ensureForagerRouteGlow() {
+        if (this.foragerRouteGlow?.scene) return this.foragerRouteGlow;
+        this.foragerRouteGlow?.destroy?.();
+        this.foragerRouteGlow = this.add.graphics()
+            .setDepth(UIDEPTH - 1)
+            .setVisible(false);
+        return this.foragerRouteGlow;
+    }
+
+    _drawForagerRouteAssist(force = false) {
+        const profile = this._getForagerRouteSelectionProfile();
+        const signature = [
+            this._foragerRouteSelectionSignature(profile),
+            this.foragerRouteHoverType || "all",
+            this.foragerRouteHoverNode ? `${this.foragerRouteHoverNode.gridX},${this.foragerRouteHoverNode.gridY}` : "",
+        ].join("|");
+        const now = this.time?.now ?? 0;
+
+        if (!force && signature === this._foragerRouteAssistSignature && now - this._foragerRouteLastDrawAt < 180) {
+            return;
+        }
+
+        this._foragerRouteAssistSignature = signature;
+        this._foragerRouteLastDrawAt = now;
+
+        const glow = this._ensureForagerRouteGlow();
+        glow.clear();
+
+        if (!profile) {
+            glow.setVisible(false);
+            this.hideForagerRouteInstruction();
+            return;
+        }
+
+        glow.setVisible(true);
+        const hoveredType = this.foragerRouteHoverType;
+        const nodes = this._getForagerRouteNodes();
+
+        nodes.forEach((node) => {
+            const type = this._getForagerRouteNodeResourceType(node);
+            const cfg = FORAGER_ROUTE_RESOURCE_UI[type];
+            if (!cfg) return;
+
+            const sameType = !hoveredType || hoveredType === type;
+            const hoveredNode = this.foragerRouteHoverNode === node;
+            const gx = Number(node.gridX ?? node.x ?? 0);
+            const gy = Number(node.gridY ?? node.y ?? 0);
+            const w = Math.max(1, Number(node.footprintW ?? node.resourceTileType?.lenX ?? 1));
+            const h = Math.max(1, Number(node.footprintH ?? node.resourceTileType?.lenY ?? 1));
+            const x = gx * SQUARESIZE;
+            const y = gy * SQUARESIZE;
+            const width = w * SQUARESIZE;
+            const height = h * SQUARESIZE;
+            const alpha = hoveredNode ? 0.24 : sameType ? 0.13 : 0.045;
+            const strokeAlpha = hoveredNode ? 0.95 : sameType ? 0.58 : 0.18;
+            const lineWidth = hoveredNode ? 4 : sameType ? 2.4 : 1.4;
+
+            glow.fillStyle(cfg.color, alpha);
+            glow.fillRoundedRect(x + 3, y + 3, Math.max(2, width - 6), Math.max(2, height - 6), 8);
+            glow.lineStyle(lineWidth, cfg.color, strokeAlpha);
+            glow.strokeRoundedRect(x + 2, y + 2, Math.max(2, width - 4), Math.max(2, height - 4), 8);
+        });
+
+        if (hoveredType) this.showForagerRouteInstruction(hoveredType);
+        else this.hideForagerRouteInstruction();
+    }
+
+    updateForagerRouteAssist(force = false) {
+        this._drawForagerRouteAssist(force);
+    }
+
+    setForagerRouteHover(node, resourceType = null, hovering = true) {
+        if (!hovering) {
+            if (this.foragerRouteHoverNode === node) {
+                this.foragerRouteHoverNode = null;
+                this.foragerRouteHoverType = null;
+                this.updateForagerRouteAssist(true);
+            }
+            return;
+        }
+
+        const profile = this._getForagerRouteSelectionProfile();
+        if (!profile) return;
+
+        const type = resourceType || this._getForagerRouteNodeResourceType(node);
+        if (!FORAGER_ROUTE_RESOURCE_UI[type]) return;
+
+        this.foragerRouteHoverNode = node;
+        this.foragerRouteHoverType = type;
+        this.updateForagerRouteAssist(true);
+    }
+
+    tryIssueForagerRouteToNode(node, resourceType = null) {
+        const profile = this._getForagerRouteSelectionProfile();
+        if (!profile || !node) return false;
+
+        const type = resourceType || this._getForagerRouteNodeResourceType(node);
+        const cfg = FORAGER_ROUTE_RESOURCE_UI[type];
+        if (!cfg) return false;
+
+        if (!OrderRunner._nodeActive?.(node) || Math.max(0, Number(node.health ?? node.task?.remaining ?? 0)) <= 0) {
+            showAlert(this, `That ${cfg.target} target is already cleared`, "#fecaca");
+            return true;
+        }
+
+        const tileType = node.resourceTileType || node.task?.type;
+        if (tileType && !buildingManager.isBlockAccessible(node.gridX, node.gridY, tileType)) {
+            showAlert(this, `Can't reach those ${cfg.target}`, "#fecaca");
+            return true;
+        }
+
+        const issued = OrderRunner.issueGatherSetOrder(profile.troops, [node]);
+        if (!issued) {
+            showAlert(this, `Could not route selected foragers to ${cfg.target}`, "#fecaca");
+            return true;
+        }
+
+        this.foragerRouteHoverNode = null;
+        this.foragerRouteHoverType = null;
+        Player.clearSelection();
+        this.updateForagerRouteAssist(true);
+        this.functionTab?.updateVisuals?.();
+        this.uiScene?.functionTab?.updateVisuals?.();
+        showAlert(this, cfg.alert, cfg.textColor);
+        return true;
+    }
+
+    ensureForagerRouteInstructionUI() {
+        if (
+            this.foragerRouteInstructionUI?.active &&
+            this.foragerRouteInstructionBg?.scene &&
+            this.foragerRouteInstructionLeft?.scene &&
+            this.foragerRouteInstructionTarget?.scene &&
+            this.foragerRouteInstructionRight?.scene
+        ) {
+            return;
+        }
+
+        this.foragerRouteInstructionUI?.destroy?.(true);
+        this.foragerRouteInstructionUI = this.add.container(this.scale.width / 2, 132)
+            .setDepth(UIDEPTH + 42)
+            .setScrollFactor(0)
+            .setVisible(false)
+            .setAlpha(0);
+
+        this.foragerRouteInstructionBg = this.add.graphics().setScrollFactor(0);
+        this.foragerRouteInstructionLeft = this.add.text(0, 0, "", {
+            fontFamily: "Bungee",
+            fontSize: "15px",
+            color: "#f6fcff",
+            stroke: "#06111b",
+            strokeThickness: 4,
+        }).setOrigin(0, 0.5).setScrollFactor(0);
+        this.foragerRouteInstructionTarget = this.add.text(0, 0, "", {
+            fontFamily: "Bungee",
+            fontSize: "15px",
+            color: "#86efac",
+            stroke: "#06111b",
+            strokeThickness: 4,
+        }).setOrigin(0, 0.5).setScrollFactor(0);
+        this.foragerRouteInstructionRight = this.add.text(0, 0, "", {
+            fontFamily: "Bungee",
+            fontSize: "15px",
+            color: "#d9f3ff",
+            stroke: "#06111b",
+            strokeThickness: 4,
+        }).setOrigin(0, 0.5).setScrollFactor(0);
+
+        this.foragerRouteInstructionUI.add([
+            this.foragerRouteInstructionBg,
+            this.foragerRouteInstructionLeft,
+            this.foragerRouteInstructionTarget,
+            this.foragerRouteInstructionRight,
+        ]);
+
+        this._trackScaleResize(({ width }) => {
+            this.foragerRouteInstructionUI?.setX(width / 2);
+        });
+    }
+
+    _layoutForagerRouteInstruction() {
+        const ui = this.foragerRouteInstructionUI;
+        if (!ui) return;
+
+        const pad = 7;
+        let x = 0;
+        this.foragerRouteInstructionLeft.setPosition(x, 0);
+        x += this.foragerRouteInstructionLeft.width + pad;
+        this.foragerRouteInstructionTarget.setPosition(x, 0);
+        x += this.foragerRouteInstructionTarget.width + pad;
+        this.foragerRouteInstructionRight.setPosition(x, 0);
+        x += this.foragerRouteInstructionRight.width;
+
+        const textWidth = Math.max(1, x);
+        const bubbleWidth = Math.max(260, textWidth + 48);
+        const bubbleHeight = 42;
+        const left = -bubbleWidth / 2;
+        const top = -bubbleHeight / 2;
+
+        for (const child of [this.foragerRouteInstructionLeft, this.foragerRouteInstructionTarget, this.foragerRouteInstructionRight]) {
+            child.x -= textWidth / 2;
+        }
+
+        const bg = this.foragerRouteInstructionBg;
+        bg.clear();
+        bg.fillStyle(0x031019, 0.28);
+        bg.fillRoundedRect(left, top + 5, bubbleWidth, bubbleHeight, 16);
+        bg.fillStyle(0x113048, 0.84);
+        bg.fillRoundedRect(left, top, bubbleWidth, bubbleHeight, 16);
+        bg.fillStyle(0xffffff, 0.10);
+        bg.fillRoundedRect(left + 9, top + 6, bubbleWidth - 18, 13, 10);
+        bg.lineStyle(2, 0x9edfff, 0.24);
+        bg.strokeRoundedRect(left, top, bubbleWidth, bubbleHeight, 16);
+        bg.lineStyle(1, 0xffffff, 0.12);
+        bg.strokeRoundedRect(left + 1, top + 1, bubbleWidth - 2, bubbleHeight - 2, 15);
+    }
+
+    showForagerRouteInstruction(resourceType = null) {
+        const profile = this._getForagerRouteSelectionProfile();
+        if (!profile) {
+            this.hideForagerRouteInstruction();
+            return;
+        }
+
+        this.ensureForagerRouteInstructionUI();
+        const cfg = FORAGER_ROUTE_RESOURCE_UI[resourceType] || null;
+        if (cfg) {
+            this.foragerRouteInstructionLeft.setText(`${cfg.action} `);
+            this.foragerRouteInstructionTarget.setText(cfg.target);
+            this.foragerRouteInstructionTarget.setColor(cfg.textColor);
+            this.foragerRouteInstructionRight.setText("");
+        } else {
+            this.foragerRouteInstructionLeft.setText("Route selected foragers");
+            this.foragerRouteInstructionTarget.setText("");
+            this.foragerRouteInstructionRight.setText("");
+        }
+
+        this._layoutForagerRouteInstruction();
+        if (!this.foragerRouteInstructionUI.visible) {
+            this.foragerRouteInstructionUI.setVisible(true).setAlpha(0).setScale(0.96);
+            this.tweens.add({
+                targets: this.foragerRouteInstructionUI,
+                alpha: 1,
+                scaleX: 1,
+                scaleY: 1,
+                duration: 130,
+                ease: "Quad.easeOut",
+            });
+        }
+    }
+
+    hideForagerRouteInstruction() {
+        if (!this.foragerRouteInstructionUI?.visible) return;
+        this.tweens.killTweensOf(this.foragerRouteInstructionUI);
+        this.foragerRouteInstructionUI.setVisible(false).setAlpha(0);
+    }
+
     // === Farm mode: laptop-friendly 2-click plot selection ===
 // === Farm instruction UI (segmented, colored parts, seed icon) ===
 ensureFarmInstructionUI() {
@@ -3813,8 +4205,7 @@ beginFarmSelectionIfNeeded() {
     this.endCell = null;
     this.graphics.clear();
 
-    // IMPORTANT: consume the click that turned farm mode on (prevents fall-through)
-    this.farmConsumeNextClick = true;
+    this.farmConsumeNextClick = false;
 
     this.setFarmInstructionPhase1();
 }
@@ -3839,7 +4230,6 @@ cancelFarmSelection(exitFarmMode = false) {
     handleFarmPointerDown(pointer) {
         this.beginFarmSelectionIfNeeded();
 
-        // consume the activation click (so first "real" click sets the start tile)
         if (this.farmConsumeNextClick) {
             this.farmConsumeNextClick = false;
             return;
@@ -4301,7 +4691,6 @@ cancelFarmSelection(exitFarmMode = false) {
             this.handleKeyboardCameraMovement();
             PineTree.updateAll(this.time.now);
             if (this.farmMode && !this._prevFarmMode) {
-                this.farmConsumeNextClick = true;
                 this.beginFarmSelectionIfNeeded();
             }
             if (!this.farmMode && this._prevFarmMode) {
@@ -4310,6 +4699,7 @@ cancelFarmSelection(exitFarmMode = false) {
             this._prevFarmMode = this.farmMode;
         }
         Player.update();
+        this.updateForagerRouteAssist();
         ClayOvenUI.updateAllOvens(effectiveSimSpeed);
         this._refreshNorthFortArrivalMarker();
         this._syncNightPressurePreviewPanels();

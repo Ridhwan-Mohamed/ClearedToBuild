@@ -577,6 +577,7 @@ export class OrderRunner {
   static handleTroopDestroyed(troop) {
     const orderId = troop?.currentOrder?.id;
     if (!orderId) return;
+    this._releaseManagedGatherTarget(troop.currentOrder, troop);
     troop.currentOrder = null;
     this._cleanupOrderReservations(orderId);
   }
@@ -695,6 +696,7 @@ export class OrderRunner {
     if (!troop?.active) return;
     const oldOrder = troop.currentOrder;
     const orderId = oldOrder?.id;
+    this._releaseManagedGatherTarget(oldOrder, troop);
     if (interrupt && (troop.task || troop.currentPath?.length || troop.timer || StorageManager.isCarrying(troop))) {
       InterruptController.interruptTroop(troop, "direct_order_clear", targetState);
     }
@@ -709,6 +711,41 @@ export class OrderRunner {
       troop.body?.setVelocity?.(0, 0);
     }
     if (orderId) this._cleanupOrderReservations(orderId);
+  }
+
+  static _releaseManagedGatherTarget(order, troop) {
+    if (!order || order.source !== "function_tab") return false;
+    if (order.kind !== ORDER_KINDS.GATHER_TYPE || order.shuttingDown) return false;
+    const resourceType = order.resourceType;
+    const automation = Teams.ensureTownAutomation?.(troop?.body?.team ?? 1);
+    const targets = automation?.gatherTargets;
+    if (!targets || !Object.prototype.hasOwnProperty.call(targets, resourceType)) return false;
+
+    const current = Math.max(0, Number(targets[resourceType] || 0));
+    if (current <= 0) return false;
+    targets[resourceType] = Math.max(0, current - 1);
+
+    const total = Object.values(targets).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+    if (total <= 0) automation.gatherEnabled = false;
+
+    this._refreshFunctionTabForTroop(troop);
+    return true;
+  }
+
+  static _refreshFunctionTabForTroop(troop) {
+    const scene = troop?.scene ?? Player.scene;
+    const candidates = new Set([
+      scene,
+      scene?.uiScene,
+      scene?.scene?.get?.("GameUIScene"),
+      Player.scene,
+      Player.scene?.uiScene,
+      Player.scene?.scene?.get?.("GameUIScene"),
+    ]);
+
+    candidates.forEach((candidate) => {
+      candidate?.functionTab?.updateVisuals?.();
+    });
   }
 
   static _finishGatherOrder(troop) {
@@ -842,6 +879,7 @@ export class OrderRunner {
         currentTarget,
         priorityFn: (enemy) => this._combatThreatPriority(enemy, townCenter),
         assignmentPriorityFn: (enemy) => this._defendTownCoveragePriority(troop, enemy, currentTarget),
+        strictTargetSpread: true,
       }
     );
   }
@@ -860,6 +898,7 @@ export class OrderRunner {
       {
         anchor,
         currentTarget: troop.forcedTarget || troop.track?.[0]?.gameObject || null,
+        strictTargetSpread: true,
       }
     );
   }

@@ -98,14 +98,14 @@ export function getStructuralBarAnchor(
   if (!bounds) {
     return {
       centerX: (sprite?.x ?? 0) + xOffset,
-      topY: sprite?.y ?? 0,
+      topY: (sprite?.y ?? 0) + yOffset,
       width: minWidth,
     };
   }
 
   return {
     centerX: bounds.centerX + xOffset,
-    topY: bounds.top - yOffset,
+    topY: bounds.bottom + yOffset,
     width: Math.max(minWidth, Math.round(bounds.width * widthScale) + paddingX),
   };
 }

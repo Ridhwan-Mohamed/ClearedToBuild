@@ -6,6 +6,8 @@ import { Player } from "./players/Player";
 import { Teams } from "./Teams";
 import { buildingManager } from "./Manager/buildingManager";
 import { AudioManager } from "./Manager/AudioManager";
+import { CombatSpacingCoordinator } from "./ai/CombatSpacingCoordinator";
+import { playSmokeClearing } from "./FX/SmokeClearing";
 
 export class Projectile {
     static scene;
@@ -37,6 +39,14 @@ export class Projectile {
         const textureKey = weapon?.projectileTextureKey ?? 'cube';
         const textureFrame = weapon?.projectileFrame ?? undefined;
         const newCube = Projectile.scene.physics.add.sprite(startX, startY, textureKey, textureFrame);
+        if (Number.isFinite(weapon?.projectileDisplayWidth) && Number.isFinite(weapon?.projectileDisplayHeight)) {
+            newCube.setDisplaySize(weapon.projectileDisplayWidth, weapon.projectileDisplayHeight);
+        }
+        if (weapon?.projectilePointsUp) {
+            newCube.setRotation(angle + Math.PI / 2);
+        } else if (weapon?.projectileRotateToAngle) {
+            newCube.setRotation(angle);
+        }
         Projectile.projectileGroup.add(newCube);
         newCube.body.dontTrack = true;
         newCube.team = teamNumber;
@@ -63,6 +73,65 @@ export class Projectile {
         }
 
         Projectile.applyTravelScaleArc(newCube, weapon, options);
+        Projectile.startProjectileTrail(newCube, weapon);
+    }
+
+    static ensureWeaponEffectAnimations() {
+        if (!Projectile.scene?.anims) return false;
+        if (Projectile.scene.textures?.exists?.("weapon_hit_effect") && !Projectile.scene.anims.exists("weapon_hit_effect_anim")) {
+            Projectile.scene.anims.create({
+                key: "weapon_hit_effect_anim",
+                frames: Projectile.scene.anims.generateFrameNumbers("weapon_hit_effect", { start: 0, end: 2 }),
+                frameRate: 18,
+                repeat: 0,
+            });
+        }
+        return true;
+    }
+
+    static playHitEffect(x, y, { scale = 1, angle = 0 } = {}) {
+        if (!Projectile.scene?.textures?.exists?.("weapon_hit_effect")) return;
+        Projectile.ensureWeaponEffectAnimations();
+        const fx = Projectile.scene.add.sprite(x, y, "weapon_hit_effect", 0)
+            .setDepth((TILE_TYPES.turret.depth ?? 10) + 16)
+            .setScale(scale)
+            .setRotation(angle);
+        fx.play("weapon_hit_effect_anim");
+        fx.once("animationcomplete", () => fx.destroy());
+    }
+
+    static startProjectileTrail(projectile, weapon) {
+        if (!projectile?.active || !weapon?.projectileTrail) return;
+        const delay = Math.max(45, Number(weapon.projectileTrailDelay ?? 70));
+        const color = Number.isFinite(weapon.projectileTrailColor) ? weapon.projectileTrailColor : 0xfff0a8;
+        projectile._trailTimer = Projectile.scene.time.addEvent({
+            delay,
+            loop: true,
+            callback: () => {
+                if (!projectile?.active) return;
+                Projectile.playProjectileTrailRing(projectile.x, projectile.y, color, weapon);
+            },
+        });
+        projectile.once("destroy", () => {
+            projectile._trailTimer?.remove?.(false);
+            projectile._trailTimer = null;
+        });
+    }
+
+    static playProjectileTrailRing(x, y, color, weapon = null) {
+        const scene = Projectile.scene;
+        if (!scene) return;
+        const ring = scene.add.circle(x, y, Math.max(3, Number(weapon?.projectileTrailRadius ?? 4)), color, 0)
+            .setDepth((TILE_TYPES.turret.depth ?? 10) + 4);
+        ring.setStrokeStyle(Math.max(1, Number(weapon?.projectileTrailStroke ?? 1.5)), color, 0.62);
+        scene.tweens.add({
+            targets: ring,
+            scale: Number(weapon?.projectileTrailScale ?? 2.3),
+            alpha: 0,
+            duration: Math.max(120, Number(weapon?.projectileTrailDuration ?? 260)),
+            ease: "Sine.easeOut",
+            onComplete: () => ring.destroy(),
+        });
     }
 
     static getTravelDurationMs(weapon, options = null) {
@@ -157,6 +226,13 @@ export class Projectile {
 
         const impactRadius = Math.max(10, Number(options?.impactRadius ?? projectile.weapon?.impactRadius ?? 18));
         const preferredTarget = options?.impactTarget ?? null;
+        if (projectile.weapon?.impactAtEndOnly) {
+            const smokeSize = Math.max(16, Number(options?.impactSmokeSize ?? projectile.weapon?.impactSmokeSize ?? 32));
+            playSmokeClearing(Projectile.scene, impactX, impactY, {
+                width: smokeSize,
+                height: smokeSize,
+            });
+        }
 
         const target = this.findImpactTarget(projectile, impactX, impactY, impactRadius, preferredTarget);
         if (target) {
@@ -329,14 +405,22 @@ export class Projectile {
             fightManager.applyHitReaction(target, attacker, projectile.weapon);
 
             target.health = Math.max(0, target.health - result.damage);
+            Projectile.playHitEffect(target.x, target.y - 6, {
+                scale: projectile.weapon?.hitEffectScale ?? 1,
+                angle: Phaser.Math.Angle.Between(projectile.x, projectile.y, target.x, target.y),
+            });
 
             if (target.health <= 0) {
                 fightManager.checkForKillReward(projectile.team, target);
+                Player._cleanupCombatTicketForTarget?.(projectile.team, target);
                 Player.destroyPlayer(target);
 
                 if (projectile.player) {
+                    CombatSpacingCoordinator.clearTroopFocus(projectile.player);
+                    Player.resetRoamState?.(projectile.player);
                     Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE);
                     projectile.player.track = null;
+                    projectile.player.forcedTarget = null;
                     if (projectile.player.timer) {
                         projectile.player.timer.remove(false);
                         projectile.player.timer = null;
@@ -372,7 +456,7 @@ export class Projectile {
     }
 
     static handleStructureCollision(projectile, hit) {
-        if (this.isFriendlyStructureHit(projectile, hit)) {
+        if (Projectile.isFriendlyStructureHit(projectile, hit)) {
             return;
         }
 
@@ -440,47 +524,16 @@ export class Projectile {
         if (hit.buildingRef) {
             const building = hit.buildingRef;
 
-            // If shooter is on a destroy task, decrement shared task duration and call building.onDamaged
             const t = shooter?.task;
 
             if (shooter && t) {
-            // ensure we have a max for bar math
-            t.totalDuration = t.totalDuration ?? t.duration;
+                const damageResult = buildingManager.applyDestroyDamage(t, dmg);
+                if (damageResult.destroyed || t.duration <= 0) {
+                    buildingManager._completeDestroyBlock(shooter, t);
+                }
 
-            t.duration = Math.max(0, t.duration - dmg);
-            // ✅ Keep building HP synced to shared task HP (so UI + later clicks stay correct)
-            if (building) {
-                building.maxHealth = building.maxHealth ?? t.totalDuration;
-                building.health = t.duration;
-            }
-
-            // trigger the old animations + red bar behavior (tower already implements this)
-            const targetObj = t.value?.buildingRef || t.value; // matches your task pattern :contentReference[oaicite:1]{index=1}
-            if (targetObj && typeof targetObj.onDamaged === "function") {
-                targetObj.onDamaged(dmg, t.duration, t.totalDuration);
-            } else if (building && typeof building.onDamaged === "function") {
-                building.onDamaged(dmg, t.duration, t.totalDuration);
-            }
-
-            // floating damage text (still useful even if onDamaged has it)
-            const bx = building.sprite?.x ?? hit.x;
-            const by = building.sprite?.y ?? hit.y;
-            showGhostText(
-                Projectile.scene,
-                bx,
-                by - 10,
-                `${result.isCrit ? "CRIT " : ""}${dmg}`,
-                teamNumber,
-                result.isCrit
-            );
-
-            // FINISH: complete shared task and cleanup others
-            if (t.duration <= 0) {
-                buildingManager._completeDestroyBlock(shooter, t);
-            }
-
-            projectile.destroy();
-            return;
+                projectile.destroy();
+                return;
             }
 
             // No task: treat as normal "damage building health" path if present

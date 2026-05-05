@@ -14,6 +14,7 @@ import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Teams } from "../Teams.js";
 import { VisibilitySystem } from "../UI/VisibilitySystem.js";
 import { FortGrunt } from "../players/FortGrunt.js";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing.js";
 
 export class SpawnerBuilding {
   /**
@@ -260,7 +261,21 @@ export class SpawnerBuilding {
     if (this._destroyed) return;
     this.hp -= dmg;
     // Minor feedback
-    this.scene.tweens.add({ targets: this.sprite, angle: { from: -2, to: 2 }, duration: 40, yoyo: true, repeat: 1 });
+    const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite?.angle || 0);
+    this._damageRestAngle = baseAngle;
+    this._damageShakeTween?.stop?.();
+    if (this.sprite) this.sprite.angle = baseAngle;
+    this._damageShakeTween = this.scene.tweens.add({
+      targets: this.sprite,
+      angle: baseAngle + 2,
+      duration: 40,
+      yoyo: true,
+      repeat: 1,
+      onComplete: () => {
+        if (this.sprite) this.sprite.angle = baseAngle;
+        this._damageShakeTween = null;
+      },
+    });
     if (this.hp <= 0) this.destroy();
   }
 
@@ -286,6 +301,7 @@ export class SpawnerBuilding {
       VisibilitySystem.removeLightById(this.lightId);
       this.lightId = null;
     }
+    playBuildingCollapseSmoke(this);
     this.sprite?.destroy();
     this.counterText?.destroy();
   }

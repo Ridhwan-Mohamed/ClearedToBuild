@@ -166,10 +166,11 @@ export class ContractHud {
     return true;
   }
 
-  setExternalHover(slotId, hovered = false) {
+  setExternalHover(slotId) {
     const slot = this.squares.get(slotId);
     if (!slot) return;
-    slot.externalHovered = !!hovered;
+    if (!slot.externalHovered) return;
+    slot.externalHovered = false;
     this._applySquareVisual(slotId, this._getSlotStatus(slotId));
   }
 
@@ -384,6 +385,7 @@ export class ContractHud {
         const slot = this.squares.get(slotId);
         if (!slot) return;
         slot.hovered = true;
+        this._setSquareHoverScale(slotId, true);
         this._applySquareVisual(slotId, this._getSlotStatus(slotId));
       });
       zone.on("pointerout", () => {
@@ -391,6 +393,7 @@ export class ContractHud {
         if (!slot) return;
         slot.hovered = false;
         slot.pressed = false;
+        this._setSquareHoverScale(slotId, false);
         this._applySquareVisual(slotId, this._getSlotStatus(slotId));
       });
       zone.on("pointerdown", () => {
@@ -403,6 +406,7 @@ export class ContractHud {
         const slot = this.squares.get(slotId);
         if (!slot) return;
         slot.pressed = false;
+        this._setSquareHoverScale(slotId, !!slot.hovered);
         this._applySquareVisual(slotId, this._getSlotStatus(slotId));
         this._onSquareClicked(slotId);
       });
@@ -423,6 +427,19 @@ export class ContractHud {
       icon.setText(defaultIconText);
       timer.setText(defaultTimerText);
     }
+  }
+
+  _setSquareHoverScale(slotId, hovered = false) {
+    const slot = this.squares.get(slotId);
+    if (!slot?.group) return;
+    this.scene.tweens.killTweensOf(slot.group);
+    this.scene.tweens.add({
+      targets: slot.group,
+      scaleX: hovered ? 1.12 : 1,
+      scaleY: hovered ? 1.12 : 1,
+      duration: 110,
+      ease: "Sine.Out",
+    });
   }
 
   _buildPopup() {
@@ -471,7 +488,7 @@ export class ContractHud {
   }
 
   _layout() {
-    const stackX = 54;
+    const stackX = 46;
     const xpBottom = Math.round(
       (this.scene?.townXpHud?.y ?? 72) + ((this.scene?.townXpHud?.panelHeight ?? 60) / 2)
     );
@@ -512,8 +529,8 @@ export class ContractHud {
     if (!slot || !status) return;
 
     const fillAlpha = status.fillAlpha ?? 0.94;
-    const isHovered = !!(slot.hovered || slot.externalHovered);
-    const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.78 : 0.55;
+    const isHovered = !!slot.hovered;
+    const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
     const iconColor = status.iconColor ?? "#ffffff";
 
     slot.frame.clear();
@@ -522,7 +539,7 @@ export class ContractHud {
       slot.frame.fillStyle(status.fillColor ?? 0x111827, boostedFill);
       slot.frame.fillRoundedRect(-28, 6, 56, 56, 12);
     }
-    slot.frame.lineStyle(3, status.strokeColor ?? 0xffffff, strokeAlpha);
+    slot.frame.lineStyle(status.kind === "empty" ? 2 : 3, status.strokeColor ?? 0xffffff, strokeAlpha);
     slot.frame.strokeRoundedRect(-28, 6, 56, 56, 12);
 
     slot.icon.setText(status.iconText);
@@ -592,11 +609,11 @@ export class ContractHud {
       return {
         kind: "empty",
         iconText: "+",
-        timerText: "BUY",
+        timerText: "",
         fillColor: 0x0b1220,
         strokeColor: 0xdbeafe,
-        iconSize: 30,
-        fillAlpha: 0.86,
+        iconSize: 34,
+        fillAlpha: 0,
       };
     }
 

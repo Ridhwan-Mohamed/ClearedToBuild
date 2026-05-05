@@ -17,6 +17,7 @@ import {
     getStructuralHealthBarTargets,
     layoutStructuralHealthBar,
 } from "../UI/BuildingTheme";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 export class House {
 
@@ -388,8 +389,10 @@ export class House {
 
     shakeAndFlash() {
         if (!this.sprite) return;
-        const baseAngle = this.sprite.angle || 0;
+        const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+        this._damageRestAngle = baseAngle;
         this._damageShakeTween?.stop?.();
+        this.sprite.angle = baseAngle;
 
         this._damageShakeTween = this.scene.tweens.add({
             targets: this.sprite,
@@ -445,6 +448,9 @@ export class House {
     }
 
     destroy() {
+        if (this._destroyed) return;
+        this._destroyed = true;
+        this.health = 0;
         this._damageBarTimer?.remove(false);
         this._damageBarTimer = null;
         this.evacuateResidents();
@@ -453,6 +459,7 @@ export class House {
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);
         destroyStructuralHealthBar(this);
         this.sleepFxContainer?.destroy();
+        playBuildingCollapseSmoke(this);
         this.sprite?.destroy();
         this.clearIcons?.();
         this.scene?.events?.emit?.("housing:updated", this.team);

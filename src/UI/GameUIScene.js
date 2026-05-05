@@ -8,11 +8,12 @@ import { ContractHud } from "./ContractHud.js";
 import { SelectionCommandBar } from "./SelectionCommandBar.js";
 import { Teams } from "../Teams.js";
 import { getNextHordeUnlock } from "../parcel_system/HordeUnlockTrack.js";
-import { applyPortraitKeyToSprite, getPlayerPortraitKey } from "../players/playerPortraits.js";
+import { applyPortraitKeyToSprite } from "../players/playerPortraits.js";
 import { MainMenu } from "../mainMenu.js";
 import { AudioManager } from "../Manager/AudioManager.js";
 import { SaveManager } from "../save/SaveManager.js";
 import { AchievementBoard } from "./AchievementBoard.js";
+import { MARKET_REAL_ASSETS } from "../Cards/MarketCards.js";
 
 export class GameUIScene extends Phaser.Scene {
   constructor() {
@@ -54,6 +55,8 @@ export class GameUIScene extends Phaser.Scene {
     this.functionTab = null;
     this._townLossPresentation = null;
     this._townXpRewardPresentation = null;
+    this._adrenalineHud = null;
+    this._adrenalineUntil = 0;
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
     this._scaleResizeHandlers = [];
@@ -211,6 +214,7 @@ export class GameUIScene extends Phaser.Scene {
     this.topHud = null;
     this.townXpHud?.destroy?.(true);
     this.townXpHud = null;
+    this._destroyAdrenalineHud();
     this.phaseClock?.destroy?.(true);
     this.phaseClock = null;
     this.stageMetaText?.destroy?.();
@@ -302,6 +306,7 @@ export class GameUIScene extends Phaser.Scene {
       "mode:completed",
       "achievements:changed",
       "achievement:completed",
+      "market:adrenaline-changed",
     ];
 
     passthrough.forEach((evt) => {
@@ -309,6 +314,10 @@ export class GameUIScene extends Phaser.Scene {
       this.worldScene.events.on(evt, fn);
       this._bridged.push({ evt, fn, sourceScene: this.worldScene });
     });
+
+    const adrenalineFn = (payload) => this._setAdrenalineHud(payload);
+    this.events.on("market:adrenaline-changed", adrenalineFn);
+    this._bridged.push({ evt: "market:adrenaline-changed", fn: adrenalineFn, sourceScene: { events: this.events } });
   }
 
   _forwardWorldState() {
@@ -367,8 +376,8 @@ export class GameUIScene extends Phaser.Scene {
     this._buildAlertHud();
     this._buildTopHud();
     this._buildTownXpHud();
-    this._buildAchievementBoard();
     this._buildPhaseClock();
+    this._buildAchievementBoard();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
     this._buildContractHud();
@@ -385,8 +394,8 @@ export class GameUIScene extends Phaser.Scene {
     this._buildAlertHud();
     this._buildTopHud();
     this._buildTownXpHud();
-    this._buildAchievementBoard();
     this._buildPhaseClock();
+    this._buildAchievementBoard();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
     this._buildContractHud();
@@ -853,9 +862,9 @@ export class GameUIScene extends Phaser.Scene {
       stroke: "#07111b",
       strokeThickness: 3,
     }).setOrigin(0.5);
-    const badgeText = this.add.text(0, 0, "XP", {
+    const badgeText = this.add.text(0, 0, "", {
       fontFamily: "Bungee",
-      fontSize: "13px",
+      fontSize: "11px",
       color: "#0c2b3f",
       stroke: "#f8feff",
       strokeThickness: 2,
@@ -896,24 +905,28 @@ export class GameUIScene extends Phaser.Scene {
     root.panelHeight = 0;
     root.trackWidth = 0;
     root.progressRatio = 0;
+    root.displayedProgressRatio = null;
+    root._progressTween = null;
+    root._progressAnimState = null;
+    root._progressRendered = false;
+    root._lastRenderedGainSerial = 0;
+    root._lastRenderedTownLevel = null;
 
-    hitZone.on("pointerdown", () => {
-      this.achievementBoard?.toggle?.();
-      root.refresh(true);
-    });
+    hitZone.disableInteractive();
 
-    const layout = () => {
-      const width = Math.round(Phaser.Math.Clamp(this.scale.width * 0.23, 250, 360));
-      const height = 60;
+    const layout = (noticeCount = 0) => {
+      const maxUsableWidth = Math.max(300, this.scale.width - 36);
+      const width = Math.round(Math.min(maxUsableWidth, 430));
+      const height = 65;
       root.panelWidth = width;
       root.panelHeight = height;
-      root.trackWidth = Math.max(64, width - 186);
-      root.trackLeft = -(width / 2) + 82;
+      root.trackWidth = Math.max(180, width - 108);
+      root.trackLeft = -(width / 2) + 88;
 
-      root.setPosition(Math.round((width / 2) + 18), 76);
-      badgeText.setPosition(-(width / 2) + 36, 0);
-      levelText.setPosition(6, -11);
-      detailText.setPosition(6, 12);
+      root.setPosition(Math.round((width / 2) + 18), Math.round(42 + 10 + (height / 2)));
+      badgeText.setPosition(-(width / 2) + 43, 0);
+      levelText.setPosition(root.trackLeft + root.trackWidth / 2, -13);
+      detailText.setPosition(root.trackLeft + root.trackWidth / 2, 23);
       pendingText.setPosition((width / 2) - 54, 0);
       goalsText.setPosition((width / 2) - 54, 18);
       hitZone.setSize(width, height);
@@ -935,8 +948,8 @@ export class GameUIScene extends Phaser.Scene {
       badgeBg.clear();
       badgeBg.fillStyle(0xbbefff, 0.98);
       badgeBg.lineStyle(2, 0xffffff, 0.22);
-      badgeBg.fillRoundedRect(-(width / 2) + 14, -16, 44, 32, 16);
-      badgeBg.strokeRoundedRect(-(width / 2) + 14, -16, 44, 32, 16);
+      badgeBg.fillRoundedRect(-(width / 2) + 14, -16, 58, 32, 16);
+      badgeBg.strokeRoundedRect(-(width / 2) + 14, -16, 58, 32, 16);
 
       pendingBg.clear();
       pendingBg.fillStyle(0xffefc2, 0.94);
@@ -945,18 +958,47 @@ export class GameUIScene extends Phaser.Scene {
       pendingBg.strokeRoundedRect((width / 2) - 88, -14, 68, 28, 14);
 
       goalsBg.clear();
-      goalsBg.fillStyle(0x153246, 0.92);
-      goalsBg.lineStyle(2, 0xbdefff, 0.16);
+      goalsBg.fillStyle(noticeCount > 0 ? 0xffe58a : 0x153246, noticeCount > 0 ? 0.96 : 0.92);
+      goalsBg.lineStyle(2, noticeCount > 0 ? 0xffffff : 0xbdefff, noticeCount > 0 ? 0.24 : 0.16);
       goalsBg.fillRoundedRect((width / 2) - 96, 8, 84, 18, 9);
       goalsBg.strokeRoundedRect((width / 2) - 96, 8, 84, 18, 9);
+      goalsBg.setVisible(false);
+      goalsText.setVisible(false);
+    };
+
+    const drawProgress = (progress, xp) => {
+      const ratio = Math.max(0, Math.min(1, Number(progress || 0)));
+      root.displayedProgressRatio = ratio;
+
+      const width = root.trackWidth;
+      const left = Number.isFinite(root.trackLeft) ? root.trackLeft : (-(width / 2) + 72);
+      const top = 7;
+      const trackHeight = 14;
+
+      track.clear();
+      track.fillStyle(0x0a1a27, 0.82);
+      track.lineStyle(2, 0xffffff, 0.10);
+      track.fillRoundedRect(left, top, width, trackHeight, 8);
+      track.strokeRoundedRect(left, top, width, trackHeight, 8);
+
+      const maxFillWidth = Math.max(0, width - 4);
+      const fillWidth = ratio <= 0 ? 0 : Math.max(10, Math.round(maxFillWidth * ratio));
+      fill.clear();
+      if (fillWidth > 0) {
+        fill.fillStyle(xp.pendingLevelRewards > 0 ? 0xffd785 : 0x78e6ff, 0.96);
+        fill.fillRoundedRect(left + 2, top + 2, Math.min(maxFillWidth, fillWidth), trackHeight - 4, 6);
+      }
+
+      fillGlow.clear();
+      if (fillWidth > 0) {
+        fillGlow.fillStyle(xp.pendingLevelRewards > 0 ? 0xfff1b5 : 0xbdefff, xp.pendingLevelRewards > 0 ? 0.28 : 0.18);
+        fillGlow.fillRoundedRect(left + Math.max(4, Math.min(width - 20, fillWidth - 14)), top - 3, 20, trackHeight + 6, 9);
+      }
     };
 
     root.refresh = (force = false) => {
       const xp = this.worldScene?.getTownXpSnapshot?.();
       if (!xp) return;
-
-      const achievementSnapshot = this.worldScene?.getAchievementBoardSnapshot?.() || { activeGoals: [] };
-      const activeGoalCount = Array.isArray(achievementSnapshot.activeGoals) ? achievementSnapshot.activeGoals.length : 0;
 
       const signature = [
         this.scale.width,
@@ -966,8 +1008,6 @@ export class GameUIScene extends Phaser.Scene {
         xp.pendingLevelRewards,
         xp.gainSerial,
         Teams.teamLists?.["1"]?.name || "",
-        activeGoalCount,
-        this.achievementBoard?.expanded ? 1 : 0,
       ].join("|");
       if (!force && signature === this._townXpHudSignature) return;
       this._townXpHudSignature = signature;
@@ -976,56 +1016,73 @@ export class GameUIScene extends Phaser.Scene {
 
       const progress = Math.max(0, Math.min(1, Number(xp.progress || 0)));
       root.progressRatio = progress;
-      const width = root.trackWidth;
-      const left = Number.isFinite(root.trackLeft) ? root.trackLeft : (-(width / 2) + 72);
-      const top = 7;
-      const trackHeight = 16;
 
-      track.clear();
-      track.fillStyle(0x0a1a27, 0.82);
-      track.lineStyle(2, 0xffffff, 0.10);
-      track.fillRoundedRect(left, top, width, trackHeight, 8);
-      track.strokeRoundedRect(left, top, width, trackHeight, 8);
+      const firstProgressDraw = !root._progressRendered || root.displayedProgressRatio == null;
+      const xpChanged = xp.gainSerial !== root._lastRenderedGainSerial;
+      const levelChanged = root._lastRenderedTownLevel != null && xp.level !== root._lastRenderedTownLevel;
+      const shouldAnimateProgress = !force && !firstProgressDraw && xpChanged;
 
-      const fillWidth = progress <= 0 ? 0 : Math.max(16, Math.round(width * progress));
-      fill.clear();
-      if (fillWidth > 0) {
-        fill.fillStyle(xp.pendingLevelRewards > 0 ? 0xffd785 : 0x78e6ff, 0.96);
-        fill.fillRoundedRect(left + 2, top + 2, Math.min(width - 4, fillWidth), trackHeight - 4, 7);
+      root._progressTween?.stop?.();
+      root._progressTween = null;
+      root._progressAnimState = null;
+
+      if (shouldAnimateProgress) {
+        const startProgress = levelChanged && progress < root.displayedProgressRatio
+          ? 0
+          : Math.max(0, Math.min(1, Number(root.displayedProgressRatio || 0)));
+
+        root._progressAnimState = { value: startProgress };
+        drawProgress(startProgress, xp);
+        root._progressTween = this.tweens.add({
+          targets: root._progressAnimState,
+          value: progress,
+          duration: 540,
+          ease: "Cubic.easeOut",
+          onUpdate: () => drawProgress(root._progressAnimState.value, xp),
+          onComplete: () => {
+            drawProgress(progress, xp);
+            root._progressTween = null;
+            root._progressAnimState = null;
+          },
+        });
+      } else {
+        drawProgress(progress, xp);
       }
-
-      fillGlow.clear();
-      if (fillWidth > 0) {
-        fillGlow.fillStyle(xp.pendingLevelRewards > 0 ? 0xfff1b5 : 0xbdefff, xp.pendingLevelRewards > 0 ? 0.28 : 0.18);
-        fillGlow.fillRoundedRect(left + Math.max(4, Math.min(width - 20, fillWidth - 18)), top - 3, 20, trackHeight + 6, 9);
-      }
+      root._progressRendered = true;
+      root._lastRenderedGainSerial = xp.gainSerial;
+      root._lastRenderedTownLevel = xp.level;
 
       const rawTownName = String(Teams.teamLists?.["1"]?.name || "").trim();
       const townName = rawTownName
-        ? (rawTownName.length > 16 ? `${rawTownName.slice(0, 15)}...` : rawTownName)
-        : "Town";
-      levelText.setText(townName);
+        ? (rawTownName.length > 18 ? `${rawTownName.slice(0, 17)}...` : rawTownName)
+        : "Home";
+      levelText.setText(`Town ${townName}`);
       detailText.setText(
         xp.pendingLevelRewards > 0
           ? `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP  •  reward ready`
           : `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP to next reward`
       );
 
-      goalsText.setText(this.achievementBoard?.expanded ? "GOALS v" : "GOALS ^");
+      goalsText.setText("");
       detailText.setText(
         xp.pendingLevelRewards > 0
           ? `Level ${xp.level} - ${xp.xpIntoLevel}/${xp.xpForNextLevel} XP - reward ready`
           : `Level ${xp.level} - ${xp.xpIntoLevel}/${xp.xpForNextLevel} XP to next reward`
       );
-      goalsText.setText(`${activeGoalCount} GOALS ${this.achievementBoard?.expanded ? "v" : "^"}`);
+      goalsText.setText("");
 
-      pendingBg.setVisible(xp.pendingLevelRewards > 0);
-      pendingText.setVisible(xp.pendingLevelRewards > 0);
-      pendingText.setText(
-        xp.pendingLevelRewards > 1
-          ? `${xp.pendingLevelRewards} READY`
-          : "READY"
+      badgeText.setText(`LV ${xp.level}`);
+      detailText.setText(
+        xp.pendingLevelRewards > 0
+          ? `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP - REWARD READY`
+          : `${xp.xpIntoLevel}/${xp.xpForNextLevel} XP`
       );
+      goalsText.setColor("#d9f3ff");
+      goalsText.setText("");
+
+      pendingBg.setVisible(false);
+      pendingText.setVisible(false);
+      pendingText.setText("");
 
       if (xp.gainSerial !== this._townXpLastGainSerial) {
         if (this._townXpLastGainSerial !== 0) {
@@ -1055,6 +1112,8 @@ export class GameUIScene extends Phaser.Scene {
       yoyo: true,
     });
 
+    this._playTownXpSourceParticles(xp, root);
+
     const shouldShowLabel =
       Math.max(0, Number(xp?.lastGainAmount || 0)) >= 8
       || Math.max(0, Number(xp?.pendingLevelRewards || 0)) > 0
@@ -1079,6 +1138,67 @@ export class GameUIScene extends Phaser.Scene {
     });
   }
 
+  _playTownXpSourceParticles(xp, root) {
+    const source = xp?.lastGainSource;
+    if (!root || !source || !this.textures?.exists?.("player_death")) return;
+
+    const cam = this.worldScene?.cameras?.main;
+    const sourceX = Number(source.x);
+    const sourceY = Number(source.y);
+    if (!cam || !Number.isFinite(sourceX) || !Number.isFinite(sourceY)) return;
+
+    const screenW = Math.max(1, Number(this.scale?.width || 1));
+    const screenH = Math.max(1, Number(this.scale?.height || 1));
+    const rawStartX = (sourceX - Number(cam.scrollX || 0)) * Number(cam.zoom || 1) + Number(cam.x || 0);
+    const rawStartY = (sourceY - Number(cam.scrollY || 0)) * Number(cam.zoom || 1) + Number(cam.y || 0);
+    const startX = Phaser.Math.Clamp(rawStartX, 18, screenW - 18);
+    const startY = Phaser.Math.Clamp(rawStartY, 18, screenH - 18);
+    const targetRatio = Math.max(0.08, Math.min(0.96, Number(root.progressRatio || 0.1)));
+    const targetX = root.x + Number(root.trackLeft || 0) + (Number(root.trackWidth || 180) * targetRatio);
+    const targetY = root.y + 14;
+    const depth = (UIDEPTH ?? 0) + 32;
+    const count = Math.max(5, Math.min(10, 5 + Math.floor(Number(xp?.lastGainAmount || 0) / 2)));
+
+    for (let i = 0; i < count; i += 1) {
+      const shard = this.add.sprite(
+        startX + Phaser.Math.Between(-10, 10),
+        startY + Phaser.Math.Between(-10, 10),
+        "player_death",
+        Phaser.Math.Between(0, 5)
+      )
+        .setDepth(depth)
+        .setScale(Phaser.Math.FloatBetween(0.28, 0.46))
+        .setAlpha(Phaser.Math.FloatBetween(0.55, 0.88))
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      this.tweens.add({
+        targets: shard,
+        x: targetX + Phaser.Math.Between(-10, 10),
+        y: targetY + Phaser.Math.Between(-5, 5),
+        scale: 0.12,
+        alpha: 0,
+        angle: Phaser.Math.Between(-35, 35),
+        delay: i * 32,
+        duration: Phaser.Math.Between(560, 820),
+        ease: "Cubic.easeInOut",
+        onComplete: () => shard.destroy(),
+      });
+    }
+
+    const spark = this.add.circle(targetX, targetY, 3, xp?.pendingLevelRewards > 0 ? 0xffe1a8 : 0x8fe7ff, 0.75)
+      .setDepth(depth + 1)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({
+      targets: spark,
+      scale: 3.1,
+      alpha: 0,
+      delay: 520,
+      duration: 280,
+      ease: "Quad.easeOut",
+      onComplete: () => spark.destroy(),
+    });
+  }
+
   _refreshTownXpHud(force = false) {
     this.townXpHud?.refresh?.(force);
   }
@@ -1086,6 +1206,7 @@ export class GameUIScene extends Phaser.Scene {
   _buildAchievementBoard() {
     if (this.achievementBoard || !this.worldScene) return;
     this.achievementBoard = new AchievementBoard(this, this.worldScene);
+    this.townXpHud?.refresh?.(true);
   }
 
   _ensureTopHudHoverBubble() {
@@ -1245,7 +1366,7 @@ export class GameUIScene extends Phaser.Scene {
       world.clock = new Clock(world);
     }
 
-    const PANEL_W = 278;
+    const PANEL_W = 300;
     const PANEL_H = 104;
     const DIAL_CX = -88;
     const DIAL_CY = 0;
@@ -1282,7 +1403,7 @@ export class GameUIScene extends Phaser.Scene {
       stroke: "#07111b",
       strokeThickness: 2,
       align: "left",
-      wordWrap: { width: 162 },
+      wordWrap: { width: 184 },
     }).setOrigin(0, 0.5);
     const countdownText = this.add.text(-28, 40, "", {
       fontFamily: "Bungee",
@@ -1291,12 +1412,14 @@ export class GameUIScene extends Phaser.Scene {
       stroke: "#07111b",
       strokeThickness: 2,
       align: "left",
-      wordWrap: { width: 162 },
+      wordWrap: { width: 184 },
     }).setOrigin(0, 0.5);
     const dialCore = this.add.circle(DIAL_CX, DIAL_CY, INNER_R - 1, 0x0f172a, 0.98)
       .setStrokeStyle(2, 0xffffff, 0.12);
 
     root.add([shadow, bg, shine, dial, hand, dialCore, timeText, phaseText, actionText, countdownText]);
+    root.panelWidth = PANEL_W;
+    root.panelHeight = PANEL_H;
 
     const phaseSegments = [
       {
@@ -1350,8 +1473,8 @@ export class GameUIScene extends Phaser.Scene {
       shadow.fillRoundedRect(-PANEL_W / 2 + 3, -PANEL_H / 2 + 5, PANEL_W, PANEL_H, 20);
 
       bg.clear();
-      bg.fillStyle(0x156c99, 0.86);
-      bg.lineStyle(2, 0x89d6ff, 0.28);
+      bg.fillStyle(0x113048, 0.94);
+      bg.lineStyle(2, 0x9edfff, 0.22);
       bg.fillRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 20);
       bg.strokeRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 20);
 
@@ -1361,8 +1484,9 @@ export class GameUIScene extends Phaser.Scene {
     };
 
     const layout = () => {
-      root.setPosition(this.scale.width - PANEL_W / 2 - 18, 36 + PANEL_H / 2 + 8);
+      root.setPosition(this.scale.width - PANEL_W / 2 - 18, 42 + 10 + PANEL_H / 2);
       this.phaseClockBottomY = root.y + PANEL_H / 2;
+      this.achievementBoard?.reposition?.();
       this.zoomControls?.reposition?.();
     };
 
@@ -1518,22 +1642,23 @@ export class GameUIScene extends Phaser.Scene {
   _buildZoomControls() {
     if (this.zoomControls) return;
 
-    const BTN_SIZE = 48;
-    const GAP = 8;
-    const RIGHT_MARGIN = 18;
+    const SPEED_W = 72;
+    const ZOOM_W = 46;
+    const BTN_H = 28;
+    const GAP = 6;
     const ACTIVE_ALPHA = 0.92;
     const IDLE_ALPHA = 0.68;
     const DISABLED_ALPHA = 0.32;
 
-    const root = this.add.container(0, 0).setDepth(UIDEPTH + 12);
+    const root = this.add.container(0, 0).setDepth(UIDEPTH + 18);
     const setButtonAlpha = (btn) => {
       btn.setAlpha(btn.disabled ? DISABLED_ALPHA : btn.active ? ACTIVE_ALPHA : IDLE_ALPHA);
     };
 
-    const makeBtn = (label, { fontSize = "20px" } = {}) => {
+    const makeBtn = (label, width, { fontSize = "15px" } = {}) => {
       const bg = this.add
-        .rectangle(0, 0, BTN_SIZE, BTN_SIZE, 0x0f172a, 0.8)
-        .setStrokeStyle(2, 0xe5e7eb, 0.28)
+        .rectangle(0, 0, width, BTN_H, 0x0b1c2a, 0.001)
+        .setStrokeStyle(2, 0x9edfff, 0)
         .setInteractive({ useHandCursor: true });
 
       const txt = this.add
@@ -1546,9 +1671,10 @@ export class GameUIScene extends Phaser.Scene {
         })
         .setOrigin(0.5);
 
-      const btn = this.add.container(0, 0, [bg, txt]).setSize(BTN_SIZE, BTN_SIZE).setAlpha(IDLE_ALPHA);
+      const btn = this.add.container(0, 0, [bg, txt]).setSize(width, BTN_H).setAlpha(IDLE_ALPHA);
       btn.bg = bg;
       btn.label = txt;
+      btn.widthPx = width;
       btn.active = false;
       btn.disabled = false;
       btn.refreshAlpha = () => setButtonAlpha(btn);
@@ -1556,9 +1682,29 @@ export class GameUIScene extends Phaser.Scene {
       bg.on("pointerover", () => {
         if (btn.disabled) return;
         AudioManager.playUiHover({ volume: 0.16 });
+        btn.bg.setFillStyle(0x0b1c2a, 0.32);
+        btn.bg.setStrokeStyle(2, 0x9edfff, 0.22);
         btn.setAlpha(ACTIVE_ALPHA);
+        this.tweens.killTweensOf(btn);
+        this.tweens.add({
+          targets: btn,
+          scaleX: 1.05,
+          scaleY: 1.05,
+          duration: 100,
+          ease: "Sine.Out",
+        });
       });
       bg.on("pointerout", () => {
+        this.tweens.killTweensOf(btn);
+        this.tweens.add({
+          targets: btn,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 100,
+          ease: "Sine.Out",
+        });
+        btn.bg.setFillStyle(0x0b1c2a, 0.001);
+        btn.bg.setStrokeStyle(2, 0x9edfff, 0);
         btn.refreshAlpha?.();
       });
 
@@ -1579,10 +1725,10 @@ export class GameUIScene extends Phaser.Scene {
         btn._interactiveDisabled = false;
       }
 
-      const fillColor = disabled ? 0x1f2937 : active ? 0x172554 : 0x0f172a;
-      const fillAlpha = disabled ? 0.6 : active ? 0.92 : 0.8;
-      const strokeColor = disabled ? 0x9ca3af : active ? 0x93c5fd : 0xe5e7eb;
-      const strokeAlpha = disabled ? 0.18 : active ? 0.58 : 0.28;
+      const fillColor = 0x0b1c2a;
+      const fillAlpha = 0.001;
+      const strokeColor = 0x9edfff;
+      const strokeAlpha = 0;
 
       btn.bg.setFillStyle(fillColor, fillAlpha);
       btn.bg.setStrokeStyle(2, strokeColor, strokeAlpha);
@@ -1591,28 +1737,14 @@ export class GameUIScene extends Phaser.Scene {
       btn.refreshAlpha?.();
     };
 
-    const zoomInBtn = makeBtn("+");
-    const zoomOutBtn = makeBtn("-");
-    const speedButtons = [
-      { label: "1x", speed: 1 },
-      { label: "2x", speed: 2 },
-      { label: "4x", speed: 4 },
-    ].map(({ label, speed }) => {
-      const btn = makeBtn(label, { fontSize: "16px" });
-      btn.speedMultiplier = speed;
-      return btn;
-    });
-
-    zoomInBtn.setPosition(0, 0);
-    zoomOutBtn.setPosition(0, BTN_SIZE + GAP);
-    speedButtons.forEach((btn, index) => {
-      btn.setPosition(-(BTN_SIZE + GAP) * (speedButtons.length - index), 0);
-    });
-    root.add([...speedButtons, zoomInBtn, zoomOutBtn]);
+    const speedBtn = makeBtn("", SPEED_W);
+    const zoomBtn = makeBtn("", ZOOM_W, { fontSize: "17px" });
+    speedBtn.setPosition(-(ZOOM_W + GAP) / 2, 0);
+    zoomBtn.setPosition((SPEED_W + GAP) / 2, 0);
+    root.add([speedBtn, zoomBtn]);
 
     const positionControls = () => {
-      const y = Math.max(104, (this.phaseClockBottomY ?? 104) + 30);
-      root.setPosition(this.scale.width - RIGHT_MARGIN - (BTN_SIZE / 2), y);
+      root.setPosition(this.scale.width - 118, 22);
     };
     positionControls();
     this.scale.on("resize", positionControls);
@@ -1626,12 +1758,19 @@ export class GameUIScene extends Phaser.Scene {
       mixer.smoothCenterZoomTo(targetZoom);
     };
 
-    zoomInBtn.bg.on("pointerdown", () => triggerZoom(this.worldScene?.zoomMixer?.detailedZoom ?? 1));
-    zoomOutBtn.bg.on("pointerdown", () => triggerZoom(this.worldScene?.zoomMixer?.overviewZoom ?? 0.3));
-    speedButtons.forEach((btn) => {
-      btn.bg.on("pointerdown", () => {
-        this.worldScene?.setSimulationSpeed?.(btn.speedMultiplier);
-      });
+    const cycleSpeed = () => {
+      const current = this.worldScene?.getSimulationSpeed?.() ?? 1;
+      const next = current >= 4 ? 1 : current >= 2 ? 4 : 2;
+      this.worldScene?.setSimulationSpeed?.(next);
+      root.updateState?.();
+    };
+
+    speedBtn.bg.on("pointerdown", () => cycleSpeed());
+    zoomBtn.bg.on("pointerdown", () => {
+      const mixer = this.worldScene?.zoomMixer;
+      if (!mixer) return;
+      const isOverview = mixer.mode === "overview";
+      triggerZoom(isOverview ? (mixer.detailedZoom ?? 1) : (mixer.overviewZoom ?? 0.3));
     });
 
     root.updateState = () => {
@@ -1640,15 +1779,14 @@ export class GameUIScene extends Phaser.Scene {
       const speedDisabled = !!(!world || world.stageCompleteLock);
       const selectedSpeed = world?.getSimulationSpeed?.() ?? 1;
 
-      applyButtonState(zoomInBtn, { disabled: zoomDisabled });
-      applyButtonState(zoomOutBtn, { disabled: zoomDisabled });
-      speedButtons.forEach((btn) => {
-        applyButtonState(btn, {
-          disabled: speedDisabled,
-          active: selectedSpeed === btn.speedMultiplier,
-          activeLabelColor: "#dbeafe",
-        });
+      speedBtn.label.setText(`\u23e9 ${selectedSpeed}x`);
+      zoomBtn.label.setText(world?.zoomMixer?.mode === "overview" ? "\ud83d\udd0d+" : "\ud83d\udd0e-");
+      applyButtonState(speedBtn, {
+        disabled: speedDisabled,
+        active: selectedSpeed > 1,
+        activeLabelColor: "#dbeafe",
       });
+      applyButtonState(zoomBtn, { disabled: zoomDisabled });
     };
 
     root.reposition = positionControls;
@@ -1670,48 +1808,50 @@ export class GameUIScene extends Phaser.Scene {
   }
 
   _getRaiderIndicatorBounds() {
-    const top = Math.max(78, Math.round((this.phaseClockBottomY ?? 106) + 10));
+    const top = Math.max(78, Math.round((this.phaseClockBottomY ?? 106) + 12));
+    const sidePad = 34;
+    const bottomBarProgress = Phaser.Math.Clamp(
+      Number(this.uiBottomBar?.openProgress ?? (this.uiBottomBar?.expanded ? 1 : 0)),
+      0,
+      1
+    );
+    const bottomReserve = Phaser.Math.Linear(74, 190, bottomBarProgress);
+    const bottom = Math.min(this.scale.height - 34, this.scale.height - bottomReserve);
     return {
-      left: 48,
-      right: Math.max(48, this.scale.width - 48),
+      left: sidePad,
+      right: Math.max(sidePad, this.scale.width - sidePad),
       top,
-      bottom: Math.max(top + 24, this.scale.height - 104),
+      bottom: Math.max(top + 36, bottom),
     };
   }
 
   _createRaiderEdgeIndicator(key) {
     const root = this.add.container(0, 0).setDepth(UIDEPTH + 18);
-    const shadow = this.add.circle(0, 3, 25, 0x02060d, 0.34);
-    const plate = this.add.circle(0, 0, 23, 0x7f1d1d, 0.94)
-      .setStrokeStyle(3, 0xfca5a5, 0.9);
-    const portrait = this.add.sprite(0, 0, "__WHITE").setOrigin(0.5);
+    const glow = this.add.graphics();
     const arrow = this.add.text(0, 0, "▲", {
       fontFamily: "Bungee",
-      fontSize: "16px",
-      color: "#fff5f5",
+      fontSize: "30px",
+      color: "#ff4d4d",
       stroke: "#190505",
-      strokeThickness: 4,
+      strokeThickness: 5,
     }).setOrigin(0.5);
-    arrow.setText("^").setFontSize("20px");
-    const badge = this.add.circle(15, 15, 10, 0x111827, 0.96)
-      .setStrokeStyle(2, 0xffffff, 0.28);
-    const badgeText = this.add.text(15, 15, "1", {
+    arrow.setText(">").setFontSize("30px");
+    const badge = this.add.graphics();
+    const badgeText = this.add.text(12, -12, "1", {
       fontFamily: "Bungee",
-      fontSize: "11px",
+      fontSize: "10px",
       color: "#f8fafc",
       stroke: "#000000",
       strokeThickness: 3,
     }).setOrigin(0.5);
 
-    root.add([shadow, plate, portrait, arrow, badge, badgeText]);
+    root.add([glow, arrow, badge, badgeText]);
     root.setVisible(false);
 
     const indicator = {
       key,
       root,
-      shadow,
-      plate,
-      portrait,
+      glow,
       arrow,
       badge,
       badgeText,
@@ -1735,8 +1875,8 @@ export class GameUIScene extends Phaser.Scene {
     if (!world || !cam || !this._isDetailedMode()) return [];
 
     const bounds = this._getRaiderIndicatorBounds();
-    const centerX = this.scale.width * 0.5;
-    const centerY = this.scale.height * 0.5;
+    const centerX = Phaser.Math.Clamp(this.scale.width * 0.5, bounds.left, bounds.right);
+    const centerY = Phaser.Math.Clamp(this.scale.height * 0.5, bounds.top, bounds.bottom);
     const enemyTroops = Teams.teamLists?.["0"]?.playerList || [];
     const groups = new Map();
 
@@ -1777,6 +1917,12 @@ export class GameUIScene extends Phaser.Scene {
         }
       }
 
+      if (!Number.isFinite(bestT) || bestT < 0) {
+        if (Math.abs(dy) > Math.abs(dx)) side = dy > 0 ? "bottom" : "top";
+        else side = dx > 0 ? "right" : "left";
+        bestT = 1;
+      }
+
       return {
         x: Phaser.Math.Clamp(centerX + dx * bestT, bounds.left, bounds.right),
         y: Phaser.Math.Clamp(centerY + dy * bestT, bounds.top, bounds.bottom),
@@ -1789,16 +1935,20 @@ export class GameUIScene extends Phaser.Scene {
       if (!troop?.active) continue;
       if (!troop?.isRaider && !troop?.isFortGrunt) continue;
 
-      const screenX = (troop.x - cam.worldView.x) * cam.zoom;
-      const screenY = (troop.y - cam.worldView.y) * cam.zoom;
-      const inView = screenX >= 0 && screenX <= this.scale.width && screenY >= 0 && screenY <= this.scale.height;
+      const worldView = cam.worldView;
+      const inView = !!worldView
+        && troop.x >= worldView.x
+        && troop.x <= worldView.x + worldView.width
+        && troop.y >= worldView.y
+        && troop.y <= worldView.y + worldView.height;
       if (inView) continue;
 
+      const screenX = (troop.x - cam.worldView.x) * cam.zoom;
+      const screenY = (troop.y - cam.worldView.y) * cam.zoom;
       const edge = projectToEdge(screenX, screenY);
       const axisValue = (edge.side === "left" || edge.side === "right") ? edge.y : edge.x;
-      const bucket = Math.round(axisValue / 68);
+      const bucket = Math.round(axisValue / 52);
       const key = `${edge.side}:${bucket}`;
-      const portraitKey = getPlayerPortraitKey(troop);
 
       if (!groups.has(key)) {
         groups.set(key, {
@@ -1810,7 +1960,6 @@ export class GameUIScene extends Phaser.Scene {
           axisValue,
           count: 0,
           nearestDistSq: Number.POSITIVE_INFINITY,
-          portraitKey,
         });
       }
 
@@ -1824,7 +1973,6 @@ export class GameUIScene extends Phaser.Scene {
       if (distSq < group.nearestDistSq) {
         group.nearestDistSq = distSq;
         group.angle = edge.angle;
-        group.portraitKey = portraitKey;
       }
     }
 
@@ -1835,7 +1983,7 @@ export class GameUIScene extends Phaser.Scene {
       axisValue: group.axisValue / group.count,
     }));
 
-    const minGap = 72;
+    const minGap = 44;
     const spreadSide = (side, axisMin, axisMax) => {
       const sideGroups = results
         .filter((group) => group.side === side)
@@ -1901,20 +2049,29 @@ export class GameUIScene extends Phaser.Scene {
       const indicator = this.raiderEdgeIndicators?.get?.(group.key) || this._createRaiderEdgeIndicator(group.key);
       seen.add(group.key);
 
-      applyPortraitKeyToSprite(this, indicator.portrait, group.portraitKey, 42);
       indicator.root.setVisible(true).setAlpha(1).setScale(1);
       indicator.root.setPosition(group.x, group.y);
-      indicator.shadow.setScale(1.5).setFillStyle(0x02060d, 0.42);
-      indicator.plate.setScale(1.34).setFillStyle(0x09111b, 0.96).setStrokeStyle(4, 0xfca5a5, 1);
-      indicator.arrow.setColor("#fff7f7").setFontSize("26px").setStroke("#190505", 5);
-      indicator.arrow.setPosition(Math.cos(group.angle) * 42, Math.sin(group.angle) * 42);
-      indicator.arrow.setAngle(Phaser.Math.RadToDeg(group.angle) + 90);
+      indicator.glow.clear();
+      indicator.glow.fillStyle(0x7f1d1d, 0.24);
+      indicator.glow.fillCircle(0, 0, 17);
+      indicator.glow.lineStyle(2, 0xffb4b4, 0.56);
+      indicator.glow.strokeCircle(0, 0, 17);
+      indicator.arrow.setColor("#ff4d4d").setFontSize("30px").setStroke("#190505", 5);
+      indicator.arrow.setPosition(0, 0);
+      indicator.arrow.setAngle(Phaser.Math.RadToDeg(group.angle));
 
       const showBadge = group.count > 1;
-      indicator.badge.setVisible(showBadge).setPosition(22, 22).setScale(1.15);
-      indicator.badgeText.setVisible(showBadge).setPosition(22, 22).setFontSize("13px");
+      indicator.badge.setVisible(showBadge);
+      indicator.badgeText.setVisible(showBadge).setPosition(12, -12).setFontSize("10px");
       if (showBadge) {
+        indicator.badge.clear();
+        indicator.badge.fillStyle(0x111827, 0.96);
+        indicator.badge.fillCircle(12, -12, 8);
+        indicator.badge.lineStyle(1.5, 0xffffff, 0.28);
+        indicator.badge.strokeCircle(12, -12, 8);
         indicator.badgeText.setText(`${group.count}`);
+      } else {
+        indicator.badge.clear();
       }
     });
 
@@ -2007,6 +2164,7 @@ export class GameUIScene extends Phaser.Scene {
 
     const root = this.add.container(0, 0).setDepth(UIDEPTH + 18);
     const bg = this.add.rectangle(0, 0, 42, 30, 0x0b1c2a, 0.001)
+      .setStrokeStyle(2, 0x9edfff, 0)
       .setInteractive({ useHandCursor: true });
     const label = this.add.text(0, 0, "II", {
       fontFamily: "Bungee",
@@ -2021,6 +2179,7 @@ export class GameUIScene extends Phaser.Scene {
     root.refresh = () => {
       const active = !!this.pauseMenu?.isOpen;
       bg.setFillStyle(0x0b1c2a, 0.001);
+      bg.setStrokeStyle(2, 0x9edfff, 0);
       label.setColor(active ? "#8fe7ff" : "#effbff");
       label.setScale(1);
     };
@@ -2032,6 +2191,8 @@ export class GameUIScene extends Phaser.Scene {
     bg.on("pointerover", () => {
       if (this.pauseMenu?.isOpen) return;
       AudioManager.playUiHover({ volume: 0.16 });
+      bg.setFillStyle(0x0b1c2a, 0.32);
+      bg.setStrokeStyle(2, 0x9edfff, 0.22);
       label.setColor("#c6f7ff");
       label.setScale(1.05);
     });
@@ -3808,6 +3969,74 @@ export class GameUIScene extends Phaser.Scene {
     this.time.delayedCall(600, () => this._mutateText(this.permitText, (node) => node.setFill("#ffffff")));
   }
 
+  _destroyAdrenalineHud() {
+    this._adrenalineHud?.destroy?.(true);
+    this._adrenalineHud = null;
+    this._adrenalineUntil = 0;
+    this._adrenalineHudText = null;
+    this._adrenalineHudLastSeconds = null;
+  }
+
+  _setAdrenalineHud(payload = {}) {
+    const until = Number(payload?.until || 0);
+    if (!(until > 0)) {
+      this._destroyAdrenalineHud();
+      return;
+    }
+    this._adrenalineUntil = Math.max(this._adrenalineUntil || 0, until);
+    if (!this._adrenalineHud) this._buildAdrenalineHud();
+    this._refreshAdrenalineHud(true);
+  }
+
+  _buildAdrenalineHud() {
+    this._adrenalineHud?.destroy?.(true);
+    this._adrenalineHud = null;
+    this._adrenalineHudText = null;
+    this._adrenalineHudLastSeconds = null;
+    const width = 96;
+    const height = 30;
+    const y = 18;
+    const bg = this.add.graphics();
+    bg.fillStyle(0x122d3f, 0.9);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.lineStyle(2, 0xfff17a, 0.74);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.fillStyle(0xffffff, 0.08);
+    bg.fillRoundedRect(-width / 2 + 4, -height / 2 + 3, width - 8, 9, 5);
+
+    const iconKey = MARKET_REAL_ASSETS.cardIcons.adrenalineDraft;
+    const icon = this.textures.exists(iconKey)
+      ? this.add.image(-width / 2 + 18, 0, iconKey).setDisplaySize(22, 22)
+      : this.add.text(-width / 2 + 10, -10, "AD", { fontFamily: "Bungee", fontSize: "10px", color: "#fff17a" });
+    this._adrenalineHudText = this.add.text(-width / 2 + 36, 0, "0s", {
+      fontFamily: "Bungee",
+      fontSize: "13px",
+      color: "#ffffff",
+      stroke: "#000000",
+      strokeThickness: 3,
+    }).setOrigin(0, 0.5);
+
+    this._adrenalineHud = this.add
+      .container(Math.round(this.scale.width / 2 + 92), y, [bg, icon, this._adrenalineHudText])
+      .setDepth(UIDEPTH + 8);
+  }
+
+  _refreshAdrenalineHud(force = false) {
+    if (!this._adrenalineHud || !this._adrenalineUntil) return;
+    this._adrenalineHud.setPosition(Math.round(this.scale.width / 2 + 92), 18);
+    const now = this.worldScene?.getSimulationNow?.() ?? this.worldScene?.simNowMs ?? this.time.now;
+    const remaining = Math.max(0, this._adrenalineUntil - now);
+    if (remaining <= 0) {
+      this._destroyAdrenalineHud();
+      return;
+    }
+    const seconds = Math.ceil(remaining / 1000);
+    if (force || this._adrenalineHudLastSeconds !== seconds) {
+      this._adrenalineHudLastSeconds = seconds;
+      this._mutateText(this._adrenalineHudText, (node) => node.setText(`${seconds}s`));
+    }
+  }
+
   update() {
     if (this._sceneShuttingDown) return;
     // The UI scene should never pan with world interactions.
@@ -3826,5 +4055,6 @@ export class GameUIScene extends Phaser.Scene {
     this.contractHud?.update?.();
     this.selectionCommandBar?.update?.();
     this.functionTab?.update?.();
+    this._refreshAdrenalineHud();
   }
 }

@@ -1,4 +1,4 @@
-import { SQUARESIZE, TILE_TYPES } from "../constants.js";
+import { MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES } from "../constants.js";
 import { Map as GameMap } from "../map.js";
 import { Teams } from "../Teams.js";
 import { Player } from "../players/Player.js";
@@ -7,7 +7,8 @@ import { FarmBushNode } from "../buildings/FarmBushNode.js";
 import { PineTree } from "../buildings/pineTree.js";
 import { RockNode } from "../buildings/RockNode.js";
 import { StageState } from "../parcelController/StageState.js";
-import { unlockStoreItem, resetStoreUnlocks } from "../parcel_system/StoreUnlockSystem.js";
+import { STORE_UNLOCK_KEYS, getStoreUnlockSnapshot, unlockStoreItem, resetStoreUnlocks } from "../parcel_system/StoreUnlockSystem.js";
+import { grantHordeUnlockCatchup } from "../parcel_system/HordeUnlockTrack.js";
 import { POWERUP_CARDS } from "../Cards/PowerupCards.js";
 import { clearBuildingArray, buildingArray, townBounds, townRoads, spawnPoints } from "../town.js";
 import { TROOP_TYPE_REGISTRY, CARD_REGISTRY, reapplySavedCards, restoreItemStack, getTileTypeByKey, makeBuildingRef } from "./saveAdapters.js";
@@ -94,11 +95,23 @@ function getTeamCardIds(snapshot, teamId = "1") {
   return snapshot?.teams?.[String(teamId)]?.cardIds || [];
 }
 
-function syncStoreUnlocks(scene, unlockKeys = []) {
+function syncStoreUnlocks(scene, unlockKeys = [], snapshot = null) {
   resetStoreUnlocks(null, scene);
   for (const key of Array.isArray(unlockKeys) ? unlockKeys : []) {
     unlockStoreItem(key, scene);
   }
+
+  const townLevel = Math.max(1, Number(snapshot?.progression?.townXp?.level || 1));
+  if (townLevel >= 3) {
+    unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, scene);
+  }
+
+  const completedHordes = Math.max(
+    0,
+    Number(snapshot?.progression?.runStats?.nightsSurvived || 0),
+    Number(snapshot?.progression?.stageState?.stageIndex || 1) - 1
+  );
+  grantHordeUnlockCatchup(scene, completedHordes);
 }
 
 function restoreBuildingState(building, saved) {
@@ -195,13 +208,93 @@ function restoreTeamSnapshots(snapshot) {
     team.ovenDeliveryItems = [];
     team.storageDeliveryItems = [];
     team.storageDeliveryReservations = [];
-    team.cropList = assignPlain(null, saved.cropList, []);
-    team.crops = assignPlain(null, saved.crops, []);
-    team.wateringList = assignPlain(null, saved.wateringList, []);
-    team.TeamFarmSpots = assignPlain(null, saved.TeamFarmSpots, []);
+    team.cropList = rehydrateTaskList(saved.cropList, "cropList", teamId);
+    team._savedCropSnapshots = Array.isArray(saved.crops) ? saved.crops : [];
+    team.wateringList = [];
+    team.TeamFarmSpots = [];
     team.townAutomation = assignPlain(null, saved.townAutomation, {});
     team.cardHand = (saved.cardIds || []).map((id) => CARD_REGISTRY.get(id)).filter(Boolean);
     team.cardInventory = restoreCardInventorySnapshot(saved.cardInventory);
+  }
+}
+
+function getCropSpriteAt(x, y) {
+  const key = `${x},${y}`;
+  let sprite = GameMap.cropDict?.[key] || null;
+  if (Array.isArray(sprite)) sprite = sprite[0] || sprite[1] || null;
+  if (!sprite && GameMap.grid?.[y]?.[x] === TILE_TYPES.crops.grid) {
+    GameMap.drawGridValue?.(x, y);
+    sprite = GameMap.cropDict?.[key] || null;
+    if (Array.isArray(sprite)) sprite = sprite[0] || sprite[1] || null;
+  }
+  return sprite;
+}
+
+function clearCropWaterIndicator(crop) {
+  crop?.waterNeedTween?.remove?.();
+  if (crop) crop.waterNeedTween = null;
+  if (crop?.waterNeedIcon) {
+    GameMap.removeFromWorldStatic?.(crop.waterNeedIcon);
+    crop.waterNeedIcon = null;
+  }
+}
+
+function restoreSavedCropStates() {
+  for (const [teamId, team] of Object.entries(Teams.teamLists || {})) {
+    const savedCrops = Array.isArray(team?._savedCropSnapshots) ? team._savedCropSnapshots : [];
+    delete team._savedCropSnapshots;
+
+    if (!savedCrops.length) {
+      for (const crop of team?.crops || []) {
+        Teams.syncCropWaterIndicator?.(crop);
+      }
+      continue;
+    }
+
+    for (const crop of team?.crops || []) {
+      clearCropWaterIndicator(crop);
+    }
+
+    const restored = [];
+    team.cropList = [];
+    team.wateringList = [];
+    team.TeamFarmSpots = [];
+
+    for (const saved of savedCrops) {
+      const x = Number(saved?.x);
+      const y = Number(saved?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+      const sprite = getCropSpriteAt(x, y);
+      if (!sprite) continue;
+
+      const hasSeed = saved?.hasSeed !== false;
+      const growthStage = Math.max(0, Math.min(MAX_CROP_GROWTH_STAGE, Number(saved?.growthStage || 0)));
+      const crop = {
+        sprite,
+        x,
+        y,
+        teamNumber: String(saved?.teamNumber ?? teamId ?? "1"),
+        dailyWatered: !!saved?.dailyWatered,
+        growthStage,
+        hasSeed,
+      };
+
+      sprite.hasSeed = hasSeed;
+      sprite.setFrame?.(hasSeed ? 1 + growthStage : 0);
+      restored.push(crop);
+
+      if (hasSeed && growthStage >= MAX_CROP_GROWTH_STAGE) {
+        Teams.addFarmSpots?.(sprite, x, y);
+        team.cropList.push({ x, y, assigned: 0, sprite });
+      } else if (hasSeed && !crop.dailyWatered) {
+        team.wateringList.push({ x, y, assigned: 0, sprite });
+      }
+
+      Teams.syncCropWaterIndicator?.(crop);
+    }
+
+    team.crops = restored;
   }
 }
 
@@ -299,7 +392,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
     scene.simNowMs = Number(snapshot?.progression?.simNowMs || scene.simNowMs || 0);
     reapplySavedCards(getTeamCardIds(snapshot, "1"));
     restoreTeamSnapshots(snapshot);
-    syncStoreUnlocks(scene, snapshot?.systems?.storeUnlocks || []);
+    syncStoreUnlocks(scene, snapshot?.systems?.storeUnlocks || [], snapshot);
 
     scene.clock?.restoreSnapshot?.(snapshot?.progression?.clock || null);
 
@@ -331,7 +424,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
     scene._townTowerStats = cloneSimple(snapshot?.progression?.townTowerStats, scene._townTowerStats);
     scene._northFortMainIslandOrigin = cloneSimple(snapshot?.world?.northFortMainIslandOrigin, scene._northFortMainIslandOrigin);
 
-    GameMap.cropDict = cloneSimple(snapshot?.world?.cropDict, {});
+    restoreSavedCropStates();
 
     const buildingRegistry = rebuildBuildingRegistry(scene);
     for (const team of Object.values(snapshot?.teams || {})) {
@@ -363,7 +456,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
     }
 
     scene.uiScene?.refreshAll?.();
-    scene.events.emit?.("store:unlock-changed", { changed: true, unlocks: snapshot?.systems?.storeUnlocks || [] });
+    scene.events.emit?.("store:unlock-changed", { changed: true, unlocks: getStoreUnlockSnapshot() });
     scene.events.emit?.("stage:changed", { stageIndex: StageState.stageIndex, seasonIndex: StageState.seasonIndex });
     scene.showSaveNotification?.();
 

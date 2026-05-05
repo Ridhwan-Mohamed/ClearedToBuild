@@ -10,6 +10,7 @@ import { buildingManager } from "../Manager/buildingManager";
 import { PathRegistry } from "../lib/navmesh/PathRegistry";
 import { PathRepair } from "../lib/navmesh/PathRepair";
 import { destroyStructuralHealthBar, ensureStructuralHealthBar, getStructuralBarAnchor, getStructuralHealthBarTargets, layoutStructuralHealthBar } from "../UI/BuildingTheme";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 export class Catapult {
   static scene = null;
@@ -304,8 +305,10 @@ export class Catapult {
     buildingManager.queueAutoFixForBuilding(this, this.teamNumber);
 
     const scene = this.scene;
-    const baseAngle = this.baseSprite?.angle || 0;
+    const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.baseSprite?.angle || 0);
+    this._damageRestAngle = baseAngle;
     this._damageShakeTween?.stop?.();
+    if (this.baseSprite) this.baseSprite.angle = baseAngle;
 
     this._damageShakeTween = scene.tweens.add({
       targets: this.baseSprite,
@@ -341,7 +344,7 @@ export class Catapult {
     if (this._destroyed || !this.baseSprite?.active) return;
 
     const now = this.scene?.time?.now ?? 0;
-    const shouldShow = this.isHovered || this.health < this.maxHealth || now < this._damageBarUntil;
+    const shouldShow = this.isHovered || now < this._damageBarUntil;
     if (!shouldShow) {
       destroyStructuralHealthBar(this);
       return;
@@ -383,6 +386,7 @@ export class Catapult {
 
     destroyStructuralHealthBar(this);
 
+    playBuildingCollapseSmoke(this);
     Map.removeFromWorldStatic?.(this.topSprite, true);
     Map.removeFromWorldStatic?.(this.baseSprite, true);
     this.topSprite = null;

@@ -6,6 +6,7 @@ import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { AudioManager } from "./AudioManager";
+import { getMarketWorkDuration } from "../Cards/MarketBuffs";
 
 
 export class seedManager {
@@ -40,7 +41,7 @@ export class seedManager {
         } else {
             sprite.play('action')
         }
-        sprite.timer = this.scene.time.delayedCall(this._getPickupDuration(task), () => {
+        sprite.timer = this.scene.time.delayedCall(getMarketWorkDuration(sprite, this._getPickupDuration(task)), () => {
             if(!sprite.active || sprite.state != CONTROL_STATES.SEED_MODE) {
                 Player.clearPoseLock(sprite, sprite.idle);
                 sprite.timer = null;

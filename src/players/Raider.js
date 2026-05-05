@@ -12,7 +12,9 @@ import {
     attachDirectionalSix,
     shouldUseDirectionalFacing,
     updateDirectionalAnimationFromVelocity
-} from "./PlayerDirectionalAnimator";import { InterruptController } from "../ai/scheduler/InterruptController";
+} from "./PlayerDirectionalAnimator";
+import { InterruptController } from "../ai/scheduler/InterruptController";
+import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 import raiderWalkDown from 'url:../assets/players/raider/raider_walk_down.png';
 import raiderWalkDownLeft from 'url:../assets/players/raider/raider_walk_down_left.png';
 import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_right.png';
@@ -29,6 +31,10 @@ export class Raider {
     static stamina = 0;   // no stamina drain
     static tint   = 0xff0000; // default red tint for enemies (can be overridden per raider if you want)
     static awareness = 128;
+    static PLAYER_CHASE_MAX_MS = 4200;
+    static PLAYER_CHASE_COOLDOWN_MS = 2600;
+    static PLAYER_CHASE_MAX_MISSION_DIST = SQUARESIZE * 6;
+    static PLAYER_CHASE_DROP_DIST = SQUARESIZE * 7;
 
     static preload(scene) {
         scene.load.spritesheet('raider_walk_down', raiderWalkDown, { frameWidth: 32, frameHeight: 32 });
@@ -108,15 +114,28 @@ export class Raider {
             troop._spawnWorldY = troop.y;
         }
 
+        Raider._clearInvalidMission(troop);
+        if (Raider._shouldDropPlayerChase(troop)) {
+            Raider._dropPlayerChase(troop);
+            return false;
+        }
+
+        if (troop.task && !troop.task.siege && !Raider._isBuildingTaskValid(troop.task)) {
+            troop.task = null;
+            troop.currentPath = null;
+            troop._postSiegeTask = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            return false;
+        }
+
         if(troop.task){
+            Raider._rememberMission(troop, troop.task);
             const retaliationTarget = troop._raiderRetaliationTarget;
             if (retaliationTarget?.active && retaliationTarget?.body?.team === 1) {
-                InterruptController.interruptTroop(troop, "raider_retaliate_fighter", CONTROL_STATES.TRACK_TARGET);
-                troop._raiderRetaliationTarget = null;
-                troop.forcedTarget = retaliationTarget;
-                troop.roam = false;
-                Player._syncTrackToTarget(troop, retaliationTarget);
-                Player._chaseOrBreachTarget?.(troop, retaliationTarget, true);
+                Raider._startPlayerChase(troop, retaliationTarget, {
+                    retaliation: true,
+                    reason: "raider_retaliate_fighter",
+                });
             } else if (retaliationTarget && !retaliationTarget?.active) {
                 troop._raiderRetaliationTarget = null;
             }
@@ -180,22 +199,24 @@ export class Raider {
         // -------------------------
         // 2) Land behaviour: fight nearby TEAM 1 units first
         // -------------------------
-        const nearbyPriorityTarget = Raider._findNearbyUnitTarget(troop);
-        if (nearbyPriorityTarget) {
-            troop._raiderRetaliationTarget = null;
-            troop.forcedTarget = nearbyPriorityTarget;
-            troop.roam = false;
-            const movedTile = Player._syncTrackToTarget(troop, nearbyPriorityTarget);
-            if (troop.state !== CONTROL_STATES.ATTACK_MODE) {
-                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+        if (troop.forcedTarget?.active && troop.forcedTarget?.body?.team === 1) {
+            if (!troop._raiderPlayerChase) {
+                troop._raiderPlayerChase = {
+                    startedAt: Raider._now(troop),
+                    targetId: troop.forcedTarget.id ?? null,
+                    retaliation: false,
+                };
             }
-            Player._chaseOrBreachTarget?.(troop, nearbyPriorityTarget, movedTile || !troop.currentPath?.length);
+            Player._syncTrackToTarget(troop, troop.forcedTarget);
+            Player._chaseOrBreachTarget?.(troop, troop.forcedTarget, true);
             return false;
         }
 
-        Player.updateTracking(troop);
-        if (troop.track && troop.track[0] && troop.track[0].team === 1) {
-            return false; // chase/attack handled elsewhere
+        const nearbyPriorityTarget = Raider._findNearbyUnitTarget(troop);
+        if (nearbyPriorityTarget && Raider._startPlayerChase(troop, nearbyPriorityTarget, {
+            reason: "raider_nearby_player",
+        })) {
+            return false;
         }
 
         // -------------------------
@@ -269,6 +290,7 @@ export class Raider {
 
             for (const k of idxs) {
                 const [bx, by, type, building] = buildingArray[k];
+                if (!Raider._isBuildingTargetAlive(building)) continue;
                 const entry = { bx, by, type, building };
                 (canReach(bx, by) ? reachable : blocked).push(entry);
             }
@@ -282,12 +304,16 @@ export class Raider {
                 value: chosen.building,
                 x: chosen.bx,
                 y: chosen.by,
-                duration: 100,
+                duration: Raider._buildingTargetHealth(chosen.building).current,
+                totalDuration: Raider._buildingTargetHealth(chosen.building).max,
                 assigned: 0,
             };
         };
 
         const beginSiegeForTask = (task) => {
+            if (!Raider._isBuildingTaskValid(task)) return false;
+            Raider._rememberMission(troop, task);
+
             // Build perimeter targets around the POI footprint
             const fp = { x: task.x, y: task.y, w: task.type?.lenX ?? 1, h: task.type?.lenY ?? 1 };
 
@@ -358,6 +384,7 @@ export class Raider {
         };
 
         const assignAndPathToTask = (task) => {
+            Raider._rememberMission(troop, task);
 
             // 1) Try normal raid approach (perimeter/door bias) first
             const res = Manager.assignTaskToTroop(troop, task, CONTROL_STATES.DESTROY_MODE)
@@ -423,6 +450,163 @@ export class Raider {
         return false;
     }
 
+    static _buildingFromTask(task) {
+        return task?.value?.buildingRef || task?.value || null;
+    }
+
+    static _buildingTargetHealth(building) {
+        const key = building && ("health" in building)
+            ? "health"
+            : (building && ("hp" in building) ? "hp" : "health");
+        const rawMax = Number(building?.maxHealth ?? building?.maxHp ?? building?.[key] ?? 1);
+        const max = Number.isFinite(rawMax) && rawMax > 0 ? rawMax : 1;
+        const rawCurrent = Number(building?.[key] ?? max);
+        const current = Number.isFinite(rawCurrent) ? Math.max(0, rawCurrent) : max;
+        return { current, max };
+    }
+
+    static _isBuildingTargetAlive(building) {
+        if (!building || building._destroyed || building._isDestroyed || building.sprite?._destroyed) return false;
+        if (building.sprite && building.sprite.active === false) return false;
+        if (building.baseSprite && building.baseSprite.active === false) return false;
+        return Raider._buildingTargetHealth(building).current > 0;
+    }
+
+    static _isBuildingTaskValid(task) {
+        return Raider._isBuildingTargetAlive(Raider._buildingFromTask(task));
+    }
+
+    static _now(troop) {
+        return troop?.scene?.getSimulationNow?.() ?? troop?.scene?.simNowMs ?? troop?.scene?.time?.now ?? Date.now();
+    }
+
+    static _taskWorldCenter(task) {
+        if (!task) return null;
+        const lenX = Math.max(1, Number(task?.type?.lenX ?? 1));
+        const lenY = Math.max(1, Number(task?.type?.lenY ?? 1));
+        const x = Number(task.x);
+        const y = Number(task.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {
+            x: (x + lenX / 2) * SQUARESIZE,
+            y: (y + lenY / 2) * SQUARESIZE,
+        };
+    }
+
+    static _rememberMission(troop, task = troop?.task) {
+        if (!troop || !task || task.siege || !Raider._isBuildingTaskValid(task)) return null;
+        troop._raidMissionTask = task;
+        return task;
+    }
+
+    static _clearInvalidMission(troop) {
+        if (!troop?._raidMissionTask) return;
+        if (Raider._isBuildingTaskValid(troop._raidMissionTask)) return;
+        troop._raidMissionTask = null;
+    }
+
+    static _distanceFromMission(troop) {
+        const center = Raider._taskWorldCenter(troop?._raidMissionTask);
+        if (!center) return 0;
+        return Phaser.Math.Distance.Between(troop.x, troop.y, center.x, center.y);
+    }
+
+    static _canStartPlayerChase(troop, target, opts = {}) {
+        if (!troop?.active || !target?.active || target.body?.team !== 1) return false;
+        const now = Raider._now(troop);
+        const dist = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y);
+        const immediate = dist <= Math.max((troop.weapon?.range || 0) + 14, SQUARESIZE * 0.9);
+        if (!opts.retaliation && !immediate && now < Number(troop._nextPlayerChaseAt || 0)) return false;
+        if (Map.enemyRegionSystem?.canReachWorldToWorld && !Map.enemyRegionSystem.canReachWorldToWorld(troop.x, troop.y, target.x, target.y)) {
+            return false;
+        }
+        return true;
+    }
+
+    static _startPlayerChase(troop, target, opts = {}) {
+        if (!Raider._canStartPlayerChase(troop, target, opts)) return false;
+        Raider._rememberMission(troop, troop.task || troop._raidMissionTask);
+
+        if (troop.task) {
+            InterruptController.interruptTroop(troop, opts.reason || "raider_player_interruption", CONTROL_STATES.TRACK_TARGET);
+        } else {
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
+        }
+
+        const now = Raider._now(troop);
+        troop._raiderPlayerChase = {
+            startedAt: now,
+            targetId: target.id ?? null,
+            retaliation: !!opts.retaliation,
+        };
+        troop._raiderRetaliationTarget = null;
+        troop.forcedTarget = target;
+        troop.roam = false;
+        Player._syncTrackToTarget(troop, target);
+        Player._chaseOrBreachTarget?.(troop, target, true);
+        return true;
+    }
+
+    static _shouldDropPlayerChase(troop) {
+        const chase = troop?._raiderPlayerChase;
+        const target = troop?.forcedTarget;
+        if (!chase && !target) return false;
+        if (!target?.active || target.body?.team !== 1) return true;
+
+        const now = Raider._now(troop);
+        const chaseAge = now - Number(chase?.startedAt || now);
+        if (chaseAge >= Raider.PLAYER_CHASE_MAX_MS) return true;
+
+        const targetDist = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y);
+        if (targetDist > Raider.PLAYER_CHASE_DROP_DIST) return true;
+
+        if (troop._raidMissionTask && Raider._isBuildingTaskValid(troop._raidMissionTask)) {
+            if (Raider._distanceFromMission(troop) > Raider.PLAYER_CHASE_MAX_MISSION_DIST) return true;
+        }
+
+        if (Map.enemyRegionSystem?.canReachWorldToWorld && !Map.enemyRegionSystem.canReachWorldToWorld(troop.x, troop.y, target.x, target.y)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    static _dropPlayerChase(troop) {
+        const now = Raider._now(troop);
+        troop._raiderPlayerChase = null;
+        troop._raiderRetaliationTarget = null;
+        troop._nextPlayerChaseAt = now + Raider.PLAYER_CHASE_COOLDOWN_MS;
+        troop.forcedTarget = null;
+        troop.track = null;
+        troop.currentPath?.splice?.(0);
+        troop.body?.setVelocity?.(0, 0);
+        CombatSpacingCoordinator.clearTroopFocus(troop);
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        Raider._resumeMission(troop);
+        return true;
+    }
+
+    static _resumeMission(troop) {
+        const task = troop?._raidMissionTask;
+        if (!troop?.active || !task || !Raider._isBuildingTaskValid(task)) {
+            if (troop) troop._raidMissionTask = null;
+            return false;
+        }
+
+        troop.task = null;
+        troop.roam = false;
+        if (Manager.assignTaskToTroop(troop, task, CONTROL_STATES.DESTROY_MODE)) {
+            return true;
+        }
+        if (Raider.beginSiegeForTask(troop, task)) {
+            return true;
+        }
+        troop._raidMissionTask = null;
+        return false;
+    }
+
     static _findNearbyUnitTarget(troop) {
         const radius = Math.max(
             Number(troop?.awareness ?? troop?.type?.awareness ?? Raider.awareness ?? 0),
@@ -450,7 +634,7 @@ export class Raider {
         candidates.sort((a, b) => {
             const aPriority = Player._isFighterUnit?.(a) ? 1 : 0;
             const bPriority = Player._isFighterUnit?.(b) ? 1 : 0;
-            if (aPriority !== bPriority) return aPriority - bPriority;
+            if (aPriority !== bPriority) return bPriority - aPriority;
             return Phaser.Math.Distance.Between(troop.x, troop.y, a.x, a.y) - Phaser.Math.Distance.Between(troop.x, troop.y, b.x, b.y);
         });
 
@@ -528,6 +712,8 @@ export class Raider {
 
     static beginSiegeForTask(troop, task) {
         if (!troop?.active || !task || task.siege) return false;
+        if (!Raider._isBuildingTaskValid(task)) return false;
+        Raider._rememberMission(troop, task);
 
         const fp = { x: task.x, y: task.y, w: task.type?.lenX ?? 1, h: task.type?.lenY ?? 1 };
         const gridH = Map.enemyNavGrid?.length ?? 0;
@@ -640,7 +826,13 @@ export class Raider {
         troop._postSiegeTask = null;
 
         if (post) {
+            if (!Raider._isBuildingTaskValid(post)) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+                troop.roam = false;
+                return;
+            }
             post.assigned = post.assigned ?? 0;
+            Raider._rememberMission(troop, post);
 
             // IMPORTANT: use DESTROY_MODE so buildingManager destroy loop definitely ticks,
             // or keep SIEGE_MODE now that beginDestroyingBlock allows it.

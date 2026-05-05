@@ -82,11 +82,13 @@ export class FarmBushNode {
 
   setUpHitDetection() {
     this.sprite.on("pointerover", () => {
+      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, true);
       const inPlaceMode = FarmBushNode.scene.breakItems && FarmBushNode.scene.breakItems.text === "Place";
       this.sprite.setTint(inPlaceMode ? 0x888888 : 0xaaaaaa);
     });
 
     this.sprite.on("pointerout", () => {
+      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
       if (!this.flashTween) this.sprite.clearTint();
     });
 
@@ -94,6 +96,10 @@ export class FarmBushNode {
       const team = Teams.teamLists["1"];
       if (!team) return;
       const selection = OrderRunner.getSelectionProfile();
+
+      if (FarmBushNode.scene.tryIssueForagerRouteToNode?.(this, this.resourceKind)) {
+        return;
+      }
 
       const now = FarmBushNode.scene.time.now;
       if (this._lastClickTime && now - this._lastClickTime < 300) {

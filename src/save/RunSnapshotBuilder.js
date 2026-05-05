@@ -117,6 +117,21 @@ function snapshotFarmBush(node) {
   };
 }
 
+function snapshotCropState(crop) {
+  if (!crop) return null;
+  const x = Number(crop.x);
+  const y = Number(crop.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    teamNumber: String(crop.teamNumber ?? "1"),
+    dailyWatered: !!crop.dailyWatered,
+    growthStage: Math.max(0, Number(crop.growthStage || 0)),
+    hasSeed: crop.hasSeed !== false,
+  };
+}
+
 function snapshotTroop(troop) {
   if (!troop?.active) return null;
   const typeKey = getTroopTypeKey(troop);
@@ -182,10 +197,10 @@ function snapshotTeamState(teamId, team) {
     ovenDeliveryItems: [],
     storageDeliveryItems: [],
     storageDeliveryReservations: [],
-    cropList: cloneSimple(team.cropList, []),
-    crops: cloneSimple(team.crops, []),
-    wateringList: cloneSimple(team.wateringList, []),
-    TeamFarmSpots: cloneSimple(team.TeamFarmSpots, []),
+    cropList: (team.cropList || []).map(snapshotTaskLike),
+    crops: (team.crops || []).map(snapshotCropState).filter(Boolean),
+    wateringList: (team.wateringList || []).map(snapshotTaskLike),
+    TeamFarmSpots: (team.TeamFarmSpots || []).map(snapshotTaskLike),
     buildingRefs: buildings.map((entry) => entry.ref),
     buildings,
     cardIds: getCardIdsFromHand(team.cardHand),
@@ -307,7 +322,7 @@ export function buildRunSnapshot(scene) {
       worldSeedBushes,
       worldBerryBushes,
       worldSpawners,
-      cropDict: cloneSimple(GameMap.cropDict, {}),
+      cropDict: {},
       townBounds: cloneSimple(townBounds, {}),
       townRoads: cloneSimple(townRoads, {}),
       spawnPoints: cloneSimple(spawnPoints, []),

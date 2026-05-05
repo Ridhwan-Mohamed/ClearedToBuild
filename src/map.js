@@ -34,6 +34,8 @@ const colors = {
     rockGray: {r: 90, g: 104, b: 43}
 };
 
+const OUTER_WATER_TILE_DIMENSION = 250;
+
 export class Map{
     static barrier;
     static structureBarrier;
@@ -54,6 +56,8 @@ export class Map{
     static blocks = [];
     static cropDict = {};  // add at top of map.js
     static waterBlocks = [];
+    static outerWaterLayer;
+    static outerWaterTileSprite;
     static renderCache = [];
     static cameraBounds;
     static worldPines = [];
@@ -66,6 +70,9 @@ export class Map{
     static initMap(){
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         this.graphics = this.scene.add.graphics();
+        Map.outerWaterLayer = Map.scene.add.layer();
+        Map.outerWaterLayer.setName?.("outerWaterLayer");
+        Map.outerWaterLayer.setDepth(FLOORDEPTH - 2);
         Map.worldLayer = Map.scene.add.layer();
         Map.worldLayer.setName?.("worldLayer");
         Map.worldStaticLayer = Map.scene.add.layer();   // NEW: buildings/trees/rocks/placing ghosts etc.
@@ -90,6 +97,11 @@ export class Map{
         try { this.worldLayer?.removeAll?.(true); } catch {}
         try { this.worldLayer?.destroy?.(true); } catch {}
         this.worldLayer = null;
+
+        try { this.outerWaterLayer?.removeAll?.(true); } catch {}
+        try { this.outerWaterLayer?.destroy?.(true); } catch {}
+        this.outerWaterLayer = null;
+        this.outerWaterTileSprite = null;
 
         try { this.worldStaticLayer?.removeAll?.(true); } catch {}
         try { this.worldStaticLayer?.destroy?.(true); } catch {}
@@ -796,6 +808,7 @@ export class Map{
         this.blocks.forEach(Map._destroyNode);
         this.blocks = [];
         this.waterBlocks.forEach(child => child.destroy());
+        this._clearOuterWaterBackdrop();
         this.barrier.clear(true);
     }
 
@@ -826,6 +839,7 @@ export class Map{
 
         // remove any prior world-layer children created last redraw
         if (this.worldLayer) this.worldLayer.removeAll(true);
+        this._drawOuterWaterBackdrop(width, height);
 
         // Full-world redraw (no camera chunk windowing).
         const topLeftX = 0;
@@ -866,6 +880,44 @@ export class Map{
         // After we've rebuilt visible world objects:
         this._uiIgnoreWorldLayer();
     }   
+
+    static _clearOuterWaterBackdrop() {
+        this.outerWaterTileSprite?.destroy?.();
+        this.outerWaterTileSprite = null;
+        this.outerWaterLayer?.removeAll?.(true);
+    }
+
+    static _drawOuterWaterBackdrop(width = WORLD_DIMENSIONX, height = WORLD_DIMENSIONY) {
+        if (!this.scene?.textures?.exists?.("water")) return;
+        if (!this.outerWaterLayer) {
+            this.outerWaterLayer = this.scene.add.layer();
+            this.outerWaterLayer.setName?.("outerWaterLayer");
+            this.outerWaterLayer.setDepth(FLOORDEPTH - 2);
+        }
+
+        const tileWidth = Math.max(width, OUTER_WATER_TILE_DIMENSION);
+        const tileHeight = Math.max(height, OUTER_WATER_TILE_DIMENSION);
+        const worldWidth = width * SQUARESIZE;
+        const worldHeight = height * SQUARESIZE;
+        const totalWidth = tileWidth * SQUARESIZE;
+        const totalHeight = tileHeight * SQUARESIZE;
+        const x = (worldWidth - totalWidth) / 2;
+        const y = (worldHeight - totalHeight) / 2;
+
+        this._clearOuterWaterBackdrop();
+        this.outerWaterTileSprite = this.scene.add.tileSprite(
+            x + totalWidth / 2,
+            y + totalHeight / 2,
+            totalWidth,
+            totalHeight,
+            "water",
+            1
+        )
+            .setDepth(FLOORDEPTH - 2)
+            .setAlpha(1);
+        this.outerWaterTileSprite.setFrame?.(1);
+        this.outerWaterLayer.add(this.outerWaterTileSprite);
+    }
 
     static redrawRect(x, y, w, h, pad = 1) {
         const rect = this._normalizeGridRect(x, y, w, h, pad);
@@ -2224,6 +2276,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     }
 
     static setDetailedWorldVisible(visible = true) {
+        this.outerWaterLayer?.setVisible?.(visible);
         this.worldLayer?.setVisible?.(visible);
         this.worldStaticLayer?.setVisible?.(visible);
         this.graphics?.setVisible?.(visible);

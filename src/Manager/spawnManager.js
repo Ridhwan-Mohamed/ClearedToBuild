@@ -5,8 +5,9 @@ import { Teams } from "../Teams";
 import { spawnPoints } from "../town";
 import Phaser from "phaser";
 import { Map } from "../map";
-import { ZoomMixer } from "../UI/ZoomMixer";
 import { Raider } from "../players/Raider";
+import { Hunter } from "../players/Hunter";
+import { Bomber } from "../players/Bomber";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 
 export function recalculateDestroyTasksFromPoint(x = null, y = null, teamNumber = "0", troop) {
@@ -167,40 +168,6 @@ function applySeaRaiderMods(unit, modifier = null, options = {}) {
     };
 }
 
-function attachSeaRaiderIcon(scene, raider) {
-    const iconScene = scene ?? ZoomMixer.scene;
-    if (!iconScene || !raider?.active) return;
-
-    const iconKey = "enemyIcon";
-    if (!iconScene.textures.exists(iconKey)) {
-        const g = iconScene.add.graphics();
-        g.fillStyle(0xff0000, 1).fillCircle(6, 6, 5);
-        g.lineStyle(1, 0x000000, 1).strokeCircle(6, 6, 5);
-        g.generateTexture(iconKey, 12, 12);
-        g.destroy();
-    }
-
-    const icon = ZoomMixer.createZoomInvariantIcon(
-        iconKey,
-        "Sea Raider",
-        raider.x,
-        raider.y,
-        { baseScale: 0.9 }
-    );
-    icon.setTint(0xff4444);
-
-    const updateCb = () => {
-        if (!raider.active || !icon.active) {
-            iconScene.events.off("update", updateCb);
-            if (icon.active) icon.destroy();
-            return;
-        }
-        icon.setPosition(raider.x, raider.y);
-    };
-
-    iconScene.events.on("update", updateCb);
-}
-
 function spawnSingleSeaRaider(scene, options = {}) {
     const nav = Map.navGrid;
     if (!scene || !nav || !nav.length) return null;
@@ -222,7 +189,11 @@ function spawnSingleSeaRaider(scene, options = {}) {
         y: (WORLD_DIMENSIONY * SQUARESIZE) / 2,
     };
 
-    const raider = new Raider(gx, gy, options.teamNumber ?? 0);
+    const EnemyClass =
+        options.enemyType === "bomber" ? Bomber :
+        options.enemyType === "hunter" ? Hunter :
+        Raider;
+    const raider = new EnemyClass(gx, gy, options.teamNumber ?? 0);
     const appliedMods = applySeaRaiderMods(raider, options.modifier, options);
 
     raider.isSeaRaider = true;
@@ -245,7 +216,6 @@ function spawnSingleSeaRaider(scene, options = {}) {
     raider.swimSpeed = swimSpeed;
     raider.body.setVelocity(dir.x * swimSpeed, dir.y * swimSpeed);
 
-    attachSeaRaiderIcon(scene, raider);
     return raider;
 }
 

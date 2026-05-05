@@ -172,7 +172,15 @@ export class ZoomMixer {
     if (!scene) return;
     if (this.zoomOutLocked || scene.stageCompleteLock) return;
     const cam   = scene.cameras.main;
-    if (Math.abs((cam?.zoom ?? targetZoom) - targetZoom) < 0.01) return;
+    const currentZoom = cam?.zoom ?? targetZoom;
+    if (Math.abs(currentZoom - targetZoom) < 0.01) {
+      if (targetZoom <= this.OUT_THRESHOLD && this.mode !== "overview") {
+        this.swapMode("overview");
+      } else if (targetZoom >= this.IN_THRESHOLD && this.mode !== "detailed") {
+        this.swapMode("detailed");
+      }
+      return;
+    }
 
     AudioManager.playWhoosh({ volume: 0.32 });
 
@@ -192,21 +200,22 @@ export class ZoomMixer {
 
     scene.tweens.killTweensOf(cam);
 
-    // 🔹 camera zoom tween
     const self = this;
+    const syncModeForZoom = () => {
+      if (cam.zoom >= self.IN_THRESHOLD && self.mode !== "detailed") {
+        self.swapMode("detailed");
+      } else if (cam.zoom <= self.OUT_THRESHOLD && self.mode !== "overview") {
+        self.swapMode("overview");
+      }
+    };
+
     scene.tweens.add({
       targets: cam,
       zoom: targetZoom,
       duration,
       ease,
-      onComplete: () => {
-        // 🔁 restore mode-swap logic
-        if (targetZoom <= self.OUT_THRESHOLD && self.mode !== "overview") {
-          self.swapMode("overview");
-        } else if (targetZoom >= self.IN_THRESHOLD && self.mode !== "detailed") {
-          self.swapMode("detailed");
-        }
-      }
+      onUpdate: syncModeForZoom,
+      onComplete: syncModeForZoom
     });
   }
 
@@ -549,7 +558,7 @@ export class ZoomMixer {
       cam.scrollY, targetScrollY, this.scrollVel, "y", this.scrollSmoothTime, dt, 5000
     );
 
-    // 4) Your mode swap hysteresis (do it while moving, not just on tween complete)
+    // 4) Swap presentation as the zoom crosses its thresholds.
     if (cam.zoom <= this.OUT_THRESHOLD && this.mode !== "overview") {
       this.swapMode("overview");
     } else if (cam.zoom >= this.IN_THRESHOLD && this.mode !== "detailed") {

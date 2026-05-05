@@ -1748,7 +1748,6 @@ export class MainMenu {
             launchSequencePlayed = true;
 
             const isContinueTransition = !!transitionOpts?.isContinue;
-            const overviewPose = transitionOpts?.overviewPose ?? null;
 
             const fadeTargets = [scene.menu, scene._teamTownIcon].filter(Boolean);
             if (fadeTargets.length) {
@@ -1795,7 +1794,8 @@ export class MainMenu {
                     onUpdate: () => {
                         scene._applyStartupCameraPose?.();
                         if (!isContinueTransition || detailedRevealPlayed) return;
-                        if (cam.zoom < Math.max(zoomMixer?.IN_THRESHOLD ?? 0.45, 0.52)) return;
+                        const revealZoom = Math.max(zoomMixer?.IN_THRESHOLD ?? 0.45, 0.52);
+                        if (cam.zoom < revealZoom) return;
                         detailedRevealPlayed = true;
                         MainMenu._restoreDetailedPresentation(scene, zoomMixer);
                     },

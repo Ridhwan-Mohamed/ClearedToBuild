@@ -14,6 +14,7 @@ import {
 } from "../UI/BuildingTheme";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 export class ClayOven {
 
@@ -607,8 +608,10 @@ export class ClayOven {
     shakeAndFlash() {
         if (!this.sprite) return;
         const scene = ClayOven.scene;
-        const baseAngle = this.sprite.angle || 0;
+        const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+        this._damageRestAngle = baseAngle;
         this._damageShakeTween?.stop?.();
+        this.sprite.angle = baseAngle;
 
         this._damageShakeTween = scene.tweens.add({
             targets: this.sprite,
@@ -673,6 +676,7 @@ export class ClayOven {
         this.clearStoredContents();
         ClayOven.scene.events.emit('oven:removed', this);
         destroyStructuralHealthBar(this);
+        playBuildingCollapseSmoke(this, { scene: ClayOven.scene });
         if (this.sprite) this.sprite.destroy();
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);

@@ -117,8 +117,10 @@ export class CombatSpacingCoordinator {
         return best;
     }
 
-    static getTargetAssignmentCounts(teamNumber, target) {
-        const focused = this._getFocusedTroopsForTarget(teamNumber, target);
+    static getTargetAssignmentCounts(teamNumber, target, opts = {}) {
+        const excludeTroop = opts.excludeTroop ?? null;
+        const focused = this._getFocusedTroopsForTarget(teamNumber, target)
+            .filter(troop => troop !== excludeTroop);
         let primary = 0;
         let overflow = 0;
 
@@ -135,8 +137,8 @@ export class CombatSpacingCoordinator {
         };
     }
 
-    static getAssignmentPressure(teamNumber, target) {
-        const counts = this.getTargetAssignmentCounts(teamNumber, target);
+    static getAssignmentPressure(teamNumber, target, opts = {}) {
+        const counts = this.getTargetAssignmentCounts(teamNumber, target, opts);
         return counts.total * (SQUARESIZE * 1.5) + counts.primary * (SQUARESIZE * 0.5);
     }
 
@@ -151,12 +153,19 @@ export class CombatSpacingCoordinator {
             : null;
         const teamNumber = troop.body?.team ?? 1;
 
-        const viable = targets.filter(target =>
+        let viable = targets.filter(target =>
             target?.active &&
             target?.body &&
             target.body.team !== troop.body?.team
         );
         if (!viable.length) return null;
+
+        if (opts.strictTargetSpread) {
+            const unassigned = viable.filter(target =>
+                this.getTargetAssignmentCounts(teamNumber, target, { excludeTroop: troop }).total <= 0
+            );
+            if (unassigned.length) viable = unassigned;
+        }
 
         let best = null;
         let bestScore = Infinity;
@@ -164,7 +173,7 @@ export class CombatSpacingCoordinator {
         for (const target of viable) {
             const priorityScore = Number(priorityFn?.(target) ?? 0);
             const assignmentPriorityScore = Number(assignmentPriorityFn?.(target) ?? 0);
-            const pressureScore = this.getAssignmentPressure(teamNumber, target);
+            const pressureScore = this.getAssignmentPressure(teamNumber, target, { excludeTroop: troop });
             const anchorScore = worldDistance(anchor, target);
             const troopScore = worldDistance(troop, target) * 0.2;
             const keepFocusBonus = target === currentTarget ? -(SQUARESIZE * 1.5) : 0;
@@ -198,7 +207,7 @@ export class CombatSpacingCoordinator {
             const target = this.getTaskTarget(task);
             if (!target?.active || !target?.body) continue;
 
-            const pressureScore = this.getAssignmentPressure(teamNumber, target);
+            const pressureScore = this.getAssignmentPressure(teamNumber, target, { excludeTroop: troop });
             const distanceScore = worldDistance(troop, target);
             const forcedBonus = task?.forced ? -(SQUARESIZE * 4) : 0;
             const keepFocusBonus = target === currentTarget ? -(SQUARESIZE * 2) : 0;

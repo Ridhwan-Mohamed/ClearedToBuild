@@ -4,7 +4,7 @@ import { Wall } from "../buildings/Wall";
 import { Map as GameMap } from "../map";
 import { buildingManager } from "../Manager/buildingManager";
 
-const DRAG_THRESHOLD = 10;
+const DRAG_THRESHOLD = 6;
 
 function normalizeCostBundle(cost) {
     if (!cost) return {};
@@ -57,7 +57,7 @@ export class WallDestroyController {
 
     start() {
         this.active = true;
-        this.consumeNextClick = true;
+        this.consumeNextClick = false;
         this.selected.clear();
         this._resetDrag();
         this.scene.input.setDefaultCursor("url(hammer.png), pointer");
@@ -86,7 +86,7 @@ export class WallDestroyController {
     }
 
     onPointerMove(pointer) {
-        if (!this.active || pointer?.button !== 0) return;
+        if (!this.active || !pointer?.isDown) return;
         if (!this.dragPending && !this.dragActive) return;
         if (this.dragPointerId != null && pointer?.id !== this.dragPointerId) return;
 
@@ -196,6 +196,9 @@ export class WallDestroyController {
             const building = sprite?.buildingRef || sprite || null;
             const type = building?.tileType ?? tileType ?? building?.buildType ?? null;
             if (!building || !type) continue;
+            if (building._destroyed || building.sprite?._destroyed || building.sprite?.active === false) continue;
+            const hp = Number(building.health ?? building.hp ?? building.maxHealth ?? building.maxHp ?? 1);
+            if (!(hp > 0)) continue;
             const teamNumber = Number(building.teamNumber ?? building.team ?? sprite?.team ?? 1);
             if (teamNumber !== 1) continue;
             const key = `building:${x},${y}:${type.name ?? type.value ?? "unknown"}`;
@@ -275,7 +278,9 @@ export class WallDestroyController {
 
     _buildingTarget(entry) {
         if (!entry?.value || !entry?.type) return null;
-        const health = Math.max(1, Number(entry.value.health ?? entry.value.hp ?? entry.value.maxHealth ?? entry.value.maxHp ?? 100));
+        const rawHealth = Number(entry.value.health ?? entry.value.hp ?? entry.value.maxHealth ?? entry.value.maxHp ?? 100);
+        if (!(rawHealth > 0) || entry.value._destroyed || entry.value.sprite?._destroyed) return null;
+        const health = Math.max(1, rawHealth);
         const maxHealth = Math.max(health, Number(entry.value.maxHealth ?? entry.value.maxHp ?? health));
         return {
             key: this._targetKeyForBuilding(entry),

@@ -1,10 +1,10 @@
 import Phaser from "phaser";
 import { UIDEPTH } from "../constants.js";
 
-const BOARD_W = 332;
-const HEADER_H = 0;
+const BOARD_W = 300;
+const HEADER_H = 30;
 const ROW_H = 58;
-const ROW_GAP = 8;
+const ROW_GAP = 15;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -14,10 +14,11 @@ export class AchievementBoard {
   constructor(scene, worldScene) {
     this.scene = scene;
     this.worldScene = worldScene;
-    this.expanded = false;
+    this.expanded = true;
     this._lastSignature = "";
     this._rowBySlot = new Map();
     this._completionTimers = new Map();
+    this._unseenCompletions = 0;
 
     this.root = scene.add.container(0, 0).setDepth((UIDEPTH ?? 0) + 18);
     this.header = scene.add.container(0, 0);
@@ -26,20 +27,20 @@ export class AchievementBoard {
     this.headerShadow = scene.add.graphics();
     this.headerBg = scene.add.graphics();
     this.headerShine = scene.add.graphics();
-    this.headerTitle = scene.add.text(0, -6, "TOWN GOALS", {
+    this.headerTitle = scene.add.text(-(BOARD_W / 2) + 24, -5, "TOWN GOALS", {
       fontFamily: "Bungee",
       fontSize: "14px",
       color: "#eef8ff",
       stroke: "#07111b",
       strokeThickness: 3,
-    }).setOrigin(0.5);
-    this.headerStatus = scene.add.text(0, 11, "3 ACTIVE", {
+    }).setOrigin(0, 0.5);
+    this.headerStatus = scene.add.text(-(BOARD_W / 2) + 24, 9, "3 ACTIVE", {
       fontFamily: "Bungee",
       fontSize: "9px",
       color: "#b9deef",
       stroke: "#07111b",
       strokeThickness: 2,
-    }).setOrigin(0.5);
+    }).setOrigin(0, 0.5);
     this.chevron = scene.add.text(BOARD_W / 2 - 24, 0, "v", {
       fontFamily: "Bungee",
       fontSize: "14px",
@@ -47,6 +48,15 @@ export class AchievementBoard {
       stroke: "#07111b",
       strokeThickness: 3,
     }).setOrigin(0.5);
+    this.noticeBadgeBg = scene.add.graphics().setVisible(false);
+    this.noticeBadgeText = scene.add.text(BOARD_W / 2 - 72, 0, "", {
+      fontFamily: "Bungee",
+      fontSize: "9px",
+      color: "#17330e",
+      stroke: "#fff8d2",
+      strokeThickness: 2,
+      align: "center",
+    }).setOrigin(0.5).setVisible(false);
     this.headerHit = scene.add.zone(0, 0, BOARD_W, HEADER_H).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.headerHit.on("pointerdown", () => this.toggle());
 
@@ -56,6 +66,8 @@ export class AchievementBoard {
       this.headerShine,
       this.headerTitle,
       this.headerStatus,
+      this.noticeBadgeBg,
+      this.noticeBadgeText,
       this.chevron,
       this.headerHit,
     ]);
@@ -85,7 +97,6 @@ export class AchievementBoard {
     scene.scale.on("resize", this._resizeHandler);
 
     this._drawShell();
-    this.header.setVisible(false);
     this.reposition();
     this.refresh(true);
   }
@@ -96,43 +107,43 @@ export class AchievementBoard {
 
     const bg = this.scene.add.graphics();
     const shine = this.scene.add.graphics();
-    const tag = this.scene.add.text(-(BOARD_W / 2) + 34, -17, "", {
+    const tag = this.scene.add.text(-(BOARD_W / 2) + 26, -17, "", {
       fontFamily: "Bungee",
       fontSize: "9px",
       color: "#ffffff",
       stroke: "#07111b",
       strokeThickness: 2,
     }).setOrigin(0, 0.5);
-    const title = this.scene.add.text(-(BOARD_W / 2) + 34, -4, "", {
+    const title = this.scene.add.text(-(BOARD_W / 2) + 26, -4, "", {
       fontFamily: "Bungee",
       fontSize: "12px",
       color: "#eef8ff",
       stroke: "#07111b",
       strokeThickness: 3,
-      wordWrap: { width: 190 },
+      wordWrap: { width: 146 },
     }).setOrigin(0, 0.5);
-    const desc = this.scene.add.text(-(BOARD_W / 2) + 34, 16, "", {
+    const desc = this.scene.add.text(-(BOARD_W / 2) + 26, 16, "", {
       fontFamily: "Bungee",
       fontSize: "9px",
       color: "#cfe4f2",
       stroke: "#07111b",
       strokeThickness: 2,
-      wordWrap: { width: 200 },
+      wordWrap: { width: 150 },
     }).setOrigin(0, 0.5);
 
     const rewardBg = this.scene.add.graphics();
-    const rewardText = this.scene.add.text((BOARD_W / 2) - 76, -14, "", {
+    const rewardText = this.scene.add.text((BOARD_W / 2) - 70, -14, "", {
       fontFamily: "Bungee",
       fontSize: "8px",
       color: "#fff4cf",
       stroke: "#07111b",
       strokeThickness: 2,
       align: "right",
-      wordWrap: { width: 104 },
+      wordWrap: { width: 92 },
     }).setOrigin(0.5);
 
     const progressBg = this.scene.add.graphics();
-    const progressText = this.scene.add.text((BOARD_W / 2) - 76, 14, "", {
+    const progressText = this.scene.add.text((BOARD_W / 2) - 70, 14, "", {
       fontFamily: "Bungee",
       fontSize: "10px",
       color: "#e6f7ff",
@@ -141,8 +152,17 @@ export class AchievementBoard {
     }).setOrigin(0.5);
 
     const strike = this.scene.add.graphics();
+    const completeFlash = this.scene.add.graphics().setVisible(false);
+    const completeSweep = this.scene.add.graphics().setVisible(false);
+    const completeText = this.scene.add.text((BOARD_W / 2) - 68, 14, "COMPLETE", {
+      fontFamily: "Bungee",
+      fontSize: "9px",
+      color: "#123319",
+      stroke: "#eaffd8",
+      strokeThickness: 2,
+    }).setOrigin(0.5).setVisible(false);
 
-    root.add([bg, shine, rewardBg, progressBg, tag, title, desc, rewardText, progressText, strike]);
+    root.add([bg, shine, completeFlash, completeSweep, rewardBg, progressBg, tag, title, desc, rewardText, progressText, strike, completeText]);
     root.setPosition(0, root.baseY);
 
     return {
@@ -158,6 +178,9 @@ export class AchievementBoard {
       progressBg,
       progressText,
       strike,
+      completeFlash,
+      completeSweep,
+      completeText,
       locked: false,
     };
   }
@@ -165,17 +188,17 @@ export class AchievementBoard {
   _drawShell() {
     this.headerShadow.clear();
     this.headerShadow.fillStyle(0x02060d, 0.28);
-    this.headerShadow.fillRoundedRect(-(BOARD_W / 2) + 2, -HEADER_H / 2 + 4, BOARD_W, HEADER_H, 18);
+    this.headerShadow.fillRoundedRect(-(BOARD_W / 2) + 2, -HEADER_H / 2 + 4, BOARD_W, HEADER_H, 15);
 
     this.headerBg.clear();
-    this.headerBg.fillStyle(0x123548, 0.94);
-    this.headerBg.lineStyle(2, 0x9edfff, 0.24);
-    this.headerBg.fillRoundedRect(-(BOARD_W / 2), -HEADER_H / 2, BOARD_W, HEADER_H, 18);
-    this.headerBg.strokeRoundedRect(-(BOARD_W / 2), -HEADER_H / 2, BOARD_W, HEADER_H, 18);
+    this.headerBg.fillStyle(0x113048, 0.94);
+    this.headerBg.lineStyle(2, 0x9edfff, 0.22);
+    this.headerBg.fillRoundedRect(-(BOARD_W / 2), -HEADER_H / 2, BOARD_W, HEADER_H, 15);
+    this.headerBg.strokeRoundedRect(-(BOARD_W / 2), -HEADER_H / 2, BOARD_W, HEADER_H, 15);
 
     this.headerShine.clear();
     this.headerShine.fillStyle(0xffffff, 0.08);
-    this.headerShine.fillRoundedRect(-(BOARD_W / 2) + 10, -HEADER_H / 2 + 6, BOARD_W - 20, 13, 10);
+    this.headerShine.fillRoundedRect(-(BOARD_W / 2) + 10, -HEADER_H / 2 + 5, BOARD_W - 20, 11, 9);
 
     const panelH = this.rows.length * ROW_H + (this.rows.length - 1) * ROW_GAP + 20;
     this.panelShadow.clear();
@@ -183,14 +206,16 @@ export class AchievementBoard {
     this.panelShadow.fillRoundedRect(-(BOARD_W / 2) + 3, HEADER_H - 5, BOARD_W, panelH, 20);
 
     this.panelBg.clear();
-    this.panelBg.fillStyle(0x10283a, 0.86);
-    this.panelBg.lineStyle(2, 0x89d6ff, 0.18);
+    this.panelBg.fillStyle(0x113048, 0.88);
+    this.panelBg.lineStyle(2, 0x9edfff, 0.18);
     this.panelBg.fillRoundedRect(-(BOARD_W / 2), HEADER_H - 10, BOARD_W, panelH, 20);
     this.panelBg.strokeRoundedRect(-(BOARD_W / 2), HEADER_H - 10, BOARD_W, panelH, 20);
 
     this.panelShine.clear();
     this.panelShine.fillStyle(0xffffff, 0.05);
     this.panelShine.fillRoundedRect(-(BOARD_W / 2) + 10, HEADER_H - 2, BOARD_W - 20, 18, 12);
+
+    this._drawNoticeBadge();
   }
 
   _goalSignature(snapshot) {
@@ -198,6 +223,7 @@ export class AchievementBoard {
       expanded: this.expanded,
       serial: snapshot?.serial || 0,
       completed: snapshot?.totalCompleted || 0,
+      unseen: this._unseenCompletions,
       goals: (snapshot?.activeGoals || []).map((goal) => ({
         id: goal.instanceId,
         value: goal.progressValue,
@@ -217,6 +243,11 @@ export class AchievementBoard {
     row.root.setVisible(true);
     row.root.setAlpha(1);
     row.root.setScale(1);
+    row.completeFlash?.clear?.();
+    row.completeFlash?.setVisible?.(false);
+    row.completeSweep?.clear?.();
+    row.completeSweep?.setVisible?.(false);
+    row.completeText?.setVisible?.(false);
 
     const accent = completed ? 0x5fd18a : Number(goal.accent || 0x9edfff);
     const fill = completed ? 0x173725 : Number(goal.fill || 0x10283a);
@@ -242,16 +273,16 @@ export class AchievementBoard {
     row.rewardBg.clear();
     row.rewardBg.fillStyle(completed ? 0x24593a : 0x5a4311, 0.96);
     row.rewardBg.lineStyle(2, completed ? 0xbff6d3 : 0xf7d58b, 0.26);
-    row.rewardBg.fillRoundedRect((BOARD_W / 2) - 132, -25, 112, 22, 11);
-    row.rewardBg.strokeRoundedRect((BOARD_W / 2) - 132, -25, 112, 22, 11);
+    row.rewardBg.fillRoundedRect((BOARD_W / 2) - 120, -25, 100, 22, 11);
+    row.rewardBg.strokeRoundedRect((BOARD_W / 2) - 120, -25, 100, 22, 11);
     row.rewardText.setText(completed ? "Reward paid" : (goal.rewardText || ""));
     row.rewardText.setColor(completed ? "#d9ffe4" : "#fff4cf");
 
     row.progressBg.clear();
     row.progressBg.fillStyle(completed ? 0x2f7d4f : 0x16364d, 0.96);
     row.progressBg.lineStyle(2, completed ? 0xbff6d3 : accent, 0.28);
-    row.progressBg.fillRoundedRect((BOARD_W / 2) - 116, 4, 96, 22, 11);
-    row.progressBg.strokeRoundedRect((BOARD_W / 2) - 116, 4, 96, 22, 11);
+    row.progressBg.fillRoundedRect((BOARD_W / 2) - 106, 4, 86, 22, 11);
+    row.progressBg.strokeRoundedRect((BOARD_W / 2) - 106, 4, 86, 22, 11);
     row.progressText.setText(completed ? "DONE" : `${goal.progressValue}/${goal.progressTarget}`);
     row.progressText.setColor(completed ? "#f0fff5" : "#e6f7ff");
 
@@ -260,7 +291,7 @@ export class AchievementBoard {
       row.strike.lineStyle(4, 0xbff6d3, 0.9);
       row.strike.beginPath();
       row.strike.moveTo(-(BOARD_W / 2) + 28, 4);
-      row.strike.lineTo((BOARD_W / 2) - 142, 4);
+      row.strike.lineTo((BOARD_W / 2) - 130, 4);
       row.strike.strokePath();
     }
   }
@@ -272,6 +303,10 @@ export class AchievementBoard {
     this._pulseHeader();
 
     if (!this.expanded) {
+      this._unseenCompletions += 1;
+      this._syncNoticeState();
+      this._emitXpParticlesFrom(this.root.x, this.root.y);
+      this.scene.townXpHud?.refresh?.(true);
       this.scene.time.delayedCall(720, () => this.refresh(true));
       return;
     }
@@ -282,24 +317,29 @@ export class AchievementBoard {
     this._completionTimers.get(row.slot)?.remove?.(false);
     row.locked = true;
     this._renderRow(row, completed, { completed: true });
+    this._playOpenCompletionFx(row);
+    this._emitXpParticlesFrom(
+      this.root.x + row.root.x + (BOARD_W / 2) - 70,
+      this.root.y + row.root.y + 14
+    );
     this.scene.tweens.killTweensOf(row.root);
     this.scene.tweens.add({
       targets: row.root,
-      scaleX: 1.02,
-      scaleY: 1.02,
-      duration: 130,
-      ease: "Sine.Out",
+      scaleX: 1.045,
+      scaleY: 1.045,
+      duration: 150,
+      ease: "Back.Out",
       yoyo: true,
     });
     this.scene.tweens.add({
       targets: row.root,
-      alpha: 0.32,
-      delay: 390,
+      alpha: 0.42,
+      delay: 560,
       duration: 260,
       ease: "Quad.Out",
     });
 
-    const timer = this.scene.time.delayedCall(720, () => {
+    const timer = this.scene.time.delayedCall(920, () => {
       row.locked = false;
       row.root.setAlpha(0);
       row.root.setPosition(0, row.root.baseY + 8);
@@ -313,6 +353,88 @@ export class AchievementBoard {
       });
     });
     this._completionTimers.set(row.slot, timer);
+  }
+
+  _playOpenCompletionFx(row) {
+    if (!row) return;
+
+    row.completeFlash.clear();
+    row.completeFlash.fillStyle(0xc8ffcf, 0.26);
+    row.completeFlash.lineStyle(3, 0xbff6d3, 0.74);
+    row.completeFlash.fillRoundedRect(-(BOARD_W / 2) + 8, -(ROW_H / 2), BOARD_W - 16, ROW_H, 16);
+    row.completeFlash.strokeRoundedRect(-(BOARD_W / 2) + 8, -(ROW_H / 2), BOARD_W - 16, ROW_H, 16);
+    row.completeFlash.setAlpha(0);
+    row.completeFlash.setVisible(true);
+
+    row.completeSweep.clear();
+    row.completeSweep.fillStyle(0xffffff, 0.26);
+    row.completeSweep.fillRoundedRect(0, -(ROW_H / 2) + 6, 34, ROW_H - 12, 10);
+    row.completeSweep.setPosition(-(BOARD_W / 2) + 18, 0);
+    row.completeSweep.setAlpha(0);
+    row.completeSweep.setVisible(true);
+
+    row.completeText.setAlpha(0);
+    row.completeText.setScale(0.84);
+    row.completeText.setVisible(true);
+
+    this.scene.tweens.add({
+      targets: row.completeFlash,
+      alpha: { from: 0.78, to: 0 },
+      duration: 620,
+      ease: "Cubic.easeOut",
+    });
+    this.scene.tweens.add({
+      targets: row.completeSweep,
+      x: (BOARD_W / 2) - 58,
+      alpha: { from: 0.92, to: 0 },
+      duration: 520,
+      ease: "Cubic.easeOut",
+    });
+    this.scene.tweens.add({
+      targets: row.completeText,
+      alpha: { from: 0, to: 1 },
+      scaleX: 1.08,
+      scaleY: 1.08,
+      duration: 180,
+      ease: "Back.Out",
+      yoyo: true,
+      hold: 360,
+    });
+  }
+
+  _emitXpParticlesFrom(originX, originY) {
+    const hud = this.scene.townXpHud;
+    if (!hud || !this.scene?.add || !this.scene?.tweens) return;
+
+    const trackLeft = Number.isFinite(hud.trackLeft) ? hud.trackLeft : -80;
+    const trackWidth = Math.max(60, Number(hud.trackWidth || 120));
+    const ratio = Math.max(0.08, Math.min(1, Number(hud.progressRatio || hud.displayedProgressRatio || 0)));
+    const targetX = hud.x + trackLeft + Math.round(trackWidth * ratio);
+    const targetY = hud.y + 14;
+    const colors = [0x8fe7ff, 0xfff0a8, 0xbff6d3];
+
+    for (let i = 0; i < 14; i += 1) {
+      const dot = this.scene.add.circle(
+        originX + Phaser.Math.Between(-12, 12),
+        originY + Phaser.Math.Between(-8, 8),
+        Phaser.Math.Between(3, 5),
+        colors[i % colors.length],
+        0.94
+      ).setDepth((UIDEPTH ?? 0) + 34);
+
+      this.scene.tweens.add({
+        targets: dot,
+        x: targetX + Phaser.Math.Between(-8, 10),
+        y: targetY + Phaser.Math.Between(-5, 5),
+        alpha: { from: 0.94, to: 0 },
+        scaleX: { from: 1, to: 0.35 },
+        scaleY: { from: 1, to: 0.35 },
+        delay: i * 22,
+        duration: 520 + Phaser.Math.Between(0, 120),
+        ease: "Cubic.easeInOut",
+        onComplete: () => dot.destroy(),
+      });
+    }
   }
 
   _pulseHeader() {
@@ -330,31 +452,89 @@ export class AchievementBoard {
   }
 
   toggle() {
-    this.expanded = !this.expanded;
-    this.chevron.setText(this.expanded ? "v" : "^");
+    this.setExpanded(!this.expanded);
+  }
+
+  setExpanded(expanded, animate = true) {
+    const nextExpanded = !!expanded;
+    if (nextExpanded && this._unseenCompletions > 0) {
+      this._unseenCompletions = 0;
+      this._syncNoticeState();
+    }
+
+    this.expanded = nextExpanded;
+    this.chevron.setText(this.expanded ? "^" : "v");
     this.scene.tweens.killTweensOf(this.panel);
     this.panel.setVisible(true);
-    this.scene.tweens.add({
-      targets: this.panel,
-      alpha: this.expanded ? 1 : 0,
-      scaleY: this.expanded ? 1 : 0.94,
-      duration: 180,
-      ease: "Cubic.easeOut",
-      onComplete: () => {
-        if (!this.expanded) {
-          this.panel.setVisible(false);
-        }
-      },
-    });
+    if (!animate) {
+      this.panel.setAlpha(this.expanded ? 1 : 0);
+      this.panel.setScale(1, this.expanded ? 1 : 0.94);
+      this.panel.setVisible(this.expanded);
+    } else {
+      this.scene.tweens.add({
+        targets: this.panel,
+        alpha: this.expanded ? 1 : 0,
+        scaleY: this.expanded ? 1 : 0.94,
+        duration: 180,
+        ease: "Cubic.easeOut",
+        onComplete: () => {
+          if (!this.expanded) {
+            this.panel.setVisible(false);
+          }
+        },
+      });
+    }
     this.refresh(true);
+    this.scene.townXpHud?.refresh?.(true);
   }
 
   reposition() {
-    const hud = this.scene.townXpHud;
-    const panelWidth = Math.max(BOARD_W, Number(hud?.panelWidth || BOARD_W));
-    const centerX = clamp(Number(hud?.x || 180), panelWidth / 2 + 16, this.scene.scale.width - panelWidth / 2 - 16);
-    const topY = Math.round((Number(hud?.y || 72) + Number(hud?.panelHeight || 60) / 2) + 14);
+    const clock = this.scene.phaseClock;
+    const panelWidth = Math.max(BOARD_W, Number(clock?.panelWidth || BOARD_W));
+    const centerX = clamp(
+      Number(clock?.x || (this.scene.scale.width - (panelWidth / 2) - 18)),
+      BOARD_W / 2 + 10,
+      this.scene.scale.width - BOARD_W / 2 - 10
+    );
+    const clockBottom = Number(this.scene.phaseClockBottomY || (Number(clock?.y || 96) + Number(clock?.panelHeight || 104) / 2));
+    const topY = Math.round(clockBottom + 12 + (HEADER_H / 2));
     this.root.setPosition(centerX, topY);
+  }
+
+  getNotificationCount() {
+    return this._unseenCompletions;
+  }
+
+  _drawNoticeBadge() {
+    this.noticeBadgeBg.clear();
+    if (this._unseenCompletions <= 0) return;
+
+    this.noticeBadgeBg.fillStyle(0xfff0a8, 0.98);
+    this.noticeBadgeBg.lineStyle(2, 0xffffff, 0.28);
+    this.noticeBadgeBg.fillRoundedRect((BOARD_W / 2) - 112, -11, 78, 22, 11);
+    this.noticeBadgeBg.strokeRoundedRect((BOARD_W / 2) - 112, -11, 78, 22, 11);
+  }
+
+  _syncNoticeState() {
+    const hasNotice = this._unseenCompletions > 0;
+    this.noticeBadgeBg.setVisible(hasNotice);
+    this.noticeBadgeText.setVisible(hasNotice);
+    this.noticeBadgeText.setText(hasNotice ? `${this._unseenCompletions} DONE` : "");
+    this.headerBg.setAlpha(1);
+    this._drawNoticeBadge();
+
+    if (!hasNotice) return;
+    this.scene.tweens.killTweensOf(this.noticeBadgeText);
+    this.noticeBadgeText.setScale(1);
+    this.scene.tweens.add({
+      targets: this.noticeBadgeText,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      duration: 160,
+      ease: "Sine.Out",
+      yoyo: true,
+      repeat: 2,
+    });
   }
 
   refresh(force = false) {
@@ -369,7 +549,8 @@ export class AchievementBoard {
 
     const activeCount = Array.isArray(snapshot.activeGoals) ? snapshot.activeGoals.length : 0;
     this.headerStatus.setText(`${activeCount} ACTIVE  ${snapshot.totalCompleted || 0} DONE`);
-    this.chevron.setText(this.expanded ? "v" : "^");
+    this.chevron.setText(this.expanded ? "^" : "v");
+    this._syncNoticeState();
     this.reposition();
 
     const goalsBySlot = new Map((snapshot.activeGoals || []).map((goal) => [goal.slot, goal]));

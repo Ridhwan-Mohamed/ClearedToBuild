@@ -30,7 +30,7 @@ export class WallPlacementController {
 
     this.active = false;
     this.wallTypeName = "wall";   // "wall" or "woodWall"
-    this.consumeNextClick = false; // <--- ADD
+    this.consumeNextClick = false;
 
     this.pivots = [];             // [{x,y}]
     this.committedCells = [];     // cells locked in by prior clicks (all segments except current preview)
@@ -147,7 +147,7 @@ _initDoorPhysicsOnce() {
     this.committedDoors = [];
       this.orderedBuildTiles = []; // ✅ walls + doors in the order you want built
 
-    this.consumeNextClick = true; // <--- ADD (eat the UI click)
+    this.consumeNextClick = false;
     this.pivots = [];
     this.committedCells = [];
     this.previewCells = [];

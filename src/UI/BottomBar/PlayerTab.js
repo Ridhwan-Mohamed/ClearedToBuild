@@ -382,10 +382,9 @@ export default class PlayerTab {
         const sellBtn   = makeSellButton(() => ui.sellSelected());
         const sleepBtn  = makeButton('Sleep', () => ui.sendSelectedToSleep())
         const guardBtn  = makeButton('Guard',  () => ui.startGuardPlacementForSelected?.());
-        const attackBtn = makeButton('Attack', () => ui.attackSelectedTarget?.());
 
         // layout helper: rebuild row so things always pack from the left
-        function updateButtonsLayout({ isFriendly, isCombatant, isEnemy }) {
+        function updateButtonsLayout({ isFriendly, isCombatant }) {
             // remove all children from the row, but keep them alive
             buttonsRow.clear(false);
 
@@ -393,7 +392,6 @@ export default class PlayerTab {
             sellBtn.setVisible(false);
             sleepBtn.setVisible(false);
             guardBtn.setVisible(false);
-            attackBtn.setVisible(false);
 
             if (isFriendly) {
                 sellBtn.setVisible(true);
@@ -408,16 +406,11 @@ export default class PlayerTab {
                 }
             }
 
-            if (isEnemy) {
-                attackBtn.setVisible(true);
-                buttonsRow.add(attackBtn, 0, 'top', 0, false);
-            }
-
             buttonsRow.layout();
         }
 
         // start with nothing shown (no unit selected yet)
-        updateButtonsLayout({ isFriendly: false, isCombatant: false, isEnemy: false });
+        updateButtonsLayout({ isFriendly: false, isCombatant: false });
 
         // ---------- root panel stack ----------
         const panelBg = makeGlassRoundRect(scene, 0, 0, 18, {
@@ -821,7 +814,6 @@ export default class PlayerTab {
         // ---- NEW: control which buttons you see ----
         const team = s.body?.team;
         const isFriendly = team === 1;
-        const isEnemy    = team === 0;
 
         const isCombatant =
             type === 'Gunslinger' ||
@@ -830,8 +822,7 @@ export default class PlayerTab {
 
         this.detailCard.setButtonsLayout?.({
             isFriendly,
-            isCombatant,
-            isEnemy
+            isCombatant
         });
     }
 
@@ -850,8 +841,7 @@ export default class PlayerTab {
         this.detailCard.setPrices({ seed: 0, sleep: null });
         this.detailCard.setButtonsLayout?.({
             isFriendly: false,
-            isCombatant: false,
-            isEnemy: false
+            isCombatant: false
         });
     }
 

@@ -1,4 +1,18 @@
 import Phaser from "phaser";
+import autoWallIcon from "url:../assets/market/auto_wall_icon.png";
+import chainZapperIcon from "url:../assets/market/chain_zapper.png";
+import meteorDropIcon from "url:../assets/market/meteor_drop.png";
+import decoyBeaconIcon from "url:../assets/market/decoy_beacon.png";
+import fortifyPatchIcon from "url:../assets/market/fortify_patch.png";
+import shockMineIcon from "url:../assets/market/shock_mine.png";
+import teamHealIcon from "url:../assets/market/team_heal.png";
+import fighterHealIcon from "url:../assets/market/fighter_heal.png";
+import workerHealIcon from "url:../assets/market/worker_heal.png";
+import adrenalineDraftIcon from "url:../assets/market/adrenaline_draft.png";
+import decoyBeaconImg from "url:../assets/market/decoy_beacon_img.png";
+import shockMineImg from "url:../assets/market/shock_mine_img.png";
+import chainZapperImg from "url:../assets/market/chain_zapper_img.png";
+import meteorDropAnimation from "url:../assets/market/meteor_drop_animation.png";
 
 export const MARKET_CARD_KIND = Object.freeze({
   CONSUMABLE: "consumable",
@@ -48,10 +62,31 @@ export const MARKET_PLACEHOLDER_ASSETS = Object.freeze({
   },
 });
 
+export const MARKET_REAL_ASSETS = Object.freeze({
+  cardIcons: {
+    autoWall: "market_icon_auto_wall",
+    chainZapper: "market_icon_chain_zapper",
+    meteorDrop: "market_icon_meteor_drop",
+    decoyBeacon: "market_icon_decoy_beacon",
+    fortifyPatch: "market_icon_fortify_patch",
+    shockMine: "market_icon_shock_mine",
+    teamHeal: "market_icon_team_heal",
+    fighterHeal: "market_icon_fighter_heal",
+    workerHeal: "market_icon_worker_heal",
+    adrenalineDraft: "market_icon_adrenaline_draft",
+  },
+  world: {
+    decoyBeacon: "market_decoy_beacon_img",
+    shockMine: "market_shock_mine_img",
+    chainZapper: "market_chain_zapper_img",
+    meteorDrop: "market_meteor_drop_animation",
+  },
+});
+
 export const MARKET_CARDS = Object.freeze([
   {
     id: "auto_wall",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.autoWall,
+    image: MARKET_REAL_ASSETS.cardIcons.autoWall,
     name: "Auto Wall",
     text: "Preview and place a town perimeter wall with one tile of berth.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -63,7 +98,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "chain_zapper",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.chainZapper,
+    image: MARKET_REAL_ASSETS.cardIcons.chainZapper,
     name: "Chain Zapper",
     text: "Target a raider. A heavy zap chains through nearby raiders once each.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -75,7 +110,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "meteor_drop",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.meteorDrop,
+    image: MARKET_REAL_ASSETS.cardIcons.meteorDrop,
     name: "Meteor Drop",
     text: "Target an area. Damages troops and buildings in the blast radius.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -87,7 +122,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "decoy_beacon",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.decoyBeacon,
+    image: MARKET_REAL_ASSETS.cardIcons.decoyBeacon,
     name: "Decoy Beacon",
     text: "Place a fragile lure. When destroyed, it explodes near raiders.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -99,7 +134,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "fortify_patch",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.fortifyPatch,
+    image: MARKET_REAL_ASSETS.cardIcons.fortifyPatch,
     name: "Fortify Patch",
     text: "Select a building or wall to repair and temporarily reinforce.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -111,7 +146,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "shock_mine",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.shockMine,
+    image: MARKET_REAL_ASSETS.cardIcons.shockMine,
     name: "Shock Mine",
     text: "Place a trap that shocks and briefly disrupts enemies that trigger it.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -123,7 +158,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "team_heal",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.teamHeal,
+    image: MARKET_REAL_ASSETS.cardIcons.teamHeal,
     name: "Team Heal",
     text: "Confirm to heal all team members by 50% max HP.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -135,7 +170,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "fighter_heal",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.fighterHeal,
+    image: MARKET_REAL_ASSETS.cardIcons.fighterHeal,
     name: "Fighter Heal",
     text: "Confirm to heal all fighters by 70% max HP.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -147,7 +182,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "worker_heal",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.workerHeal,
+    image: MARKET_REAL_ASSETS.cardIcons.workerHeal,
     name: "Worker Heal",
     text: "Confirm to heal all workers by 70% max HP.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -159,7 +194,7 @@ export const MARKET_CARDS = Object.freeze([
   },
   {
     id: "adrenaline_draft",
-    image: MARKET_PLACEHOLDER_ASSETS.cardIcons.adrenalineDraft,
+    image: MARKET_REAL_ASSETS.cardIcons.adrenalineDraft,
     name: "Adrenaline Draft",
     text: "Confirm for a brief team tempo buff to movement and response.",
     kind: MARKET_CARD_KIND.CONSUMABLE,
@@ -265,6 +300,33 @@ function makePlaceholderTexture(scene, key, {
 
   g.generateTexture(key, width, height);
   g.destroy();
+}
+
+function loadImageIfNeeded(scene, key, source) {
+  if (!scene?.load || !key || scene.textures?.exists?.(key)) return;
+  scene.load.image(key, source);
+}
+
+function loadSpritesheetIfNeeded(scene, key, source, frameWidth = 32, frameHeight = 32) {
+  if (!scene?.load || !key || scene.textures?.exists?.(key)) return;
+  scene.load.spritesheet(key, source, { frameWidth, frameHeight });
+}
+
+export function loadMarketCardAssets(scene) {
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.autoWall, autoWallIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.chainZapper, chainZapperIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.meteorDrop, meteorDropIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.decoyBeacon, decoyBeaconIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.fortifyPatch, fortifyPatchIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.shockMine, shockMineIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.teamHeal, teamHealIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.fighterHeal, fighterHealIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.workerHeal, workerHealIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.adrenalineDraft, adrenalineDraftIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.world.decoyBeacon, decoyBeaconImg);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.world.shockMine, shockMineImg);
+  loadSpritesheetIfNeeded(scene, MARKET_REAL_ASSETS.world.chainZapper, chainZapperImg, 32, 32);
+  loadSpritesheetIfNeeded(scene, MARKET_REAL_ASSETS.world.meteorDrop, meteorDropAnimation, 32, 32);
 }
 
 export function loadMarketCardPlaceholderAssets(scene) {

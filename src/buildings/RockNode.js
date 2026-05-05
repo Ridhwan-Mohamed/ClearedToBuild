@@ -56,12 +56,14 @@ export class RockNode {
 
   setUpHitDetection() {
     this.sprite.on("pointerover", () => {
+      RockNode.scene.setForagerRouteHover?.(this, "stone", true);
       const inPlaceMode = RockNode.scene.breakItems && RockNode.scene.breakItems.text === "Place";
       if (inPlaceMode) this.sprite.setTint(0x888888);
       else this.sprite.setTint(0xaaaaaa);
     });
 
     this.sprite.on("pointerout", () => {
+      RockNode.scene.setForagerRouteHover?.(this, "stone", false);
       if (!this.flashTween) this.sprite.clearTint();
     });
 
@@ -69,6 +71,10 @@ export class RockNode {
       const team = Teams.teamLists["1"];
       if (!team) return;
       const selection = OrderRunner.getSelectionProfile();
+
+      if (RockNode.scene.tryIssueForagerRouteToNode?.(this, "stone")) {
+        return;
+      }
 
       const now = RockNode.scene.time.now;
       if (this._lastClickTime && now - this._lastClickTime < 300) {

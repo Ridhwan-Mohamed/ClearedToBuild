@@ -4,6 +4,7 @@ import { TILE_MAP, TILE_TYPES, SQUARESIZE } from "../constants";
 import { WallPlacementController } from "../Controllers/WallPlacementController";
 import { Teams } from "../Teams";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 export class Wall {
   // registry by "x,y"
@@ -495,6 +496,7 @@ export class Wall {
 
     // remove sprite
     if (this.sprite) {
+      playBuildingCollapseSmoke(this, { width: SQUARESIZE, height: SQUARESIZE });
       this.sprite.destroy();
       this.sprite = null;
     }

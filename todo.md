@@ -1,81 +1,93 @@
 # Release Checklist
+## v1.0.0 Launch Demo Priorities
 
-Goal for release:
-- Ship a polished endless-run build where the core loop is clear, rewards feel good, automation is satisfying, and the controls do not fight the player.
+### Tutorial
+- Add a talking guide/player that walks new players through the core systems.
+- Teach farming basics.
+- Teach building placement and town expansion basics.
+- Teach parcel purchasing.
+- Teach defending yourself and the town.
+- Keep the rest of the game light-touch and self-explanatory.
 
-## v0.9.9 Main Patch Priorities
+### Achievements Bar [done]
+- Reposition the achievements dropdown so it opens to the right of the contract HUD squares. [done]
+- Extend the town level bar so the achievements dropdown has a clear attached source. [done]
+- Keep a visible closed dropdown tab so players can tell the goals panel opens there. [done]
+- Open the achievements dropdown on game start. [done]
+- Improve the closed state so completed achievements are visible through a clear alert or notification. [done]
+- Add a nicer completion animation when the achievements bar is open. [done]
+- Animate progress bar movement as XP is added instead of jumping instantly. [done]
+- Replace the XP pill with the current level display. [done]
+- Remove text from inside the progress bar. [done]
+- Show completion text separately, for example `0/100 XP`. [done]
 
-### 1. Save Functionality [check]
-- Add full local storage save/load support for continue-on-reload.
-- Restore timer state, map layout, parcels, buildings, cook jobs, players, inventories, and player states.
-- Make reload return the game to the same progression state instead of restarting the run.
-- Treat this as a major systems task and lock down data shape early so follow-up features can build on it.
+### Player Polish
+- let foragers be retouted by clicking on them then parcel. [done]
+- Improve player art, movement, and sprite logic.
+- Improve awareness logic so players and raiders do not crowd or stand on the same spot.
+- Imporove projectile players pathing and logic and defense
+- Improve flee behavior so players do not twitch or panic without a clear reason. [done]
+- Improve raider attack priorities so they do not chase one player forever. [done]
+- Make raiders focus more on destroying the town than hunting individual players. [done]
 
-### 2. Menu Pause [check]
-- Add an in-game pause menu.
-- Let the player pause to manage settings and game state safely.
-- Include volume controls, mute, save, continue, restart, and delete/reset actions.
-- Make sure this plays nicely with the save/load system and does not leave timers or jobs in a bad state.
+### Enemies
+- Add a run-and-explode enemy type that detonates when it reaches its target. [done]
+- Allow players to stop the exploding enemy by killing it before detonation. [done] 
+- Add a projectile-shooting enemy type similar to the Gunslinger, but less powerful. [done]
+- Improve off-screen enemy indicators. [done]
+- Reduce indicator size and fix cases where indicators do not appear. [done]
+- make them prefer attacking troops, less so non offensive ones
 
-### 3. Parcel Addition And Removal Performance [check]
-- Rework parcel add/remove so we do not redraw the whole map or rebuild the full navmesh every time.
-- Redraw only the parcel bounding box plus a 1-tile border for connected terrain updates.
-- Build navmesh locally for the parcel, then connect it into the main island navmesh.
-- Goal: reduce hitching and make parcel expansion feel snappy.
+### Balancing
+- Balance money gathering so players cannot earn too much too quickly.
+- Tune progression so the game gets difficult at a good rate.
+- Balance parcel item pricing.
+- Scale parcel prices over time.
+- Balance market item pricing.
+- Scale market item prices over time.
+- Balance player costs.
+- Scale player costs over time.
 
-### 4. Storage Logic [check]
-- Make haulers and workers prioritize the closest valid storage instead of first-added storage.
-- Sort candidate storages by distance before deposit and pickup decisions.
-- Verify this works for both placing items into storage and pulling items back out.
-- Goal: remove dumb pathing and reduce unnecessary walking.
+### Market Tab Art
+- Add art for market tab items. [done]
+- Add more market tab items. [done]
+- Replace placeholder market item art with finished art. [done]
 
-### 5. bottom bar final pass [check]
-- Tighten layout and logic across every page/state.
-- Make it more compact, more readable, and more consistent.
-- Clean up edge cases where the wrong actions or spacing show up.
-- Treat this as the last major UX pass for the bar before `v1.0.0`.
+### UI
+- Reduce the size of the speed-up and zoom buttons. [done]
+- Align town XP HUD, contract HUD, clock, and town goals top-bar spacing. [done]
+- Remove idle backgrounds from top-bar pause, speed, and zoom buttons. [done]
+- Prevent world parcel hover from changing contract HUD square visuals. [done]
+- Fix bottom bar edge spill. [done]
+- use a bullet with effects for projctiles [done]
+- add explosion smoke effects and shake when buildings and walls break and projectiles hit [done]
+- add player death animations [done]
+- receive xp for killing players with animation to xp bar [done]
+- Improve fonts for smaller screens.
+- remove attack button from bottom bar [done]
 
-### 6. Sound Pass [in progress]
-- Add missing sounds for main menu, button clicks, menu transitions, and swimming.
-- Rebalance overly loud and overly quiet sounds.
-- Cap simultaneous footstep sounds so they do not stack into noise.
-- Aim for a cleaner, more intentional audio mix across the whole game.
-
-### 7. Achievements [check]
-- Add early and mid-game achievements that guide player behavior.
-- Examples: first house, first storage, first oven, first fighter.
-- Reward with XP, money, or other light progression boosts.
-- Use achievements as goal-setting and onboarding support, not just completion tracking.
-
-### 8. UI Pass + market [in progress]
-- use better fonts for smaller screens 
-- fix overview mode ui and parcel contract ui issues
-
-### 9. market Pass [check]
-- redesign market
-
-### 10. water pickup spots [check]
-- either fix water spots on run time or come up with a more elegant solution
-- implement solution
-- make parcel lakes swimmable by changing the sprite used
-
-### 11. Resilient Builders and walls [check]
-- stop them (buildes and pther palyers) from getting stuck from being built over when building walls mainly like a builder standing in a spot to build a wall but that spot is already queued for another wall placement thus getting caught (and make them cautious when building walls/buildings in general, some awareness ot flee area)
-- multilayer walls cause for breach logic to break when the soltuion is just to break the wall multituple times, perhaps consider walls their own region based on connection?
-- fix breach bug when wall is closed while a enemy path is active causing the raider to just through the now currently blocked last entry point
-- when players are in a blocked spot, path them automatically to nearest unblocked in a straight path then let them continue normal functions
+### parcel polish
+- animate parcel addby the tile
+- make parcel add work on thread
 
 ### bugs
-- fighters using unintelligent tracking software
-- check recovery path/state for fighters post fight
-- allow builders to cancel queued destroy jobs cleanly if needed [x]
-- fix navmesh issues on parcel adds [x]
-- allow navmesh merging [x]
+- store items on game load not syncing with level [done]
+- crops on game load regen for free [done]
+- bottom bar sleep buttons not working [done]
+- turret and catapults are not properly configurable
+- Fix overview mode UI issues.
+- Fix parcel contract UI issues.
+- Fix farm mode and wall placement sometimes eating clicks when starting a plot or segment. [done]
+- Improve destroy mode drag so it feels as good as select drag. [done]
+- Fix players showing as selected when they are not selected.
+- Fix building health bars sitting too high. [done]
+- Fix building health bars lingering if a raider dies unexpectedly. [done]
+- Fix building health values changing inconsistently when multiple raiders hit the same building. [done]
+- Prevent raiders from pathing toward buildings that are already broken. [done]
+- Improve fighter tracking logic. [done]
+- Check fighter recovery path/state after fights. [done]
+- Allow builders to cancel queued destroy jobs cleanly if needed. [done]
 
-## v1.0.0 Focus
-- Tutorial
-- QA and bug fixing
-- Light polish patches only
-
-## Notes
-- More items will probably surface during `v0.9.9`, but this should stay the core patch list unless something critical appears.
+## audio
+- Finish sound rebalance for overly loud and overly quiet sounds.
+- Aim for a cleaner, more intentional audio mix across the whole game.

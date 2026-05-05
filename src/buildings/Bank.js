@@ -16,6 +16,7 @@ import {
   layoutStructuralHealthBar,
 } from "../UI/BuildingTheme";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
+import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 
 
 // Reward curve defaults (override via opts)
@@ -283,8 +284,10 @@ export class Bank {
 
   shakeAndFlash() {
     if (!this.sprite || !this.scene) return;
-    const baseAngle = this.sprite.angle || 0;
+    const baseAngle = Number.isFinite(this._damageRestAngle) ? this._damageRestAngle : (this.sprite.angle || 0);
+    this._damageRestAngle = baseAngle;
     this._damageShakeTween?.stop?.();
+    this.sprite.angle = baseAngle;
 
     this._damageShakeTween = this.scene.tweens.add({
       targets: this.sprite,
@@ -339,11 +342,15 @@ export class Bank {
 
   // Called when buildingManager actually destroys it
   destroy() {
+    if (this._destroyed) return;
+    this._destroyed = true;
+    this.health = 0;
     this._damageBarTimer?.remove(false);
     this._damageBarTimer = null;
 
     // Swap to opened + reward
     if (this.sprite?.active) {
+      playBuildingCollapseSmoke(this);
       this.sprite.setTexture("bank_opened", 0);
       this.sprite.play("bank_opened_idle");
       this.sprite.disableInteractive();

@@ -65,6 +65,8 @@ export class fightManager{
             target._raiderRetaliationTarget = attacker;
         }
 
+        target?.type?.handleHit?.(target, attacker, weapon);
+
         // 3) Knockback ONLY team 0 units, away from the attacker
         // if (!attacker || !target.body || target.body.team !== 0) return;
 
@@ -372,6 +374,12 @@ export class fightManager{
     static checkForKillReward(teamNumber, target){
         if(teamNumber && target.killReward){
             this.scene.updateMoney(target.killReward);
+        }
+        if (Number(teamNumber) === 1 && target?.body?.team !== 1) {
+            this.scene?.registerRunEnemyDefeat?.(target, {
+                sourceX: Number(target?.x),
+                sourceY: Number(target?.y),
+            });
         }
     }
 

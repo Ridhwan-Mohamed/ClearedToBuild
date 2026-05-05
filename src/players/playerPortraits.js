@@ -12,6 +12,8 @@ import foragerHealthyPortrait from 'url:../assets/Players/forager/forager_health
 import foragerWeakPortrait from 'url:../assets/Players/forager/forager_weak_portrait.png';
 import gunslingerHealthyPortrait from 'url:../assets/Players/gunslinger/gunslinger_healthy_portrait.png';
 import gunslingerWeakPortrait from 'url:../assets/Players/gunslinger/gunslinger_weak_portrait.png';
+import hunterPortrait from 'url:../assets/Players/hunters/hunter_portrait.png';
+import bomberPortrait from 'url:../assets/Players/bombers/bomber_portrait.png';
 import raiderPortrait from 'url:../assets/Players/raider/raider_portrait.png';
 
 const PORTRAIT_FRAME_HEIGHT = 50;
@@ -33,6 +35,8 @@ const PORTRAIT_ASSETS = {
   portrait_forager_weak: { asset: foragerWeakPortrait, frameWidth: 58 },
   portrait_gunslinger_healthy: { asset: gunslingerHealthyPortrait, frameWidth: 62 },
   portrait_gunslinger_weak: { asset: gunslingerWeakPortrait, frameWidth: 65 },
+  portrait_hunter: { asset: hunterPortrait, frameWidth: 62 },
+  portrait_bomber: { asset: bomberPortrait, frameWidth: 62 },
   portrait_raider: { asset: raiderPortrait, frameWidth: 77 },
 };
 
@@ -64,6 +68,12 @@ const PORTRAIT_KEYS = {
   gunslinger: {
     healthy: 'portrait_gunslinger_healthy',
     weak: 'portrait_gunslinger_weak',
+  },
+  hunter: {
+    default: 'portrait_hunter',
+  },
+  bomber: {
+    default: 'portrait_bomber',
   },
   raider: {
     default: 'portrait_raider',
@@ -144,6 +154,8 @@ function getPortraitType(unit) {
   if (unit.isFireman) return 'fireman';
   if (unit.isForager) return 'forager';
   if (unit.isGunslinger) return 'gunslinger';
+  if (unit.isHunter) return 'hunter';
+  if (unit.isBomber) return 'bomber';
   if (unit.isFortGrunt || unit.isRaider) return 'raider';
   return null;
 }

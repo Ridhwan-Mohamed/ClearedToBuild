@@ -28,7 +28,7 @@ const BOTTOM_BAR_DEPTH = UIDEPTH + 40;
 const COLLAPSED = 100;     // how much of the bar stays visible when hidden
 const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
 const START_OPEN  = false; // start expanded?
-const BOTTOM_BAR_SIDE_INSET = 12;
+const BOTTOM_BAR_SIDE_INSET = 18;
 
 function getBottomBarWidth(scene) {
   return Math.max(0, scene.scale.width - (BOTTOM_BAR_SIDE_INSET * 2));

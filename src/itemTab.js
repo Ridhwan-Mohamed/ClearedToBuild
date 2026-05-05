@@ -86,6 +86,11 @@ import bank_opened from 'url:./assets/fortTiles/bank_opened.png'
 import explosions from 'url:./assets/explosion.png'
 import rewardMiniCard from 'url:./assets/reward/mini_card.png'
 import rewardTreasureChest from 'url:./assets/reward/treasure_chest.png'
+import smokeClearing from 'url:./assets/smoke_clearing.png'
+import gunslingerBullet from 'url:./assets/weapons/gunslinger_bullet.png'
+import hunterBullet from 'url:./assets/weapons/hunter_bullet.png'
+import turretBullet from 'url:./assets/weapons/turret_bullet.png'
+import hitEffect from 'url:./assets/weapons/hit_effect.png'
 
 export class itemTab extends Phaser.Scene {
 
@@ -185,6 +190,11 @@ export class itemTab extends Phaser.Scene {
         scene.load.spritesheet('bank_closed', bank_closed, { frameWidth: 64, frameHeight: 64 });
         scene.load.spritesheet('bank_opened', bank_opened, { frameWidth: 64, frameHeight: 64 });
         scene.load.spritesheet('explosions', explosions, { frameWidth: 80, frameHeight: 74 });
+        scene.load.spritesheet('smoke_clearing', smokeClearing, { frameWidth: 64, frameHeight: 64 });
+        scene.load.image('gunslinger_bullet', gunslingerBullet);
+        scene.load.image('hunter_bullet', hunterBullet);
+        scene.load.image('turret_bullet', turretBullet);
+        scene.load.spritesheet('weapon_hit_effect', hitEffect, { frameWidth: 32, frameHeight: 32 });
         scene.load.image('reward_mini_card', rewardMiniCard);
         scene.load.spritesheet('reward_treasure_chest', rewardTreasureChest, { frameWidth: 100, frameHeight: 80 });
     }

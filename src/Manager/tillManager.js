@@ -6,6 +6,7 @@ import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
 import { AudioManager } from "./AudioManager";
+import { getMarketWorkDuration } from "../Cards/MarketBuffs";
 
 export class tillManager {
     static scene;
@@ -65,7 +66,7 @@ export class tillManager {
             Player.setPoseLock(sprite, sprite.plantPose);
         }
 
-        sprite.timer = this.scene.time.delayedCall(1000, () => {
+        sprite.timer = this.scene.time.delayedCall(getMarketWorkDuration(sprite, 1000), () => {
             if (!sprite.active || sprite.state != CONTROL_STATES.FARM_MODE) {
                 Player.clearPoseLock(sprite);
                 sprite.timer = null;
@@ -128,7 +129,7 @@ export class tillManager {
             ease: 'Sine.easeOut',
             onComplete: () => sparkle.destroy()
         });
-        sprite.timer = this.scene.time.delayedCall(1000, () => {
+        sprite.timer = this.scene.time.delayedCall(getMarketWorkDuration(sprite, 1000), () => {
             if(!sprite.active || sprite.state != CONTROL_STATES.WATER_CROPS_MODE) return;
             //function needed here for setting dailywatered state to true here
             sprite.waterBucket.count = Math.max(0, sprite.waterBucket.count - 1);

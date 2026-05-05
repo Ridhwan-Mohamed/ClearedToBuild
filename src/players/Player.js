@@ -30,6 +30,7 @@ import { InterruptController } from "../ai/scheduler/InterruptController";
 import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 import { OrderRunner } from "../orders/OrderRunner";
+import { getMarketMoveMultiplier } from "../Cards/MarketBuffs";
 import {
     faceDirectionalTowardVector,
     shouldUseDirectionalFacing,
@@ -60,6 +61,9 @@ export class Player {
     static CARRY_ICON_SIZE     = 18;
     static HIGHLIGHT_RING_OFFSET_Y = 10;
     static FRIENDLY_VISION_BOOST = 0.58;
+    static FLEE_REPATH_COOLDOWN_MS = 900;
+    static FLEE_SAFE_GRACE_MS = 850;
+    static FLEE_DEST_EPSILON = SQUARESIZE * 0.65;
 
     static resetRuntimeState(scene = null) {
         this.scene = scene ?? null;
@@ -84,6 +88,7 @@ export class Player {
         this.createAnim('carryWalk', 'playerCarry', 0, 2)
         this.createAnim('carryIdle', 'playerCarry', 0, 0)
         this.createAnim('swim', 'playerSwim', 0, 2, -1, 8);
+        this.createAnim('player_death_anim', 'player_death', 0, 5, 0, 14);
         this.setUpBackToTown()
         PathDebugDrawer.init(scene);
     }
@@ -122,6 +127,7 @@ export class Player {
 
         const teamNum = player.body?.team ?? player._teamNumber ?? null;
         const state = player.state;
+        this._playDeathAnimation(player);
         this._removePlayerFromHouse(player);
 
         // Call the troop-specific destroy logic if defined
@@ -495,6 +501,33 @@ export class Player {
         return true;
     }
 
+    static _playDeathAnimation(player) {
+        const scene = player?.scene || this.scene;
+        if (!scene || player?._deathAnimationPlayed) return;
+        if (!scene.textures?.exists?.('player_death')) return;
+        player._deathAnimationPlayed = true;
+
+        if (!scene.anims?.exists?.('player_death_anim')) {
+            scene.anims?.create?.({
+                key: 'player_death_anim',
+                frames: scene.anims.generateFrameNumbers('player_death', { start: 0, end: 5 }),
+                frameRate: 14,
+                repeat: 0,
+            });
+        }
+
+        const fx = scene.add.sprite(Number(player.x) || 0, Number(player.y) || 0, 'player_death', 0)
+            .setOrigin(0.5, 0.58)
+            .setDepth(Math.max(BLOCKDEPTH + 3, (player.depth ?? BLOCKDEPTH) + 2))
+            .setAlpha(0.92);
+        const targetHeight = Math.max(28, Math.min(52, (player.displayHeight || SQUARESIZE) * 1.45));
+        const scale = targetHeight / 44;
+        fx.setScale(scale);
+        fx.play('player_death_anim');
+        fx.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => fx.destroy());
+        scene.time?.delayedCall?.(700, () => fx?.destroy?.());
+    }
+
     static _worldTileIsWalkableForTroop(troop, worldX, worldY) {
         const { navGrid } = this._getNavForTroop(troop);
         const tx = Math.floor(worldX / SQUARESIZE);
@@ -834,6 +867,7 @@ export class Player {
             }
         }
         currentSpeed *= Math.max(0.5, Number(sprite.moveSpeedMultiplier ?? 1) || 1);
+        currentSpeed *= getMarketMoveMultiplier(sprite);
         currentSpeed *= this.getMovementSlowFactor(sprite);
 
         if(sprite.body.team == 1){
@@ -1155,6 +1189,7 @@ export class Player {
 
             const bestTarget = CombatSpacingCoordinator.chooseBestEnemyTarget(troop, candidates, {
                 currentTarget: troop.track?.[0]?.gameObject ?? null,
+                strictTargetSpread: troop.body?.team === 1 && Player._isFighterUnit?.(troop),
             });
 
             if (bestTarget?.body) {
@@ -1237,6 +1272,70 @@ export class Player {
         });
 
         return closest;
+    }
+
+    static _sceneNowMs(troop = null) {
+        const scene = troop?.scene ?? this.scene;
+        return scene?.getSimulationNow?.() ?? scene?.simNowMs ?? scene?.time?.now ?? Date.now();
+    }
+
+    static _handleNonCombatFlee(troop, closest) {
+        const now = this._sceneNowMs(troop);
+
+        if (!closest) {
+            if (troop.state === CONTROL_STATES.FLEE_MODE) {
+                const lastThreatAt = Number(troop._fleeLastThreatAt || 0);
+                if (now - lastThreatAt < this.FLEE_SAFE_GRACE_MS) return true;
+
+                troop._fleeThreatId = null;
+                troop._fleeLastThreatAt = 0;
+                troop._fleeNextRepathAt = 0;
+                troop._fleeDest = null;
+                this.resetRoamState(troop);
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
+            return true;
+        }
+
+        troop._fleeLastThreatAt = now;
+        const threatId = closest.gameObject?.id ?? closest.id ?? null;
+        const threatChanged = troop._fleeThreatId !== threatId;
+        const needsEnterFlee = troop.state !== CONTROL_STATES.FLEE_MODE;
+
+        if (needsEnterFlee) {
+            Player.handleStateIntteruptStart(troop, CONTROL_STATES.FLEE_MODE);
+            troop.track = null;
+            troop._fleeNextRepathAt = 0;
+            troop._fleeDest = null;
+        }
+
+        const hasPath = !!troop.currentPath?.length;
+        if (!needsEnterFlee && hasPath && !threatChanged && now < Number(troop._fleeNextRepathAt || 0)) {
+            return true;
+        }
+
+        const fleeDest = this.computeFleeDestination(troop, closest);
+        if (!fleeDest) return true;
+
+        const previousDest = troop._fleeDest;
+        const sameDest = previousDest &&
+            Phaser.Math.Distance.Between(previousDest.x, previousDest.y, fleeDest.x, fleeDest.y) < this.FLEE_DEST_EPSILON;
+
+        if (!needsEnterFlee && hasPath && sameDest && now < Number(troop._fleeNextRepathAt || 0)) {
+            return true;
+        }
+
+        const path = Map.navMesh.findPath(
+            { x: troop.x, y: troop.y },
+            fleeDest
+        );
+        if (path && path.length) {
+            troop._fleeThreatId = threatId;
+            troop._fleeDest = fleeDest;
+            troop._fleeNextRepathAt = now + this.FLEE_REPATH_COOLDOWN_MS;
+            this.moveTo(troop, path);
+        }
+        return true;
     }
 
     static computeFleeDestination(troop, threatBody) {
@@ -1560,7 +1659,7 @@ export class Player {
             }
 
             // final navGrid check
-            if (tileOK && Map.navGrid[gy][gx] === 1) {
+            if (tileOK && navGrid[gy]?.[gx] === 1) {
                 validPositions.push(pos);
             }
         }
@@ -1570,10 +1669,7 @@ export class Player {
             const dest = CombatSpacingCoordinator.chooseRoamDestination(troop, validPositions)
                 || Phaser.Utils.Array.GetRandom(validPositions);
             troop._combatRoamDest = dest ? { x: dest.x, y: dest.y } : null;
-            const path = navMesh.findPath(
-                { x: px, y: py },
-                { x: dest.x, y: dest.y }
-            );
+            const path = Player.pathTo(troop, dest.x, dest.y, false);
             Player.moveTo(troop, path);
         }
     }
@@ -1873,31 +1969,7 @@ export class Player {
         // 🟡 NON-COMBATANTS (no weapon) → FLEE
         if (!hasWeapon) {
             const closest = this.findClosestEnemyBody(troop, neighbours);
-
-            // No threat nearby → drop out of flee if we were fleeing
-            if (!closest) {
-                if (troop.state === CONTROL_STATES.FLEE_MODE) {
-                    this.resetRoamState(troop);
-                    Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-                }
-                return;
-            }
-
-            // Interrupt whatever we were doing and enter FLEE_MODE (once)
-            Player.handleStateIntteruptStart(troop, CONTROL_STATES.FLEE_MODE);
-
-            troop.track = null;
-
-            const fleeDest = this.computeFleeDestination(troop, closest);
-            if (!fleeDest) return;
-
-            const path = Map.navMesh.findPath(
-                { x: troop.x, y: troop.y },
-                fleeDest
-            );
-            if (path && path.length) {
-                this.moveTo(troop, path);
-            }
+            this._handleNonCombatFlee(troop, closest);
             return;
         }
 
@@ -2125,7 +2197,7 @@ export class Player {
         }
 
         const speedBase = troop?.type?.speed ?? troop.speed ?? 90;
-        const speedMultiplier = Math.max(0.5, Number(troop?.moveSpeedMultiplier ?? 1) || 1);
+        const speedMultiplier = Math.max(0.5, Number(troop?.moveSpeedMultiplier ?? 1) || 1) * getMarketMoveMultiplier(troop);
         const swimSpeed = Math.max(60, speedBase * 0.85 * speedMultiplier * this.getMovementSlowFactor(troop));
         const inv = dist > 0.001 ? 1 / dist : 0;
         const vx = dx * inv * swimSpeed;
@@ -2174,7 +2246,8 @@ export class Player {
 
             // Raiders get their own AI
             if (troop.isRaider) {
-                skipTail = Raider.update(troop) === true;
+                const raiderController = typeof troop.type?.update === "function" ? troop.type : Raider;
+                skipTail = raiderController.update(troop) === true;
             }
             else if (troop.isGunslinger) {
                 Gunslinger.update(troop);
@@ -2245,10 +2318,7 @@ export class Player {
             CombatSpacingCoordinator.clearTroopFocus(troop);
 
             // Path to the guard point
-            const path = Map.navMesh.findPath(
-                { x: troop.x, y: troop.y },
-                { x: worldX, y: worldY }
-            );
+            const path = Player.pathTo(troop, worldX, worldY, false);
 
             if (path && path.length) {
                 Player.moveTo(troop, path);
@@ -2275,10 +2345,7 @@ export class Player {
         // Set state + path to guard post
         Teams.movePlayerState(troop, CONTROL_STATES.HEADING_TO_GUARD);
 
-        const path = Map.navMesh.findPath(
-            { x: troop.x, y: troop.y },
-            { x: troop.guardCenter.x, y: troop.guardCenter.y }
-        );
+        const path = Player.pathTo(troop, troop.guardCenter.x, troop.guardCenter.y, false);
 
         if (path && path.length) {
             Player.moveTo(troop, path);

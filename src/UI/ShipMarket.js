@@ -12,6 +12,7 @@ import {
   MARKET_CARD_SECTIONS,
   MARKET_CARDS_BY_SECTION,
   MARKET_PLACEHOLDER_ASSETS,
+  loadMarketCardAssets,
   loadMarketCardPlaceholderAssets,
 } from "../Cards/MarketCards";
 import { getCardOutlineTint } from "./CardPreview";
@@ -21,6 +22,7 @@ export const DEFAULT_MARKET_PRICES = Object.freeze(
 );
 
 export function loadParcelMarketAssets(scene) {
+  loadMarketCardAssets(scene);
   loadMarketCardPlaceholderAssets(scene);
 }
 

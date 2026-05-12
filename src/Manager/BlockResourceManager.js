@@ -20,6 +20,7 @@ export class blockResourceManager{
     static scene;
     static woodBreakDuration = 1500;
     static rockBreakDuration = 2500
+    static gatherSwingHalfDuration = 140;
 
     static _hasFastGatherCard(teamNumber) {
         const hand = Teams.teamLists?.[`${teamNumber}`]?.cardHand;
@@ -47,7 +48,7 @@ export class blockResourceManager{
         }
     }
 
-    static _playGatherSwing(sprite, task, duration) {
+    static _playGatherSwing(sprite, task, _duration) {
         if (!sprite?.active || !task || !sprite.scene) return;
 
         const isWoodJob = task.type == TILE_TYPES.pine;
@@ -82,8 +83,9 @@ export class blockResourceManager{
         const tween = sprite.scene.tweens.add({
             targets: fx,
             rotation: aim + swingArc / 2,
-            duration: Math.max(120, Math.floor(duration / 2)),
+            duration: this.gatherSwingHalfDuration,
             yoyo: true,
+            repeat: -1,
             ease: "Sine.easeInOut",
             onUpdate: () => {
                 if (!sprite.active || !fx.active) return;
@@ -91,11 +93,6 @@ export class blockResourceManager{
                     sprite.x + Math.cos(aim) * handleOffset,
                     sprite.y - 5 + Math.sin(aim) * (handleOffset * 0.42)
                 );
-            },
-            onComplete: () => {
-                if (sprite.gatherSwingFx === fx) sprite.gatherSwingFx = null;
-                if (sprite.gatherSwingTween === tween) sprite.gatherSwingTween = null;
-                fx.destroy();
             }
         });
 
@@ -106,7 +103,7 @@ export class blockResourceManager{
     static _getGatherAudioMaterial(task) {
         const resourceKind = task?.value?.resourceKind || task?.type?.resourceKind || task?.resource?.name;
         if (task?.type === TILE_TYPES.pine || resourceKind === "wood") return "wood";
-        if (task?.type === TILE_TYPES.rock || resourceKind === "stone") return "rock";
+        if (task?.type === TILE_TYPES.rock || task?.type === TILE_TYPES.goldOre || resourceKind === "stone" || resourceKind === "gold") return "rock";
         return null;
     }
 
@@ -563,6 +560,9 @@ export class blockResourceManager{
                 task.assigned = Math.max(0, Number(task.assigned || 0) - 1);
                 // If this is a layered/complex resource (like PineTree), use its adapter.
                 // Else fall back to the old single-sprite frames logic.
+                const rewardHandled = typeof task.value?.grantGatherReward === "function"
+                    ? task.value.grantGatherReward(this.scene, sprite, nextHealth)
+                    : false;
                 if (nextHealth > 0) {
                     if (typeof task.value?.applyBlockDamage === 'function') {
                         task.value.applyBlockDamage(nextHealth);
@@ -608,7 +608,9 @@ export class blockResourceManager{
                 if (material) {
                     AudioManager.playBlockBreak(material);
                 }
-                StorageManager.addCarriedItem(sprite, task.resource);
+                if (!rewardHandled && task.resource) {
+                    StorageManager.addCarriedItem(sprite, task.resource);
+                }
                 sprite.timer = null;
                 if (isManualClick || task.remaining <= 0) {
                     Teams.removeFromStateArray(sprite.body.team, "foragerQueue", sprite.task);

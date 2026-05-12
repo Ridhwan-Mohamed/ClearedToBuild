@@ -7,10 +7,26 @@ import { BUILDING_PANEL_TEXT_STYLES, createBuildingHoverPanel } from './Building
 
 export class ClayOvenUI {
     static scene = null; // set externally
+    static _onOvenUpdated = null;
+    static _onOvenAdded = null;
+    static _onOvenRemoved = null;
 
     static init(scene) {
+        if (this.scene?.events && this._onOvenUpdated) {
+            this.scene.events.off('oven:updated', this._onOvenUpdated);
+            this.scene.events.off('oven:added', this._onOvenAdded);
+            this.scene.events.off('oven:removed', this._onOvenRemoved);
+        }
+
         this.scene = scene;
         this.openUIs = new Map();
+        this._onOvenUpdated = (oven) => this.refreshStatus(oven);
+        this._onOvenAdded = (oven) => this.refreshStatus(oven);
+        this._onOvenRemoved = (oven) => this.hideStatus(oven);
+        this.scene.events.on('oven:updated', this._onOvenUpdated);
+        this.scene.events.on('oven:added', this._onOvenAdded);
+        this.scene.events.on('oven:removed', this._onOvenRemoved);
+        Teams.teamLists?.[1]?.ovenList?.forEach((oven) => this.refreshStatus(oven));
     }
 
     static updateAllOvens(speedMultiplier = 0) {
@@ -68,6 +84,87 @@ export class ClayOvenUI {
                 }
             }
         });
+    }
+
+    static refreshStatus(oven) {
+        if (!this.scene || !oven?.sprite) return;
+
+        const state = oven.getStatusBadgeState?.();
+        if (!state) {
+            this.hideStatus(oven);
+            return;
+        }
+
+        let ui = oven.statusUI;
+        if (!ui) {
+            const container = this.scene.add.container(0, 0)
+                .setDepth(UIDEPTH + 1)
+                .setScrollFactor(0);
+
+            const title = this.scene.add.text(0, -6, '', {
+                ...BUILDING_PANEL_TEXT_STYLES.compact,
+                fontSize: '10px',
+                color: state.textColor,
+                align: 'center',
+                stroke: '#04111a',
+                strokeThickness: 5,
+            }).setOrigin(0.5);
+            const detail = this.scene.add.text(0, 8, '', {
+                ...BUILDING_PANEL_TEXT_STYLES.compactBody,
+                fontSize: '8px',
+                color: state.detailColor,
+                align: 'center',
+                stroke: '#04111a',
+                strokeThickness: 4,
+            }).setOrigin(0.5);
+
+            container.add([title, detail]);
+
+            const updatePosition = () => {
+                if (!oven?.sprite?.active) return;
+                const cam = this.scene.cameras.main;
+                const bounds = oven.sprite.getBounds?.();
+                const centerX = bounds?.centerX ?? oven.sprite.x;
+                const topY = bounds?.top ?? (oven.sprite.y - ((oven.sprite.displayHeight || 0) * 0.5));
+                const bodyOffset = bounds
+                    ? Math.max(18, Math.min(bounds.height * 0.38, 32))
+                    : 22;
+                container.setPosition(
+                    centerX - cam.scrollX,
+                    topY + bodyOffset - cam.scrollY
+                );
+            };
+
+            updatePosition();
+            this.scene.events.on('update', updatePosition);
+            ui = { container, title, detail, updatePosition, tween: null, state: null };
+            oven.statusUI = ui;
+        }
+
+        ui.title.setText(state.title).setColor(state.textColor);
+        ui.detail.setText(state.detail).setColor(state.detailColor);
+        ui.state = state.key;
+        ui.updatePosition?.();
+
+        ui.tween?.remove();
+        ui.container.setAlpha(state.key === 'cooking' ? 0.96 : 1);
+        ui.tween = this.scene.tweens.add({
+            targets: ui.container,
+            alpha: { from: state.key === 'cooking' ? 0.96 : 1, to: state.key === 'cooking' ? 0.66 : 0.52 },
+            duration: state.key === 'cooking' ? 920 : 560,
+            ease: 'Sine.easeInOut',
+            yoyo: true,
+            repeat: -1,
+        });
+    }
+
+    static hideStatus(oven) {
+        if (!oven?.statusUI) return;
+        const { container, updatePosition, tween } = oven.statusUI;
+        tween?.remove();
+        if (updatePosition) this.scene?.events?.off('update', updatePosition);
+        container?.destroy?.();
+        oven.statusUI = null;
     }
 
     // === Minor UI (hover) ===

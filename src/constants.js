@@ -1,5 +1,10 @@
 import { UI_ITEM_TYPES } from "./UI/UIConstants";
 import { StageState } from "./parcelController/StageState";
+import {
+  estimatePressureContractEconomy,
+  getContractMoneyCost,
+  getPressureClearBonus,
+} from "./balance/GameBalance.js";
 export function create2DArray(rows, cols) {
     let array = new Array(rows);
     for (let i = 0; i < rows; i++) {
@@ -406,6 +411,21 @@ export const TILE_TYPES = {
     images: ['rock1','rock2','rock3']
   },
 
+  goldOre: {
+    name: "goldOre",
+    label: "gold ore",
+    value: 'gold_ore3',
+    spread: false,
+    block: true,
+    complex: false,
+    grid: 121,
+    lenX: 2, lenY: 2,
+    depth: BLOCKDEPTH+2,
+    resource: null,
+    gatherDuration: 4200,
+    images: ['gold_ore1', 'gold_ore2', 'gold_ore3']
+  },
+
   construction: {
     name: "construction",
     value: 'construction',
@@ -687,6 +707,7 @@ export const TILE_ARR = [
   'darkgrass_inner_corner', // 118
   'darkgrass_inner_corner', // 119
   'darkgrass_inner_corner', // 120
+  'gold_ore3',             // 121
 ];
 
 // --- TILE_MAP (full) ---
@@ -733,6 +754,7 @@ export function TILE_MAP(val){
   else if (val >= 99 && val <= 106) return "grass";
   else if (val == 107) return "catapult";
   else if (val >= 108 && val <= 120) return "dark_grass";
+  else if (val == 121) return "goldOre";
 
   return null;
 }
@@ -867,6 +889,7 @@ export const gridColors = {
     clayOven: 0xb64536,
     pine: 0x006400,
     rock: 0x5a682b,
+    goldOre: 0xb6941f,
     catapult: 0x8b5b2b,
     crops: 0xFCF55F,
     fort_floor: 0x777777,
@@ -1071,24 +1094,19 @@ export function getContractStage(scene) {
 }
 
 export function estimatePressureContract(scene, difficulty = 1) {
-  const stage = getContractStage(scene);
-
-  const spawners = PRESSURE_CONTRACT.SPAWNERS_BY_DIFFICULTY[difficulty] ?? 1;
-  const quotaPerSpawner =
-    PRESSURE_CONTRACT.BASE_QUOTA_PER_SPAWNER + Math.max(0, stage - 1);
-
-  const totalKills = spawners * quotaPerSpawner;
-
-  const cost = calcContractCost(scene, "PRESSURE", difficulty);
-  const bonus = calcPressureBonus(scene, difficulty);
-
-  const killPay = CONTRACT_ECON.KILL_PAY_BASE;
-  const killTotal = totalKills * killPay;
-
-  const gross = killTotal + bonus;
-  const net = gross - cost;
-
-  return { stage, spawners, quotaPerSpawner, totalKills, killPay, killTotal, bonus, cost, gross, net };
+  const econ = estimatePressureContractEconomy(scene, difficulty);
+  return {
+    stage: getContractStage(scene),
+    spawners: econ.spawnerCount,
+    quotaPerSpawner: econ.quotaPerSpawner,
+    totalKills: econ.totalPlannedEnemies,
+    killPay: Math.round(econ.killTotal / Math.max(1, econ.totalPlannedEnemies)),
+    killTotal: econ.killTotal,
+    bonus: econ.bonus,
+    cost: econ.cost,
+    gross: econ.gross,
+    net: econ.net,
+  };
 }
 
 export function removeFromArray(arr, obj) {
@@ -1103,22 +1121,11 @@ export function calcStageScaled(value, stage, mult) {
 }
 
 export function calcContractCost(scene, type, difficulty = 1) {
-  const stage = getContractStage(scene);
-  const base = CONTRACT_ECON.COST_BASE[type] ?? 0;
-
-  let raw = base;
-  if (type === "PRESSURE") raw = base + CONTRACT_ECON.PRESSURE_PER_DIFFICULTY * Math.max(1, difficulty);
-
-  return calcStageScaled(raw, stage, CONTRACT_ECON.STAGE_MULT);
+  return getContractMoneyCost(scene, type, difficulty);
 }
 
 export function calcPressureBonus(scene, difficulty = 1) {
-  const stage = getContractStage(scene);
-  const raw =
-    CONTRACT_ECON.PRESSURE_BONUS_BASE +
-    CONTRACT_ECON.PRESSURE_BONUS_PER_DIFFICULTY * Math.max(1, difficulty);
-
-  return calcStageScaled(raw, stage, CONTRACT_ECON.STAGE_MULT);
+  return getPressureClearBonus(scene, difficulty);
 }
 
 export const RESOURCE_PARCEL = {
@@ -1127,5 +1134,3 @@ export const RESOURCE_PARCEL = {
   // min distance from parcel edge to place water so you don’t create open-water borders
   WATER_EDGE_BUFFER: 2,
 };
-
-

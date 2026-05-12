@@ -14,6 +14,9 @@ export function makeButton(scene, cfg) {
 
   const c = scene.add.container(x, y);
   c.setScrollFactor(1);
+  c.setSize(w, h);
+  c.tutorialW = w;
+  c.tutorialH = h;
 
   const bg = scene.add.rectangle(0, 0, w, h, 0xffffff, 0.10);
   bg.setStrokeStyle(2, 0xffffff, 0.22);
@@ -27,6 +30,8 @@ export function makeButton(scene, cfg) {
   t.setScrollFactor(1);
 
   bg.setInteractive({ useHandCursor: true });
+  c.bg = bg;
+  c.label = t;
 
   bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
   bg.on("pointerout",  () => bg.setFillStyle(0xffffff, 0.10));

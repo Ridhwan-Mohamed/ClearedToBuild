@@ -205,6 +205,18 @@ export class buildingManager{
         }
     }
 
+    static interruptBuilderFixForQueuedBuild(troop) {
+        if (!troop?.active || troop.state !== CONTROL_STATES.FIX_BUILDING || !troop.task) return false;
+
+        const task = troop.task;
+        Player.handleStateIntteruptStart(troop, CONTROL_STATES.TRACK_MODE);
+        this._clearBuilderBuildPresentation(troop);
+        AudioManager.setConstructionActive(troop, false);
+        troop.play?.(troop.idle);
+        this.ensureFixTaskVisual(task);
+        return true;
+    }
+
     static _sameQueuedBuildTask(a, b) {
         if (!a || !b) return false;
         if (a === b) return true;

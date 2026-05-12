@@ -14,6 +14,11 @@ import { StaminaManager } from "../Manager/staminaManager";
 import { StageState } from "../parcelController/StageState";
 import { buildingManager } from "../Manager/buildingManager";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import {
+  canSellTroopsNow,
+  getTroopSellLockMessage,
+  getTroopSellValue as getBalancedTroopSellValue,
+} from "../balance/GameBalance";
 
 export class OrderRunner {
   static nextOrderId = 1;
@@ -77,7 +82,7 @@ export class OrderRunner {
 
   static getGatherContractType(resourceType) {
     if (resourceType === "wood") return "FOREST";
-    if (resourceType === "stone") return "ROCK";
+    if (resourceType === "stone" || resourceType === "gold") return "ROCK";
     if (resourceType === "seed" || resourceType === "berry") return "FARM";
     return null;
   }
@@ -87,6 +92,7 @@ export class OrderRunner {
       case "wood":
         return Map.worldPines || [];
       case "stone":
+      case "gold":
         return Map.worldStones || [];
       case "seed":
         return Map.worldSeedBushes || [];
@@ -115,7 +121,7 @@ export class OrderRunner {
     if (resourceType === "wood") {
       return "No active forest parcel. Buy a forest parcel first.";
     }
-    if (resourceType === "stone") {
+    if (resourceType === "stone" || resourceType === "gold") {
       return "No active rock parcel. Buy a rock parcel first.";
     }
     if (resourceType === "seed" || resourceType === "berry") {
@@ -133,6 +139,9 @@ export class OrderRunner {
     }
     if (resourceType === "berry") {
       return "No berry bushes are available on the active field parcel.";
+    }
+    if (resourceType === "gold") {
+      return "No gold ore targets are available on the active rock parcel.";
     }
     return `No ${resourceType} targets are available right now.`;
   }
@@ -337,23 +346,16 @@ export class OrderRunner {
     if (!selection.hasSelection) return false;
     this.clearPendingGatherPlacement();
 
-    const fighters = [];
-    const workers = [];
-
     for (const troop of selection.troops) {
       this._clearTroopOrder(troop, { interrupt: true, targetState: CONTROL_STATES.TRACK_MODE });
-      if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
-        fighters.push(troop);
-      } else {
-        workers.push(troop);
+    }
+
+    for (const troop of selection.troops) {
+      if (!troop?.active) continue;
+      if (troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
+        Player.updateTracking?.(troop);
+        continue;
       }
-    }
-
-    if (fighters.length) {
-      this.issueDefendTownOrder(fighters);
-    }
-
-    for (const troop of workers) {
       Scheduler.stepUnit(troop);
     }
     return true;
@@ -366,14 +368,10 @@ export class OrderRunner {
 
     if (selection.allSleepingLike) {
       let changed = 0;
-      const wokeFighters = [];
       for (const troop of selection.troops) {
         this._clearTroopOrder(troop, { interrupt: false, targetState: CONTROL_STATES.TRACK_MODE });
         if (troop.state === CONTROL_STATES.SLEEP_MODE) {
           StaminaManager.wakeUp(troop);
-          if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
-            wokeFighters.push(troop);
-          }
           changed += 1;
           continue;
         }
@@ -382,14 +380,8 @@ export class OrderRunner {
           troop.currentPath = [];
           troop.body?.setVelocity?.(0, 0);
           Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-          if (troop?.active && troop.body?.team === 1 && Player._isFighterUnit?.(troop)) {
-            wokeFighters.push(troop);
-          }
           changed += 1;
         }
-      }
-      if (wokeFighters.length) {
-        this.issueDefendTownOrder(wokeFighters);
       }
       return { ok: changed > 0, mode: "wake", changed, failed: 0 };
     }
@@ -405,17 +397,32 @@ export class OrderRunner {
     return { ok: changed > 0, mode: "sleep", changed, failed };
   }
 
-  static sellTroops(troops, scene = null) {
+  static sellTroops(troops, scene = null, opts = {}) {
     const selection = this.getSelectionProfile(troops);
     if (!selection.hasSelection) return { ok: false, sold: 0, money: 0 };
+    const worldScene = scene?.worldScene ?? scene ?? Player.scene;
+    if (!canSellTroopsNow(worldScene)) {
+      return {
+        ok: false,
+        reason: "phase_locked",
+        message: getTroopSellLockMessage(),
+        sold: 0,
+        money: 0,
+      };
+    }
 
     const toSell = [...selection.troops];
     const money = toSell.reduce((sum, troop) => sum + this.getTroopSellValue(troop), 0);
     const uiScene = scene ?? Player.scene?.uiScene ?? Player.scene;
+    const sourceTroop = toSell[0] || null;
 
     Player.clearSelection?.();
     if (money > 0 && typeof uiScene?.updateMoney === "function") {
-      uiScene.updateMoney(money);
+      uiScene.updateMoney(money, {
+        sourceUiTarget: opts?.sourceUiTarget ?? null,
+        sourceWorldX: Number(sourceTroop?.x),
+        sourceWorldY: Number(sourceTroop?.y),
+      });
     }
 
     for (const troop of toSell) {
@@ -474,83 +481,22 @@ export class OrderRunner {
   }
 
   static issueDefendTownOrder(troops) {
-    const selection = this.getSelectionProfile(troops);
-    if (!selection.allCombatants) return false;
-
-    const townCenter = this._getTownCenterWorld(selection.troops[0]?.body?.team ?? 1);
-    if (!townCenter) return false;
-
-    const orderId = this._nextId();
-    for (const troop of selection.troops) {
-      this._replaceTroopOrder(troop, {
-        id: orderId,
-        kind: ORDER_KINDS.DEFEND_TOWN,
-        status: "active",
-        source: "player",
-        persistent: true,
-        anchor: { ...townCenter },
-      });
-    }
-
-    Player.sendGuardOrder(
-      selection.troops,
-      townCenter.x,
-      townCenter.y,
-      this.DEFEND_TOWN_RADIUS_TILES * SQUARESIZE
-    );
-    return true;
+    return false;
   }
 
   static ensureCombatAutoOrder(troop) {
-    if (!troop?.active || troop.body?.team !== 1 || !Player._isFighterUnit?.(troop)) return false;
-    if (troop.currentOrder) return false;
-    if (troop.forcedTarget || troop.track || troop.task || troop.timer) return false;
+    if (!troop?.active) return false;
     if (
-      troop.state === CONTROL_STATES.SLEEP_MODE ||
-      troop.state === CONTROL_STATES.GO_HOME_MODE ||
-      troop.state === CONTROL_STATES.FLEE_MODE ||
-      troop.state === CONTROL_STATES.HEADING_TO_GUARD
+      troop.currentOrder?.kind === ORDER_KINDS.DEFEND_TOWN ||
+      troop.currentOrder?.kind === ORDER_KINDS.HOLD_POSITION
     ) {
-      return false;
+      this._clearTroopOrder(troop, { interrupt: true, targetState: CONTROL_STATES.TRACK_MODE });
     }
-
-    if (troop.state === CONTROL_STATES.BACK_TO_TOWN) {
-      if (troop.currentPath?.length) return false;
-      Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-    }
-
-    if (
-      troop.state !== CONTROL_STATES.TRACK_MODE &&
-      troop.state !== CONTROL_STATES.USER_MODE
-    ) {
-      return false;
-    }
-
-    return this.issueDefendTownOrder([troop]);
+    return false;
   }
 
   static issueHoldOrder(troops) {
-    const selection = this.getSelectionProfile(troops);
-    if (!selection.allGunslingers) return false;
-
-    const orderId = this._nextId();
-    for (const troop of selection.troops) {
-      this._replaceTroopOrder(troop, {
-        id: orderId,
-        kind: ORDER_KINDS.HOLD_POSITION,
-        status: "active",
-        source: "player",
-        persistent: true,
-        anchor: { x: troop.x, y: troop.y },
-      });
-      Player.setGuardPost(
-        troop,
-        troop.x,
-        troop.y,
-        this.HOLD_RADIUS_TILES * SQUARESIZE
-      );
-    }
-    return true;
+    return false;
   }
 
   static issueAttackFortOrder(troops) {
@@ -586,12 +532,9 @@ export class OrderRunner {
     const order = troop?.currentOrder;
     if (!troop?.active || !order || order.status !== "active") return false;
 
-    if (order.kind === ORDER_KINDS.DEFEND_TOWN) {
-      return this._stepDefendTownOrder(troop, order);
-    }
-
-    if (order.kind === ORDER_KINDS.HOLD_POSITION) {
-      return this._stepHoldOrder(troop, order);
+    if (order.kind === ORDER_KINDS.DEFEND_TOWN || order.kind === ORDER_KINDS.HOLD_POSITION) {
+      this._clearTroopOrder(troop, { interrupt: false, targetState: CONTROL_STATES.TRACK_MODE });
+      return false;
     }
 
     if (
@@ -688,8 +631,7 @@ export class OrderRunner {
   }
 
   static getTroopSellValue(troop) {
-    const type = this._troopTypeLabel(troop);
-    return this.SELL_PRICE[type] ?? this.SELL_PRICE.Default;
+    return getBalancedTroopSellValue(troop, Player.scene);
   }
 
   static _clearTroopOrder(troop, { interrupt = false, targetState = CONTROL_STATES.TRACK_MODE } = {}) {
@@ -1658,10 +1600,12 @@ export class OrderRunner {
     if (node?.resourceKind) return node.resourceKind;
     if (node?.resourceTileType?.name === "pine") return "wood";
     if (node?.resourceTileType?.name === "rock") return "stone";
+    if (node?.resourceTileType?.name === "goldOre") return "gold";
     if (node?.resourceTileType?.name === "seedBush") return "seed";
     if (node?.resourceTileType?.name === "berryBush") return "berry";
     if (node?.task?.type?.name === "pine") return "wood";
     if (node?.task?.type?.name === "rock") return "stone";
+    if (node?.task?.type?.name === "goldOre") return "gold";
     if (node?.task?.type?.name === "seedBush") return "seed";
     if (node?.task?.type?.name === "berryBush") return "berry";
     return null;
@@ -1672,6 +1616,7 @@ export class OrderRunner {
     const kind = this._nodeResourceKind(task.value) ||
       (task.type?.name === "pine" ? "wood" : null) ||
       (task.type?.name === "rock" ? "stone" : null) ||
+      (task.type?.name === "goldOre" ? "gold" : null) ||
       (task.type?.name === "seedBush" ? "seed" : null) ||
       (task.type?.name === "berryBush" ? "berry" : null);
     return `${kind || "resource"}:${task.x},${task.y}`;

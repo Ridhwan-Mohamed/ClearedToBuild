@@ -9,7 +9,6 @@ import { VisibilitySystem } from '../UI/VisibilitySystem.js';
 import { Manager } from '../Manager/Manager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
-import { OrderRunner } from '../orders/OrderRunner.js';
 import brawlerWalkDown from 'url:../assets/players/brawler/brawler_walk_down.png';
 import brawlerWalkDownLeft from 'url:../assets/players/brawler/brawler_walk_down_left.png';
 import brawlerWalkDownRight from 'url:../assets/players/brawler/brawler_walk_down_right.png';
@@ -107,18 +106,16 @@ export class Brawler {
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
         sprite.destroySelf = () => Brawler.destroy(sprite);
-        OrderRunner.issueDefendTownOrder([sprite]);
 
         return sprite;
     }
 
     static update(troop) {
-        OrderRunner.ensureCombatAutoOrder(troop);
-        if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
         if (troop.task || troop.track) return;
         if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
+        if (Player.tryReturnIdleTroopToTown?.(troop, { requireNoActiveEnemies: true })) return;
         if (!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam)
             Player.roam(troop);
     }
@@ -147,7 +144,7 @@ export class Brawler {
             troop.visionId = null;
         }
 
-        if (troop.task) { troop.task.assigned--; troop.task = null; }
+        Player._releaseTaskAssignment?.(troop);
         if (troop.carrying) troop.carrying = null;
 
         Player.characters.remove(troop);

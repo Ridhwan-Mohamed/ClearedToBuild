@@ -190,9 +190,10 @@ function spawnSingleSeaRaider(scene, options = {}) {
     };
 
     const EnemyClass =
-        options.enemyType === "bomber" ? Bomber :
+        options.EnemyClass
+        || (options.enemyType === "bomber" ? Bomber :
         options.enemyType === "hunter" ? Hunter :
-        Raider;
+        Raider);
     const raider = new EnemyClass(gx, gy, options.teamNumber ?? 0);
     const appliedMods = applySeaRaiderMods(raider, options.modifier, options);
 

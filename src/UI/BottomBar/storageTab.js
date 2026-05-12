@@ -720,7 +720,13 @@ export default class StorageTab {
         if (!slot?.item) return;
 
         const amount = sellStack ? slot.amount : 1;
-        const { sold, revenue, item } = StorageManager.sellFromStorage(currentStorage, selectedSlotIndex, amount, scene);
+        const { sold, revenue, item } = StorageManager.sellFromStorage(
+          currentStorage,
+          selectedSlotIndex,
+          amount,
+          scene,
+          { sourceUiTarget: sellStack ? sellStackBtn : sellOneBtn }
+        );
         if (sold <= 0) return;
 
         showAlert(scene, `Sold ${sold} ${item?.label || item?.name} for $${revenue}`, "#33ff77", 1800);
@@ -954,7 +960,13 @@ export default class StorageTab {
       if (!slot?.item) return;
 
       const amount = sellStack ? slot.amount : 1;
-      const { sold, revenue, item } = StorageManager.sellFromStorage(currentStorage, selectedSlotIndex, amount, scene);
+      const { sold, revenue, item } = StorageManager.sellFromStorage(
+        currentStorage,
+        selectedSlotIndex,
+        amount,
+        scene,
+        { sourceUiTarget: sellStack ? sellStackBtn : sellOneBtn }
+      );
       if (sold <= 0) return;
 
       showAlert(scene, `Sold ${sold} ${item?.label || item?.name} for $${revenue}`, "#33ff77", 1800);

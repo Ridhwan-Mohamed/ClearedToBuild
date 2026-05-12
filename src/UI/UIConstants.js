@@ -39,7 +39,7 @@ export const UI_ITEM_TYPES = {
         label: "Wood",
         description: "Basic fuel for ovens",
         stacks: 5,
-        moneyValue: 1
+        moneyValue: 10
     },
     stone: {
         name: "stone",
@@ -47,7 +47,7 @@ export const UI_ITEM_TYPES = {
         label: "Stone",
         description: "Construction material",
         stacks: 5,
-        moneyValue: 1
+        moneyValue: 10
     },
     crop: {
         name: "crop",

@@ -129,6 +129,7 @@ export class Farmer {
         if (troop.task) return;
         if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
+        if (Player.tryReturnIdleTroopToTown?.(troop)) return;
 
         if(!troop.task && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);

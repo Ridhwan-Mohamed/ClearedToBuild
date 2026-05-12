@@ -1,13 +1,13 @@
 # Release Checklist
 ## v1.0.0 Launch Demo Priorities
 
-### Tutorial
-- Add a talking guide/player that walks new players through the core systems.
-- Teach farming basics.
-- Teach building placement and town expansion basics.
-- Teach parcel purchasing.
-- Teach defending yourself and the town.
-- Keep the rest of the game light-touch and self-explanatory.
+### Tutorial [done]
+- Add a talking guide/player that walks new players through the core systems. [done]
+- Teach farming basics. [done]
+- Teach building placement and town expansion basics. [done]
+- Teach parcel purchasing. [done]
+- Teach defending yourself and the town. [done]
+- Keep the rest of the game light-touch and self-explanatory. [done]
 
 ### Achievements Bar [done]
 - Reposition the achievements dropdown so it opens to the right of the contract HUD squares. [done]
@@ -30,28 +30,38 @@
 - Improve raider attack priorities so they do not chase one player forever. [done]
 - Make raiders focus more on destroying the town than hunting individual players. [done]
 
-### Enemies
+### Status updates
+- mention if storages are all full [done]
+- mention if players cant put their items in storage [done]
+- mention if cooking is in process somehow [done]
+- redisgn to make larger and more self-explanatory
+
+### Enemies [done-ish]
 - Add a run-and-explode enemy type that detonates when it reaches its target. [done]
 - Allow players to stop the exploding enemy by killing it before detonation. [done] 
 - Add a projectile-shooting enemy type similar to the Gunslinger, but less powerful. [done]
 - Improve off-screen enemy indicators. [done]
 - Reduce indicator size and fix cases where indicators do not appear. [done]
-- make them prefer attacking troops, less so non offensive ones
+- make them prefer attacking troops, less so non offensive ones [done]
 
-### Balancing
-- Balance money gathering so players cannot earn too much too quickly.
-- Tune progression so the game gets difficult at a good rate.
-- Balance parcel item pricing.
-- Scale parcel prices over time.
-- Balance market item pricing.
-- Scale market item prices over time.
-- Balance player costs.
-- Scale player costs over time.
+### Balancing [done]
+- Balance money gathering so players cannot earn too much too quickly. [done]
+- Tune progression so the game gets difficult at a good rate. [done]
+- Balance parcel item pricing. [done]
+- Scale parcel prices over time. [done]
+- Balance market item pricing. [done]
+- Scale market item prices over time. [done]
+- Balance player costs. [done]
+- Scale player costs over time. [done]
 
-### Market Tab Art
+### Market Tab Art [done]
 - Add art for market tab items. [done]
 - Add more market tab items. [done]
 - Replace placeholder market item art with finished art. [done]
+
+### contract deals [done]
+- implement contract sales based on least usage [done]
+- add sale and duration bonusses [done]
 
 ### UI
 - Reduce the size of the speed-up and zoom buttons. [done]
@@ -67,8 +77,12 @@
 - remove attack button from bottom bar [done]
 
 ### parcel polish
-- animate parcel addby the tile
-- make parcel add work on thread
+- animate parcel addby the tile [done]
+- make parcel add work on thread [done]
+
+### the shocker
+- make the shocker [done]
+- fix wall preference
 
 ### bugs
 - store items on game load not syncing with level [done]
@@ -87,6 +101,14 @@
 - Improve fighter tracking logic. [done]
 - Check fighter recovery path/state after fights. [done]
 - Allow builders to cancel queued destroy jobs cleanly if needed. [done]
+- debug fighters and make sure they prioiritize enemies closest to town or are attacking town and not bunch up and also not do nothing if there is an enemy [done]
+- yes and no button keep moving up on hover [done]
+- placed to be built should act as placement blockers [done]
+- continue causing crops to always have water sign even when nothing there [done]
+- raiders having pathing issues after fighting (possible clean up issue)
+- builders are prioiritizing fixing over new build jobs [done]
+- debug issue of forager after getting reosurce [done]
+- debug fireman sometimes not getting wood [done]
 
 ## audio
 - Finish sound rebalance for overly loud and overly quiet sounds.

@@ -342,7 +342,7 @@ export class AchievementSystem {
         description: "Reach 3 houses in town.",
         metric: "houses",
         target: 3,
-        reward: { xp: 24, permits: 1 },
+        reward: { xp: 24, money: 85 },
       }));
     }
     if (fighters < 3) {
@@ -487,7 +487,7 @@ export class AchievementSystem {
         mode: "delta",
         baseline: parcelsClaimed,
         target: 2,
-        reward: { xp: 26, permits: 1 },
+        reward: { xp: 26, money: 110 },
       }));
     }
     if (nightsSurvived < 1) {

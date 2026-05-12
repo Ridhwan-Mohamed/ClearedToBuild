@@ -14,6 +14,8 @@ import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Teams } from "../Teams.js";
 import { VisibilitySystem } from "../UI/VisibilitySystem.js";
 import { FortGrunt } from "../players/FortGrunt.js";
+import { Hunter } from "../players/Hunter.js";
+import { Bomber } from "../players/Bomber.js";
 import { playBuildingCollapseSmoke } from "../FX/SmokeClearing.js";
 
 export class SpawnerBuilding {
@@ -41,9 +43,17 @@ export class SpawnerBuilding {
     this.maxHp = opts.maxHp ?? 80;
     this.hp = this.maxHp;
     this.contractId = opts.contractId ?? null;
-    this.enemyType = opts.enemyType === "grunt" ? "grunt" : "raider";
+    this.enemyType = ["grunt", "hunter", "bomber"].includes(opts.enemyType) ? opts.enemyType : "raider";
     this.enemyMods = opts.enemyMods ? { ...opts.enemyMods } : null;
-    this.enemyTypeLabel = opts.enemyTypeLabel ?? (this.enemyType === "grunt" ? "Fort Grunts" : "Raiders");
+    this.enemyTypeLabel = opts.enemyTypeLabel ?? (
+      this.enemyType === "grunt"
+        ? "Fort Grunts"
+        : this.enemyType === "hunter"
+        ? "Hunters"
+        : this.enemyType === "bomber"
+        ? "Bombers"
+        : "Raiders"
+    );
     this.modifierKey = opts.modifierKey ?? null;
     this.modifierLabel = opts.modifierLabel ?? null;
 
@@ -207,8 +217,14 @@ export class SpawnerBuilding {
   }
 
   _spawnEnemy() {
+    const spawnGX = Math.floor(this.sprite.x / SQUARESIZE);
+    const spawnGY = Math.floor(this.sprite.y / SQUARESIZE);
     const unit = this.enemyType === "grunt"
-      ? new FortGrunt(Math.floor(this.sprite.x / SQUARESIZE), Math.floor(this.sprite.y / SQUARESIZE), 0)
+      ? new FortGrunt(spawnGX, spawnGY, 0)
+      : this.enemyType === "hunter"
+      ? new Hunter(spawnGX, spawnGY, 0)
+      : this.enemyType === "bomber"
+      ? new Bomber(spawnGX, spawnGY, 0)
       : spawnRaiderAtWorld(this.sprite.x, this.sprite.y);
 
     if (!unit) return false;

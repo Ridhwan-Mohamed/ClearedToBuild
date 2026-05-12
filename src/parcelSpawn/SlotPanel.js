@@ -1,12 +1,11 @@
-import { BasePage } from "./pages/BasePage.js";
-import { ForestPage } from "./pages/ForestPage.js";
-import { RockPage } from "./pages/RockPage.js";
-import { PressurePage } from "./pages/PressurePage.js";
-import { MarketPage } from "./pages/MarketPage.js";
-import { MilitiaPage } from "./pages/MilitiaPage.js";
 import { showAlert } from "../constants.js";
 import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
+import { getContractMoneyCost } from "../balance/GameBalance.js";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
+import {
+  getSlotFavorBannerText,
+  getSlotFavorShortLabel,
+} from "../parcel_system/SlotFavorSystem.js";
 
 export class SlotPanel {
   constructor(scene, cfg) {
@@ -19,8 +18,7 @@ export class SlotPanel {
     this.container.setScrollFactor(1);
     this.container.setDepth(9000);
 
-    this._state = "GRID"; // GRID | PAGE
-    this._page = null;
+    this._state = "GRID";
     this._pressureMode = false;
     this._pressureText = null;
     this._overviewStatusPrimary = null;
@@ -159,6 +157,21 @@ export class SlotPanel {
     return !!slotToContractId?.[this.id];
   }
 
+  _getSlotFavor() {
+    return this.scene?.parcelManager?.getSlotFavor?.(this.id) ?? null;
+  }
+
+  _getPurchaseContext(type, difficulty = 1) {
+    const pm = this.scene?.parcelManager;
+    if (!pm?.getContractPurchaseContext) {
+      return {
+        favor: null,
+        moneyCost: getContractMoneyCost(this.scene, type, difficulty),
+      };
+    }
+    return pm.getContractPurchaseContext(this.id, type, difficulty);
+  }
+
   _setDetailedProxyHovered(hovered) {
     this._detailHovered = !!hovered;
     this._refreshDetailedProxyVisual();
@@ -223,8 +236,6 @@ export class SlotPanel {
   }
 
   refreshMilitiaLockState() {
-    this._clearPage?.();
-
     if (Array.isArray(this.gridObjects)) {
       for (const obj of this.gridObjects) {
         try { obj?.destroy?.(); } catch {}
@@ -246,11 +257,9 @@ export class SlotPanel {
     this._buildGrid();
     this._buildOverviewGrid();
 
-    if (this._state !== "PAGE") {
-      const showDetailed = this.mode !== "overview";
-      this.gridObjects?.forEach?.((obj) => obj?.setVisible?.(showDetailed));
-      this.overviewGridObjects?.forEach?.((obj) => obj?.setVisible?.(!showDetailed));
-    }
+    const showDetailed = this.mode !== "overview";
+    this.gridObjects?.forEach?.((obj) => obj?.setVisible?.(showDetailed));
+    this.overviewGridObjects?.forEach?.((obj) => obj?.setVisible?.(!showDetailed));
   }
 
   _getOverviewDefs() {
@@ -366,10 +375,22 @@ export class SlotPanel {
       wordWrap: { width: this.W - 36 },
     }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
 
-    this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary]);
+    this._overviewFavorLabel = this.scene.add.text(0, -this.H / 2 + 46, "", {
+      fontFamily: "Bungee",
+      fontSize: "18px",
+      color: "#dff7ff",
+      stroke: "#001018",
+      strokeThickness: 6,
+      align: "center",
+      wordWrap: { width: this.W - 36 },
+      lineSpacing: 6,
+    }).setOrigin(0.5, 0).setScrollFactor(1).setVisible(false);
+
+    this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary, this._overviewFavorLabel]);
     this._buildOverviewPressureMenu(cellW, cellH, innerW, innerH);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+    this._refreshOverviewFavorLabel();
   }
 
   _isMilitiaUnlocked() {
@@ -396,7 +417,7 @@ export class SlotPanel {
     this.gridObjects = [];
     this._buildGrid();
 
-    if (this.mode === "overview" || this._state === "PAGE" || this._pressureMode) {
+    if (this.mode === "overview" || this._pressureMode) {
       this.gridObjects?.forEach((o) => o.setVisible(false));
     }
   }
@@ -414,8 +435,10 @@ export class SlotPanel {
     this._overviewPressureCards = [];
     this._overviewStatusPrimary?.destroy?.();
     this._overviewStatusSecondary?.destroy?.();
+    this._overviewFavorLabel?.destroy?.();
     this._overviewStatusPrimary = null;
     this._overviewStatusSecondary = null;
+    this._overviewFavorLabel = null;
     this._buildOverviewGrid();
 
     if (this.mode !== "overview" || this._overviewMenu !== "GRID" || this._pressureMode) {
@@ -434,10 +457,12 @@ export class SlotPanel {
         card.costText.setText("PICK\nLEVEL");
         continue;
       }
-      const amount = Number(card.def.cost?.() ?? 0);
-      const extra = card.def.type === "PRESSURE" ? "1" : "";
-      card.costText.setText(`${extra ? `D${extra}\n` : ""}${formatPermitCostText(amount)}`);
+      const permitCost = Number(card.def.cost?.() ?? 0);
+      const purchase = this._getPurchaseContext(card.def.type, card.def.difficulty ?? 1);
+      const moneyCost = Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.scene, card.def.type, card.def.difficulty ?? 1)));
+      card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
     }
+    this._refreshOverviewFavorLabel();
   }
 
   _buildOverviewPressureMenu(cellW, cellH, innerW, innerH) {
@@ -510,9 +535,36 @@ export class SlotPanel {
         card.costText.setText("LOCK");
         continue;
       }
-      const amount = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
-      card.costText.setText(formatPermitCostText(amount));
+      const permitCost = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
+      const moneyCost = getContractMoneyCost(this.scene, "PRESSURE", card.def.difficulty);
+      card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
     }
+  }
+
+  _refreshOverviewFavorLabel() {
+    if (!this._overviewFavorLabel) return;
+    const favor = this._getSlotFavor();
+    const banner = getSlotFavorBannerText(favor);
+    if (!banner) {
+      this._overviewFavorLabel.setText("");
+      this._overviewFavorLabel.setVisible(false);
+      return;
+    }
+    this._overviewFavorLabel.setText(`${banner.title}\n${banner.detail}`);
+  }
+
+  _syncOverviewFavorVisibility(showGrid = false) {
+    const hasActiveContract = this._hasActiveContract();
+    const showingStatus = !!(
+      this._overviewStatusPrimary?.visible ||
+      this._overviewStatusSecondary?.visible
+    );
+    const showFavor = showGrid
+      && !hasActiveContract
+      && !showingStatus
+      && !this._pressureMode
+      && !!this._getSlotFavor();
+    this._overviewFavorLabel?.setVisible(showFavor);
   }
 
   _getTownLevel() {
@@ -563,18 +615,17 @@ export class SlotPanel {
       !this._pressureMode &&
       !hasActiveContract &&
       !showingStatus &&
-      this._state !== "PAGE" &&
       this._overviewMenu === "GRID";
     const showPressureMenu =
       this.mode === "overview" &&
       !this._pressureMode &&
       !hasActiveContract &&
       !showingStatus &&
-      this._state !== "PAGE" &&
       this._overviewMenu === "PRESSURE";
 
     this.overviewGridObjects?.forEach(o => o.setVisible(showGrid));
     this._overviewPressureObjects?.forEach(o => o.setVisible(showPressureMenu));
+    this._syncOverviewFavorVisibility(showGrid);
   }
 
   _showOverviewStatus(primary, secondary) {
@@ -582,6 +633,7 @@ export class SlotPanel {
     this._overviewStatusSecondary?.setText(secondary ?? "");
     this._overviewStatusPrimary?.setVisible(true);
     this._overviewStatusSecondary?.setVisible(true);
+    this._overviewFavorLabel?.setVisible(false);
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
   }
@@ -589,20 +641,20 @@ export class SlotPanel {
   _hideOverviewStatus() {
     this._overviewStatusPrimary?.setVisible(false);
     this._overviewStatusSecondary?.setVisible(false);
+    this._syncOverviewFavorVisibility(this.mode === "overview" && this._overviewMenu === "GRID");
   }
 
   _applyModeVisibilityState() {
     const hasActiveContract = this._hasActiveContract();
-    const showPage = this._state === "PAGE" && !this._pressureMode;
 
     if (hasActiveContract) {
       this.frameG?.setVisible(false);
       this.gridObjects?.forEach(o => o.setVisible(false));
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewFavorLabel?.setVisible(false);
       this._hideOverviewStatus();
       this._pressureText?.setVisible(false);
-      if (this._page?.container) this._page.container.setVisible(false);
       this._refreshDetailedProxyVisual();
       return;
     }
@@ -611,10 +663,10 @@ export class SlotPanel {
       this.frameG?.setVisible(this.container.visible);
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewFavorLabel?.setVisible(false);
       this._hideOverviewStatus();
       this._pressureText?.setVisible(false);
       this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(showPage);
       this._refreshDetailedProxyVisual();
       return;
     }
@@ -622,14 +674,13 @@ export class SlotPanel {
     if (this._pressureMode) {
       this.frameG?.setVisible(this.container.visible);
       this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewFavorLabel?.setVisible(false);
       return;
     }
 
     this.frameG?.setVisible(this.container.visible);
     this.gridObjects?.forEach(o => o.setVisible(false));
-    if (this._page?.container) this._page.container.setVisible(showPage);
     this._syncOverviewVisibility();
   }
 
@@ -643,20 +694,15 @@ export class SlotPanel {
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
 
-    if (!isOverview && this._state === "PAGE") {
-      this._clearPage();
-      this._state = "GRID";
-    }
-
     if (this._pressureMode) {
       this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
 
       if (isOverview) {
         this._pressureText?.setVisible(false);
         this._overviewStatusPrimary?.setVisible(true);
         this._overviewStatusSecondary?.setVisible(true);
         this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+        this._overviewFavorLabel?.setVisible(false);
       } else {
         this._hideOverviewStatus();
         this.overviewGridObjects?.forEach(o => o.setVisible(false));
@@ -678,45 +724,7 @@ export class SlotPanel {
     this._applyModeVisibilityState();
   }
 
-  open(type) {
-    if (!this._canBuyContracts()) {
-      this._showParcelLockedMessage();
-      return;
-    }
-
-    if (type === "MILITIA" && !this._canAccessMilitia()) {
-      this._showMilitiaLockedMessage();
-      return;
-    }
-
-    this._clearPage();
-    this.gridObjects.forEach(o => o.setVisible(false));
-
-    if (type === "FOREST") this._page = new ForestPage(this.scene, this);
-    else if (type === "ROCK") this._page = new RockPage(this.scene, this);
-    else if (type === "PRESSURE") this._page = new PressurePage(this.scene, this);
-    else if (type === "MARKET") this._page = new MarketPage(this.scene, this);
-    else if (type === "MILITIA") this._page = new MilitiaPage(this.scene, this);
-    else {
-      this._page = new BasePage(this.scene, this, {
-        title: `${type} (todo)`,
-        lines: ["Not implemented yet."],
-        primaryLabel: "OK",
-        onPrimary: () => this.back(),
-      });
-    }
-
-    this._page.render();
-    this._page.container.setScrollFactor(1);
-    this.container.add(this._page.container);
-
-    this._state = "PAGE";
-    this._applyModeVisibilityState();
-  }
-
   back() {
-    this._clearPage();
-    // When pressure overlay is active, keep grid hidden.
     if (this.mode === "overview") {
       this.gridObjects.forEach(o => o.setVisible(false));
       this._syncOverviewVisibility();
@@ -735,7 +743,6 @@ export class SlotPanel {
   resetUiState() {
     this._closeOverviewPressureMenu();
     this._hideOverviewStatus();
-    this._clearPage();
     this._state = "GRID";
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
@@ -743,6 +750,13 @@ export class SlotPanel {
       if (this.mode === "overview") this._syncOverviewVisibility();
       else this.gridObjects?.forEach(o => o.setVisible(false));
     }
+    this._applyModeVisibilityState();
+  }
+
+  refreshDisplayState() {
+    this._refreshOverviewGridCosts();
+    this._refreshOverviewPressureCosts();
+    this._refreshOverviewFavorLabel();
     this._applyModeVisibilityState();
   }
 
@@ -756,12 +770,6 @@ export class SlotPanel {
 
   _showParcelLockedMessage() {
     showAlert(this.scene, "Parcel contracts stay open during every phase.", "#a7f3d0");
-  }
-
-  _clearPage() {
-    if (!this._page) return;
-    this._page.container.destroy(true);
-    this._page = null;
   }
 
   /**
@@ -783,6 +791,15 @@ export class SlotPanel {
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
+    const tutorial = this.scene.tutorialManager || null;
+    if (tutorial && !tutorial.canPerformAction?.("parcel.commit", {
+      type,
+      slotId: this.id,
+      source: "overview",
+    })) {
+      return;
+    }
+
     if (type === "MILITIA" && !this._canAccessMilitia()) {
       this._showMilitiaLockedMessage();
       return;
@@ -793,7 +810,8 @@ export class SlotPanel {
       return;
     }
 
-    const moneyCost = Math.max(0, Number(payload.moneyCost ?? 0));
+    const purchase = this._getPurchaseContext(type, difficulty);
+    const moneyCost = Math.max(0, Number(payload.moneyCost ?? purchase.moneyCost ?? getContractMoneyCost(this.scene, type, difficulty)));
     // ✅ compute cost (allow payload.cost override if you really want)
     const cost = (payload.cost != null) ? payload.cost : getContractPermitCost(type, difficulty);
 
@@ -839,10 +857,12 @@ export class SlotPanel {
       return;
     }
 
-    // Militia consumes permits permanently. Other parcel contracts keep current refund-on-end behavior.
-    if (type !== "MILITIA") {
-      pm.markContractPermitCost?.(started, cost);
-    }
+    tutorial?.notifyAction?.("parcel.commit", {
+      type,
+      slotId: this.id,
+      source: "overview",
+      contract: started,
+    });
 
     this.playCloseTween(() => {
       this.resetUiState();
@@ -882,7 +902,6 @@ export class SlotPanel {
     this.gridObjects?.forEach(o => o.setVisible(false));
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
-    if (this._page?.container) this._page.container.setVisible(false);
 
     if (this.mode === "overview") {
       this._pressureText.setVisible(false);
@@ -913,7 +932,6 @@ export class SlotPanel {
 
     // Hide normal UI while pressure is active
     this.gridObjects?.forEach(o => o.setVisible(false));
-    if (this._page?.container) this._page.container.setVisible(false);
 
     this._pressureText.setVisible(true);
     this._pressureText.setText(
@@ -932,7 +950,6 @@ export class SlotPanel {
     this.gridObjects?.forEach(o => o.setVisible(false));
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
-    if (this._page?.container) this._page.container.setVisible(false);
 
     if (this.mode === "overview") {
       this._pressureText.setVisible(false);
@@ -961,7 +978,6 @@ export class SlotPanel {
     return;
 
     this.gridObjects?.forEach(o => o.setVisible(false));
-    if (this._page?.container) this._page.container.setVisible(false);
 
     this._pressureText.setVisible(true);
     this._pressureText.setText(
@@ -980,13 +996,11 @@ export class SlotPanel {
     // Restore normal UI (only if panel is visible)
     if (this.mode === "overview") {
       this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
       this._syncOverviewVisibility();
     } else {
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
       this.gridObjects?.forEach(o => o.setVisible(false));
-      if (this._page?.container) this._page.container.setVisible(false);
     }
     this._refreshDetailedProxyVisual();
   }

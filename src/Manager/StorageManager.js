@@ -7,17 +7,10 @@ import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 import { StorageUI } from "../UI/StorageUI";
 import { Manager } from "./Manager";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { getStorageSellPrice as getBalancedStorageSellPrice, getStorageSellPrices } from "../balance/GameBalance";
 
 export const STORAGE_SELL_PRICES = Object.freeze({
-    clean_water: 2,
-    unclean_water: 2,
-    food: 3,
-    rawFood: 3,
-    crop: 3,
-    wood: 4,
-    stone: 5,
-    seedCrop: 2,
-    seedBerry: 3,
+    ...getStorageSellPrices(),
 });
 
 export class StorageManager {
@@ -37,8 +30,7 @@ export class StorageManager {
     }
 
     static getStorageSellPrice(itemOrName) {
-        const name = typeof itemOrName === "string" ? itemOrName : itemOrName?.name;
-        return STORAGE_SELL_PRICES[name] ?? 0;
+        return getBalancedStorageSellPrice(itemOrName);
     }
 
     static _countActiveDeliveryAssignments(task, players) {
@@ -506,7 +498,7 @@ export class StorageManager {
         return consumed;
     }
 
-    static sellFromStorage(storage, slotIndex, amount = 1, scene = this.scene) {
+    static sellFromStorage(storage, slotIndex, amount = 1, scene = this.scene, opts = {}) {
         const slot = storage?.storageItems?.[slotIndex];
         if (!slot?.item) {
             return { sold: 0, revenue: 0, item: null };
@@ -521,9 +513,9 @@ export class StorageManager {
         DailyNeedsTracker.updateUIItems(item, sold, true);
 
         const revenue = this.getStorageSellPrice(item) * sold;
-        const targetScene = scene || storage?.sprite?.scene || this.scene;
+        const targetScene = scene?.worldScene ?? scene ?? storage?.sprite?.scene ?? this.scene;
         if (revenue > 0 && typeof targetScene?.updateMoney === "function") {
-            targetScene.updateMoney(revenue);
+            targetScene.updateMoney(revenue, opts);
         }
 
         return { sold, revenue, item };

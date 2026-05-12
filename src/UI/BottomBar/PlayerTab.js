@@ -3,6 +3,7 @@ import { House } from "../../buildings/House.js";
 import { showAlert, CONTROL_STATES } from "../../constants";
 import { StaminaManager } from "../../Manager/staminaManager.js";
 import { AudioManager } from "../../Manager/AudioManager.js";
+import { OrderRunner } from "../../orders/OrderRunner.js";
 import { Player } from "../../players/Player";
 import {
     applyPortraitKeyToSprite,
@@ -381,8 +382,6 @@ export default class PlayerTab {
 
         const sellBtn   = makeSellButton(() => ui.sellSelected());
         const sleepBtn  = makeButton('Sleep', () => ui.sendSelectedToSleep())
-        const guardBtn  = makeButton('Guard',  () => ui.startGuardPlacementForSelected?.());
-
         // layout helper: rebuild row so things always pack from the left
         function updateButtonsLayout({ isFriendly, isCombatant }) {
             // remove all children from the row, but keep them alive
@@ -391,19 +390,12 @@ export default class PlayerTab {
             // hard reset visibility so dropped buttons don't float on screen
             sellBtn.setVisible(false);
             sleepBtn.setVisible(false);
-            guardBtn.setVisible(false);
-
             if (isFriendly) {
                 sellBtn.setVisible(true);
                 buttonsRow.add(sellBtn,  0, 'top', 0, false);
 
                 sleepBtn.setVisible(true);
                 buttonsRow.add(sleepBtn, 0, 'top', 0, false);
-
-                if (isCombatant) {
-                    guardBtn.setVisible(true);
-                    buttonsRow.add(guardBtn, 0, 'top', 0, false);
-                }
             }
 
             buttonsRow.layout();
@@ -428,6 +420,7 @@ export default class PlayerTab {
 
         panel.add(header,     0, 'left', 0, true);
         panel.add(barsCol,    0, 'left', 0, true);
+        panel.add(buttonsRow, 0, 'left', 0, true);
 
         // ---------- return with setters ----------
         return {
@@ -452,7 +445,9 @@ export default class PlayerTab {
             },
             setPrices() {},
             setSleepButton() {},
-            setButtonsLayout() {},
+            setButtonsLayout(layout = {}) { updateButtonsLayout(layout); },
+            sellButton: sellBtn,
+            sleepButton: sleepBtn,
         };
     }
 
@@ -472,24 +467,7 @@ export default class PlayerTab {
     }
 
     startGuardPlacementForSelected() {
-        const s = this.selected;
-        if (!s || !s.active) return;
-
-        // Put the scene into "guard placement" mode
-        this.scene.guardPlacement = {
-            active: true,
-            troop: s
-        };
-
-        // Change mouse cursor to a "hand" / grab style to indicate mode
-        this.scene.input.setDefaultCursor('grab');
-
-        showAlert?.(
-            this.scene,
-            `Guard mode: click on the map to station ${s.name}.`,
-            '#33aaff',
-            2000
-        );
+        return;
     }
 
     wakeOrCancelSelected() {
@@ -848,20 +826,19 @@ export default class PlayerTab {
     sellSelected() {
         const s = this.selected;
         if (!s || !s.active) return;
-
-        const type = this.typeOf(s);
-        const price = this.SELL_PRICE[type] ?? this.SELL_PRICE.Default;
-
-        // 🔥 use mapView.updateMoney instead of addGold
-        if (typeof this.scene.updateMoney === 'function') {
-            this.scene.updateMoney(price);
+        const result = OrderRunner.sellTroops([s], this.scene, {
+            sourceUiTarget: this.detailCard?.sellButton ?? null,
+        });
+        if (!result.ok) {
+            if (result.reason === "phase_locked") {
+                showAlert?.(this.scene, result.message || "Troops can only be sold during dawn or day.", '#ff7777', 1800);
+            }
+            return;
         }
 
-        showAlert?.(this.scene, `Sold ${s.name} (${type}) for $${price}`, '#33ff77', 1800);
-
-        Player.destroyPlayer(s); // removes from world + team lists
-        this.clearDetails();     // reset detail panel
-        this.rebuildList();      // refresh list
+        showAlert?.(this.scene, `Sold ${s.name} for $${result.money}`, '#33ff77', 1800);
+        this.clearDetails();
+        this.rebuildList();
     }
 
     // --------- tick / refresh ---------
@@ -955,6 +932,7 @@ export default class PlayerTab {
         if (s.isGunslinger)  return 'Gunslinger';
         if (s.isBlademaster) return 'Blademaster';
         if (s.isBrawler)     return 'Brawler';
+        if (s.isShocker)     return 'Shocker';
         if (s.isFortGrunt)   return 'Fort Grunt';
         if (s.isSeaRaider)   return 'Sea Raider';
         if (s.isRaider)      return 'Raider';

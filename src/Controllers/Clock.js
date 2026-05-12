@@ -10,9 +10,28 @@ const DAWN_START = 6;
 const DAY_START = 7;
 const DUSK_START = 16;
 const NIGHT_START = 18;
+const NIGHT_PEAK_LOCK_HOUR = 20;
 const NIGHT_END = DAWN_START;
 const CROP_GROWTH_INTERVAL_HOURS = 8;
 const CROP_GROWTH_START_HOUR = DAWN_START;
+const WEEKDAY_LABELS = Object.freeze([
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]);
+const WEEKDAY_SHORT_LABELS = Object.freeze([
+    "MON",
+    "TUE",
+    "WED",
+    "THU",
+    "FRI",
+    "SAT",
+    "SUN",
+]);
 
 const PHASE_DEFS = {
     dawn: {
@@ -126,7 +145,7 @@ export class Clock {
     }
 
     formatTimeWithDay() {
-        return `Day ${this.day} - ${this.formatClockFaceTime()}`;
+        return `${this.getWeekdayLabel()} - Day ${this.day} - ${this.formatClockFaceTime()}`;
     }
 
     getSnapshot() {
@@ -211,6 +230,13 @@ export class Clock {
 
     advanceTime() {
         if (this.paused) return; // ⛔ don't advance time or spawn events
+        const holdAtPeakDarkness = this.scene?.shouldHoldNightAtPeakDarkness?.();
+        if (holdAtPeakDarkness && this.isNight() && this.getHourFloat() >= NIGHT_PEAK_LOCK_HOUR) {
+            this.hours = NIGHT_PEAK_LOCK_HOUR;
+            this.minutes = 0;
+            this.wasNight = true;
+            return;
+        }
         this.minutes += this.minuteStep;
         if (this.minutes >= 60) {
             this.minutes = 0;
@@ -325,5 +351,17 @@ export class Clock {
     setDay(day = 1) {
         this.day = Math.max(1, Math.floor(Number(day) || 1));
         this.externalText?.setText?.(this.formatTimeWithDay());
+    }
+
+    getWeekdayIndex(day = this.day) {
+        return ((Math.max(1, Math.floor(Number(day) || 1)) - 1) % WEEKDAY_LABELS.length + WEEKDAY_LABELS.length) % WEEKDAY_LABELS.length;
+    }
+
+    getWeekdayLabel(day = this.day) {
+        return WEEKDAY_LABELS[this.getWeekdayIndex(day)] || WEEKDAY_LABELS[0];
+    }
+
+    getWeekdayShortLabel(day = this.day) {
+        return WEEKDAY_SHORT_LABELS[this.getWeekdayIndex(day)] || WEEKDAY_SHORT_LABELS[0];
     }
 }

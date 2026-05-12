@@ -68,6 +68,10 @@ export class Map{
 
 
     static initMap(){
+        this._detailedWorldDrawn = false;
+        this.blocks = [];
+        this.waterBlocks = [];
+        this.outerWaterTileSprite = null;
         this.barrier = this.scene.physics.add.staticGroup();  // Ensure barriers are static bodies
         this.graphics = this.scene.add.graphics();
         Map.outerWaterLayer = Map.scene.add.layer();
@@ -185,6 +189,9 @@ export class Map{
     }
 
     static mapFromData(data){
+        this._detailedWorldDrawn = false;
+        this.blocks = [];
+        this.waterBlocks = [];
         this.grid = data;
         this.initGrid();
     }
@@ -430,6 +437,7 @@ export class Map{
             return false;
         }
 
+        if (buildingManager._queuedBlockBuildCovers?.(x, y)) return true;
         if (this._cellIsBlocking(x, y)) return true;
         if (protectFarmSpots && this._cellHasProtectedFarmSpot(x, y)) return true;
 
@@ -810,6 +818,7 @@ export class Map{
         this.waterBlocks.forEach(child => child.destroy());
         this._clearOuterWaterBackdrop();
         this.barrier.clear(true);
+        this._detailedWorldDrawn = false;
     }
 
     static _destroyNode(node){
@@ -879,6 +888,7 @@ export class Map{
         
         // After we've rebuilt visible world objects:
         this._uiIgnoreWorldLayer();
+        this._detailedWorldDrawn = true;
     }   
 
     static _clearOuterWaterBackdrop() {
@@ -1021,8 +1031,12 @@ export class Map{
 
     static _spawnSpec(cx, cy, depth, spec, angle = 0, flipX = false, flipY = false) {
         const node = spec.sheet
-            ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth).play(spec.anim || spec.key)
+            ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth)
             : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
+        if (spec.sheet) {
+            node._pauseInOverview = spec.key === "water" || spec.anim === "water";
+            node.play(spec.anim || spec.key);
+        }
         this._worldAdd(node); 
         if (angle) node.setAngle(angle);
         if (flipX || flipY) node.setFlip(flipX, flipY);
@@ -1596,7 +1610,10 @@ export class Map{
             ? this.scene.add.sprite(cx, cy, spec.key).setDepth(depth)
             : this.scene.add.image (cx, cy, spec.key).setDepth(depth);
         this._worldAdd(node); 
-        if (spec.sheet) node.play(spec.anim || spec.key);
+        if (spec.sheet) {
+            node._pauseInOverview = spec.key === "water" || spec.anim === "water";
+            node.play(spec.anim || spec.key);
+        }
         node.setAngle(angle);
         return node;
     }
@@ -2131,9 +2148,9 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             this.addBlockItem(posX,posY,item)
             return new PineTree(posX, posY);
         }
-        if(item?.name === TILE_TYPES.rock.name){
+        if(item?.name === TILE_TYPES.rock.name || item?.name === TILE_TYPES.goldOre?.name){
             this.addBlockItem(posX,posY,item)
-            return new RockNode(posX, posY);
+            return new RockNode(posX, posY, 1, { tileType: item });
         }
         if(item?.name === TILE_TYPES.turret.name){
             return new Turret(posX, posY, teamNumber ?? buildingArray[index]?.[3] ?? 1);
@@ -2273,6 +2290,51 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
 
     static _uiIgnoreWorldLayer() {
         return;
+    }
+
+    static hasDetailedWorldElements() {
+        const isLiveNode = (node) => {
+            if (!node) return false;
+            if (Array.isArray(node)) return node.some(isLiveNode);
+            if (node.active === false) return false;
+            if (node.scene && node.scene !== this.scene) return false;
+            return !!node.scene || !!node.parentContainer || !!node.parentList;
+        };
+
+        if (isLiveNode(this.outerWaterTileSprite)) return true;
+        if (Array.isArray(this.blocks) && this.blocks.some(isLiveNode)) return true;
+        return Array.isArray(this.worldLayer?.list) && this.worldLayer.list.some(isLiveNode);
+    }
+
+    static _setNodeAnimationPaused(node, paused) {
+        if (!node) return;
+        if (Array.isArray(node)) {
+            node.forEach((child) => this._setNodeAnimationPaused(child, paused));
+            return;
+        }
+
+        if (node._pauseInOverview && node.anims) {
+            if (paused) {
+                if (!node._pausedForOverview) {
+                    node._wasAnimatingBeforeOverview = !!node.anims.isPlaying;
+                    if (node.anims.isPlaying) node.anims.pause();
+                    node._pausedForOverview = true;
+                }
+            } else if (node._pausedForOverview) {
+                if (node._wasAnimatingBeforeOverview) node.anims.resume();
+                node._pausedForOverview = false;
+                node._wasAnimatingBeforeOverview = false;
+            }
+        }
+
+        if (node.list && Array.isArray(node.list)) {
+            node.list.forEach((child) => this._setNodeAnimationPaused(child, paused));
+        }
+    }
+
+    static setDetailedWorldPaused(paused = true) {
+        this._detailedWorldPaused = !!paused;
+        this._setNodeAnimationPaused(this.blocks, this._detailedWorldPaused);
     }
 
     static setDetailedWorldVisible(visible = true) {

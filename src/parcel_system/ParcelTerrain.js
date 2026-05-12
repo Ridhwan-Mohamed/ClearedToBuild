@@ -114,14 +114,60 @@ export function paintResourceParcel({
   pondTiles = 30,
   edgeBuffer = 2,
 }) {
+  const plan = buildResourceParcelTerrainPlan({
+    origin,
+    size,
+    rng,
+    groundType,
+    pondTiles,
+    edgeBuffer,
+  });
+
   // one-shot fill (NO per-tile loops)
   setGroundRect(origin.x, origin.y, size, size, groundType);
 
-  const pond = buildPondCells({ size, rng, edgeBuffer, pondTiles });
-  for (const kk of pond) {
-    const [lx, ly] = kk.split(",").map(Number);
-    setWater(origin.x + lx, origin.y + ly);
+  for (const cell of plan.cells) {
+    if (cell.tileType !== "water") continue;
+    setWater(cell.x, cell.y);
   }
+
+  return plan;
+}
+
+export function buildResourceParcelTerrainPlan({
+  origin,
+  size = PARCEL_SIZE,
+  rng,
+  groundType = "dirt",
+  pondTiles = 30,
+  edgeBuffer = 2,
+}) {
+  const pond = buildPondCells({ size, rng, edgeBuffer, pondTiles });
+  const cells = [];
+  const tileTypeByKey = new Map();
+
+  for (let ly = 0; ly < size; ly++) {
+    for (let lx = 0; lx < size; lx++) {
+      const tileType = pond.has(key(lx, ly)) ? "water" : groundType;
+      const x = origin.x + lx;
+      const y = origin.y + ly;
+      const cell = { x, y, lx, ly, tileType };
+      cells.push(cell);
+      tileTypeByKey.set(key(x, y), tileType);
+    }
+  }
+
+  return {
+    origin: { x: origin.x, y: origin.y },
+    size,
+    groundType,
+    cells,
+    pondCells: Array.from(pond).map((kk) => {
+      const [lx, ly] = kk.split(",").map(Number);
+      return { x: origin.x + lx, y: origin.y + ly, lx, ly, tileType: "water" };
+    }),
+    tileTypeByKey,
+  };
 }
 
 export function paintWaterRect({ origin, size = PARCEL_SIZE, setWaterRect }) {

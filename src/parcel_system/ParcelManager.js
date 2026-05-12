@@ -5,6 +5,16 @@ import { PARCEL_SIZE, CONTRACT_SLOTS } from "./ParcelConfig.js";
 import { ParcelContractInstance } from "./ParcelContractInstance.js";
 import { Player } from "../players/Player.js";
 import { SaveManager } from "../save/SaveManager.js";
+import {
+  SLOT_FAVOR_MAX_ACTIVE,
+  SLOT_FAVOR_THRESHOLD,
+  cloneSlotFavor,
+  getEffectiveContractDurationMs,
+  getEffectiveContractMoneyCost,
+  getSlotFavorCompletionBonusMoney,
+  isSlotFavorEligibleContractType,
+  pickRandomSlotFavor,
+} from "./SlotFavorSystem.js";
 
 export class ParcelManager {
   constructor({ scene, opts }) {
@@ -23,8 +33,130 @@ export class ParcelManager {
 
     // ✅ keys must match ParcelConfig CONTRACT_SLOTS
     this.slotToContractId = { N: null, W: null, S: null, E: null };
+    this.slotFavorState = this._createEmptySlotFavorState();
 
     this.onContractProgressChanged = null;
+  }
+
+  _createEmptySlotFavorState() {
+    return Object.fromEntries(
+      Object.keys(CONTRACT_SLOTS).map((slotId) => [slotId, {
+        completedElsewhere: 0,
+        favor: null,
+        appliedContractId: null,
+      }])
+    );
+  }
+
+  _getSlotFavorState(slotId) {
+    if (!slotId) return null;
+    if (!this.slotFavorState?.[slotId]) {
+      this.slotFavorState[slotId] = {
+        completedElsewhere: 0,
+        favor: null,
+        appliedContractId: null,
+      };
+    }
+    return this.slotFavorState[slotId];
+  }
+
+  getSlotFavor(slotId) {
+    return cloneSlotFavor(this._getSlotFavorState(slotId)?.favor);
+  }
+
+  getContractPurchaseContext(slotId, type, difficulty = 1) {
+    const favor = isSlotFavorEligibleContractType(type) ? this.getSlotFavor(slotId) : null;
+    return {
+      favor,
+      moneyCost: getEffectiveContractMoneyCost(this.scene, type, difficulty, favor),
+      durationMs: getEffectiveContractDurationMs(type, favor),
+      completionBonusMoney: getSlotFavorCompletionBonusMoney(this.scene, type, difficulty, favor),
+    };
+  }
+
+  _countActiveSlotFavors() {
+    return Object.values(this.slotFavorState || {}).reduce(
+      (sum, state) => sum + (state?.favor ? 1 : 0),
+      0
+    );
+  }
+
+  _canSlotReceiveFavor(slotId) {
+    if (!slotId) return false;
+    if (this.slotToContractId?.[slotId]) return false;
+    if (this.scene?.towerPressureController?.isSlotUnderTowerPressure?.(slotId)) return false;
+    return true;
+  }
+
+  _assignPendingSlotFavors() {
+    let available = SLOT_FAVOR_MAX_ACTIVE - this._countActiveSlotFavors();
+    if (available <= 0) return false;
+
+    const candidates = Object.keys(CONTRACT_SLOTS)
+      .map((slotId) => ({ slotId, state: this._getSlotFavorState(slotId) }))
+      .filter(({ slotId, state }) => (
+        this._canSlotReceiveFavor(slotId)
+        && !state?.favor
+        && !state?.appliedContractId
+        && Number(state?.completedElsewhere || 0) >= SLOT_FAVOR_THRESHOLD
+      ))
+      .sort((a, b) => (
+        Number(b.state?.completedElsewhere || 0) - Number(a.state?.completedElsewhere || 0)
+      ));
+
+    let changed = false;
+    for (const entry of candidates) {
+      if (available <= 0) break;
+      entry.state.favor = pickRandomSlotFavor(this.rng);
+      entry.state.appliedContractId = null;
+      changed = true;
+      available -= 1;
+    }
+    return changed;
+  }
+
+  _markSlotChosen(slotId, contractId, type) {
+    const state = this._getSlotFavorState(slotId);
+    if (!state) return;
+    state.completedElsewhere = 0;
+    state.appliedContractId = state.favor && isSlotFavorEligibleContractType(type)
+      ? contractId
+      : null;
+  }
+
+  _advanceSlotFavorsAfterCompletion(inst) {
+    if (!inst) return false;
+    if (inst.type === "PRESSURE" && inst.pressureSource === "tower") return false;
+
+    let changed = false;
+    const finishedState = this._getSlotFavorState(inst.slotId);
+    if (finishedState) {
+      finishedState.completedElsewhere = 0;
+      if (finishedState.appliedContractId === inst.id || finishedState.favor) {
+        finishedState.favor = null;
+        finishedState.appliedContractId = null;
+        changed = true;
+      }
+    }
+
+    for (const slotId of Object.keys(CONTRACT_SLOTS)) {
+      if (slotId === inst.slotId) continue;
+      const state = this._getSlotFavorState(slotId);
+      if (!state || state.favor || state.appliedContractId || !this._canSlotReceiveFavor(slotId)) {
+        continue;
+      }
+      state.completedElsewhere = Math.max(0, Number(state.completedElsewhere || 0) + 1);
+      changed = true;
+    }
+
+    return this._assignPendingSlotFavors() || changed;
+  }
+
+  refreshSlotFavorUi() {
+    for (const slot of this.scene?.parcelSpawnUI?.slots?.values?.() || []) {
+      slot?.refreshDisplayState?.();
+    }
+    this.scene?.uiScene?.contractHud?.refreshForParcelStateChange?.();
   }
 
   getSlotOrigin(slotId) {
@@ -91,6 +223,7 @@ export class ParcelManager {
 
     inst.moneyCost = Math.max(0, Number(opts.moneyCost ?? 0));
 
+    this._markSlotChosen(slotId, id, "MILITIA");
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
 
@@ -110,6 +243,7 @@ export class ParcelManager {
 
     const id = `MARKET_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
+    const purchase = this.getContractPurchaseContext(slotId, "MARKET", 1);
 
     const inst = new ParcelContractInstance({
       id,
@@ -120,8 +254,13 @@ export class ParcelManager {
       rng: this.rng,
       map: this.map,
       parcelManager: this,
+      slotFavor: purchase.favor,
+      contractDurationMs: purchase.durationMs,
+      completionBonusMoney: purchase.completionBonusMoney,
     });
+    inst.moneyCost = Math.max(0, Number(purchase.moneyCost ?? 0));
 
+    this._markSlotChosen(slotId, id, "MARKET");
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
 
@@ -144,6 +283,7 @@ export class ParcelManager {
 
     const id = `${type}_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
+    const purchase = this.getContractPurchaseContext(slotId, type, 1);
 
     const inst = new ParcelContractInstance({
       id, type, slotId, origin,
@@ -156,25 +296,55 @@ export class ParcelManager {
       map: this.map,
 
       parcelManager: this,
+      slotFavor: purchase.favor,
+      contractDurationMs: purchase.durationMs,
+      completionBonusMoney: purchase.completionBonusMoney,
     });
+    inst.moneyCost = Math.max(0, Number(purchase.moneyCost ?? 0));
 
+    this._markSlotChosen(slotId, id, type);
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
-    inst.spawn();
-    this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
-      waterSourceUpdate: {
-        slotId,
-        landParcel: true,
-      },
-    });
-    this._notifyExpansionParcelClaimed(type, slotId, id);
-    SaveManager.queueAutosave(`parcel_${String(type || "").toLowerCase()}_start`);
 
     // Hide the slot UI while a contract is active (no outline during play)
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();
     slotPanel?.resetUiState?.();
     slotPanel?.setVisible?.(true);
+
+    const afterSpawn = (result = {}) => {
+      if (!result?.refreshHandled) {
+        this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
+          waterSourceUpdate: {
+            slotId,
+            landParcel: true,
+          },
+        });
+      } else {
+        this.map._uiIgnoreWorldLayer?.();
+        this.scene?.parcelSpawnUI?.setMode?.(this.scene?.zoomMixer?.mode || "detailed");
+      }
+
+      this._notifyExpansionParcelClaimed(type, slotId, id);
+      SaveManager.queueAutosave(`parcel_${String(type || "").toLowerCase()}_start`);
+    };
+
+    const spawnResult = inst.spawn({ animateParcelAdd: true });
+    if (spawnResult && typeof spawnResult.then === "function") {
+      spawnResult
+        .then(afterSpawn)
+        .catch((err) => {
+          console.error("Animated parcel spawn failed; falling back to immediate spawn.", err);
+          if (!inst._spawnCommitted && !inst._completed) {
+            const fallbackResult = inst.spawn({ skipAnimation: true });
+            afterSpawn(fallbackResult);
+          } else if (inst._spawnCommitted && !inst._completed) {
+            afterSpawn({ refreshHandled: true });
+          }
+        });
+    } else {
+      afterSpawn(spawnResult);
+    }
 
     return id;
   }
@@ -204,27 +374,55 @@ export class ParcelManager {
       pressureHordeIndex: opts.hordeIndex ?? null,
     });
 
-
+    this._markSlotChosen(slotId, id, "PRESSURE");
     this.slotToContractId[slotId] = id;
     this.contractsById.set(id, inst);
-    inst.spawn();
-    this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
-      waterSourceUpdate: {
-        slotId,
-        landParcel: true,
-      },
-    });
-    // Hide the slot UI while a pressure contract is active (no outline during play)
-    SaveManager.queueAutosave("parcel_pressure_start");
+
+    // Hide the slot UI while a pressure contract is active or being revealed.
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
     slotPanel?.clearPressureState?.();
     slotPanel?.resetUiState?.();
     slotPanel?.setVisible?.(true);
+
+    const afterSpawn = (result = {}) => {
+      if (!result?.refreshHandled) {
+        this._refreshAfterParcelPaint(inst.getParcelBounds?.(), {
+          waterSourceUpdate: {
+            slotId,
+            landParcel: true,
+          },
+        });
+      } else {
+        this.map._uiIgnoreWorldLayer?.();
+        this.scene?.parcelSpawnUI?.setMode?.(this.scene?.zoomMixer?.mode || "detailed");
+      }
+
+      SaveManager.queueAutosave("parcel_pressure_start");
+    };
+
+    const spawnResult = inst.spawn({ animateParcelAdd: true });
+    if (spawnResult && typeof spawnResult.then === "function") {
+      spawnResult
+        .then(afterSpawn)
+        .catch((err) => {
+          console.error("Animated pressure parcel spawn failed; falling back to immediate spawn.", err);
+          if (!inst._spawnCommitted && !inst._completed) {
+            const fallbackResult = inst.spawn({ skipAnimation: true });
+            afterSpawn(fallbackResult);
+          } else if (inst._spawnCommitted && !inst._completed) {
+            afterSpawn({ refreshHandled: true });
+          }
+        });
+    } else {
+      afterSpawn(spawnResult);
+    }
+
     return id;
   }
 
   removeContract(slotId, id, reason) {
     const inst = this.contractsById.get(id);
+    const slotFavorChanged = this._advanceSlotFavorsAfterCompletion(inst);
 
     if (this.slotToContractId[slotId] === id) this.slotToContractId[slotId] = null;
     this.contractsById.delete(id);
@@ -233,12 +431,6 @@ export class ParcelManager {
       const diff = inst.difficulty ?? 1;
       const bonus = calcPressureBonus(this.scene, diff);
       this.scene.updateMoney(+bonus);
-    }
-
-    const permitCost = Number(inst?.permitCost ?? 0);
-    if (permitCost > 0) {
-      this.scene.updatePermits?.(+permitCost);
-      inst.permitCost = 0;
     }
 
     // If this slot is owned by a standing tower, let the tower controller
@@ -252,6 +444,9 @@ export class ParcelManager {
     } else {
       // Normal slot: re-show the regular contract UI panel.
       this.scene.parcelSpawnUI.showSlot(slotId);
+    }
+    if (slotFavorChanged) {
+      this.refreshSlotFavorUi();
     }
     SaveManager.queueAutosave(`parcel_remove_${reason || "unknown"}`);
   }
@@ -284,6 +479,13 @@ export class ParcelManager {
     return {
       mainIslandOrigin: this.mainIslandOrigin ? { ...this.mainIslandOrigin } : null,
       slotToContractId: { ...this.slotToContractId },
+      slotFavorState: Object.fromEntries(
+        Object.entries(this.slotFavorState || {}).map(([slotId, state]) => [slotId, {
+          completedElsewhere: Math.max(0, Number(state?.completedElsewhere || 0)),
+          favor: cloneSlotFavor(state?.favor),
+          appliedContractId: state?.appliedContractId ?? null,
+        }])
+      ),
       contracts: Array.from(this.contractsById.values()).map((inst) => inst.getSnapshot?.()).filter(Boolean),
     };
   }
@@ -293,6 +495,17 @@ export class ParcelManager {
     this.mainIslandOrigin = saved.mainIslandOrigin ? { ...saved.mainIslandOrigin } : this.mainIslandOrigin;
     this.contractsById.clear();
     this.slotToContractId = { N: null, W: null, S: null, E: null };
+    this.slotFavorState = this._createEmptySlotFavorState();
+
+    for (const slotId of Object.keys(CONTRACT_SLOTS)) {
+      const nextState = saved?.slotFavorState?.[slotId];
+      if (!nextState) continue;
+      this.slotFavorState[slotId] = {
+        completedElsewhere: Math.max(0, Number(nextState.completedElsewhere || 0)),
+        favor: cloneSlotFavor(nextState.favor),
+        appliedContractId: nextState.appliedContractId ?? null,
+      };
+    }
 
     const contracts = Array.isArray(saved.contracts) ? saved.contracts : [];
     for (const entry of contracts) {
@@ -313,6 +526,9 @@ export class ParcelManager {
         pressureModifier: entry.pressureModifier ?? null,
         pressureHordeIndex: entry.pressureHordeIndex ?? null,
         militiaConfig: entry.militiaConfig ?? null,
+        slotFavor: cloneSlotFavor(entry.slotFavor),
+        contractDurationMs: Number(entry.contractDurationMs ?? 0) || null,
+        completionBonusMoney: Number(entry.completionBonusMoney ?? 0),
       });
       this.slotToContractId[entry.slotId] = entry.id;
       this.contractsById.set(entry.id, inst);
@@ -334,6 +550,7 @@ export class ParcelManager {
         });
       }
     }
+    this.refreshSlotFavorUi();
   }
 
   forceClearContracts(reason = "external_cleanup", opts = {}) {

@@ -82,6 +82,7 @@ export class StorageBuilding {
         // Register into the team
         Teams.teamLists[teamNumber].storageList.push(this);
         Teams.teamLists[teamNumber].buildings.push([x, y, TILE_TYPES.storage, this.sprite])
+        StorageBuilding.scene?.events?.emit?.("storage:added", this);
         //setup UI listeners
         this.sprite.setInteractive({ useHandCursor: true });
         this.sprite.on('pointerover', () => {
@@ -137,6 +138,41 @@ export class StorageBuilding {
     getStorageWarningState() {
         if (this.hasOpenSlots()) return null;
         return this.hasStackRoom() ? 'slots' : 'full';
+    }
+
+    getStatusBadgeState() {
+        const state = this.getStorageWarningState?.();
+        if (!state) return null;
+
+        if (state === 'full') {
+            return {
+                key: 'full',
+                title: 'FULL',
+                detail: 'NO ROOM',
+                fillColor: 0x5a1d2a,
+                fillAlpha: 0.94,
+                strokeColor: 0xffc6d0,
+                strokeAlpha: 0.28,
+                accentColor: 0xff7f96,
+                accentAlpha: 0.24,
+                textColor: '#fff3f5',
+                detailColor: '#ffd7df',
+            };
+        }
+
+        return {
+            key: 'slots',
+            title: 'STACKS',
+            detail: 'SLOTS USED',
+            fillColor: 0x5c3d10,
+            fillAlpha: 0.94,
+            strokeColor: 0xffe0a3,
+            strokeAlpha: 0.26,
+            accentColor: 0xffc85a,
+            accentAlpha: 0.22,
+            textColor: '#fff8e5',
+            detailColor: '#ffe4ad',
+        };
     }
 
     static _cloneSlots(slots = []) {

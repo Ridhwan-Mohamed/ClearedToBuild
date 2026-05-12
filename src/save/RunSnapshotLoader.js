@@ -212,6 +212,14 @@ function restoreTeamSnapshots(snapshot) {
     team._savedCropSnapshots = Array.isArray(saved.crops) ? saved.crops : [];
     team.wateringList = [];
     team.TeamFarmSpots = [];
+    team.reliefPackageCount = Math.max(
+      0,
+      Number(
+        saved.reliefPackageCount
+        ?? team.reliefPackageCount
+        ?? (String(teamId) === "1" ? 1 : 0)
+      ) || 0
+    );
     team.townAutomation = assignPlain(null, saved.townAutomation, {});
     team.cardHand = (saved.cardIds || []).map((id) => CARD_REGISTRY.get(id)).filter(Boolean);
     team.cardInventory = restoreCardInventorySnapshot(saved.cardInventory);
@@ -239,6 +247,32 @@ function clearCropWaterIndicator(crop) {
   }
 }
 
+function removeGeneratedCropPlaceholder(team, x, y) {
+  if (!team) return;
+
+  const pruneTaskList = (list) => {
+    if (!Array.isArray(list)) return;
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const entry = list[i];
+      if (Number(entry?.x) !== x || Number(entry?.y) !== y) continue;
+      list.splice(i, 1);
+    }
+  };
+
+  if (Array.isArray(team.crops)) {
+    for (let i = team.crops.length - 1; i >= 0; i -= 1) {
+      const crop = team.crops[i];
+      if (Number(crop?.x) !== x || Number(crop?.y) !== y) continue;
+      clearCropWaterIndicator(crop);
+      team.crops.splice(i, 1);
+    }
+  }
+
+  pruneTaskList(team.wateringList);
+  pruneTaskList(team.cropList);
+  pruneTaskList(team.TeamFarmSpots);
+}
+
 function restoreSavedCropStates() {
   for (const [teamId, team] of Object.entries(Teams.teamLists || {})) {
     const savedCrops = Array.isArray(team?._savedCropSnapshots) ? team._savedCropSnapshots : [];
@@ -256,6 +290,7 @@ function restoreSavedCropStates() {
     }
 
     const restored = [];
+    team.crops = [];
     team.cropList = [];
     team.wateringList = [];
     team.TeamFarmSpots = [];
@@ -267,6 +302,7 @@ function restoreSavedCropStates() {
 
       const sprite = getCropSpriteAt(x, y);
       if (!sprite) continue;
+      removeGeneratedCropPlaceholder(team, x, y);
 
       const hasSeed = saved?.hasSeed !== false;
       const growthStage = Math.max(0, Math.min(MAX_CROP_GROWTH_STAGE, Number(saved?.growthStage || 0)));
@@ -441,6 +477,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
     scene.towerPressureController?.restoreSnapshot?.(snapshot?.parcels?.towerPressure, scene, snapshot);
 
     restorePlayers(scene, snapshot, buildingRegistry);
+    scene.restoreShockerBossState?.(snapshot?.progression?.shockerBoss || null);
     restoreQueuedFarmPreviews(scene);
     restoreQueuedBuildVisuals(scene);
 

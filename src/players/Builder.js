@@ -9,6 +9,7 @@ import { Manager } from '../Manager/Manager.js';
 import { UI_ITEM_TYPES } from '../UI/UIConstants.js';
 import { StorageBuilding } from '../buildings/Storage.js';
 import { Wall } from '../buildings/Wall.js';
+import { buildingManager } from '../Manager/buildingManager.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
 import builderWalkDown from 'url:../assets/players/builder/builder_walk_down.png';
@@ -123,11 +124,20 @@ export class Builder {
             return;
         }
 
+        if (
+            troop.task &&
+            troop.state === CONTROL_STATES.FIX_BUILDING &&
+            Scheduler.hasAvailableBuilderBuildWork?.(troop)
+        ) {
+            buildingManager.interruptBuilderFixForQueuedBuild?.(troop);
+        }
+
         // If we still have a task after tracking (i.e., not dropped by flee), just work it.
         if (troop.task) return;
 
         if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
+        if (Player.tryReturnIdleTroopToTown?.(troop)) return;
         if (!troop.task && !troop.track && troop.state === CONTROL_STATES.TRACK_MODE && !troop.roam) {
             Player.roam(troop);
         }

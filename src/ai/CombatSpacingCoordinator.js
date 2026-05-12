@@ -152,6 +152,12 @@ export class CombatSpacingCoordinator {
             ? opts.assignmentPriorityFn
             : null;
         const teamNumber = troop.body?.team ?? 1;
+        const priorityWeight = Number.isFinite(opts.priorityWeight) ? Number(opts.priorityWeight) : 100000;
+        const assignmentWeight = Number.isFinite(opts.assignmentWeight) ? Number(opts.assignmentWeight) : 10000;
+        const pressureWeight = Number.isFinite(opts.pressureWeight) ? Number(opts.pressureWeight) : 1;
+        const anchorWeight = Number.isFinite(opts.anchorWeight) ? Number(opts.anchorWeight) : 1;
+        const troopWeight = Number.isFinite(opts.troopWeight) ? Number(opts.troopWeight) : 0.2;
+        const keepFocusWeight = Number.isFinite(opts.keepFocusWeight) ? Number(opts.keepFocusWeight) : 1.5;
 
         let viable = targets.filter(target =>
             target?.active &&
@@ -175,14 +181,14 @@ export class CombatSpacingCoordinator {
             const assignmentPriorityScore = Number(assignmentPriorityFn?.(target) ?? 0);
             const pressureScore = this.getAssignmentPressure(teamNumber, target, { excludeTroop: troop });
             const anchorScore = worldDistance(anchor, target);
-            const troopScore = worldDistance(troop, target) * 0.2;
-            const keepFocusBonus = target === currentTarget ? -(SQUARESIZE * 1.5) : 0;
+            const troopScore = worldDistance(troop, target) * troopWeight;
+            const keepFocusBonus = target === currentTarget ? -(SQUARESIZE * keepFocusWeight) : 0;
 
             const score =
-                priorityScore * 100000 +
-                assignmentPriorityScore * 10000 +
-                pressureScore +
-                anchorScore +
+                priorityScore * priorityWeight +
+                assignmentPriorityScore * assignmentWeight +
+                pressureScore * pressureWeight +
+                anchorScore * anchorWeight +
                 troopScore +
                 keepFocusBonus;
 

@@ -5,6 +5,13 @@ import { Teams } from "../Teams.js";
 import { makeButton } from "../parcelSpawn/ui/makeButton.js";
 import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
+import { getContractMoneyCost } from "../balance/GameBalance.js";
+import {
+  getSlotFavorBannerText,
+  getSlotFavorEffectText,
+  getSlotFavorIconText,
+  getSlotFavorShortLabel,
+} from "../parcel_system/SlotFavorSystem.js";
 
 const SLOT_ORDER = ["N", "E", "S", "W"];
 const SLOT_LABELS = {
@@ -26,6 +33,7 @@ const CONTRACT_DEFS = {
       "Timer-based resource run.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("FOREST"))}`,
+      `Cash Cost: $${getContractMoneyCost(scene, "FOREST")}`,
     ],
   },
   ROCK: {
@@ -37,6 +45,7 @@ const CONTRACT_DEFS = {
       "Timer-based resource run.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("ROCK"))}`,
+      `Cash Cost: $${getContractMoneyCost(scene, "ROCK")}`,
     ],
   },
   PRESSURE: {
@@ -48,11 +57,12 @@ const CONTRACT_DEFS = {
     emoji: "🏪",
     title: "Market Contract",
     color: 0x14384c,
-    lines: () => [
+    lines: (scene) => [
       "Temporary parcel storefront.",
       "Sells bailout cards only.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("MARKET"))}`,
+      `Cash Cost: $${getContractMoneyCost(scene, "MARKET")}`,
     ],
   },
   FARM: {
@@ -64,6 +74,7 @@ const CONTRACT_DEFS = {
       "Mixed seed and berry bushes grow there.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("FARM"))}`,
+      `Cash Cost: $${getContractMoneyCost(scene, "FARM")}`,
     ],
   },
   MILITIA: {
@@ -75,6 +86,7 @@ const CONTRACT_DEFS = {
       "Extra bodies for a short run.",
       "",
       `Permit Cost: ${formatPermitCostText(getContractPermitCost("MILITIA"))}`,
+      `Cash Cost: $${getContractMoneyCost(scene, "MILITIA")}`,
     ],
   },
   LOCKED_MILITIA: {
@@ -110,6 +122,7 @@ export class ContractHud {
     this.root = scene.add.container(0, 0).setDepth(UIDEPTH + 5);
     this.squares = new Map();
     this.popupObjects = [];
+    this.popupButtonRefs = new Map();
     this.popupState = null;
     this._popupTween = null;
     this._clusterTween = null;
@@ -152,6 +165,7 @@ export class ContractHud {
 
   focusSlot(slotId) {
     if (!this._hudVisible || !slotId) return false;
+    if (!this._canPerformTutorialAction("contractHud.slot", { slotId })) return false;
     const status = this._getSlotStatus(slotId);
     if (!status) return false;
     if (status.kind === "locked-empty") {
@@ -160,18 +174,87 @@ export class ContractHud {
     }
     if (status.kind === "empty") {
       this._openChooser(slotId);
+      this._notifyTutorialAction("contractHud.slot", { slotId });
       return true;
     }
     this._openSummary(slotId);
+    this._notifyTutorialAction("contractHud.slot", { slotId });
     return true;
   }
 
-  setExternalHover(slotId) {
+  setExternalHover(slotId, hovered = false) {
     const slot = this.squares.get(slotId);
     if (!slot) return;
-    if (!slot.externalHovered) return;
-    slot.externalHovered = false;
+    slot.externalHovered = !!hovered;
     this._applySquareVisual(slotId, this._getSlotStatus(slotId));
+  }
+
+  getTutorialTargetBounds(key) {
+    if (!key) return null;
+    if (key.startsWith("slot:")) {
+      const slotId = key.slice("slot:".length);
+      const slot = this.squares.get(slotId);
+      if (!slot?.group || !slot?.zone) return null;
+      return this._boundsFromLocal(slot.group, slot.zone.x, slot.zone.y, slot.zone.width, slot.zone.height);
+    }
+
+    if (key.startsWith("button:")) {
+      const buttonKey = key.slice("button:".length);
+      const button = this.popupButtonRefs.get(buttonKey);
+      if (!button) return null;
+      return this._boundsFromLocal(button, 0, 0, button.tutorialW || button.width || 90, button.tutorialH || button.height || 32);
+    }
+
+    return null;
+  }
+
+  _boundsFromLocal(obj, localX = 0, localY = 0, width = 1, height = 1) {
+    const matrix = obj?.getWorldTransformMatrix?.();
+    if (!matrix) {
+      return {
+        x: (obj?.x ?? 0) + localX - width / 2,
+        y: (obj?.y ?? 0) + localY - height / 2,
+        width,
+        height,
+      };
+    }
+
+    const point = matrix.transformPoint
+      ? matrix.transformPoint(localX, localY)
+      : { x: (matrix.tx ?? 0) + localX, y: (matrix.ty ?? 0) + localY };
+    const scaleX = Math.max(0.0001, Math.hypot(matrix.a ?? 1, matrix.b ?? 0));
+    const scaleY = Math.max(0.0001, Math.hypot(matrix.c ?? 0, matrix.d ?? 1));
+    const w = width * scaleX;
+    const h = height * scaleY;
+    return {
+      x: point.x - w / 2,
+      y: point.y - h / 2,
+      width: w,
+      height: h,
+    };
+  }
+
+  _getTutorialManager() {
+    return this.world?.tutorialManager || this.scene?.tutorialManager || null;
+  }
+
+  _canPerformTutorialAction(action, payload = {}) {
+    const tutorial = this._getTutorialManager();
+    return !tutorial || tutorial.canPerformAction?.(action, payload) !== false;
+  }
+
+  _notifyTutorialAction(action, payload = {}) {
+    this._getTutorialManager()?.notifyAction?.(action, payload);
+  }
+
+  _tryClosePopup() {
+    if (!this._canPerformTutorialAction("contractHud.close")) return;
+    this.closePopup();
+  }
+
+  _tryBackToChooser(slotId) {
+    if (!this._canPerformTutorialAction("contractHud.back", { slotId })) return;
+    this._openChooser(slotId);
   }
 
   _getWorldNowMs() {
@@ -213,6 +296,30 @@ export class ContractHud {
 
   _showParcelLockedMessage() {
     showAlert(this.scene, "Parcel contracts stay open during every phase.", "#a7f3d0");
+  }
+
+  _getPurchaseContext(slotId, type, difficulty = 1) {
+    const pm = this.world?.parcelManager;
+    if (!pm?.getContractPurchaseContext) {
+      return {
+        favor: null,
+        moneyCost: getContractMoneyCost(this.world ?? this.scene, type, difficulty),
+        durationMs: 0,
+        completionBonusMoney: 0,
+      };
+    }
+    return pm.getContractPurchaseContext(slotId, type, difficulty);
+  }
+
+  _getSlotFavor(slotId) {
+    return this.world?.parcelManager?.getSlotFavor?.(slotId) ?? null;
+  }
+
+  refreshForParcelStateChange() {
+    this._refreshSquares();
+    if (this.popup.visible && this.popupState) {
+      this._renderPopup();
+    }
   }
 
   _getNorthFortArrival() {
@@ -529,7 +636,7 @@ export class ContractHud {
     if (!slot || !status) return;
 
     const fillAlpha = status.fillAlpha ?? 0.94;
-    const isHovered = !!slot.hovered;
+    const isHovered = !!slot.hovered || !!slot.externalHovered;
     const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
     const iconColor = status.iconColor ?? "#ffffff";
 
@@ -606,15 +713,29 @@ export class ContractHud {
         };
       }
 
+    const favor = this._getSlotFavor(slotId);
+    if (favor) {
       return {
         kind: "empty",
-        iconText: "+",
-        timerText: "",
-        fillColor: 0x0b1220,
-        strokeColor: 0xdbeafe,
-        iconSize: 34,
-        fillAlpha: 0,
+        iconText: getSlotFavorIconText(favor),
+        timerText: getSlotFavorShortLabel(favor),
+        fillColor: 0x10263a,
+        strokeColor: 0x86d7ff,
+        iconSize: 24,
+        fillAlpha: 0.88,
+        favor,
       };
+    }
+
+    return {
+      kind: "empty",
+      iconText: "+",
+      timerText: "",
+      fillColor: 0x0b1220,
+      strokeColor: 0xdbeafe,
+      iconSize: 34,
+      fillAlpha: 0,
+    };
     }
 
   _getActiveContract(slotId) {
@@ -775,7 +896,13 @@ export class ContractHud {
   }
 
   _onSquareClicked(slotId) {
+    if (!this._canPerformTutorialAction("contractHud.slot", { slotId })) return;
+
     if (this.popupState?.slotId === slotId) {
+      if (this._getTutorialManager()?.isActive?.()) {
+        this._getTutorialManager()?.blockAction?.("Choose the highlighted contract next.");
+        return;
+      }
       this.closePopup();
       return;
     }
@@ -787,10 +914,12 @@ export class ContractHud {
     }
     if (status.kind === "empty") {
       this._openChooser(slotId);
+      this._notifyTutorialAction("contractHud.slot", { slotId });
       return;
     }
 
     this._openSummary(slotId);
+    this._notifyTutorialAction("contractHud.slot", { slotId });
   }
 
   _openFortPopup() {
@@ -812,6 +941,8 @@ export class ContractHud {
   }
 
   _openDetail(slotId, type) {
+    if (!this._canPerformTutorialAction("contractHud.type", { slotId, type })) return;
+
     if (type === "MILITIA" && !this._canAccessMilitia()) {
       this._showMilitiaLockedMessage();
       return;
@@ -829,6 +960,7 @@ export class ContractHud {
     this._renderPopup();
     if (animatePopup) this._animatePopupOpen(slotId);
     else this._animateSquare(slotId, "open");
+    this._notifyTutorialAction("contractHud.type", { slotId, type });
   }
 
   _openSummary(slotId) {
@@ -972,12 +1104,13 @@ export class ContractHud {
       this.popupBody.setText([
         `Time Left: ${fmtMMSS(remainingMs)}`,
         `${def.title} is active.`,
+        ...(inst?.slotFavor ? [`Slot Bonus: ${getSlotFavorShortLabel(inst.slotFavor)}`] : []),
       ].join("\n"));
     }
 
     if (withButtons) {
       this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() },
+        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
       ]);
     }
   }
@@ -993,7 +1126,7 @@ export class ContractHud {
       this.popupBody.setPosition(18, 52);
       this.popupBody.setText(fortPopup.body);
       this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() },
+        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
       ]);
       return;
 
@@ -1008,7 +1141,7 @@ export class ContractHud {
       this.popupBody.setPosition(18, 52);
       this.popupBody.setText(this._getFortSummaryLines().join("\n"));
       this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() },
+        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
       ]);
       return;
     }
@@ -1026,7 +1159,18 @@ export class ContractHud {
       });
       this.popupTitle.setText(`${slotLabel} Contract`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText("Pick a contract to inspect, then buy it here.");
+      const slotFavor = this._getSlotFavor(slotId);
+      const favorBanner = getSlotFavorBannerText(slotFavor);
+      this.popupBody.setText(
+        favorBanner
+          ? [
+              "Pick a contract to inspect, then buy it here.",
+              "",
+              `Slot Bonus: ${favorBanner.title}`,
+              favorBanner.detail,
+            ].join("\n")
+          : "Pick a contract to inspect, then buy it here."
+      );
       const buttons = [];
       this._getBuyableTypes().forEach((type, index) => {
         const def = CONTRACT_DEFS[type];
@@ -1037,6 +1181,8 @@ export class ContractHud {
 
         const isLockedMilitia = type === "LOCKED_MILITIA";
         const cost = isLockedMilitia ? 0 : getContractPermitCost(type, 1);
+        const purchase = isLockedMilitia ? null : this._getPurchaseContext(slotId, type, 1);
+        const moneyCost = isLockedMilitia ? 0 : Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, 1)));
 
         buttons.push({
           x,
@@ -1045,7 +1191,8 @@ export class ContractHud {
           h: 34,
           label: isLockedMilitia
             ? `🔒 Level 3`
-            : `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)}`,
+            : `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)} + $${moneyCost}`,
+          tutorialKey: isLockedMilitia ? null : `contract:${type}`,
           onClick: () => {
             if (isLockedMilitia) {
               this._showMilitiaLockedMessage();
@@ -1055,7 +1202,7 @@ export class ContractHud {
           },
         });
       });
-      buttons.push({ x: 140, y: 228, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() });
+      buttons.push({ x: 140, y: 228, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() });
       this._addPopupButtons(buttons);
       return;
     }
@@ -1077,7 +1224,7 @@ export class ContractHud {
           "Militia parcel is not available yet.",
         ].join("\n"));
         this._addPopupButtons([
-          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._openChooser(slotId) },
+          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
         ]);
         return;
       }
@@ -1096,23 +1243,27 @@ export class ContractHud {
         this.popupBody.setText([
           `Difficulty: ${"💀".repeat(diff)}`,
           `Permit Cost: ${formatPermitCostText(getContractPermitCost("PRESSURE", diff))}`,
+          `Cash Cost: $${getContractMoneyCost(this.world ?? this.scene, "PRESSURE", diff)}`,
           `Max payout: $${est.gross}`,
-          `Spawners: ${diff}`,
-          `Raiders: ${diff * (PRESSURE.baseEnemiesPerSpawner ?? 3)}`,
+          `Spawners: ${est.spawners}`,
+          `Enemies: ${est.totalKills}`,
         ].join("\n"));
 
         const buttons = [
           { x: 56, y: 158, w: 60, h: 32, label: "💀 1", onClick: () => { this.popupState.difficulty = 1; this._renderPopup(); } },
           { x: 140, y: 158, w: 60, h: 32, label: "💀 2", onClick: () => { this.popupState.difficulty = 2; this._renderPopup(); } },
           { x: 224, y: 158, w: 60, h: 32, label: "💀 3", onClick: () => { this.popupState.difficulty = 3; this._renderPopup(); } },
-          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._openChooser(slotId) },
-          { x: 202, y: 220, w: 90, h: 32, label: "Start", onClick: () => this._commit(slotId, { type: "PRESSURE", difficulty: diff }) },
+          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
+          { x: 202, y: 220, w: 90, h: 32, label: "Start", tutorialKey: "contractBuy:PRESSURE", onClick: () => this._commit(slotId, { type: "PRESSURE", difficulty: diff }) },
         ];
         this._addPopupButtons(buttons);
         return;
       }
 
       const def = CONTRACT_DEFS[type];
+      const purchase = this._getPurchaseContext(slotId, type, 1);
+      const favorBanner = getSlotFavorBannerText(purchase.favor);
+      const favorEffect = getSlotFavorEffectText(this.world ?? this.scene, purchase.favor, { type, difficulty: 1 });
       this._setPopupTheme({
         bgColor: def.color ?? 0x1f2937,
         bgAlpha: 0.36,
@@ -1122,10 +1273,13 @@ export class ContractHud {
       });
       this.popupTitle.setText(`${def.emoji} ${def.title}`);
       this.popupBody.setPosition(18, 52);
-      this.popupBody.setText((def.lines?.(this.world ?? this.scene) ?? []).join("\n"));
+      this.popupBody.setText([
+        ...(def.lines?.(this.world ?? this.scene) ?? []),
+        ...(favorBanner ? ["", `Slot Bonus: ${favorBanner.title}`, favorEffect || favorBanner.detail] : []),
+      ].join("\n"));
       this._addPopupButtons([
-        { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._openChooser(slotId) },
-        { x: 202, y: 220, w: 90, h: 32, label: "Buy", onClick: () => this._commit(slotId, { type }) },
+        { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
+        { x: 202, y: 220, w: 90, h: 32, label: "Buy", tutorialKey: `contractBuy:${type}`, onClick: () => this._commit(slotId, { type }) },
       ]);
       return;
     }
@@ -1187,22 +1341,30 @@ export class ContractHud {
       this.popupBody.setText([
         `Time Left: ${fmtMMSS(remainingMs)}`,
         `${def.title} is active.`,
+        ...(inst?.slotFavor ? [`Slot Bonus: ${getSlotFavorShortLabel(inst.slotFavor)}`] : []),
       ].join("\n"));
     }
 
     this._addPopupButtons([
-      { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this.closePopup() },
+      { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
     ]);
   }
 
   _clearPopupButtons() {
     this.popupObjects.forEach((obj) => obj?.destroy?.());
     this.popupObjects = [];
+    this.popupButtonRefs.clear();
   }
 
   _addPopupButtons(defs) {
     defs.forEach((cfg) => {
       const btn = makeButton(this.scene, cfg);
+      btn.tutorialKey = cfg.tutorialKey || null;
+      btn.tutorialW = cfg.w ?? 120;
+      btn.tutorialH = cfg.h ?? 34;
+      if (btn.tutorialKey) {
+        this.popupButtonRefs.set(btn.tutorialKey, btn);
+      }
       this.popup.add(btn);
       this.popupObjects.push(btn);
     });
@@ -1222,6 +1384,15 @@ export class ContractHud {
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
+    const tutorial = this.world?.tutorialManager || this.scene?.tutorialManager || null;
+    if (tutorial && !tutorial.canPerformAction?.("parcel.commit", {
+      type,
+      slotId,
+      source: "contractHud",
+    })) {
+      return;
+    }
+
     if (type === "MILITIA" && !this._canAccessMilitia()) {
       this._showMilitiaLockedMessage();
       return;
@@ -1229,10 +1400,20 @@ export class ContractHud {
     const cost = payload.cost != null
       ? payload.cost
       : getContractPermitCost(type, difficulty);
+    const purchase = this._getPurchaseContext(slotId, type, difficulty);
+    const moneyCost = Math.max(0, Number(payload.moneyCost ?? purchase.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, difficulty)));
 
     if (cost > 0) {
       if (!this.scene.checkSufficientPermits(cost)) return;
       this.scene.updatePermits(-cost);
+    }
+
+    if (moneyCost > 0) {
+      if (!this.scene.checkSufficientFunds(moneyCost)) {
+        if (cost > 0) this.scene.updatePermits(+cost);
+        return;
+      }
+      this.scene.updateMoney(-moneyCost);
     }
 
     let started = null;
@@ -1240,19 +1421,27 @@ export class ContractHud {
       if (type === "FOREST") started = pm.startForest(slotId);
       else if (type === "ROCK") started = pm.startRock(slotId);
       else if (type === "FARM") started = pm.startFarm?.(slotId);
-      else if (type === "MILITIA") started = pm.startMilitia?.(slotId);
+      else if (type === "MILITIA") started = pm.startMilitia?.(slotId, { moneyCost });
       else if (type === "PRESSURE") started = pm.startPressure(slotId, difficulty, { source: "manual" });
       else if (type === "MARKET") started = pm.startMarket(slotId);
     } catch (err) {
       console.error("ContractHud commit failed:", err);
+      if (cost > 0) this.scene.updatePermits(+cost);
+      if (moneyCost > 0) this.scene.updateMoney(+moneyCost);
     }
 
     if (!started) {
       if (cost > 0) this.scene.updatePermits(+cost);
+      if (moneyCost > 0) this.scene.updateMoney(+moneyCost);
       return;
     }
 
-    pm.markContractPermitCost?.(started, cost);
+    tutorial?.notifyAction?.("parcel.commit", {
+      type,
+      slotId,
+      source: "contractHud",
+      contract: started,
+    });
 
     this.closePopup(true, "buy", slotId);
   }

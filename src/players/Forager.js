@@ -139,7 +139,8 @@ export class Forager {
         if (forager.task) return;
 
         if (Player.tryEnterQueuedSleep?.(forager)) return;
-        if (Scheduler.stepUnit(forager)) return;
+        if (Player.tryReturnIdleTroopToTown?.(forager)) return;
+        // if (Scheduler.stepUnit(forager)) return;
         
         if (!forager.task && forager.state === CONTROL_STATES.TRACK_MODE && !forager.roam) {
             Player.roam(forager);

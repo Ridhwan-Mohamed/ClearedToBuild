@@ -84,6 +84,132 @@ export function createBuildingHoverPanel(
   return root;
 }
 
+export function createGlassStatusBubble(
+  scene,
+  {
+    x = 0,
+    y = 0,
+    width = 120,
+    height = 34,
+    radius = 18,
+    depth = UIDEPTH,
+    scrollFactor = 1,
+    fillColor = 0x143347,
+    fillAlpha = 0.92,
+    strokeColor = 0xaee8ff,
+    strokeAlpha = 0.22,
+    accentColor = 0x7dd3fc,
+    accentAlpha = 0.18,
+    shineAlpha = 0.1,
+    shadowAlpha = 0.3,
+  } = {}
+) {
+  const root = scene.add.container(x, y).setDepth(depth);
+  if (scrollFactor !== 1) {
+    root.setScrollFactor(scrollFactor);
+  }
+
+  const shadow = scene.add.graphics();
+  const bg = scene.add.graphics();
+  const glow = scene.add.graphics();
+  const shine = scene.add.graphics();
+  const accent = scene.add.graphics();
+
+  root.add([shadow, bg, glow, shine, accent]);
+
+  root.redraw = (next = {}) => {
+    const bubbleWidth = Math.max(44, Number(next.width ?? root.bubbleWidth ?? width) || width);
+    const bubbleHeight = Math.max(22, Number(next.height ?? root.bubbleHeight ?? height) || height);
+    const bubbleRadius = Math.max(10, Number(next.radius ?? root.bubbleRadius ?? radius) || radius);
+    const nextFillColor = next.fillColor ?? root.fillColor ?? fillColor;
+    const nextFillAlpha = next.fillAlpha ?? root.fillAlpha ?? fillAlpha;
+    const nextStrokeColor = next.strokeColor ?? root.strokeColor ?? strokeColor;
+    const nextStrokeAlpha = next.strokeAlpha ?? root.strokeAlpha ?? strokeAlpha;
+    const nextAccentColor = next.accentColor ?? root.accentColor ?? accentColor;
+    const nextAccentAlpha = next.accentAlpha ?? root.accentAlpha ?? accentAlpha;
+    const nextShineAlpha = next.shineAlpha ?? root.shineAlpha ?? shineAlpha;
+    const nextShadowAlpha = next.shadowAlpha ?? root.shadowAlpha ?? shadowAlpha;
+
+    root.bubbleWidth = bubbleWidth;
+    root.bubbleHeight = bubbleHeight;
+    root.bubbleRadius = bubbleRadius;
+    root.fillColor = nextFillColor;
+    root.fillAlpha = nextFillAlpha;
+    root.strokeColor = nextStrokeColor;
+    root.strokeAlpha = nextStrokeAlpha;
+    root.accentColor = nextAccentColor;
+    root.accentAlpha = nextAccentAlpha;
+    root.shineAlpha = nextShineAlpha;
+    root.shadowAlpha = nextShadowAlpha;
+
+    shadow.clear();
+    shadow.fillStyle(PANEL_SHADOW, nextShadowAlpha);
+    shadow.fillRoundedRect(
+      Math.round(-bubbleWidth * 0.5) + 2,
+      Math.round(-bubbleHeight * 0.5) + 4,
+      bubbleWidth,
+      bubbleHeight,
+      bubbleRadius
+    );
+
+    bg.clear();
+    bg.fillStyle(nextFillColor, nextFillAlpha);
+    bg.lineStyle(2, nextStrokeColor, nextStrokeAlpha);
+    bg.fillRoundedRect(
+      Math.round(-bubbleWidth * 0.5),
+      Math.round(-bubbleHeight * 0.5),
+      bubbleWidth,
+      bubbleHeight,
+      bubbleRadius
+    );
+    bg.strokeRoundedRect(
+      Math.round(-bubbleWidth * 0.5),
+      Math.round(-bubbleHeight * 0.5),
+      bubbleWidth,
+      bubbleHeight,
+      bubbleRadius
+    );
+
+    glow.clear();
+    glow.fillStyle(nextAccentColor, 0.07);
+    glow.fillRoundedRect(
+      Math.round(-bubbleWidth * 0.5) + 4,
+      Math.round(-bubbleHeight * 0.5) + 4,
+      Math.max(16, bubbleWidth - 8),
+      Math.max(12, bubbleHeight - 8),
+      Math.max(8, bubbleRadius - 5)
+    );
+
+    shine.clear();
+    shine.fillStyle(0xffffff, nextShineAlpha);
+    shine.fillRoundedRect(
+      Math.round(-bubbleWidth * 0.5) + 10,
+      Math.round(-bubbleHeight * 0.5) + 5,
+      Math.max(16, bubbleWidth - 20),
+      Math.max(8, Math.round(bubbleHeight * 0.34)),
+      Math.max(6, Math.round(bubbleRadius * 0.55))
+    );
+
+    accent.clear();
+    accent.fillStyle(nextAccentColor, nextAccentAlpha);
+    accent.fillRoundedRect(
+      Math.round(-bubbleWidth * 0.5) + 8,
+      Math.round(-bubbleHeight * 0.5) + 8,
+      Math.max(12, Math.round(bubbleWidth * 0.42)),
+      Math.max(7, Math.round(bubbleHeight * 0.18)),
+      Math.max(5, Math.round(bubbleRadius * 0.4))
+    );
+  };
+
+  root.redraw();
+  root.bubbleShadow = shadow;
+  root.bubbleBg = bg;
+  root.bubbleGlow = glow;
+  root.bubbleShine = shine;
+  root.bubbleAccent = accent;
+  return root;
+}
+
 export function getStructuralBarAnchor(
   sprite,
   {

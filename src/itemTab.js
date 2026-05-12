@@ -77,6 +77,9 @@ import pine2 from 'url:./assets/pine2.png'
 import pine1 from 'url:./assets/pine1.png'
 import rock2 from 'url:./assets/rock2.png'
 import rock1 from 'url:./assets/rock1.png'
+import goldOre3 from 'url:./assets/gold_ore3.png'
+import goldOre2 from 'url:./assets/gold_ore2.png'
+import goldOre1 from 'url:./assets/gold_ore1.png'
 import tower from 'url:./assets/townTower.png'
 import tower_destroyed from 'url:./assets/fortTiles/tower_destroyed.png'
 import prison_closed from 'url:./assets/fortTiles/prison_closed.png'
@@ -108,6 +111,9 @@ export class itemTab extends Phaser.Scene {
         scene.load.image('rock3', rock3);
         scene.load.image('rock2', rock2);
         scene.load.image('rock1', rock1);
+        scene.load.image('gold_ore3', goldOre3);
+        scene.load.image('gold_ore2', goldOre2);
+        scene.load.image('gold_ore1', goldOre1);
         scene.load.image('image3', flower);
         scene.load.image('image4', brick);
         scene.load.image('image5', dirt_interior);

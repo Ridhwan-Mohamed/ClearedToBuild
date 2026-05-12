@@ -1,10 +1,11 @@
-import { SQUARESIZE, TILE_TYPES, removeFromArray, showAlert } from "../constants";
+import { SQUARESIZE, TILE_TYPES, removeFromArray, showAlert, showGhostText } from "../constants";
 import { Teams } from "../Teams";
 import { Map as GameMap } from "../map";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { buildingManager } from "../Manager/buildingManager";
 import { VisibilitySystem } from "../UI/VisibilitySystem";
 import { OrderRunner } from "../orders/OrderRunner";
+import { getGoldOrePayout, roundPrice } from "../balance/GameBalance";
 
 export class RockNode {
   static scene;
@@ -14,24 +15,28 @@ export class RockNode {
   }
 
   // gridX, gridY are TOP-LEFT of the blocked footprint
-  constructor(gridX, gridY, level = 1) {
+  constructor(gridX, gridY, level = 1, opts = {}) {
     const scene = RockNode.scene;
     this.gridX = gridX;
     this.gridY = gridY;
-    this.resourceTileType = TILE_TYPES.rock;
-    this.resourceKind = "stone";
+    this.resourceTileType = opts.tileType || TILE_TYPES.rock;
+    this.resourceKind = opts.resourceKind || (this.resourceTileType?.name === TILE_TYPES.goldOre?.name ? "gold" : "stone");
     this.footprintW = this.resourceTileType.lenX ?? 1;
     this.footprintH = this.resourceTileType.lenY ?? 1;
+    this.maxHealth = 3;
     this.health = 3;
     this.task = null;
     this._lastClickTime = 0;
     this.flashTween = null;
+    this.active = true;
+    this.moneyReward = Math.max(0, Number(opts.moneyReward ?? (this.resourceKind === "gold" ? getGoldOrePayout(scene) : 0)) || 0);
+    this.moneyRewardRemaining = Math.max(0, Number(opts.moneyRewardRemaining ?? this.moneyReward) || 0);
 
     const cx = (gridX + this.footprintW / 2) * SQUARESIZE;
     const cy = (gridY + this.footprintH / 2) * SQUARESIZE;
     this.sprite = scene.add
-      .sprite(cx, cy, "rock3")
-      .setDepth(TILE_TYPES.rock.depth)
+      .sprite(cx, cy, this.resourceTileType?.value || "rock3")
+      .setDepth(this.resourceTileType?.depth ?? TILE_TYPES.rock.depth)
       .setInteractive({ cursor: "pointer" });
 
     this.sprite.ownerNode = this;
@@ -49,21 +54,24 @@ export class RockNode {
 
   setLevel(level) {
     this.level = level;
-    if (level <= 1) this.sprite.setTexture("rock3");
-    else if (level === 2) this.sprite.setTexture("rock2");
-    else this.sprite.setTexture("rock1");
+    const textures = Array.isArray(this.resourceTileType?.images) && this.resourceTileType.images.length >= 3
+      ? this.resourceTileType.images
+      : TILE_TYPES.rock.images;
+    if (level <= 1) this.sprite.setTexture(textures[2]);
+    else if (level === 2) this.sprite.setTexture(textures[1]);
+    else this.sprite.setTexture(textures[0]);
   }
 
   setUpHitDetection() {
     this.sprite.on("pointerover", () => {
-      RockNode.scene.setForagerRouteHover?.(this, "stone", true);
+      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, true);
       const inPlaceMode = RockNode.scene.breakItems && RockNode.scene.breakItems.text === "Place";
       if (inPlaceMode) this.sprite.setTint(0x888888);
       else this.sprite.setTint(0xaaaaaa);
     });
 
     this.sprite.on("pointerout", () => {
-      RockNode.scene.setForagerRouteHover?.(this, "stone", false);
+      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
       if (!this.flashTween) this.sprite.clearTint();
     });
 
@@ -72,7 +80,7 @@ export class RockNode {
       if (!team) return;
       const selection = OrderRunner.getSelectionProfile();
 
-      if (RockNode.scene.tryIssueForagerRouteToNode?.(this, "stone")) {
+      if (RockNode.scene.tryIssueForagerRouteToNode?.(this, this.resourceKind)) {
         return;
       }
 
@@ -83,8 +91,8 @@ export class RockNode {
       }
       this._lastClickTime = now;
 
-      if (!buildingManager.isBlockAccessible(this.gridX, this.gridY, TILE_TYPES.rock)) {
-        showAlert(RockNode.scene, "Can't reach that resource");
+      if (!buildingManager.isBlockAccessible(this.gridX, this.gridY, this.resourceTileType)) {
+        showAlert(RockNode.scene, `Can't reach that ${this.resourceTileType?.label || "resource"}`);
         return;
       }
 
@@ -136,8 +144,38 @@ export class RockNode {
     }
   }
 
+  grantGatherReward(scene = RockNode.scene, _sprite = null, nextHealth = this.health) {
+    if (this.resourceKind !== "gold") return false;
+    const remainingReward = Math.max(0, Number(this.moneyRewardRemaining || 0));
+    if (!(remainingReward > 0)) return true;
+
+    const maxHealth = Math.max(1, Number(this.maxHealth || 1));
+    const next = Math.max(0, Number(nextHealth || 0));
+    const currentHitIndex = Math.max(1, (maxHealth - next));
+    const remainingWeightTotal = Array.from(
+      { length: Math.max(1, (maxHealth - currentHitIndex + 1)) },
+      (_, idx) => currentHitIndex + idx
+    ).reduce((sum, weight) => sum + weight, 0);
+    const stagedAmount = currentHitIndex < maxHealth
+      ? roundPrice((remainingReward * currentHitIndex) / Math.max(1, remainingWeightTotal), 5)
+      : remainingReward;
+    const amount = Math.max(0, Math.min(remainingReward, stagedAmount));
+    if (!(amount > 0)) return true;
+
+    const sourceX = Number(this.sprite?.x ?? ((this.gridX + this.footprintW / 2) * SQUARESIZE));
+    const sourceY = Number(this.sprite?.y ?? ((this.gridY + this.footprintH / 2) * SQUARESIZE));
+    this.moneyRewardRemaining = Math.max(0, remainingReward - amount);
+    scene?.updateMoney?.(amount, {
+      sourceWorldX: sourceX,
+      sourceWorldY: sourceY,
+    });
+    showGhostText(scene, sourceX, sourceY - 14, `+$${amount}`, 0, 0, 0, "#facc15");
+    return true;
+  }
+
   destroy() {
     if (!this.sprite) return;
+    this.active = false;
     this.stopFlash();
     if (this.lightId != null) {
       VisibilitySystem.removeLightById(this.lightId);

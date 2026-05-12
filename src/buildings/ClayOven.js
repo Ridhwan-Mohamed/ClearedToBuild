@@ -94,6 +94,63 @@ export class ClayOven {
         ClayOven.scene.events.emit('oven:added', this);
     }
 
+    getStatusBadgeState() {
+        const activeInput = this.cookingSlots?.find((slot) => slot?.item) || null;
+        const activeOutput = this.outputSlots?.find((slot) => slot?.item) || null;
+        const activeItemLabel = activeInput?.item?.label || activeInput?.item?.name || '';
+        const outputItemLabel = activeOutput?.item?.label || activeOutput?.item?.name || '';
+
+        if (activeInput && this.cooking) {
+            return {
+                key: 'cooking',
+                title: 'COOKING',
+                detail: String(activeItemLabel || 'Batch').toUpperCase(),
+                fillColor: 0x173a55,
+                fillAlpha: 0.94,
+                strokeColor: 0xc7efff,
+                strokeAlpha: 0.24,
+                accentColor: 0x74d7ff,
+                accentAlpha: 0.22,
+                textColor: '#eefbff',
+                detailColor: '#cdefff',
+            };
+        }
+
+        if (activeInput && (Number(this.fuel || 0) <= 0)) {
+            return {
+                key: 'fuel',
+                title: 'NO FUEL',
+                detail: String(activeItemLabel || 'WAITING').toUpperCase(),
+                fillColor: 0x5a2b14,
+                fillAlpha: 0.94,
+                strokeColor: 0xffd0a8,
+                strokeAlpha: 0.26,
+                accentColor: 0xffa24d,
+                accentAlpha: 0.22,
+                textColor: '#fff6ef',
+                detailColor: '#ffd8b8',
+            };
+        }
+
+        if (activeOutput) {
+            return {
+                key: 'ready',
+                title: 'READY',
+                detail: String(outputItemLabel || 'OUTPUT').toUpperCase(),
+                fillColor: 0x244226,
+                fillAlpha: 0.94,
+                strokeColor: 0xc8f8cf,
+                strokeAlpha: 0.24,
+                accentColor: 0x70e08a,
+                accentAlpha: 0.22,
+                textColor: '#f0fff2',
+                detailColor: '#d9ffe0',
+            };
+        }
+
+        return null;
+    }
+
     hasFreeSlotForItem(itemType, amount) {
         for (let i = 0; i < this.cookingSlots.length; i++) {
             const slot = this.cookingSlots[i];

@@ -8,12 +8,16 @@ import { ContractHud } from "./ContractHud.js";
 import { SelectionCommandBar } from "./SelectionCommandBar.js";
 import { Teams } from "../Teams.js";
 import { getNextHordeUnlock } from "../parcel_system/HordeUnlockTrack.js";
-import { applyPortraitKeyToSprite } from "../players/playerPortraits.js";
+import { applyPortraitKeyToSprite, getPlayerPortraitKey } from "../players/playerPortraits.js";
 import { MainMenu } from "../mainMenu.js";
 import { AudioManager } from "../Manager/AudioManager.js";
 import { SaveManager } from "../save/SaveManager.js";
 import { AchievementBoard } from "./AchievementBoard.js";
 import { MARKET_REAL_ASSETS } from "../Cards/MarketCards.js";
+import { RELIEF_PACKAGE_MONEY_GRANT, RELIEF_PACKAGE_PRICE } from "../ReliefPackageConfig.js";
+import { StorageBuilding } from "../buildings/Storage.js";
+import { ClayOven } from "../buildings/ClayOven.js";
+import { createGlassStatusBubble } from "./BuildingTheme.js";
 
 export class GameUIScene extends Phaser.Scene {
   constructor() {
@@ -32,12 +36,23 @@ export class GameUIScene extends Phaser.Scene {
     this._bridged = [];
     this._hudBuilt = false;
     this._sceneShuttingDown = false;
+    this.topHudHoverBubble = null;
+    this._topHudHoverHideTimer = null;
 
     this.alertHud = null;
     this._activeAlerts = [];
     this.topHud = null;
+    this.moneyIcon = null;
+    this.moneyIconBaseScaleX = 1;
+    this.moneyIconBaseScaleY = 1;
+    this.moneyTextBaseScaleX = 1;
+    this.moneyTextBaseScaleY = 1;
+    this.reliefPackageIcon = null;
+    this.reliefPackageHoverTarget = null;
     this.townXpHud = null;
     this.phaseClock = null;
+    this.townStatusHud = null;
+    this.townStatusHudBottomY = null;
     this.stageMetaText = null;
     this.zoomControls = null;
     this.raiderEdgeHud = null;
@@ -53,12 +68,20 @@ export class GameUIScene extends Phaser.Scene {
     this.buildTab = null;
     this.cardsTab = null;
     this.functionTab = null;
+    this.bossHud = null;
+    this._bossTarget = null;
+    this._bossIntroPresentation = null;
+    this._bossStorm = null;
     this._townLossPresentation = null;
+    this._reliefPackageRecoveryPresentation = null;
     this._townXpRewardPresentation = null;
     this._adrenalineHud = null;
     this._adrenalineUntil = 0;
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
+    this._townStatusHudSignature = null;
+    this._townStatusCycleIndex = 0;
+    this._townStatusNextCycleAt = 0;
     this._scaleResizeHandlers = [];
     this._stageMetaRecompute = null;
     this._stageMetaRefreshTimer = null;
@@ -183,6 +206,9 @@ export class GameUIScene extends Phaser.Scene {
     const world = this.worldScene;
     this._destroyPauseMenu(true);
     this._teardownStageMetaHud();
+    this._topHudHoverHideTimer?.remove?.(false);
+    this._topHudHoverHideTimer = null;
+    this._destroyReliefPackageRecoveryPresentation();
     this._destroyTownXpRewardPresentation();
     this.achievementBoard?.destroy?.();
     this.achievementBoard = null;
@@ -208,15 +234,23 @@ export class GameUIScene extends Phaser.Scene {
     this.functionTab?.destroy?.();
     this.functionTab?.container?.destroy?.(true);
     this.functionTab = null;
+    this._destroyBossHud();
+    this._destroyBossIntroPresentation();
+    this._destroyBossStorm();
     this.uiBottomBar?.ui?.destroy?.(true);
     this.uiBottomBar = null;
     this.topHud?.destroy?.(true);
     this.topHud = null;
+    this.reliefPackageIcon = null;
+    this.reliefPackageHoverTarget = null;
     this.townXpHud?.destroy?.(true);
     this.townXpHud = null;
     this._destroyAdrenalineHud();
     this.phaseClock?.destroy?.(true);
     this.phaseClock = null;
+    this.townStatusHud?.destroy?.(true);
+    this.townStatusHud = null;
+    this.townStatusHudBottomY = null;
     this.stageMetaText?.destroy?.();
     this.stageMetaText = null;
     this.stageMetaSubText?.destroy?.();
@@ -227,6 +261,9 @@ export class GameUIScene extends Phaser.Scene {
     this.raiderEdgeHud = null;
     this.alertHud?.destroy?.(true);
     this.alertHud = null;
+    this.topHudHoverBubble?.destroy?.(true);
+    this.topHudHoverBubble = null;
+    this.moneyIcon = null;
     this.moneyText = null;
     this.seedsText = null;
     this.berryText = null;
@@ -241,6 +278,9 @@ export class GameUIScene extends Phaser.Scene {
     this.topHudHoverTargets = [];
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
+    this._townStatusHudSignature = null;
+    this._townStatusCycleIndex = 0;
+    this._townStatusNextCycleAt = 0;
     this._hudBuilt = false;
 
     if (world) {
@@ -301,6 +341,7 @@ export class GameUIScene extends Phaser.Scene {
       "storage:removed",
       "storage:updated",
       "housing:updated",
+      "relief-package:changed",
       "store:unlock-changed",
       "cards:updated",
       "mode:completed",
@@ -377,6 +418,7 @@ export class GameUIScene extends Phaser.Scene {
     this._buildTopHud();
     this._buildTownXpHud();
     this._buildPhaseClock();
+    this._buildTownStatusHud();
     this._buildAchievementBoard();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
@@ -395,6 +437,7 @@ export class GameUIScene extends Phaser.Scene {
     this._buildTopHud();
     this._buildTownXpHud();
     this._buildPhaseClock();
+    this._buildTownStatusHud();
     this._buildAchievementBoard();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
@@ -742,6 +785,22 @@ export class GameUIScene extends Phaser.Scene {
     this.topHudElements.push(permitIcon, this.permitText);
     this.topHudHoverTargets.push(registerHover(permitLeftX, x - spacing, "Growth Permits"));
 
+    const reliefLeftX = x;
+    this.reliefPackageIcon = makeIcon(x, "relief_package");
+    this.reliefPackageIcon.setVisible(false);
+    x += iconSize + spacing;
+    this.topHudElements.push(this.reliefPackageIcon);
+    this.reliefPackageHoverTarget = registerHover(
+      reliefLeftX,
+      x - spacing,
+      () => this._getReliefPackageHoverLabel()
+    );
+    this.reliefPackageHoverTarget.setVisible(false);
+    if (this.reliefPackageHoverTarget.input) {
+      this.reliefPackageHoverTarget.input.enabled = false;
+    }
+    this.topHudHoverTargets.push(this.reliefPackageHoverTarget);
+
     const housingLeftX = x;
     const housingIcon = makeEmojiIcon(x, "🏠");
     x += housingIcon.width + 4;
@@ -753,7 +812,12 @@ export class GameUIScene extends Phaser.Scene {
     const centerX = W / 2;
     const moneyLeftX = centerX - 30;
     const moneyIcon = makeIcon(centerX - 30, "monies");
+    this.moneyIcon = moneyIcon;
     this.moneyText = makeText(centerX - 4, `$${world.money}`);
+    this.moneyIconBaseScaleX = moneyIcon.scaleX;
+    this.moneyIconBaseScaleY = moneyIcon.scaleY;
+    this.moneyTextBaseScaleX = this.moneyText.scaleX;
+    this.moneyTextBaseScaleY = this.moneyText.scaleY;
     this.topHudElements.push(moneyIcon, this.moneyText);
     this.topHudHoverTargets.push(registerHover(moneyLeftX, centerX - 4 + this.moneyText.width, "Money"));
 
@@ -779,6 +843,11 @@ export class GameUIScene extends Phaser.Scene {
     return `Housing: ${stats.playerCount}/${stats.capacity}\n${stats.descriptor}`;
   }
 
+  _getReliefPackageHoverLabel() {
+    if (!this.worldScene?.hasReliefPackage?.()) return "";
+    return `Relief Package Ready\nEmergency storage recovery armed`;
+  }
+
   _refreshTopHudValues(force = false) {
     if (!this.worldScene || this._sceneShuttingDown) return;
 
@@ -798,6 +867,7 @@ export class GameUIScene extends Phaser.Scene {
       stone: Number(this.worldScene.stoneAmnt ?? 0),
       permits: Number(this.worldScene.permits ?? 0),
       money: Number(this.worldScene.money ?? 0),
+      reliefPackageCount: Math.max(0, Number(this.worldScene.getReliefPackageCount?.() ?? 0)),
       needCount,
       housingPlayers: Number(housing.playerCount ?? needCount),
       housingCapacity: Number(housing.capacity ?? 0),
@@ -822,6 +892,20 @@ export class GameUIScene extends Phaser.Scene {
     this._mutateText(this.woodText, (node) => node.setText(`${snapshot.wood}`));
     this._mutateText(this.stoneText, (node) => node.setText(`${snapshot.stone}`));
     this._mutateText(this.permitText, (node) => node.setText(`${snapshot.permits}`));
+    const hasReliefPackage = snapshot.reliefPackageCount > 0;
+    if (this.reliefPackageIcon) {
+      this.reliefPackageIcon.setVisible(hasReliefPackage);
+      this.reliefPackageIcon.setAlpha(hasReliefPackage ? 1 : 0);
+    }
+    if (this.reliefPackageHoverTarget) {
+      this.reliefPackageHoverTarget.setVisible(hasReliefPackage);
+      if (this.reliefPackageHoverTarget.input) {
+        this.reliefPackageHoverTarget.input.enabled = hasReliefPackage;
+      }
+      if (!hasReliefPackage) {
+        this._hideTopHudHover(true);
+      }
+    }
     this._mutateText(this.housingText, (node) => {
       node.setText(`${snapshot.housingPlayers}/${snapshot.housingCapacity}`);
       const housingColor =
@@ -1199,6 +1283,167 @@ export class GameUIScene extends Phaser.Scene {
     });
   }
 
+  _getUiPoint(target) {
+    if (!target) return null;
+    const bounds = target.getBounds?.();
+    if (bounds && Number.isFinite(bounds.centerX) && Number.isFinite(bounds.centerY)) {
+      return { x: bounds.centerX, y: bounds.centerY };
+    }
+
+    let x = Number(target.x);
+    let y = Number(target.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    let parent = target.parentContainer || null;
+    while (parent) {
+      x += Number(parent.x || 0);
+      y += Number(parent.y || 0);
+      parent = parent.parentContainer || null;
+    }
+    return { x, y };
+  }
+
+  _getMoneyHudTargetPoint() {
+    const textPoint = this._getUiPoint(this.moneyText);
+    const iconPoint = this._getUiPoint(this.moneyIcon);
+    if (textPoint && iconPoint) {
+      return {
+        x: Math.round(((textPoint.x + iconPoint.x) * 0.5) + 4),
+        y: Math.round((textPoint.y + iconPoint.y) * 0.5),
+      };
+    }
+    return textPoint || iconPoint || { x: Math.round(this.scale.width * 0.5), y: 24 };
+  }
+
+  _resolveMoneyFxSource(opts = {}) {
+    if (Number.isFinite(opts?.sourceUiX) && Number.isFinite(opts?.sourceUiY)) {
+      return { x: opts.sourceUiX, y: opts.sourceUiY };
+    }
+
+    const uiTargetPoint = this._getUiPoint(opts?.sourceUiTarget);
+    if (uiTargetPoint) return uiTargetPoint;
+
+    const cam = this.worldScene?.cameras?.main;
+    const sourceX = Number(opts?.sourceWorldX);
+    const sourceY = Number(opts?.sourceWorldY);
+    if (!cam || !Number.isFinite(sourceX) || !Number.isFinite(sourceY)) return null;
+
+    return {
+      x: Phaser.Math.Clamp(
+        (sourceX - Number(cam.scrollX || 0)) * Number(cam.zoom || 1) + Number(cam.x || 0),
+        18,
+        Math.max(18, Number(this.scale?.width || 1) - 18)
+      ),
+      y: Phaser.Math.Clamp(
+        (sourceY - Number(cam.scrollY || 0)) * Number(cam.zoom || 1) + Number(cam.y || 0),
+        18,
+        Math.max(18, Number(this.scale?.height || 1) - 18)
+      ),
+    };
+  }
+
+  _playMoneySourceParticles(amountDelta, opts = {}) {
+    if (this._sceneShuttingDown || !(amountDelta > 0)) return;
+
+    const source = this._resolveMoneyFxSource(opts);
+    if (!source) return;
+
+    const target = this._getMoneyHudTargetPoint();
+    const count = Math.max(6, Math.min(14, 5 + Math.floor(Number(amountDelta || 0) / 25)));
+    const depth = (UIDEPTH ?? 0) + 160;
+    const palette = [0xfacc15, 0xfbbf24, 0xfde68a];
+
+    for (let i = 0; i < count; i += 1) {
+      const shard = this.add.circle(
+        source.x + Phaser.Math.Between(-10, 10),
+        source.y + Phaser.Math.Between(-10, 10),
+        Phaser.Math.Between(4, 7),
+        Phaser.Utils.Array.GetRandom(palette),
+        Phaser.Math.FloatBetween(0.68, 0.94)
+      )
+        .setDepth(depth)
+        .setBlendMode(Phaser.BlendModes.ADD);
+
+      this.tweens.add({
+        targets: shard,
+        x: target.x + Phaser.Math.Between(-10, 10),
+        y: target.y + Phaser.Math.Between(-6, 6),
+        scaleX: 0.3,
+        scaleY: 0.3,
+        alpha: 0,
+        delay: i * 34,
+        duration: Phaser.Math.Between(760, 1120),
+        ease: "Cubic.easeInOut",
+        onComplete: () => shard.destroy(),
+      });
+    }
+
+    const spark = this.add.circle(target.x, target.y, 4, 0xfff1a8, 0.82)
+      .setDepth(depth + 1)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setScale(0.2);
+    this.tweens.add({
+      targets: spark,
+      scaleX: 2.8,
+      scaleY: 2.8,
+      alpha: 0,
+      duration: 260,
+      ease: "Quad.easeOut",
+      onComplete: () => spark.destroy(),
+    });
+  }
+
+  _pulseMoneyHud(color = "#facc15") {
+    const icon = this.moneyIcon;
+    const text = this.moneyText;
+    const targets = [text, icon].filter(Boolean);
+    if (!targets.length) return;
+
+    const iconBaseScaleX = Number(this.moneyIconBaseScaleX ?? icon?.scaleX ?? 1);
+    const iconBaseScaleY = Number(this.moneyIconBaseScaleY ?? icon?.scaleY ?? 1);
+    const textBaseScaleX = Number(this.moneyTextBaseScaleX ?? text?.scaleX ?? 1);
+    const textBaseScaleY = Number(this.moneyTextBaseScaleY ?? text?.scaleY ?? 1);
+
+    if (text) {
+      this.tweens.killTweensOf(text);
+      text.setScale(textBaseScaleX, textBaseScaleY);
+    }
+    if (icon) {
+      this.tweens.killTweensOf(icon);
+      icon.setScale(iconBaseScaleX, iconBaseScaleY);
+    }
+
+    this.moneyIcon?.setTint?.(0xfacc15);
+    if (text) {
+      this.tweens.add({
+        targets: text,
+        scaleX: textBaseScaleX * 1.08,
+        scaleY: textBaseScaleY * 1.08,
+        duration: 130,
+        ease: "Sine.Out",
+        yoyo: true,
+      });
+    }
+    if (icon) {
+      this.tweens.add({
+        targets: icon,
+        scaleX: iconBaseScaleX * 1.08,
+        scaleY: iconBaseScaleY * 1.08,
+        duration: 130,
+        ease: "Sine.Out",
+        yoyo: true,
+        onComplete: () => {
+          if (icon?.active) icon.setScale(iconBaseScaleX, iconBaseScaleY);
+        },
+      });
+    }
+    this._mutateText(this.moneyText, (node) => node.setFill(color));
+    this.time.delayedCall(650, () => {
+      this.moneyIcon?.clearTint?.();
+      this._mutateText(this.moneyText, (node) => node.setFill("#ffffff"));
+    });
+  }
+
   _refreshTownXpHud(force = false) {
     this.townXpHud?.refresh?.(force);
   }
@@ -1210,7 +1455,17 @@ export class GameUIScene extends Phaser.Scene {
   }
 
   _ensureTopHudHoverBubble() {
-    if (this.topHudHoverBubble) return this.topHudHoverBubble;
+    const existingBubble = this.topHudHoverBubble;
+    if (
+      existingBubble?.active !== false &&
+      existingBubble?.scene === this &&
+      this._canMutateText(existingBubble.label)
+    ) {
+      return existingBubble;
+    }
+
+    existingBubble?.destroy?.(true);
+    this.topHudHoverBubble = null;
 
     const shadow = this.add.graphics().setDepth(UIDEPTH + 22);
     const bg = this.add.graphics().setDepth(UIDEPTH + 23);
@@ -1239,10 +1494,19 @@ export class GameUIScene extends Phaser.Scene {
   }
 
   _layoutTopHudHoverBubble(label) {
-    const bubble = this._ensureTopHudHoverBubble();
+    let bubble = this._ensureTopHudHoverBubble();
     const paddingX = 16;
     const paddingY = 10;
-    bubble.label.setText(label).setPosition(0, 0);
+    const applyLabel = (targetBubble) =>
+      this._mutateText(targetBubble?.label, (node) => node.setText(label).setPosition(0, 0));
+
+    if (!applyLabel(bubble)) {
+      bubble?.destroy?.(true);
+      this.topHudHoverBubble = null;
+      bubble = this._ensureTopHudHoverBubble();
+      if (!applyLabel(bubble)) return null;
+    }
+
     const width = Math.max(98, Math.ceil(bubble.label.width) + paddingX * 2);
     const height = Math.max(38, Math.ceil(bubble.label.height) + paddingY * 2);
     const radius = 14;
@@ -1262,11 +1526,12 @@ export class GameUIScene extends Phaser.Scene {
     bubble.shine.clear();
     bubble.shine.fillStyle(0xffffff, 0.08);
     bubble.shine.fillRoundedRect(-width / 2 + 6, -height / 2 + 5, width - 12, Math.max(10, Math.floor(height * 0.42)), Math.max(8, radius - 4));
+    return bubble;
   }
 
   _showTopHudHover(label, anchorX, targetY = 56) {
-    const bubble = this._ensureTopHudHoverBubble();
-    this._layoutTopHudHoverBubble(label);
+    const bubble = this._layoutTopHudHoverBubble(label);
+    if (!bubble) return;
     this._topHudHoverHideTimer?.remove?.(false);
     this._topHudHoverHideTimer = null;
 
@@ -1508,7 +1773,7 @@ export class GameUIScene extends Phaser.Scene {
       drawPanel();
 
       const minuteDisplay = String(Math.round(clock.minutes)).padStart(2, "0");
-      timeText.setText(`DAY ${clock.day}  ${clock.formatClockFaceTime?.() || `${clock.hours}:${minuteDisplay}`}`);
+      timeText.setText(`${clock.getWeekdayShortLabel?.() || "MON"}  DAY ${clock.day}  ${clock.formatClockFaceTime?.() || `${clock.hours}:${minuteDisplay}`}`);
       phaseText.setText(phase.label || "DAY");
       phaseText.setColor(phase.textColor || "#ffffff");
       actionText.setText(phase.actionText || "");
@@ -1569,6 +1834,252 @@ export class GameUIScene extends Phaser.Scene {
 
   _refreshPhaseClock(force = false) {
     this.phaseClock?.refresh?.(force);
+  }
+
+  _getTroopCarriedItem(troop) {
+    const carry = troop?.carrying;
+    if (!carry) return null;
+    if (carry?.item?.name) return carry.item;
+    if (carry?.name) return carry;
+    return null;
+  }
+
+  _formatStatusItemSummary(entries = []) {
+    return entries
+      .slice(0, 3)
+      .map(([label, count]) => `${String(label || "ITEM").toUpperCase()} x${count}`)
+      .join("  |  ");
+  }
+
+  _getTownStatusMessages() {
+    const team = Teams.getTeam?.(1) ?? Teams.teamLists?.["1"];
+    if (!team) return [];
+
+    const messages = [];
+    const activePlayers = (team.playerList || []).filter((troop) => troop?.active !== false);
+    const storages = (team.storageList || []).filter((storage) => storage?.sprite?.active !== false);
+    const ovens = (team.ovenList || []).filter((oven) => oven?.sprite?.active !== false);
+
+    const hardFullStorages = storages.filter((storage) => storage.getStorageWarningState?.() === "full");
+    const slotLockedStorages = storages.filter((storage) => storage.getStorageWarningState?.() === "slots");
+    const blockedStorageWorkers = activePlayers.filter((troop) => {
+      const carriedItem = this._getTroopCarriedItem(troop);
+      if (!carriedItem) return false;
+      return !StorageBuilding.canAcceptItem(carriedItem, troop?.body?.team ?? 1, null, troop);
+    });
+
+    if (blockedStorageWorkers.length > 0) {
+      messages.push({
+        key: "storage-blocked",
+        tone: "danger",
+        title: `${blockedStorageWorkers.length} WORKER${blockedStorageWorkers.length === 1 ? "" : "S"} BLOCKED`,
+        detail: "NO STORAGE ROOM FOR CARRIED GOODS",
+      });
+    }
+
+    if (storages.length > 0 && hardFullStorages.length === storages.length) {
+      messages.push({
+        key: "storage-full",
+        tone: "danger",
+        title: "ALL STORAGES FULL",
+        detail: `${hardFullStorages.length} / ${storages.length} OUT OF ROOM`,
+      });
+    } else if (hardFullStorages.length > 0 || slotLockedStorages.length > 0) {
+      const detailParts = [];
+      if (hardFullStorages.length > 0) detailParts.push(`${hardFullStorages.length} FULL`);
+      if (slotLockedStorages.length > 0) detailParts.push(`${slotLockedStorages.length} STACK-LOCKED`);
+      messages.push({
+        key: "storage-pressure",
+        tone: "warn",
+        title: "STORAGE PRESSURE",
+        detail: detailParts.join("  |  "),
+      });
+    }
+
+    const blockedOvenWorkers = activePlayers.filter((troop) => {
+      const carriedItem = this._getTroopCarriedItem(troop);
+      if (!troop?.isFireman || !carriedItem?.cooksTo) return false;
+      return !ClayOven.findFreeCookingSlot(carriedItem, troop?.body?.team ?? 1);
+    });
+
+    if (blockedOvenWorkers.length > 0) {
+      messages.push({
+        key: "oven-blocked",
+        tone: "danger",
+        title: `${blockedOvenWorkers.length} FIREMAN${blockedOvenWorkers.length === 1 ? "" : "S"} BLOCKED`,
+        detail: "NO OVEN INPUT ROOM",
+      });
+    }
+
+    const fuelStarvedOvens = ovens.filter((oven) => {
+      const hasInput = oven?.cookingSlots?.some((slot) => slot?.item);
+      return hasInput && Number(oven?.fuel || 0) <= 0 && !oven?.cooking;
+    });
+    if (fuelStarvedOvens.length > 0) {
+      messages.push({
+        key: "oven-fuel",
+        tone: "warn",
+        title: "OVENS NEED WOOD",
+        detail: `${fuelStarvedOvens.length} WAITING ON FUEL`,
+      });
+    }
+
+    const cookingCounts = new Map();
+    ovens.forEach((oven) => {
+      const hasActiveCook = !!oven?.cooking;
+      const slot = oven?.cookingSlots?.find((entry) => entry?.item) || null;
+      if (!hasActiveCook || !slot?.item) return;
+      const label = slot.item.label || slot.item.name || "Batch";
+      cookingCounts.set(label, (cookingCounts.get(label) || 0) + 1);
+    });
+    if (cookingCounts.size > 0) {
+      messages.push({
+        key: "cooking",
+        tone: "info",
+        title: `${Array.from(cookingCounts.values()).reduce((sum, count) => sum + count, 0)} OVEN${Array.from(cookingCounts.values()).reduce((sum, count) => sum + count, 0) === 1 ? "" : "S"} COOKING`,
+        detail: this._formatStatusItemSummary(Array.from(cookingCounts.entries())),
+      });
+    }
+
+    const readyOutputs = new Map();
+    ovens.forEach((oven) => {
+      const output = oven?.outputSlots?.find((slot) => slot?.item) || null;
+      if (!output?.item) return;
+      const label = output.item.label || output.item.name || "Output";
+      readyOutputs.set(label, (readyOutputs.get(label) || 0) + 1);
+    });
+    if (readyOutputs.size > 0) {
+      messages.push({
+        key: "oven-ready",
+        tone: "good",
+        title: "OVEN OUTPUT READY",
+        detail: this._formatStatusItemSummary(Array.from(readyOutputs.entries())),
+      });
+    }
+
+    return messages;
+  }
+
+  _buildTownStatusHud() {
+    if (this.townStatusHud) return;
+
+    const root = createGlassStatusBubble(this, {
+      width: 300,
+      height: 40,
+      radius: 18,
+      depth: UIDEPTH + 15,
+      scrollFactor: 0,
+      fillColor: 0x143347,
+      fillAlpha: 0.92,
+      strokeColor: 0xaee8ff,
+      strokeAlpha: 0.2,
+      accentColor: 0x7dd3fc,
+      accentAlpha: 0.18,
+    });
+    const header = this.add.text(0, -8, "TOWN STATUS", {
+      fontFamily: "Bungee",
+      fontSize: "8px",
+      color: "#d9f3ff",
+      stroke: "#07111b",
+      strokeThickness: 2,
+      align: "center",
+    }).setOrigin(0.5);
+    const detail = this.add.text(0, 7, "", {
+      fontFamily: "Bungee",
+      fontSize: "10px",
+      color: "#f6fcff",
+      stroke: "#07111b",
+      strokeThickness: 3,
+      align: "center",
+      wordWrap: { width: 246, useAdvancedWrap: true },
+    }).setOrigin(0.5);
+
+    root.add([header, detail]);
+    root.headerText = header;
+    root.detailText = detail;
+    root.currentIndex = 0;
+
+    const toneStyles = {
+      danger: { fillColor: 0x4d1d2b, strokeColor: 0xffc2cd, accentColor: 0xff7f96, detailColor: "#fff1f4" },
+      warn: { fillColor: 0x5a3b12, strokeColor: 0xffe0a3, accentColor: 0xffc85a, detailColor: "#fff7de" },
+      info: { fillColor: 0x15374c, strokeColor: 0xc7efff, accentColor: 0x74d7ff, detailColor: "#eefbff" },
+      good: { fillColor: 0x234227, strokeColor: 0xc8f8cf, accentColor: 0x70e08a, detailColor: "#effff2" },
+    };
+
+    const layout = () => {
+      const clock = this.phaseClock;
+      const panelWidth = Math.max(300, Number(clock?.panelWidth || 300));
+      const centerX = Math.round(Number(clock?.x || (this.scale.width - (panelWidth / 2) - 18)));
+      const clockBottom = Number(this.phaseClockBottomY || (Number(clock?.y || 96) + Number(clock?.panelHeight || 104) / 2));
+      const height = Number(root.bubbleHeight || 40);
+      root.setPosition(centerX, Math.round(clockBottom + 10 + (height / 2)));
+      this.townStatusHudBottomY = root.y + (height / 2);
+      this.achievementBoard?.reposition?.();
+    };
+
+    root.refresh = (force = false) => {
+      const messages = this._getTownStatusMessages();
+      const signature = messages.map((entry) => `${entry.key}:${entry.title}:${entry.detail}`).join("|");
+      const now = this.time.now;
+
+      if (force || signature !== this._townStatusHudSignature) {
+        this._townStatusHudSignature = signature;
+        this._townStatusCycleIndex = 0;
+        this._townStatusNextCycleAt = now + 2600;
+      }
+
+      if (!messages.length) {
+        this._townStatusHudSignature = "";
+        root.setVisible(false);
+        this.townStatusHudBottomY = this.phaseClockBottomY || null;
+        this.achievementBoard?.reposition?.();
+        return;
+      }
+
+      root.setVisible(true);
+      if (messages.length > 1 && now >= this._townStatusNextCycleAt) {
+        this._townStatusCycleIndex = (this._townStatusCycleIndex + 1) % messages.length;
+        this._townStatusNextCycleAt = now + 2600;
+      } else if (messages.length <= 1) {
+        this._townStatusCycleIndex = 0;
+        this._townStatusNextCycleAt = now + 2600;
+      }
+
+      const activeIndex = Math.max(0, Math.min(messages.length - 1, this._townStatusCycleIndex));
+      const message = messages[activeIndex];
+      const style = toneStyles[message.tone] || toneStyles.info;
+      const titleText = messages.length > 1
+        ? `TOWN STATUS ${activeIndex + 1}/${messages.length}`
+        : "TOWN STATUS";
+
+      root.headerText.setText(titleText);
+      root.detailText.setText(`${message.title}\n${message.detail}`).setColor(style.detailColor);
+      root.redraw?.({
+        width: Math.max(300, Math.ceil(root.detailText.width) + 40),
+        height: 44,
+        radius: 18,
+        fillColor: style.fillColor,
+        strokeColor: style.strokeColor,
+        accentColor: style.accentColor,
+        fillAlpha: 0.93,
+        strokeAlpha: 0.22,
+        accentAlpha: 0.2,
+      });
+      layout();
+    };
+
+    layout();
+    root.refresh(true);
+    this.scale.on("resize", layout);
+    this.events.once("shutdown", () => {
+      this.scale.off("resize", layout);
+    });
+
+    this.townStatusHud = root;
+  }
+
+  _refreshTownStatusHud(force = false) {
+    this.townStatusHud?.refresh?.(force);
   }
 
   _buildStageMetaHud() {
@@ -1760,7 +2271,9 @@ export class GameUIScene extends Phaser.Scene {
 
     const cycleSpeed = () => {
       const current = this.worldScene?.getSimulationSpeed?.() ?? 1;
-      const next = current >= 4 ? 1 : current >= 2 ? 4 : 2;
+      const speeds = [1, 1.5, 2];
+      const currentIndex = speeds.indexOf(current);
+      const next = speeds[(currentIndex + 1) % speeds.length] ?? 1;
       this.worldScene?.setSimulationSpeed?.(next);
       root.updateState?.();
     };
@@ -2374,17 +2887,24 @@ export class GameUIScene extends Phaser.Scene {
       .setStrokeStyle(3, 0x7de7ff, 0.9)
       .setInteractive({ draggable: true, useHandCursor: true });
 
+    const actionButtonRefs = [];
+    const isTutorialSaveBlocked = () => !!this.worldScene?.tutorialManager?.isBlockingSaves?.();
     const makeActionButton = (x, y, width, label, hint, palette, onClick) => {
       const bg = this.add.graphics();
+      const isDisabled = () => {
+        if (typeof palette.disabled === "function") return !!palette.disabled();
+        return !!palette.disabled;
+      };
       const draw = (hovered = false) => {
+        const disabled = isDisabled();
         this._drawRoundedPanel(bg, width, 64, {
           radius: 20,
-          fillColor: hovered ? palette.hoverFill : palette.fill,
-          fillAlpha: 0.98,
-          strokeColor: hovered ? palette.hoverStroke : palette.stroke,
-          strokeAlpha: hovered ? 0.34 : 0.20,
+          fillColor: disabled ? 0x26313a : (hovered ? palette.hoverFill : palette.fill),
+          fillAlpha: disabled ? 0.72 : 0.98,
+          strokeColor: disabled ? 0x81919e : (hovered ? palette.hoverStroke : palette.stroke),
+          strokeAlpha: disabled ? 0.14 : (hovered ? 0.34 : 0.20),
           shadowColor: 0x03101a,
-          shadowAlpha: 0.24,
+          shadowAlpha: disabled ? 0.10 : 0.24,
           shadowOffsetY: 7,
         });
       };
@@ -2405,17 +2925,32 @@ export class GameUIScene extends Phaser.Scene {
         stroke: "#04111a",
         strokeThickness: 2,
       }).setOrigin(0.5);
+      const refresh = (hovered = false) => {
+        const disabled = isDisabled();
+        draw(hovered && !disabled);
+        titleText.setColor(disabled ? "#9aa7b2" : palette.text);
+        hintText.setColor(disabled ? "#c5ced6" : palette.subtext);
+        hintText.setText(disabled ? (palette.disabledHint || "Finish tutorial first") : hint);
+        bg.setAlpha(disabled ? 0.88 : 1);
+        titleText.setAlpha(disabled ? 0.78 : 1);
+        hintText.setAlpha(disabled ? 0.82 : 1);
+      };
       bg.on("pointerover", () => {
-        AudioManager.playUiHover({ volume: 0.16 });
-        draw(true);
-        bg.setScale(1.02);
+        if (!isDisabled()) AudioManager.playUiHover({ volume: 0.16 });
+        refresh(true);
+        bg.setScale(isDisabled() ? 1 : 1.02);
       });
       bg.on("pointerout", () => {
-        draw(false);
+        refresh(false);
         bg.setScale(1);
       });
       bg.on("pointerdown", (pointer, lx, ly, event) => {
         event?.stopPropagation?.();
+        if (isDisabled()) {
+          AudioManager.playError({ volume: 0.18 });
+          this.showAlertMessage(palette.disabledHint || "Finish tutorial first", "#fca5a5", 1500);
+          return;
+        }
         AudioManager.playMenuClick();
         this.tweens.add({
           targets: [bg, titleText, hintText],
@@ -2426,6 +2961,9 @@ export class GameUIScene extends Phaser.Scene {
         });
         onClick?.();
       });
+      bg.refreshButtonState = refresh;
+      actionButtonRefs.push({ refresh });
+      refresh(false);
       return [bg, titleText, hintText];
     };
 
@@ -2469,6 +3007,7 @@ export class GameUIScene extends Phaser.Scene {
       confirm: null,
       isOpen: false,
       draggingSlider: false,
+      actionButtonRefs,
       panelBaseY: this.scale.height * 0.54,
       setVolume: (nextValue, commit = true) => {
         const value = Phaser.Math.Clamp(Number(nextValue ?? 1), 0, 1);
@@ -2521,6 +3060,10 @@ export class GameUIScene extends Phaser.Scene {
     muteBtn.on("pointerout", () => pauseMenu.refreshMute());
 
     const saveAction = () => {
+      if (isTutorialSaveBlocked()) {
+        this.showAlertMessage("Finish tutorial first", "#fca5a5", 1600);
+        return;
+      }
       SaveManager.attachScene(this.worldScene);
       const ok = SaveManager.saveNow("manual", { silent: false });
       if (!ok) {
@@ -2537,6 +3080,8 @@ export class GameUIScene extends Phaser.Scene {
         hoverStroke: 0xffffff,
         text: "#eafffb",
         subtext: "#b8efe4",
+        disabled: isTutorialSaveBlocked,
+        disabledHint: "Finish tutorial first",
       }, saveAction),
       ...makeActionButton(0, 218, 250, "BACK TO GAME", "Close the menu and resume play", {
         fill: 0x6dd3f5,
@@ -2636,9 +3181,15 @@ export class GameUIScene extends Phaser.Scene {
           hoverFill: 0x2b8477,
           stroke: 0xc5fff3,
           hoverStroke: 0xffffff,
-          text: "#eafffb",
-          subtext: "#b8efe4",
-        }, () => {
+        text: "#eafffb",
+        subtext: "#b8efe4",
+        disabled: isTutorialSaveBlocked,
+        disabledHint: "Finish tutorial first",
+      }, () => {
+          if (isTutorialSaveBlocked()) {
+            this.showAlertMessage("Finish tutorial first", "#fca5a5", 1600);
+            return;
+          }
           SaveManager.attachScene(this.worldScene);
           SaveManager.saveNow("manual", { silent: false });
           leave();
@@ -2679,6 +3230,7 @@ export class GameUIScene extends Phaser.Scene {
     root.refresh = () => {
       pauseMenu.setVolume(AudioManager.getMasterVolume(), false);
       pauseMenu.refreshMute();
+      pauseMenu.actionButtonRefs?.forEach((entry) => entry.refresh?.(false));
       this.pauseMenuButton?.refresh?.();
     };
 
@@ -3615,6 +4167,285 @@ export class GameUIScene extends Phaser.Scene {
     return root;
   }
 
+  _destroyReliefPackageRecoveryPresentation() {
+    const presentation = this._reliefPackageRecoveryPresentation;
+    if (!presentation) return;
+    this._reliefPackageRecoveryPresentation = null;
+    presentation.destroyers?.forEach((fn) => {
+      try { fn?.(); } catch {}
+    });
+    presentation.destroyers = [];
+    presentation.root?.destroy?.(true);
+  }
+
+  showReliefPackageRecoveryPresentation({ onConfirm } = {}) {
+    this._destroyReliefPackageRecoveryPresentation();
+
+    const worldScene = this.worldScene;
+    if (!worldScene) return null;
+
+    const destroyers = [];
+    const lockKeyboard = (scene) => {
+      if (!scene?.input?.keyboard) return;
+      const enabled = scene.input.keyboard.enabled;
+      scene.input.keyboard.enabled = false;
+      destroyers.push(() => {
+        if (scene?.input?.keyboard) scene.input.keyboard.enabled = enabled;
+      });
+    };
+    lockKeyboard(worldScene);
+    lockKeyboard(this);
+
+    const cam = this.cameras.main;
+    const depth = (UIDEPTH ?? 2000) + 4350;
+    const root = this.add.container(0, 0).setDepth(depth).setScrollFactor(0);
+    const shade = this.add.rectangle(0, 0, cam.width, cam.height, 0x071726, 0.80)
+      .setOrigin(0)
+      .setInteractive({ useHandCursor: false });
+    const bloomA = this.add.circle(cam.width * 0.26, cam.height * 0.28, 210, 0x8fe7ff, 0.10).setScrollFactor(0);
+    const bloomB = this.add.circle(cam.width * 0.76, cam.height * 0.68, 240, 0xffe1bb, 0.10).setScrollFactor(0);
+
+    const panelWidth = Math.min(920, cam.width - 80);
+    const panelHeight = Math.min(620, cam.height - 80);
+    const panel = this.add.container(cam.centerX, cam.centerY + 12).setAlpha(0).setScale(0.94).setScrollFactor(0);
+    const panelBg = this.add.graphics();
+    this._drawRoundedPanel(panelBg, panelWidth, panelHeight, {
+      radius: 34,
+      fillColor: 0x113048,
+      fillAlpha: 0.98,
+      strokeColor: 0xdff7ff,
+      strokeAlpha: 0.22,
+      shadowColor: 0x04101a,
+      shadowAlpha: 0.34,
+      shadowOffsetY: 16,
+      topStripColor: 0xffffff,
+      topStripAlpha: 0.10,
+      topStripHeight: 18,
+    });
+    panel.add(panelBg);
+
+    const badgeBg = this.add.graphics();
+    this._drawRoundedPanel(badgeBg, 304, 42, {
+      radius: 20,
+      fillColor: 0xb7efff,
+      fillAlpha: 0.98,
+      strokeColor: 0xffffff,
+      strokeAlpha: 0.18,
+      shadowAlpha: 0.10,
+      shadowOffsetY: 6,
+    });
+    badgeBg.setPosition(0, -(panelHeight / 2) + 50);
+    const badgeText = this.add.text(0, badgeBg.y, "EMERGENCY RELIEF PACKAGE", {
+      fontFamily: "Bungee",
+      fontSize: "15px",
+      color: "#0c2b3f",
+      stroke: "#f8feff",
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+
+    const title = this.add.text(0, -(panelHeight / 2) + 112, "All Storages Lost", {
+      fontFamily: "Bungee",
+      fontSize: "32px",
+      color: "#fff7e6",
+      stroke: "#08131d",
+      strokeThickness: 6,
+      align: "center",
+    }).setOrigin(0.5);
+    const subtitle = this.add.text(0, title.y + 44, "The town is deploying its emergency relief package to keep the economy alive.", {
+      fontFamily: "Bungee",
+      fontSize: "13px",
+      color: "#d8f3ff",
+      stroke: "#08131d",
+      strokeThickness: 3,
+      align: "center",
+      wordWrap: { width: panelWidth - 150 },
+      lineSpacing: 4,
+    }).setOrigin(0.5);
+
+    const artX = -(panelWidth * 0.27);
+    const artY = -12;
+    const artGlow = this.add.circle(artX, artY - 14, 110, 0x8fe7ff, 0.12);
+    const artPlate = this.add.circle(artX, artY - 14, 74, 0x0e2436, 0.98)
+      .setStrokeStyle(3, 0xb7efff, 0.34);
+    const art = this.textures.exists("relief_package")
+      ? this.add.image(artX, artY - 14, "relief_package").setDisplaySize(108, 108)
+      : this.add.text(artX, artY - 14, "RP", {
+          fontFamily: "Bungee",
+          fontSize: "34px",
+          color: "#fff7e6",
+          stroke: "#08131d",
+          strokeThickness: 4,
+        }).setOrigin(0.5);
+    const artLabel = this.add.text(artX, artY + 88, "Package contents", {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#ffe9c7",
+      stroke: "#08131d",
+      strokeThickness: 3,
+      align: "center",
+    }).setOrigin(0.5);
+
+    const contents = [
+      "1 Storage with 1 full seed stack",
+      "6 Food, 6 clean water",
+      "4 Wood, 4 stone",
+      `1 Permit and +$${RELIEF_PACKAGE_MONEY_GRANT}`,
+      "At least 1 Builder and 1 Forager",
+    ];
+    const contentsText = this.add.text(artX + 132, artY + 8, contents.map((line) => `- ${line}`).join("\n"), {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#eef8ff",
+      stroke: "#08131d",
+      strokeThickness: 3,
+      lineSpacing: 7,
+      wordWrap: { width: 294 },
+    }).setOrigin(0, 0.5);
+
+    const rulesBg = this.add.graphics();
+    this._drawRoundedPanel(rulesBg, panelWidth - 150, 120, {
+      radius: 24,
+      fillColor: 0x0d2334,
+      fillAlpha: 0.86,
+      strokeColor: 0x8fe7ff,
+      strokeAlpha: 0.18,
+      shadowAlpha: 0.10,
+      shadowOffsetY: 6,
+      topStripColor: 0xffffff,
+      topStripAlpha: 0.06,
+      topStripHeight: 12,
+    });
+    rulesBg.setPosition(0, 150);
+    const rulesText = this.add.text(
+      0,
+      150,
+      [
+        "This recovery consumes your current relief package.",
+        `You can buy a new one later in the store for $${RELIEF_PACKAGE_PRICE}.`,
+        "Only 1 relief package can be held at a time.",
+        `The package also includes a $${RELIEF_PACKAGE_MONEY_GRANT} emergency stipend.`,
+      ].join("\n"),
+      {
+        fontFamily: "Bungee",
+        fontSize: "11px",
+        color: "#d8f3ff",
+        stroke: "#08131d",
+        strokeThickness: 3,
+        align: "center",
+        wordWrap: { width: panelWidth - 200 },
+        lineSpacing: 6,
+      }
+    ).setOrigin(0.5);
+
+    const buttonWidth = 238;
+    const buttonHeight = 66;
+    const buttonY = (panelHeight / 2) - 60;
+    const buttonBg = this.add.graphics();
+    const drawButton = (hovered = false) => {
+      this._drawRoundedPanel(buttonBg, buttonWidth, buttonHeight, {
+        radius: 22,
+        fillColor: hovered ? 0xbff4ff : 0x93eaff,
+        fillAlpha: 0.98,
+        strokeColor: 0xffffff,
+        strokeAlpha: hovered ? 0.28 : 0.18,
+        shadowColor: 0x2e85a6,
+        shadowAlpha: hovered ? 0.18 : 0.10,
+        shadowOffsetY: 6,
+      });
+      buttonBg.setPosition(0, buttonY);
+    };
+    drawButton(false);
+    buttonBg.setInteractive(
+      new Phaser.Geom.Rectangle(-(buttonWidth / 2), -(buttonHeight / 2), buttonWidth, buttonHeight),
+      Phaser.Geom.Rectangle.Contains
+    );
+    const buttonText = this.add.text(0, buttonY - 8, "Deploy Package", {
+      fontFamily: "Bungee",
+      fontSize: "17px",
+      color: "#0c2b3f",
+      stroke: "#f8feff",
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+    const buttonHint = this.add.text(0, buttonY + 14, "Recover town storage now", {
+      fontFamily: "Bungee",
+      fontSize: "10px",
+      color: "#d8f6ff",
+      stroke: "#09445e",
+      strokeThickness: 2,
+    }).setOrigin(0.5);
+
+    const finish = () => {
+      buttonBg.disableInteractive();
+      this.tweens.add({
+        targets: panel,
+        alpha: 0,
+        scaleX: 0.96,
+        scaleY: 0.96,
+        duration: 180,
+        ease: "Cubic.easeIn",
+        onComplete: () => {
+          try {
+            onConfirm?.();
+          } finally {
+            this._destroyReliefPackageRecoveryPresentation();
+          }
+        },
+      });
+    };
+
+    buttonBg.on("pointerover", () => {
+      drawButton(true);
+      buttonBg.setScale(1.02);
+    });
+    buttonBg.on("pointerout", () => {
+      drawButton(false);
+      buttonBg.setScale(1);
+    });
+    buttonBg.on("pointerdown", finish);
+
+    panel.add([
+      badgeBg,
+      badgeText,
+      title,
+      subtitle,
+      artGlow,
+      artPlate,
+      art,
+      artLabel,
+      contentsText,
+      rulesBg,
+      rulesText,
+      buttonBg,
+      buttonText,
+      buttonHint,
+    ]);
+    root.add([shade, bloomA, bloomB, panel]);
+
+    this.tweens.add({
+      targets: [bloomA, bloomB, artGlow],
+      alpha: { from: 0.08, to: 0.16 },
+      scaleX: { from: 0.94, to: 1.08 },
+      scaleY: { from: 0.94, to: 1.08 },
+      duration: 1800,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+    });
+    this.tweens.add({
+      targets: panel,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      y: cam.centerY,
+      duration: 320,
+      ease: "Back.Out",
+    });
+
+    destroyers.push(() => buttonBg.removeAllListeners());
+    this._reliefPackageRecoveryPresentation = { root, destroyers };
+    return root;
+  }
+
   _destroyTownLossPresentation() {
     const presentation = this._townLossPresentation;
     if (!presentation) return;
@@ -3922,16 +4753,22 @@ export class GameUIScene extends Phaser.Scene {
     return root;
   }
 
-  onMoneyChanged(amountDelta) {
+  onMoneyChanged(amountDelta, opts = {}) {
     if (!this.moneyText || !this.worldScene) return;
     const isGain = amountDelta > 0;
-    const color = isGain ? "#00ff00" : "#ff3333";
+    const color = isGain ? "#facc15" : "#ff3333";
     const sign = isGain ? "+" : "-";
     this._mutateText(this.moneyText, (node) => {
       node.setText(`$${this.worldScene.money}`);
       node.setFill(color);
     });
     this._ghostAt(this.moneyText, `${sign}$${Math.abs(amountDelta)}`, color);
+    if (isGain) {
+      this._playMoneySourceParticles(amountDelta, opts);
+      this._pulseMoneyHud(color);
+      return;
+    }
+    this.moneyIcon?.clearTint?.();
     this.time.delayedCall(600, () => this._mutateText(this.moneyText, (node) => node.setFill("#ffffff")));
   }
 
@@ -4037,6 +4874,284 @@ export class GameUIScene extends Phaser.Scene {
     }
   }
 
+  _destroyBossHud() {
+    this.bossHud?.destroy?.(true);
+    this.bossHud = null;
+    this._bossTarget = null;
+  }
+
+  setBossTarget(target = null) {
+    this._bossTarget = target?.active ? target : null;
+    if (!this._bossTarget) {
+      this._destroyBossHud();
+      return;
+    }
+    if (!this.bossHud) this._buildBossHud();
+    this._refreshBossHud(true);
+  }
+
+  _buildBossHud() {
+    if (this.bossHud) return;
+    const root = this.add.container(0, 0).setDepth(UIDEPTH + 44).setVisible(false);
+    const shadow = this.add.graphics();
+    const bg = this.add.graphics();
+    const fillBg = this.add.graphics();
+    const fill = this.add.graphics();
+    const shine = this.add.graphics();
+    const portraitPlate = this.add.graphics();
+    const portrait = this.add.sprite(0, 0, "");
+    const title = this.add.text(0, 0, "", {
+      fontFamily: "Bungee",
+      fontSize: "18px",
+      color: "#f5fbff",
+      stroke: "#07111b",
+      strokeThickness: 4,
+    }).setOrigin(0, 0.5);
+    const value = this.add.text(0, 0, "", {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#d8f6ff",
+      stroke: "#07111b",
+      strokeThickness: 3,
+    }).setOrigin(1, 0.5);
+
+    root.add([shadow, bg, fillBg, fill, shine, portraitPlate, portrait, title, value]);
+    root.shadow = shadow;
+    root.bg = bg;
+    root.fillBg = fillBg;
+    root.fill = fill;
+    root.shine = shine;
+    root.portraitPlate = portraitPlate;
+    root.portrait = portrait;
+    root.title = title;
+    root.value = value;
+    this.bossHud = root;
+  }
+
+  _refreshBossHud(force = false) {
+    const boss = this._bossTarget;
+    if (!boss?.active) {
+      this._destroyBossHud();
+      return;
+    }
+    if (!this.bossHud) this._buildBossHud();
+    const root = this.bossHud;
+    const bottomBarProgress = Phaser.Math.Clamp(
+      Number(this.uiBottomBar?.openProgress ?? (this.uiBottomBar?.expanded ? 1 : 0)),
+      0,
+      1
+    );
+    const bottomReserve = Phaser.Math.Linear(74, 190, bottomBarProgress);
+    const width = Math.max(360, Math.min(this.scale.width - 54, 760));
+    const height = 54;
+    const x = Math.round(this.scale.width / 2);
+    const y = Math.round(this.scale.height - bottomReserve - 46);
+    const portraitSize = 62;
+    const barLeft = -width / 2 + 90;
+    const barWidth = width - 122;
+    const ratio = Phaser.Math.Clamp(Number(boss.health || 0) / Math.max(1, Number(boss.maxHealth || 1)), 0, 1);
+    const signature = `${boss.id}|${boss.health}|${boss.maxHealth}|${width}|${y}`;
+    if (!force && signature === root._signature) return;
+    root._signature = signature;
+    root.setVisible(true);
+    root.setPosition(x, y);
+
+    root.shadow.clear();
+    root.shadow.fillStyle(0x02060d, 0.36);
+    root.shadow.fillRoundedRect(-width / 2 + 3, -height / 2 + 5, width, height, 18);
+
+    root.bg.clear();
+    root.bg.fillStyle(0x111f31, 0.96);
+    root.bg.lineStyle(2, 0x9dd7ff, 0.26);
+    root.bg.fillRoundedRect(-width / 2, -height / 2, width, height, 18);
+    root.bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 18);
+
+    root.fillBg.clear();
+    root.fillBg.fillStyle(0x06111d, 0.94);
+    root.fillBg.fillRoundedRect(barLeft, -12, barWidth, 20, 10);
+
+    root.fill.clear();
+    root.fill.fillStyle(0x5f2dd8, 0.96);
+    root.fill.fillRoundedRect(barLeft, -12, Math.max(8, Math.round(barWidth * ratio)), 20, 10);
+
+    root.shine.clear();
+    root.shine.fillStyle(0xffffff, 0.08);
+    root.shine.fillRoundedRect(barLeft + 6, -10, Math.max(20, Math.round(barWidth * ratio) - 12), 7, 6);
+
+    root.portraitPlate.clear();
+    root.portraitPlate.fillStyle(0x0d1727, 0.98);
+    root.portraitPlate.lineStyle(2, 0xb8ecff, 0.3);
+    root.portraitPlate.fillRoundedRect(-width / 2 + 12, -portraitSize / 2, 66, portraitSize, 16);
+    root.portraitPlate.strokeRoundedRect(-width / 2 + 12, -portraitSize / 2, 66, portraitSize, 16);
+
+    root.portrait.setPosition(-width / 2 + 45, 0);
+    applyPortraitKeyToSprite(this, root.portrait, getPlayerPortraitKey(boss), 44);
+
+    root.title.setText((boss.name || "BOSS").toUpperCase()).setPosition(barLeft, -20);
+    root.value.setText(`${Math.max(0, Math.ceil(Number(boss.health || 0)))} / ${Math.max(1, Math.ceil(Number(boss.maxHealth || 1)))}`).setPosition(barLeft + barWidth, -20);
+  }
+
+  _destroyBossIntroPresentation() {
+    const presentation = this._bossIntroPresentation;
+    if (!presentation) return;
+    presentation.destroyers?.forEach((fn) => {
+      try { fn?.(); } catch {}
+    });
+    presentation.destroyers = [];
+    presentation.root?.destroy?.(true);
+    this._bossIntroPresentation = null;
+  }
+
+  showBossIncomingPresentation({ title = "BOSS", subtitle = "", caption = "", portraitKey = null } = {}) {
+    this._destroyBossIntroPresentation();
+    const depth = (UIDEPTH ?? 2000) + 5000;
+    const root = this.add.container(this.scale.width / 2, this.scale.height / 2).setDepth(depth);
+    const destroyers = [];
+    const veil = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x030712, 0.84).setOrigin(0.5);
+    const glow = this.add.circle(0, -8, 160, 0x60a5fa, 0.12);
+    const plate = this.add.rectangle(0, 0, Math.min(720, this.scale.width - 42), 234, 0x101827, 0.96)
+      .setStrokeStyle(2, 0xbbe9ff, 0.3);
+    const shine = this.add.rectangle(0, -78, Math.min(620, this.scale.width - 92), 22, 0xffffff, 0.07);
+    const portraitBack = this.add.rectangle(0, -8, 102, 102, 0x0d1727, 0.98)
+      .setStrokeStyle(2, 0xdff6ff, 0.26);
+    const portrait = this.add.sprite(0, -8, "");
+    applyPortraitKeyToSprite(this, portrait, portraitKey, 74);
+    const overline = this.add.text(0, -104, "BOSS NIGHT", {
+      fontFamily: "Bungee",
+      fontSize: "18px",
+      color: "#d8f6ff",
+      stroke: "#050b14",
+      strokeThickness: 4,
+    }).setOrigin(0.5);
+    const titleText = this.add.text(0, 62, title, {
+      fontFamily: "Bungee",
+      fontSize: "34px",
+      color: "#f8fbff",
+      stroke: "#050b14",
+      strokeThickness: 6,
+      align: "center",
+    }).setOrigin(0.5);
+    const subtitleText = this.add.text(0, 98, subtitle, {
+      fontFamily: "Bungee",
+      fontSize: "16px",
+      color: "#b8ecff",
+      stroke: "#050b14",
+      strokeThickness: 4,
+      align: "center",
+    }).setOrigin(0.5);
+    const captionText = this.add.text(0, 126, caption, {
+      fontFamily: "Bungee",
+      fontSize: "11px",
+      color: "#f8e4a5",
+      stroke: "#050b14",
+      strokeThickness: 3,
+      align: "center",
+    }).setOrigin(0.5);
+
+    root.add([veil, glow, plate, shine, portraitBack, portrait, overline, titleText, subtitleText, captionText]);
+    root.setAlpha(0);
+    root.setScale(0.94);
+
+    this.tweens.add({
+      targets: root,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 220,
+      ease: "Back.Out",
+    });
+    this.flashStormLightning(170, 0.5);
+    const dismiss = this.time.delayedCall(2450, () => {
+      this.tweens.add({
+        targets: root,
+        alpha: 0,
+        duration: 220,
+        ease: "Quad.easeOut",
+        onComplete: () => this._destroyBossIntroPresentation(),
+      });
+    });
+    destroyers.push(() => dismiss.remove(false));
+    this._bossIntroPresentation = { root, destroyers };
+    return root;
+  }
+
+  _destroyBossStorm() {
+    this._bossStorm?.rainGraphics?.destroy?.();
+    this._bossStorm?.flashRect?.destroy?.();
+    this._bossStorm = null;
+  }
+
+  setBossStormActive(active = false) {
+    if (!active) {
+      this._destroyBossStorm();
+      return;
+    }
+    if (!this._bossStorm) {
+      const rainGraphics = this.add.graphics().setDepth(UIDEPTH + 38);
+      const flashRect = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0xe5f6ff, 0)
+        .setDepth(UIDEPTH + 39);
+      const drops = Array.from({ length: 120 }, () => ({
+        x: Math.random() * this.scale.width,
+        y: Math.random() * this.scale.height,
+        len: 10 + Math.random() * 16,
+        speed: 260 + Math.random() * 260,
+        drift: -24 - Math.random() * 30,
+        alpha: 0.18 + Math.random() * 0.26,
+      }));
+      this._bossStorm = {
+        rainGraphics,
+        flashRect,
+        drops,
+        lastAt: this.time.now,
+        nextLightningAt: this.time.now + 1500,
+      };
+    }
+  }
+
+  flashStormLightning(duration = 140, alpha = 0.36) {
+    if (!this._bossStorm) this.setBossStormActive(true);
+    const flashRect = this._bossStorm?.flashRect;
+    if (!flashRect) return;
+    this.tweens.killTweensOf(flashRect);
+    flashRect.setAlpha(alpha);
+    this.tweens.add({
+      targets: flashRect,
+      alpha: 0,
+      duration,
+      ease: "Quad.easeOut",
+    });
+  }
+
+  _updateBossStorm() {
+    const storm = this._bossStorm;
+    if (!storm?.rainGraphics) return;
+    const now = this.time.now;
+    const dt = Math.max(0.012, Math.min(0.05, (now - Number(storm.lastAt || now)) / 1000));
+    storm.lastAt = now;
+    storm.rainGraphics.clear();
+    storm.rainGraphics.lineStyle(2, 0x9dd7ff, 0.3);
+    for (const drop of storm.drops) {
+      drop.x += drop.drift * dt;
+      drop.y += drop.speed * dt;
+      if (drop.y > this.scale.height + 22 || drop.x < -24) {
+        drop.x = Math.random() * (this.scale.width + 40);
+        drop.y = -12 - Math.random() * 100;
+      }
+      storm.rainGraphics.lineStyle(2, 0xbfefff, drop.alpha);
+      storm.rainGraphics.beginPath();
+      storm.rainGraphics.moveTo(drop.x, drop.y);
+      storm.rainGraphics.lineTo(drop.x + 4, drop.y + drop.len);
+      storm.rainGraphics.strokePath();
+    }
+
+    storm.flashRect.setPosition(this.scale.width / 2, this.scale.height / 2);
+    storm.flashRect.setSize(this.scale.width, this.scale.height);
+    if (now >= Number(storm.nextLightningAt || 0)) {
+      storm.nextLightningAt = now + Phaser.Math.Between(2200, 5200);
+      this.flashStormLightning(150, 0.22 + Math.random() * 0.16);
+    }
+  }
+
   update() {
     if (this._sceneShuttingDown) return;
     // The UI scene should never pan with world interactions.
@@ -4048,6 +5163,7 @@ export class GameUIScene extends Phaser.Scene {
     this._refreshTownXpHud();
     this.achievementBoard?.update?.();
     this._refreshPhaseClock();
+    this._refreshTownStatusHud();
     this.zoomControls?.updateState?.();
     this.pauseMenuButton?.refresh?.();
     this._updateRaiderEdgeHud();
@@ -4056,5 +5172,7 @@ export class GameUIScene extends Phaser.Scene {
     this.selectionCommandBar?.update?.();
     this.functionTab?.update?.();
     this._refreshAdrenalineHud();
+    this._refreshBossHud();
+    this._updateBossStorm();
   }
 }

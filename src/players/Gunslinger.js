@@ -12,7 +12,6 @@ import { Wall } from '../buildings/Wall.js';
 import { Projectile } from '../Projectile.js';
 import { Scheduler } from '../ai/scheduler/Scheduler.js';
 import { attachDirectionalSix } from './PlayerDirectionalAnimator.js';
-import { OrderRunner } from '../orders/OrderRunner.js';
 import gunslingerWalkDown from 'url:../assets/players/gunslinger/gunslinger_walk_down.png';
 import gunslingerWalkDownLeft from 'url:../assets/players/gunslinger/gunslinger_walk_down_left.png';
 import gunslingerWalkDownRight from 'url:../assets/players/gunslinger/gunslinger_walk_down_right.png';
@@ -109,7 +108,6 @@ export class Gunslinger {
         Teams.addPlayer(teamNumber, sprite);
         Teams.teamLists[teamNumber].fighterList.push(sprite);
         sprite.destroySelf = () => Gunslinger.destroy(sprite);
-        OrderRunner.issueDefendTownOrder([sprite]);
 
         // --- destroy target gate: range + LOS ---
         sprite._getDestroyTarget = () => {
@@ -191,8 +189,6 @@ export class Gunslinger {
     }
 
     static update(troop) {
-        OrderRunner.ensureCombatAutoOrder(troop);
-        if (OrderRunner.stepUnit(troop)) return;
         Player.updateTracking(troop);
 
         // ✅ If we are destroying, keep validating range+LOS.
@@ -208,6 +204,7 @@ export class Gunslinger {
 
         if (Player.tryEnterQueuedSleep?.(troop)) return;
         if (Scheduler.stepUnit(troop)) return;
+        if (Player.tryReturnIdleTroopToTown?.(troop, { requireNoActiveEnemies: true })) return;
         if(!troop.task && !troop.track && troop.state == CONTROL_STATES.TRACK_MODE && !troop.roam){
             Player.roam(troop);
         }
@@ -246,7 +243,7 @@ export class Gunslinger {
         }
 
         // Clear references
-        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        Player._releaseTaskAssignment?.(troop);
         if (troop.carrying) troop.carrying = null;
 
         // ❗ Remove from Player.characters group

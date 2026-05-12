@@ -2,11 +2,16 @@ import { buildPolysFromGridMap } from '../lib/navmesh/map-parsers/build-polys-fr
 import { SQUARESIZE } from '../constants.js';
 
 self.onmessage = function (e) {
-  const { navGrid } = e.data;
+  const { navGrid, enemyNavGrid, requestId, type } = e.data;
   try {
     const polys = buildPolysFromGridMap(navGrid, SQUARESIZE, SQUARESIZE, undefined, 0);
-    self.postMessage({ success: true, polys });
+    if (type === 'buildBoth' && Array.isArray(enemyNavGrid)) {
+      const enemyPolys = buildPolysFromGridMap(enemyNavGrid, SQUARESIZE, SQUARESIZE, undefined, 0);
+      self.postMessage({ success: true, requestId, polys, enemyPolys });
+      return;
+    }
+    self.postMessage({ success: true, requestId, polys });
   } catch (err) {
-    self.postMessage({ success: false, error: err.message });
+    self.postMessage({ success: false, requestId, error: err.message });
   }
 };

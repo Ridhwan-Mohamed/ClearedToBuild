@@ -30,7 +30,7 @@ export class FortGrunt {
         grunt.roam = false;
         grunt.maxHealth = FortGrunt.maxHealth;
         grunt.health = FortGrunt.maxHealth;
-        grunt.killReward = 50;
+        grunt.killReward = 22;
         grunt.weapon = weapons.hands;
         grunt.meleeFxKey = 'raider_hands_fx';
         grunt.unitTint = FortGrunt.tint;

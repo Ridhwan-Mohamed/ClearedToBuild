@@ -1,14 +1,17 @@
 // src/parcel_system/ParcelContractInstance.js
 // One active contract instance living in a slot (W/S/E).
 
-import { paintResourceParcel, paintWaterRect } from "./ParcelTerrain.js";
-import { createPressureSpawners } from "./PressureSpawner.js";
+import { buildResourceParcelTerrainPlan, paintResourceParcel, paintWaterRect } from "./ParcelTerrain.js";
+import { ParcelRevealAnimator } from "./ParcelRevealAnimator.js";
+import { buildPressureSpawnerPlan, createPressureSpawners } from "./PressureSpawner.js";
 import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
 import { Map as GameMap } from "../map.js";
-import { TILE_TYPES, TILE_MAP, SQUARESIZE, removeFromArray } from "../constants.js";
+import { TILE_TYPES, TILE_MAP, SQUARESIZE, colorFor, removeFromArray } from "../constants.js";
 import { spawnParcelMarketStorefront, DEFAULT_MARKET_PRICES } from "../UI/ShipMarket";
 import { blockResourceManager } from "../Manager/BlockResourceManager";
 import { FarmBushNode } from "../buildings/FarmBushNode";
+import { buildMarketPriceTable, getGoldOrePayout } from "../balance/GameBalance.js";
+import { cloneSlotFavor } from "./SlotFavorSystem.js";
 
 function fmtMMSS(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -44,6 +47,9 @@ export class ParcelContractInstance {
     pressureModifier = null,
     pressureHordeIndex = null,
     militiaConfig = null,
+    slotFavor = null,
+    contractDurationMs = null,
+    completionBonusMoney = 0,
   }) {
     this.id = id;
     this.type = type;
@@ -64,6 +70,10 @@ export class ParcelContractInstance {
     this.pressureModifierKey = pressureModifierKey;
     this.pressureModifier = pressureModifier ? { ...pressureModifier } : null;
     this.pressureHordeIndex = pressureHordeIndex;
+    this.slotFavor = cloneSlotFavor(slotFavor);
+    this.contractDurationMs = Number(contractDurationMs ?? 0) || null;
+    this.completionBonusMoney = Math.max(0, Number(completionBonusMoney || 0));
+    this._completionBonusGranted = false;
 
     this.timerEvent = null;
     this.uiTickEvent = null;
@@ -173,7 +183,8 @@ export class ParcelContractInstance {
     let placed = 0;
     let tries = 0;
 
-    const tileType = nodeType === "pine" ? TILE_TYPES.pine : TILE_TYPES.rock;
+    const tileType = this._resourceTileTypeForNodeType(nodeType);
+    if (!tileType) return;
 
     const minX = this.origin.x + 1;
     const minY = this.origin.y + 1;
@@ -200,6 +211,10 @@ export class ParcelContractInstance {
 
         obj.contractId = this.id;
         obj.slotId = this.slotId;
+        if (nodeType === "goldOre") {
+          obj.moneyReward = getGoldOrePayout(this.scene);
+          obj.moneyRewardRemaining = obj.moneyReward;
+        }
 
         if (nodeType === "pine") GameMap.worldPines.push(obj);
         else GameMap.worldStones.push(obj);
@@ -209,6 +224,15 @@ export class ParcelContractInstance {
       } catch (e) {
         // Ignore placement failures and keep filling the parcel.
       }
+    }
+  }
+
+  _spawnResourceNodeDefs(nodeDefs = []) {
+    for (const def of nodeDefs) {
+      const nodeType = String(def?.nodeType || "").trim();
+      const count = Math.max(0, Number(def?.count || 0));
+      if (!nodeType || count <= 0) continue;
+      this._spawnResourceNodes(nodeType, count);
     }
   }
 
@@ -409,81 +433,672 @@ export class ParcelContractInstance {
     }
   }
 
-  spawn() {
-    const M = this.map;
+  _resourceSpawnSettings() {
+    if (this.type === "FOREST") {
+      return {
+        groundType: "dirt",
+        pondTiles: 32,
+        edgeBuffer: 2,
+        waterWalkable: true,
+        nodeDefs: [{ nodeType: "pine", count: 32 }],
+        ms: RESOURCE_CONTRACT_MS.FOREST,
+      };
+    }
 
+    if (this.type === "ROCK") {
+      return {
+        groundType: "dirt",
+        pondTiles: 26,
+        edgeBuffer: 2,
+        waterWalkable: true,
+        nodeDefs: [
+          { nodeType: "rock", count: 14 },
+          { nodeType: "goldOre", count: 6 },
+        ],
+        ms: RESOURCE_CONTRACT_MS.ROCK,
+      };
+    }
+
+    if (this.type === "FARM") {
+      return {
+        groundType: "dark_grass",
+        pondTiles: 28,
+        edgeBuffer: 2,
+        waterWalkable: false,
+        nodeDefs: [],
+        ms: RESOURCE_CONTRACT_MS.FARM ?? RESOURCE_CONTRACT_MS.FOREST,
+      };
+    }
+
+    return null;
+  }
+
+  _buildResourceTerrainPlan(settings) {
+    return buildResourceParcelTerrainPlan({
+      origin: this.origin,
+      size: PARCEL_SIZE,
+      rng: this.rng,
+      groundType: settings.groundType,
+      pondTiles: settings.pondTiles,
+      edgeBuffer: settings.edgeBuffer,
+    });
+  }
+
+  _terrainPlanTileAt(plan, gx, gy) {
+    return plan?.tileTypeByKey?.get?.(`${gx},${gy}`) ?? null;
+  }
+
+  _resourceTileTypeForNodeType(nodeType) {
+    if (nodeType === "pine") return TILE_TYPES.pine;
+    if (nodeType === "goldOre") return TILE_TYPES.goldOre;
+    if (nodeType === "rock") return TILE_TYPES.rock;
+    return null;
+  }
+
+  _footprintTouchesPlanWater(gx, gy, lenX, lenY, pad, terrainPlan) {
+    for (let yy = gy - pad; yy <= gy + lenY - 1 + pad; yy++) {
+      for (let xx = gx - pad; xx <= gx + lenX - 1 + pad; xx++) {
+        if (this._terrainPlanTileAt(terrainPlan, xx, yy) === "water") return true;
+      }
+    }
+    return false;
+  }
+
+  _buildResourceNodePlan(nodeDefs = [], terrainPlan) {
+    const minX = this.origin.x + 1;
+    const minY = this.origin.y + 1;
+    const occupied = new Set();
+    const nodes = [];
+
+    const blockedByPlannedNode = (gx, gy, tileType) => {
+      for (let yy = gy; yy < gy + tileType.lenY; yy++) {
+        for (let xx = gx; xx < gx + tileType.lenX; xx++) {
+          if (occupied.has(`${xx},${yy}`)) return true;
+        }
+      }
+      return false;
+    };
+
+    const markOccupied = (gx, gy, tileType) => {
+      for (let yy = gy; yy < gy + tileType.lenY; yy++) {
+        for (let xx = gx; xx < gx + tileType.lenX; xx++) {
+          occupied.add(`${xx},${yy}`);
+        }
+      }
+    };
+
+    for (const def of nodeDefs || []) {
+      const nodeType = String(def?.nodeType || "").trim();
+      const count = Math.max(0, Number(def?.count || 0));
+      const tileType = this._resourceTileTypeForNodeType(nodeType);
+      if (!nodeType || !tileType || count <= 0) continue;
+
+      const triesMax = Math.max(200, count * 30);
+      const maxX = this.origin.x + (PARCEL_SIZE - 1) - tileType.lenX;
+      const maxY = this.origin.y + (PARCEL_SIZE - 1) - tileType.lenY;
+      let placed = 0;
+      let tries = 0;
+
+      while (placed < count && tries < triesMax) {
+        tries++;
+        const gx = randInt(this.rng, minX, maxX);
+        const gy = randInt(this.rng, minY, maxY);
+        if (this._terrainPlanTileAt(terrainPlan, gx, gy) === "water") continue;
+        if (this._footprintTouchesPlanWater(gx, gy, tileType.lenX, tileType.lenY, 1, terrainPlan)) continue;
+        if (blockedByPlannedNode(gx, gy, tileType)) continue;
+        if (GameMap.checkBlockPositionGen(gx, gy, tileType.lenX, tileType.lenY)) continue;
+
+        nodes.push({
+          x: gx,
+          y: gy,
+          nodeType,
+          moneyReward: nodeType === "goldOre" ? getGoldOrePayout(this.scene) : 0,
+        });
+        markOccupied(gx, gy, tileType);
+        placed++;
+      }
+    }
+
+    return nodes;
+  }
+
+  _buildFarmBushPlan(terrainPlan) {
+    const candidates = [];
+    const minX = this.origin.x + 1;
+    const minY = this.origin.y + 1;
+    const maxX = this.origin.x + PARCEL_SIZE - 2;
+    const maxY = this.origin.y + PARCEL_SIZE - 2;
+
+    for (let gy = minY; gy <= maxY; gy++) {
+      for (let gx = minX; gx <= maxX; gx++) {
+        if (this._terrainPlanTileAt(terrainPlan, gx, gy) !== "dark_grass") continue;
+        candidates.push([gx, gy]);
+      }
+    }
+
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rng() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+
+    return candidates.slice(0, Math.min(18, candidates.length)).map(([x, y], index) => ({
+      x,
+      y,
+      kind: index % 2 === 0 ? "seed" : "berry",
+    }));
+  }
+
+  _cloneNavGrid(grid) {
+    return Array.isArray(grid) ? grid.map((row) => Array.isArray(row) ? row.slice() : []) : [];
+  }
+
+  _buildFutureNavGrids(terrainPlan, resourceNodes, settings) {
+    const navGrid = this._cloneNavGrid(GameMap.navGrid);
+    const enemyNavGrid = this._cloneNavGrid(GameMap.enemyNavGrid);
+
+    for (const cell of terrainPlan.cells) {
+      const walkableWater = cell.tileType === "water" && settings.waterWalkable === true;
+      const blocks = cell.tileType === "water" && !walkableWater;
+      if (navGrid[cell.y]) navGrid[cell.y][cell.x] = blocks ? 0 : 1;
+      if (enemyNavGrid[cell.y]) enemyNavGrid[cell.y][cell.x] = blocks ? 0 : 1;
+    }
+
+    for (const node of resourceNodes || []) {
+      const tileType = this._resourceTileTypeForNodeType(node.nodeType);
+      if (!tileType) continue;
+      for (let yy = node.y; yy < node.y + tileType.lenY; yy++) {
+        for (let xx = node.x; xx < node.x + tileType.lenX; xx++) {
+          if (navGrid[yy]) navGrid[yy][xx] = 0;
+          if (enemyNavGrid[yy]) enemyNavGrid[yy][xx] = 0;
+        }
+      }
+    }
+
+    return { navGrid, enemyNavGrid };
+  }
+
+  _buildPressureTerrainPlan() {
+    const cells = [];
+    const tileTypeByKey = new Map();
+
+    for (let ly = 0; ly < PARCEL_SIZE; ly++) {
+      for (let lx = 0; lx < PARCEL_SIZE; lx++) {
+        const x = this.origin.x + lx;
+        const y = this.origin.y + ly;
+        const cell = { x, y, lx, ly, tileType: "dirt" };
+        cells.push(cell);
+        tileTypeByKey.set(`${x},${y}`, "dirt");
+      }
+    }
+
+    return {
+      origin: { x: this.origin.x, y: this.origin.y },
+      size: PARCEL_SIZE,
+      groundType: "dirt",
+      cells,
+      pondCells: [],
+      tileTypeByKey,
+    };
+  }
+
+  _buildPressureNavGrids(terrainPlan, pressurePlan) {
+    const navGrid = this._cloneNavGrid(GameMap.navGrid);
+    const enemyNavGrid = this._cloneNavGrid(GameMap.enemyNavGrid);
+    const spawnType = TILE_TYPES.spawn;
+    const spawnLenX = Math.max(1, Number(spawnType?.lenX ?? 1) || 1);
+    const spawnLenY = Math.max(1, Number(spawnType?.lenY ?? 1) || 1);
+
+    for (const cell of terrainPlan.cells) {
+      if (navGrid[cell.y]) navGrid[cell.y][cell.x] = 1;
+      if (enemyNavGrid[cell.y]) enemyNavGrid[cell.y][cell.x] = 1;
+    }
+
+    for (const spec of pressurePlan?.spawnerSpecs || []) {
+      const gx = Number(spec?.pos?.gx);
+      const gy = Number(spec?.pos?.gy);
+      if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+
+      for (let yy = gy; yy < gy + spawnLenY; yy++) {
+        for (let xx = gx; xx < gx + spawnLenX; xx++) {
+          if (navGrid[yy]) navGrid[yy][xx] = 0;
+          if (enemyNavGrid[yy]) enemyNavGrid[yy][xx] = 0;
+        }
+      }
+    }
+
+    return { navGrid, enemyNavGrid };
+  }
+
+  _applyTerrainPlan(terrainPlan, settings) {
+    for (const cell of terrainPlan.cells) {
+      const def = TILE_TYPES[cell.tileType];
+      if (!def || !this.map.grid?.[cell.y] || this.map.grid[cell.y][cell.x] == null) continue;
+      this.map.grid[cell.y][cell.x] = def.interior ?? def.grid;
+
+      const walkableWater = cell.tileType === "water" && settings.waterWalkable === true;
+      const blocks = cell.tileType === "water" && !walkableWater;
+      if (this.map.navGrid?.[cell.y]) this.map.navGrid[cell.y][cell.x] = blocks ? 0 : 1;
+      if (this.map.enemyNavGrid?.[cell.y]) this.map.enemyNavGrid[cell.y][cell.x] = blocks ? 0 : 1;
+    }
+
+    this.map.refreshTerrainShapesInRect?.(this.origin.x, this.origin.y, PARCEL_SIZE, PARCEL_SIZE, 1);
+  }
+
+  _applyPressureSpawnerPlan(pressurePlan = null) {
+    const pressureData = createPressureSpawners({
+      scene: this.scene,
+      origin: this.origin,
+      difficulty: this.difficulty,
+      contractId: this.id,
+      spawnSpawnerBuilding: (args) => this.pm.spawnSpawnerBuilding(args),
+      modifier: this.pressureModifier,
+      plan: pressurePlan,
+    });
+
+    this.spawners = pressureData.spawners;
+    this.totalPlannedEnemies = pressureData.totalPlannedEnemies;
+    this.enemyType = pressureData.enemyType;
+    this.enemyTypeLabel = pressureData.enemyTypeLabel;
+    this.spawnerCount = pressureData.spawnerCount;
+    this.placedObjects = pressureData.spawners
+      .map((entry) => entry?.building)
+      .filter(Boolean);
+
+    this._startUITick();
+    return pressureData;
+  }
+
+  _applyResourceNodePlan(nodes) {
+    for (const node of nodes || []) {
+      const tileType = this._resourceTileTypeForNodeType(node.nodeType);
+      if (!tileType) continue;
+      try {
+        const obj = GameMap.handleLoadNonSpread(node.x, node.y, tileType);
+        if (!obj) continue;
+
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+        if (node.nodeType === "goldOre") {
+          obj.moneyReward = Math.max(0, Number(node.moneyReward || 0));
+          obj.moneyRewardRemaining = Math.max(0, Number(node.moneyReward || 0));
+        }
+
+        if (node.nodeType === "pine") GameMap.worldPines.push(obj);
+        else GameMap.worldStones.push(obj);
+
+        this.placedObjects.push(obj);
+      } catch (e) {
+        // Ignore placement failures and keep filling the parcel.
+      }
+    }
+  }
+
+  _applyFarmBushPlan(bushes) {
+    FarmBushNode.init(this.scene);
+    for (const entry of bushes || []) {
+      try {
+        const obj = new FarmBushNode(entry.x, entry.y, entry.kind);
+        obj.contractId = this.id;
+        obj.slotId = this.slotId;
+        this.placedObjects.push(obj);
+      } catch (e) {
+        // Ignore a bad bush spawn and keep laying out the parcel.
+      }
+    }
+  }
+
+  _startResourceLifecycle(ms) {
+    const durationMs = Math.max(0, Number(ms || this.contractDurationMs || 0));
+    this.contractDurationMs = durationMs;
+    this.expireAt = this._getSimulationNowMs() + durationMs;
+    this._startUITick();
+    this.timerEvent = this.scene.time.delayedCall(durationMs, () => this.complete("timeout"), null, this);
+  }
+
+  _fallbackRefreshResourceArea() {
+    if (this.scene?.refreshParcelArea) {
+      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
+        waterSourceUpdate: {
+          slotId: this.slotId,
+          landParcel: true,
+        },
+      });
+      return true;
+    }
+
+    if (this.scene?.zoomMixer?.mode !== "overview") {
+      this.map.reDraw?.();
+    }
+    this.scene?.rebuildBothNavMeshes?.();
+    this.scene?.zoomMixer?.buildOverviewTextureFromGrid?.(
+      this.map.grid,
+      SQUARESIZE,
+      (cell) => colorFor(cell)
+    );
+    return true;
+  }
+
+  _buildParcelWaterPlan() {
+    const cells = [];
+    for (let ly = 0; ly < PARCEL_SIZE; ly++) {
+      for (let lx = 0; lx < PARCEL_SIZE; lx++) {
+        cells.push({
+          x: this.origin.x + lx,
+          y: this.origin.y + ly,
+          lx,
+          ly,
+          tileType: "water",
+        });
+      }
+    }
+    return {
+      origin: { x: this.origin.x, y: this.origin.y },
+      size: PARCEL_SIZE,
+      cells,
+    };
+  }
+
+  _buildRemovalNavGrids(removalPlan) {
+    const navGrid = this._cloneNavGrid(GameMap.navGrid);
+    const enemyNavGrid = this._cloneNavGrid(GameMap.enemyNavGrid);
+
+    for (const cell of removalPlan.cells) {
+      if (navGrid[cell.y]) navGrid[cell.y][cell.x] = 0;
+      if (enemyNavGrid[cell.y]) enemyNavGrid[cell.y][cell.x] = 0;
+    }
+
+    return { navGrid, enemyNavGrid };
+  }
+
+  _applyWaterRemovalPlan(removalPlan) {
+    const waterVal = TILE_TYPES.water?.interior ?? TILE_TYPES.water?.grid;
+    if (waterVal == null) return;
+
+    for (const cell of removalPlan.cells) {
+      if (!this.map.grid?.[cell.y] || this.map.grid[cell.y][cell.x] == null) continue;
+      this.map.grid[cell.y][cell.x] = waterVal;
+      if (this.map.navGrid?.[cell.y]) this.map.navGrid[cell.y][cell.x] = 0;
+      if (this.map.enemyNavGrid?.[cell.y]) this.map.enemyNavGrid[cell.y][cell.x] = 0;
+    }
+
+    this.map.refreshTerrainShapesInRect?.(this.origin.x, this.origin.y, PARCEL_SIZE, PARCEL_SIZE, 1);
+  }
+
+  _disablePlacedObjectInteractions() {
+    const safeDisableInteractive = (node) => {
+      if (!node || node.active === false) return;
+      if (!node.scene?.sys?.input) return;
+      node.disableInteractive?.();
+    };
+
+    for (const obj of this.placedObjects || []) {
+      safeDisableInteractive(obj);
+      safeDisableInteractive(obj?.sprite);
+      safeDisableInteractive(obj?.hit);
+      safeDisableInteractive(obj?.container);
+    }
+
+    for (const spawner of this.spawners || []) {
+      const building = spawner?.building;
+      safeDisableInteractive(building?.sprite);
+      safeDisableInteractive(building);
+    }
+  }
+
+  _destroyPlacedObjectsForRemoval() {
+    for (const obj of this.placedObjects) {
+      if (!obj) continue;
+
+      if (typeof obj.destroy === "function" && (obj.resourceKind || obj.sprite || obj.container)) {
+        obj.destroy();
+        continue;
+      }
+
+      removeFromArray(GameMap.worldPines, obj);
+      removeFromArray(GameMap.worldStones, obj);
+      removeFromArray(GameMap.worldSeedBushes, obj);
+      removeFromArray(GameMap.worldBerryBushes, obj);
+      obj.destroy?.();
+    }
+    this.placedObjects = [];
+
+    if (this.type === "MARKET") {
+      this._marketHandle?.destroy?.();
+      this._marketHandle = null;
+    }
+
+    for (const spawner of this.spawners) {
+      try {
+        spawner.building?.destroy?.();
+      } catch {}
+    }
+
+    this.spawners = [];
+  }
+
+  _fallbackRefreshRemovalArea() {
+    if (this.scene?.refreshParcelArea) {
+      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
+        waterSourceUpdate: {
+          excludeParcelId: this.id,
+        },
+      });
+      return true;
+    }
+
+    if (this.scene?.zoomMixer?.mode !== "overview") {
+      this.map.reDraw?.();
+    }
+    this.scene?.rebuildBothNavMeshes?.();
+    return true;
+  }
+
+  _spawnResourceImmediate(settings) {
+    this._spawnCommitted = true;
+    const M = this.map;
     const setGroundRect = M.setGroundRect.bind(M);
     const setWater = M.setWater.bind(M);
     const setWalkableWater = (x, y) => M.setWater?.(x, y, { walkable: true });
 
-    if (this.type === "FOREST" || this.type === "ROCK") {
-      paintResourceParcel({
-        origin: this.origin,
-        size: PARCEL_SIZE,
-        rng: this.rng,
-        setGroundRect,
-        setWater: setWalkableWater,
-        groundType: "dirt",
-        pondTiles: this.type === "FOREST" ? 32 : 26,
-        edgeBuffer: 2,
-      });
+    paintResourceParcel({
+      origin: this.origin,
+      size: PARCEL_SIZE,
+      rng: this.rng,
+      setGroundRect,
+      setWater: settings.waterWalkable ? setWalkableWater : setWater,
+      groundType: settings.groundType,
+      pondTiles: settings.pondTiles,
+      edgeBuffer: settings.edgeBuffer,
+    });
+
+    if (settings.waterWalkable) {
       this._markParcelWaterWalkable();
-
-      if (this.type === "FOREST") {
-        this._spawnResourceNodes("pine", 32);
-      } else {
-        this._spawnResourceNodes("rock", 18);
-      }
-
-      const ms = this.type === "FOREST" ? RESOURCE_CONTRACT_MS.FOREST : RESOURCE_CONTRACT_MS.ROCK;
-      this.expireAt = this._getSimulationNowMs() + ms;
-
-      this._startUITick();
-      this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
-      return;
     }
 
-    if (this.type === "FARM") {
-      paintResourceParcel({
-        origin: this.origin,
-        size: PARCEL_SIZE,
-        rng: this.rng,
-        setGroundRect,
-        setWater,
-        groundType: "dark_grass",
-        pondTiles: 28,
-        edgeBuffer: 2,
-      });
+    if (settings.nodeDefs?.length) {
+      this._spawnResourceNodeDefs(settings.nodeDefs);
+    } else if (this.type === "FARM") {
       this._spawnFarmBushes();
+    }
 
-      const ms = RESOURCE_CONTRACT_MS.FARM ?? RESOURCE_CONTRACT_MS.FOREST;
-      this.expireAt = this._getSimulationNowMs() + ms;
+    this._startResourceLifecycle(this.contractDurationMs ?? settings.ms);
+    return { refreshHandled: false };
+  }
 
-      this._startUITick();
-      this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
-      return;
+  async _spawnResourceAnimated(settings) {
+    let reveal = null;
+    const terrainPlan = this._buildResourceTerrainPlan(settings);
+    const resourceNodes = settings.nodeDefs?.length
+      ? this._buildResourceNodePlan(settings.nodeDefs, terrainPlan)
+      : [];
+    const farmBushes = this.type === "FARM" ? this._buildFarmBushPlan(terrainPlan) : [];
+    const futureNav = this._buildFutureNavGrids(terrainPlan, resourceNodes, settings);
+
+    reveal = new ParcelRevealAnimator(this.scene, {
+      cells: terrainPlan.cells,
+      slotId: this.slotId,
+      size: PARCEL_SIZE,
+      alpha: 0.5,
+    });
+
+    let navDone = false;
+    const navPromise = this.scene?.prepareParcelNavMeshesAsync
+      ? this.scene.prepareParcelNavMeshesAsync(futureNav)
+          .catch((err) => {
+            console.warn("Parcel navmesh async prep failed; falling back to local refresh.", err);
+            return null;
+          })
+          .then((result) => {
+            navDone = true;
+            return result;
+          })
+      : Promise.resolve(null).then((result) => {
+          navDone = true;
+          return result;
+        });
+
+    try {
+      await reveal.play();
+      if (!navDone) reveal.pulseWaiting();
+      const navResult = await navPromise;
+      reveal.stopPulse();
+
+      this._spawnCommitted = true;
+      this._applyTerrainPlan(terrainPlan, settings);
+      if (settings.nodeDefs?.length) {
+        this._applyResourceNodePlan(resourceNodes);
+      } else if (this.type === "FARM") {
+        this._applyFarmBushPlan(farmBushes);
+      }
+
+      const refreshOpts = {
+        waterSourceUpdate: {
+          slotId: this.slotId,
+          landParcel: true,
+        },
+      };
+      const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
+        navPolys: navResult.navPolys,
+        enemyPolys: navResult.enemyPolys,
+        navGrid: futureNav.navGrid,
+        enemyNavGrid: futureNav.enemyNavGrid,
+        bounds: this.getParcelBounds?.(),
+        refreshOpts,
+      }));
+
+      if (!refreshHandled) {
+        this._fallbackRefreshResourceArea();
+      }
+
+      await reveal.complete();
+      this._startResourceLifecycle(this.contractDurationMs ?? settings.ms);
+      return { refreshHandled: true };
+    } catch (err) {
+      reveal?.destroy?.();
+      throw err;
+    }
+  }
+
+  _spawnPressureImmediate() {
+    this._spawnCommitted = true;
+    const terrainPlan = this._buildPressureTerrainPlan();
+    const pressurePlan = buildPressureSpawnerPlan({
+      scene: this.scene,
+      origin: this.origin,
+      difficulty: this.difficulty,
+      modifier: this.pressureModifier,
+    });
+
+    this._applyTerrainPlan(terrainPlan, { waterWalkable: false });
+    this._applyPressureSpawnerPlan(pressurePlan);
+    return { refreshHandled: false };
+  }
+
+  async _spawnPressureAnimated() {
+    let reveal = null;
+    const terrainPlan = this._buildPressureTerrainPlan();
+    const pressurePlan = buildPressureSpawnerPlan({
+      scene: this.scene,
+      origin: this.origin,
+      difficulty: this.difficulty,
+      modifier: this.pressureModifier,
+    });
+    const futureNav = this._buildPressureNavGrids(terrainPlan, pressurePlan);
+
+    reveal = new ParcelRevealAnimator(this.scene, {
+      cells: terrainPlan.cells,
+      slotId: this.slotId,
+      size: PARCEL_SIZE,
+      alpha: 0.5,
+    });
+
+    let navDone = false;
+    const navPromise = this.scene?.prepareParcelNavMeshesAsync
+      ? this.scene.prepareParcelNavMeshesAsync(futureNav)
+          .catch((err) => {
+            console.warn("Pressure parcel navmesh async prep failed; falling back to local refresh.", err);
+            return null;
+          })
+          .then((result) => {
+            navDone = true;
+            return result;
+          })
+      : Promise.resolve(null).then((result) => {
+          navDone = true;
+          return result;
+        });
+
+    try {
+      await reveal.play();
+      if (!navDone) reveal.pulseWaiting();
+      const navResult = await navPromise;
+      reveal.stopPulse();
+
+      this._spawnCommitted = true;
+      this._applyTerrainPlan(terrainPlan, { waterWalkable: false });
+      this._applyPressureSpawnerPlan(pressurePlan);
+
+      const refreshOpts = {
+        waterSourceUpdate: {
+          slotId: this.slotId,
+          landParcel: true,
+        },
+      };
+      const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
+        navPolys: navResult.navPolys,
+        enemyPolys: navResult.enemyPolys,
+        navGrid: futureNav.navGrid,
+        enemyNavGrid: futureNav.enemyNavGrid,
+        bounds: this.getParcelBounds?.(),
+        refreshOpts,
+      }));
+
+      if (!refreshHandled) {
+        this._fallbackRefreshResourceArea();
+      }
+
+      await reveal.complete();
+      return { refreshHandled: true };
+    } catch (err) {
+      reveal?.destroy?.();
+      throw err;
+    }
+  }
+
+  spawn(opts = {}) {
+    const resourceSettings = this._resourceSpawnSettings();
+    if (resourceSettings) {
+      if (opts.animateParcelAdd && !opts.skipAnimation) {
+        return this._spawnResourceAnimated(resourceSettings);
+      }
+      return this._spawnResourceImmediate(resourceSettings);
     }
 
     if (this.type === "PRESSURE") {
-      setGroundRect(this.origin.x, this.origin.y, PARCEL_SIZE, PARCEL_SIZE);
-
-      const pressureData = createPressureSpawners({
-        scene: this.scene,
-        origin: this.origin,
-        difficulty: this.difficulty,
-        contractId: this.id,
-        spawnSpawnerBuilding: (args) => this.pm.spawnSpawnerBuilding(args),
-        modifier: this.pressureModifier,
-      });
-
-      this.spawners = pressureData.spawners;
-      this.totalPlannedEnemies = pressureData.totalPlannedEnemies;
-      this.enemyType = pressureData.enemyType;
-      this.enemyTypeLabel = pressureData.enemyTypeLabel;
-      this.spawnerCount = pressureData.spawnerCount;
-
-      this._startUITick();
-      return;
+      if (opts.animateParcelAdd && !opts.skipAnimation) {
+        return this._spawnPressureAnimated();
+      }
+      return this._spawnPressureImmediate();
     }
 
     if (this.type === "MILITIA") {
@@ -498,7 +1113,8 @@ export class ParcelContractInstance {
     }
 
     if (this.type === "MARKET") {
-      const ms = 60_000;
+      const ms = Math.max(0, Number(this.contractDurationMs || 60_000));
+      this.contractDurationMs = ms;
       this.expireAt = this._getSimulationNowMs() + ms;
 
       this._paintMarketParcel();
@@ -506,7 +1122,7 @@ export class ParcelContractInstance {
 
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
-      const prices = { ...DEFAULT_MARKET_PRICES };
+      const prices = buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES);
       this._marketPrices = { ...prices };
       this._marketSoldIds = new Set();
 
@@ -554,19 +1170,25 @@ export class ParcelContractInstance {
       pressureModifier: this.pressureModifier ? { ...this.pressureModifier } : null,
       pressureHordeIndex: this.pressureHordeIndex ?? null,
       militiaConfig: this.militiaConfig ? { ...this.militiaConfig } : null,
+      slotFavor: cloneSlotFavor(this.slotFavor),
+      contractDurationMs: this.contractDurationMs ?? null,
+      completionBonusMoney: this.completionBonusMoney ?? 0,
       marketPrices: this._marketPrices ? { ...this._marketPrices } : null,
       marketSoldIds: this._marketSoldIds ? Array.from(this._marketSoldIds) : null,
+      moneyCost: this.moneyCost ?? 0,
       permitCost: this.permitCost ?? 0,
       placedObjects: (this.placedObjects || [])
         .filter((obj) => obj && obj.active !== false)
         .map((obj) => ({
-          kind: obj.resourceKind
-            ? `${obj.resourceKind}_bush`
-            : (obj.resourceTileType?.name || obj.tileType?.name || (obj.enemyType ? "spawner" : null)),
+          kind: obj.resourceTileType?.name
+            || obj.tileType?.name
+            || (obj.enemyType ? "spawner" : null),
           x: Number(obj.gridX ?? obj.x ?? obj.tilePos?.tileX ?? 0),
           y: Number(obj.gridY ?? obj.y ?? obj.tilePos?.tileY ?? 0),
           health: Number(obj.health ?? obj.hp ?? 0),
           maxHealth: Number(obj.maxHealth ?? obj.maxHp ?? 0),
+          moneyReward: Number(obj.moneyReward ?? 0),
+          moneyRewardRemaining: Number(obj.moneyRewardRemaining ?? obj.moneyReward ?? 0),
           quotaRemaining: Number(obj.quotaRemaining ?? 0),
           aliveCount: Number(obj.aliveCount ?? 0),
           intervalMs: Number(obj.intervalMs ?? 0),
@@ -589,9 +1211,13 @@ export class ParcelContractInstance {
     this.enemyTypeLabel = saved.enemyTypeLabel ?? this.enemyTypeLabel;
     this.spawnerCount = Number(saved.spawnerCount ?? this.spawnerCount ?? 0);
     this.permitCost = Number(saved.permitCost ?? this.permitCost ?? 0);
+    this.moneyCost = Number(saved.moneyCost ?? this.moneyCost ?? 0);
     this._marketPrices = saved.marketPrices ? { ...saved.marketPrices } : this._marketPrices;
     this._marketSoldIds = new Set(Array.isArray(saved.marketSoldIds) ? saved.marketSoldIds : []);
     this.militiaConfig = saved.militiaConfig ? { ...saved.militiaConfig } : this.militiaConfig;
+    this.slotFavor = cloneSlotFavor(saved.slotFavor ?? this.slotFavor);
+    this.contractDurationMs = Number(saved.contractDurationMs ?? this.contractDurationMs ?? 0) || null;
+    this.completionBonusMoney = Math.max(0, Number(saved.completionBonusMoney ?? this.completionBonusMoney ?? 0));
     this.pressureModifier = saved.pressureModifier ? { ...saved.pressureModifier } : this.pressureModifier;
     this.pressureModifierKey = saved.pressureModifierKey ?? this.pressureModifierKey;
     this.pressureOwnerTower = saved.pressureOwnerTower ?? this.pressureOwnerTower;
@@ -633,12 +1259,21 @@ export class ParcelContractInstance {
       const entries = Array.isArray(saved.placedObjects) ? saved.placedObjects : [];
       this.placedObjects = [];
       for (const entry of entries) {
-        const tileType = entry.kind === "pine" ? TILE_TYPES.pine : TILE_TYPES.rock;
+        let tileType = TILE_TYPES.rock;
+        if (entry.kind === "pine") tileType = TILE_TYPES.pine;
+        else if (entry.kind === "goldOre") tileType = TILE_TYPES.goldOre;
         const obj = GameMap.handleLoadNonSpread(entry.x, entry.y, tileType);
         if (!obj) continue;
         obj.contractId = this.id;
         obj.slotId = this.slotId;
         obj.health = Number(entry.health ?? obj.health ?? 0);
+        obj.applyBlockDamage?.(obj.health);
+        if (tileType === TILE_TYPES.goldOre) {
+          obj.moneyReward = Math.max(0, Number(entry.moneyReward || obj.moneyReward || getGoldOrePayout(this.scene)));
+          obj.moneyRewardRemaining = Math.max(0, Number(entry.moneyRewardRemaining ?? obj.moneyRewardRemaining ?? obj.moneyReward));
+        }
+        if (tileType === TILE_TYPES.pine) GameMap.worldPines.push(obj);
+        else GameMap.worldStones.push(obj);
         this.placedObjects.push(obj);
       }
       this._startUITick();
@@ -685,7 +1320,7 @@ export class ParcelContractInstance {
         slotId: this.slotId,
         teamNumber: 1,
         durationMs: remaining,
-        prices: this._marketPrices || { ...DEFAULT_MARKET_PRICES },
+        prices: this._marketPrices || buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES),
         soldIds: this._marketSoldIds,
         onSoldIdsChanged: (nextSoldIds = []) => {
           this._marketSoldIds = new Set(nextSoldIds);
@@ -738,7 +1373,8 @@ export class ParcelContractInstance {
   }
 
   complete(reason) {
-    if (this._completed) return;
+    if (this._completionPromise) return this._completionPromise;
+    if (this._completed) return this._completionPromise;
     this._completed = true;
 
     if (this.timerEvent) {
@@ -758,52 +1394,94 @@ export class ParcelContractInstance {
       });
     }
 
-    paintWaterRect({
-      origin: this.origin,
-      size: PARCEL_SIZE,
-      setWaterRect: this.map.setWaterRect.bind(this.map),
-    });
+    this._disablePlacedObjectInteractions();
 
-    for (const obj of this.placedObjects) {
-      if (!obj) continue;
+    this._completionPromise = this._completeWithRemovalAnimation(reason);
+    return this._completionPromise;
+  }
 
-      if (typeof obj.destroy === "function" && (obj.resourceKind || obj.sprite || obj.container)) {
-        obj.destroy();
-        continue;
-      }
+  _shouldGrantCompletionBonus(reason) {
+    if (this._completionBonusGranted) return false;
+    if (this.completionBonusMoney <= 0) return false;
+    return reason !== "external_cleanup" && reason !== "stage_end_cleanup";
+  }
 
-      removeFromArray(GameMap.worldPines, obj);
-      removeFromArray(GameMap.worldStones, obj);
-      removeFromArray(GameMap.worldSeedBushes, obj);
-      removeFromArray(GameMap.worldBerryBushes, obj);
-      obj.destroy?.();
-    }
-    this.placedObjects = [];
+  async _completeWithRemovalAnimation(reason) {
+    const removalPlan = this._buildParcelWaterPlan();
+    const futureNav = this._buildRemovalNavGrids(removalPlan);
+    let reveal = null;
+    let navDone = false;
 
-    if (this.type === "MARKET") {
-      this._marketHandle?.destroy?.();
-      this._marketHandle = null;
-    }
+    const navPromise = this.scene?.prepareParcelNavMeshesAsync
+      ? this.scene.prepareParcelNavMeshesAsync(futureNav)
+          .catch((err) => {
+            console.warn("Parcel removal navmesh async prep failed; falling back to local refresh.", err);
+            return null;
+          })
+          .then((result) => {
+            navDone = true;
+            return result;
+          })
+      : Promise.resolve(null).then((result) => {
+          navDone = true;
+          return result;
+        });
 
-    for (const spawner of this.spawners) {
-      try {
-        spawner.building?.destroy?.();
-      } catch {}
-    }
+    try {
+      reveal = new ParcelRevealAnimator(this.scene, {
+        cells: removalPlan.cells,
+        slotId: this.slotId,
+        size: PARCEL_SIZE,
+        alpha: 0.5,
+        batchSize: 8,
+        batchDelayMs: 12,
+      });
 
-    this.spawners = [];
-    if (this.scene?.refreshParcelArea) {
-      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
+      await reveal.play();
+      if (!navDone) reveal.pulseWaiting();
+      const navResult = await navPromise;
+      reveal.stopPulse();
+
+      this._removalCommitted = true;
+      this._applyWaterRemovalPlan(removalPlan);
+      this._destroyPlacedObjectsForRemoval();
+
+      const refreshOpts = {
         waterSourceUpdate: {
           excludeParcelId: this.id,
         },
-      });
-    } else {
-      if (this.scene?.zoomMixer?.mode !== "overview") {
-        this.map.reDraw?.();
+      };
+      const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
+        navPolys: navResult.navPolys,
+        enemyPolys: navResult.enemyPolys,
+        navGrid: futureNav.navGrid,
+        enemyNavGrid: futureNav.enemyNavGrid,
+        bounds: this.getParcelBounds?.(),
+        refreshOpts,
+      }));
+
+      if (!refreshHandled) {
+        this._fallbackRefreshRemovalArea();
       }
-      this.scene?.rebuildBothNavMeshes?.();
+
+      await reveal.complete({ holdMs: 45, darkenMs: 170 });
+    } catch (err) {
+      console.error("Animated parcel removal failed; falling back to immediate removal.", err);
+      reveal?.destroy?.();
+
+      if (!this._removalCommitted) {
+        this._removalCommitted = true;
+        this._applyWaterRemovalPlan(removalPlan);
+        this._destroyPlacedObjectsForRemoval();
+      }
+      this._fallbackRefreshRemovalArea();
     }
+
+    if (this._shouldGrantCompletionBonus(reason)) {
+      this._completionBonusGranted = true;
+      this.scene?.updateMoney?.(this.completionBonusMoney);
+    }
+
     GameMap._uiIgnoreWorldLayer();
     this.pm.removeContract(this.slotId, this.id, reason);
   }

@@ -20,6 +20,8 @@ import { Blademaster } from "../../players/Blademaster";
 import { Gunslinger } from "../../players/Gunslinger";
 import { formatPermitCostText } from "../../permitSystem";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../../parcel_system/StoreUnlockSystem";
+import { RELIEF_PACKAGE_PRICE } from "../../ReliefPackageConfig";
+import { getRecruitCost } from "../../balance/GameBalance";
 import {
   BOTTOM_BAR_THEME,
   makeGlassRoundRect,
@@ -42,7 +44,7 @@ const UNIT_STORE = [
     key: "farmer",
     name: "Farmer",
     desc: "Plants, waters, and tends crops.",
-    cost: { money: 100 },
+    cost: { money: 90 },
     iconKey: "icon_farmer_store",
     portraitTexture: "portrait_farmer_healthy",
     unitClass: Farmer,
@@ -51,7 +53,7 @@ const UNIT_STORE = [
     key: "builder",
     name: "Builder",
     desc: "Constructs and repairs your structures.",
-    cost: { money: 100 },
+    cost: { money: 110 },
     iconKey: "icon_builder_store",
     portraitTexture: "portrait_builder_healthy",
     unitClass: Builder,
@@ -78,7 +80,7 @@ const UNIT_STORE = [
     key: "brawler",
     name: "Brawler",
     desc: "Fast melee bruiser for close fights.",
-    cost: { money: 75 },
+    cost: { money: 140 },
     iconKey: "icon_brawler_store",
     portraitTexture: "portrait_brawler_healthy",
     unitClass: Brawler,
@@ -87,7 +89,7 @@ const UNIT_STORE = [
     key: "blademaster",
     name: "Blademaster",
     desc: "Elite sword fighter with heavy hits.",
-    cost: { money: 250 },
+    cost: { money: 300 },
     unlockKey: STORE_UNLOCK_KEYS.blademaster,
     iconKey: "icon_blademaster_store",
     portraitTexture: "portrait_blademaster_healthy",
@@ -97,7 +99,7 @@ const UNIT_STORE = [
     key: "gunslinger",
     name: "Gunslinger",
     desc: "Ranged fighter with high recruit cost.",
-    cost: { money: 500 },
+    cost: { money: 450 },
     unlockKey: STORE_UNLOCK_KEYS.gunslinger,
     iconKey: "icon_gunslinger_store",
     portraitTexture: "portrait_gunslinger_healthy",
@@ -168,6 +170,10 @@ function ensureBuildTabIcons(scene) {
     drawCenteredTexture(scene, rt, { key: "catapult_top", frame: 1, scale: 0.76, x: 32, y: 24, useSprite: true });
   });
 
+  buildIconTexture(scene, "icon_relief_package_store", (rt) => {
+    drawCenteredTexture(scene, rt, { key: "relief_package", scale: 0.9 });
+  });
+
   UNIT_STORE.forEach((unit) => {
     buildIconTexture(scene, unit.iconKey, (rt) => {
       drawCenteredTexture(scene, rt, {
@@ -183,55 +189,12 @@ function ensureBuildTabIcons(scene) {
 
 function hasResources(scene, cost) {
   if (!cost) return true;
-  const need = (k) => Number(cost[k] ?? 0);
-  if (need("permits") > 0 && (scene.permits ?? 0) < need("permits")) return false;
-  if (need("money") > 0 && (scene.money ?? 0) < need("money")) return false;
-  if (need("wood") > 0 && (scene.woodAmnt ?? 0) < need("wood")) return false;
-  if (need("stone") > 0 && (scene.stoneAmnt ?? 0) < need("stone")) return false;
-  if (need("seeds") > 0 && (scene.seeds ?? 0) < need("seeds")) return false;
-  if (need("food") > 0 && (scene.foodAmnt ?? 0) < need("food")) return false;
-  if (need("clean_water") > 0 && (scene.cleanWaterAmnt ?? 0) < need("clean_water")) return false;
-  return true;
+  return buildingManager.hasRequiredMaterials(cost, "1");
 }
 
 function spendResources(scene, cost) {
   if (!cost) return;
-  const take = (k) => Number(cost[k] ?? 0);
-
-  const permits = take("permits");
-  if (permits) scene.updatePermits?.(-permits);
-
-  const money = take("money");
-  if (money) scene.updateMoney?.(-money);
-
-  const wood = take("wood");
-  if (wood) { scene.woodAmnt = (scene.woodAmnt ?? 0) - wood; scene.woodText?.setText(String(scene.woodAmnt)); }
-
-  const stone = take("stone");
-  if (stone) { scene.stoneAmnt = (scene.stoneAmnt ?? 0) - stone; scene.stoneText?.setText(String(scene.stoneAmnt)); }
-
-  const seeds = take("seeds");
-  if (seeds) scene.updateSeeds?.(-seeds);
-
-  const food = take("food");
-  if (food) {
-    scene.foodAmnt = (scene.foodAmnt ?? 0) - food;
-    if (scene.foodText) {
-      const raw = scene.foodText.text || "";
-      const parts = raw.split("/");
-      scene.foodText.setText(parts.length === 2 ? `${scene.foodAmnt}/${parts[1]}` : String(scene.foodAmnt));
-    }
-  }
-
-  const water = take("clean_water");
-  if (water) {
-    scene.cleanWaterAmnt = (scene.cleanWaterAmnt ?? 0) - water;
-    if (scene.waterText) {
-      const raw = scene.waterText.text || "";
-      const parts = raw.split("/");
-      scene.waterText.setText(parts.length === 2 ? `${scene.cleanWaterAmnt}/${parts[1]}` : String(scene.cleanWaterAmnt));
-    }
-  }
+  buildingManager.consumeRequiredMaterials(cost, "1");
 }
 
 function fmtCost(cost) {
@@ -297,7 +260,9 @@ function normalizeTileCost(tile) {
 }
 
 function getDefCost(def, scene = null) {
-  if (def?.isUnit) return def.cost ?? {};
+  if (def?.isUnit) {
+    return { money: getRecruitCost(def.recruitType || def.key, scene) };
+  }
   if (def?.key === "house") {
     return Teams.getHouseBuildCost?.(scene?.teamNumber ?? "1") ?? { wood: 4, stone: 4, permits: 1 };
   }
@@ -356,9 +321,16 @@ export default class BuildTab {
       if (this.mode === "buildings") this._makeUI();
     };
     scene.events.on("housing:updated", this._onHousingChanged);
+    this._onPhaseChanged = () => {
+      this.refreshAvailableDefs();
+    };
+    scene.events.on("phase:changed", this._onPhaseChanged);
+    this._onReliefPackageChanged = () => this.refreshAvailableDefs();
+    scene.events.on("relief-package:changed", this._onReliefPackageChanged);
     scene.events.once("shutdown", () => {
       scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
       scene.events.off("housing:updated", this._onHousingChanged);
+      scene.events.off("relief-package:changed", this._onReliefPackageChanged);
     });
 
     this._makeUI();
@@ -370,6 +342,8 @@ export default class BuildTab {
   destroy() {
     this.scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
     this.scene.events.off("housing:updated", this._onHousingChanged);
+    this.scene.events.off("phase:changed", this._onPhaseChanged);
+    this.scene.events.off("relief-package:changed", this._onReliefPackageChanged);
     if (this._onCardsPointerUp) {
       this.scene.input.off("pointerup", this._onCardsPointerUp);
       this._onCardsPointerUp = null;
@@ -447,21 +421,41 @@ export default class BuildTab {
   }
 
   _makeUnitDefs() {
-    return UNIT_STORE.filter((unit) => !unit.unlockKey || hasStoreUnlock(unit.unlockKey)).map((unit) => ({
+    const defs = UNIT_STORE.filter((unit) => !unit.unlockKey || hasStoreUnlock(unit.unlockKey)).map((unit) => ({
+      costMoney: getRecruitCost(unit.key, this.scene),
       key: unit.key,
       name: unit.name,
       desc: unit.desc,
-      rarity: getUnitRarity(Number(unit.cost?.money ?? 0)),
+      rarity: getUnitRarity(getRecruitCost(unit.key, this.scene)),
       iconKey: unit.iconKey,
       unitClass: unit.unitClass,
       recruitType: unit.key,
       cost: unit.cost,
       isUnit: true,
     }));
+
+    const hasReliefPackage = !!this.scene.worldScene?.hasReliefPackage?.();
+    if (!hasReliefPackage) {
+      defs.push({
+        key: "relief_package",
+        name: "Relief Package",
+        desc: "Emergency storage recovery. Auto-deploys when all storages are lost. Limit 1.",
+        rarity: "epic",
+        iconKey: "icon_relief_package_store",
+        cost: { money: RELIEF_PACKAGE_PRICE },
+        storePurchaseType: "relief_package",
+      });
+    }
+
+    return defs;
   }
 
   _getCurrentDefs() {
     return this.mode === "units" ? this._unitDefs : this._buildDefs;
+  }
+
+  _getTutorialManager() {
+    return this.scene.worldScene?.tutorialManager || this.scene.tutorialManager || null;
   }
 
   _makeUI() {
@@ -510,19 +504,19 @@ export default class BuildTab {
 
     buildToggleBg.on("pointerdown", () => {
       AudioManager.playBottomBarClick();
-      this._setMode("buildings");
+      this._trySetMode("buildings");
     });
     buildToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
       AudioManager.playBottomBarClick();
-      this._setMode("buildings");
+      this._trySetMode("buildings");
     });
     unitToggleBg.on("pointerdown", () => {
       AudioManager.playBottomBarClick();
-      this._setMode("units");
+      this._trySetMode("units");
     });
     unitToggleText.setInteractive({ useHandCursor: true }).on("pointerdown", () => {
       AudioManager.playBottomBarClick();
-      this._setMode("units");
+      this._trySetMode("units");
     });
     applyBuildTabToggleVisual(buildToggleBg, buildToggleText, this.mode === "buildings", 0xff97c2);
     applyBuildTabToggleVisual(unitToggleBg, unitToggleText, this.mode === "units", 0x98e7ff);
@@ -767,6 +761,15 @@ export default class BuildTab {
     this._makeUI();
   }
 
+  _trySetMode(mode) {
+    const tutorial = this._getTutorialManager();
+    if (tutorial?.isActive?.() && mode !== this.mode) {
+      tutorial.blockAction("Use the highlighted Store item first.");
+      return;
+    }
+    this._setMode(mode);
+  }
+
   refreshAvailableDefs() {
     this._clearSelection(true);
     this._buildDefs = this._makeBuildDefs();
@@ -778,6 +781,11 @@ export default class BuildTab {
     const team = "1";
     const costObj = def.cost ?? {};
     const housing = Teams.getHousingStatus?.(team);
+    const tutorial = this._getTutorialManager();
+
+    if (tutorial && !tutorial.canPerformAction?.("build.recruit", { key: def.key })) {
+      return;
+    }
 
     if (!hasResources(this.scene, costObj)) {
       showAlert(this.scene, "Not enough money", "#ff5555");
@@ -802,6 +810,34 @@ export default class BuildTab {
     House.assignPlayerToHouse(player, team);
     spendResources(this.scene, costObj);
     showAlert(this.scene, `${def.name} recruited!`, "#ffb4dd");
+    tutorial?.notifyAction?.("build.recruit", {
+      key: def.key,
+      player,
+    });
+  }
+
+  _purchaseReliefPackage(def) {
+    const tutorial = this._getTutorialManager();
+    if (tutorial && !tutorial.canPerformAction?.("build.recruit", { key: def.key })) {
+      return;
+    }
+
+    if (this.scene.worldScene?.hasReliefPackage?.()) {
+      showAlert(this.scene, "Relief package already stocked", "#ffdd88");
+      return;
+    }
+
+    if (!hasResources(this.scene, def.cost ?? {})) {
+      showAlert(this.scene, "Not enough money", "#ff5555");
+      return;
+    }
+
+    spendResources(this.scene, def.cost ?? {});
+    this.scene.worldScene?.grantReliefPackage?.();
+    showAlert(this.scene, "Relief package stocked", "#a7f3d0");
+    tutorial?.notifyAction?.("build.recruit", {
+      key: def.key,
+    });
   }
 
   _select(key) {
@@ -809,12 +845,26 @@ export default class BuildTab {
     const def = this._getCurrentDefs().find(d => d.key === key);
     if (!def) return;
 
+    if (def.storePurchaseType === "relief_package") {
+      this._purchaseReliefPackage(def);
+      return;
+    }
+
     if (def.isUnit) {
       this._recruitUnit(def);
       return;
     }
 
+    const tutorial = this._getTutorialManager();
+    if (tutorial && !tutorial.canPerformAction?.("build.select", { key: def.key })) {
+      return;
+    }
+
     if (this.activeKey === key) {
+      if (tutorial?.isActive?.()) {
+        tutorial.blockAction("Place the highlighted building first.");
+        return;
+      }
       this._clearSelection(true);
       return;
     }
@@ -921,6 +971,14 @@ export default class BuildTab {
       }
 
       const costObj = getDefCost(this.pendingDef, this.scene);
+      const tutorial = this._getTutorialManager();
+
+      if (tutorial && !tutorial.canPerformAction?.("build.placed", {
+        key: this.pendingDef.key,
+        tileTypeName: this.pendingDef.tileTypeName,
+      })) {
+        return;
+      }
 
       if (!hasResources(this.scene, costObj)) {
         showAlert(this.scene, "Not enough resources or permits", "#ff5555");
@@ -934,6 +992,7 @@ export default class BuildTab {
         (tile.lenY ?? 1) > 1;
 
       if (isBlockBuild) {
+        const placedDef = this.pendingDef;
         spendResources(this.scene, costObj);
 
         buildingManager.queueBlockBuildTask({
@@ -948,13 +1007,28 @@ export default class BuildTab {
         }, 1);
         this._clearSelection(true);
         showAlert(this.scene, "Construction started!", "#aaffaa");
+        tutorial?.notifyAction?.("build.placed", {
+          key: placedDef?.key,
+          tileTypeName: placedDef?.tileTypeName,
+          gridX,
+          gridY,
+          tile,
+        });
         return;
       }
 
+      const placedDef = this.pendingDef;
       spendResources(this.scene, costObj);
       GameMap.placeItem(gridX * SQUARESIZE, gridY * SQUARESIZE, tile);
       this._clearSelection(true);
       showAlert(this.scene, "Built!", "#aaffaa");
+      tutorial?.notifyAction?.("build.placed", {
+        key: placedDef?.key,
+        tileTypeName: placedDef?.tileTypeName,
+        gridX,
+        gridY,
+        tile,
+      });
     };
     inputScene.input.on("pointerdown", this._onPlacePointerDown);
 

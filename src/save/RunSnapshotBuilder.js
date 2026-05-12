@@ -205,6 +205,7 @@ function snapshotTeamState(teamId, team) {
     buildings,
     cardIds: getCardIdsFromHand(team.cardHand),
     cardInventory: getCardInventorySnapshot(team.cardInventory),
+    reliefPackageCount: Math.max(0, Number(team.reliefPackageCount || 0)),
     townAutomation: cloneSimple(team.townAutomation, {}),
   };
 }
@@ -360,6 +361,7 @@ export function buildRunSnapshot(scene) {
         plan: cloneSimple(scene._activeNightHorde.plan, null),
         laneDetails: cloneSimple(scene._activeNightHorde.laneDetails, []),
       } : null,
+      shockerBoss: cloneSimple(scene?._shockerBossState, null),
       townTowerStats: cloneSimple(scene?._townTowerStats, null),
       activeFort: scene?._activeFort ? {
         origin: cloneSimple(scene._activeFort.origin, null),

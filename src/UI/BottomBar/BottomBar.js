@@ -126,10 +126,33 @@ export function CreateBottomBar(scene) {
     setBottomBar(!expanded);
   }
 
-  const onTogglePointerUp = () => toggleBottomBar();
+  const getTutorialManager = () => scene.worldScene?.tutorialManager || scene.tutorialManager || null;
+  const canUseDuringTutorial = (action, payload = {}) => {
+    const tutorial = getTutorialManager();
+    if (!tutorial?.isActive?.()) return true;
+    return tutorial.canPerformAction?.(action, payload) !== false;
+  };
+
+  const onTogglePointerUp = () => {
+    if (!canUseDuringTutorial("bottomBar.toggle", {
+      open: !expanded,
+      message: "Finish the highlighted tutorial step first.",
+    })) {
+      return;
+    }
+    toggleBottomBar();
+  };
   const onTabButtonClick = (btn) => {
     const key = btn?.name;
     if (!key) return;
+    if (!canUseDuringTutorial("bottomBar.tab", {
+      key,
+      message: "Use the highlighted tutorial control first.",
+    })) {
+      tabs.setValue?.(scene.uiBottomBar.currentPage);
+      updateTabButtonStyles(tabs, scene.uiBottomBar.currentPage);
+      return;
+    }
     AudioManager.playBottomBarClick();
     scene.cameras.main?.setScroll?.(0, 0);
 
@@ -158,7 +181,10 @@ export function CreateBottomBar(scene) {
     if (key === 'cards') scene.cardsTab?.onShow?.();
     updateTabButtonStyles(tabs, key);
   };
-  const onSpaceToggle = () => toggleBottomBar();
+  const onSpaceToggle = () => {
+    if (getTutorialManager()?.isActive?.()) return;
+    toggleBottomBar();
+  };
 
   scene.setBottomBar = setBottomBar;
 

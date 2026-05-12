@@ -52,7 +52,7 @@ export class Hunter {
         hunter.roam = false;
         hunter.maxHealth = 75;
         hunter.health = hunter.maxHealth;
-        hunter.killReward = 55;
+        hunter.killReward = 26;
         hunter.maxStamina = hunter.maxStamina ?? 100;
         hunter.stamina = hunter.stamina ?? hunter.maxStamina;
         hunter.weapon = { ...weapons.hunterRifle };

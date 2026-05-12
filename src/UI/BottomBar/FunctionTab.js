@@ -390,9 +390,24 @@ export default class FunctionTab {
     return null;
   }
 
+  _getTutorialManager() {
+    return this.scene.worldScene?.tutorialManager || this.scene.tutorialManager || null;
+  }
+
   toggleMode(mode) {
     const currentMode = this._getSceneActiveMode();
     const turningOn = currentMode !== mode;
+    const tutorial = this._getTutorialManager();
+
+    if (tutorial?.isActive?.()) {
+      if (!turningOn) {
+        tutorial.blockAction("Keep the highlighted tutorial mode active.");
+        return;
+      }
+      if (!tutorial.canPerformAction?.("function.mode", { mode })) {
+        return;
+      }
+    }
 
     this.scene.farmMode = false;
     this.scene.seedGridMode = false;
@@ -420,13 +435,22 @@ export default class FunctionTab {
 
     this.activeMode = this._getSceneActiveMode();
     this.updateVisuals();
+    if (turningOn) {
+      tutorial?.notifyAction?.("function.mode", { mode });
+    }
   }
 
   toggleWaterAutomation() {
     const automation = this._getAutomation();
     if (!automation) return;
+    const tutorial = this._getTutorialManager();
+    const enabled = !automation.waterEnabled;
 
-    automation.waterEnabled = !automation.waterEnabled;
+    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled })) {
+      return;
+    }
+
+    automation.waterEnabled = enabled;
     this._reconcileTownAutomation(true);
     this.updateVisuals();
 
@@ -435,11 +459,20 @@ export default class FunctionTab {
       automation.waterEnabled ? "Water production enabled for all firemen" : "Water production winding down",
       "#93c5fd"
     );
+    tutorial?.notifyAction?.("function.water", {
+      enabled,
+    });
   }
 
   toggleGatherAutomation() {
     const automation = this._getAutomation();
     if (!automation) return;
+    const tutorial = this._getTutorialManager();
+
+    if (tutorial?.isActive?.()) {
+      tutorial.blockAction("Gather staffing comes after this tutorial step.");
+      return;
+    }
 
     const totalTarget = this._sumGatherTargets(automation.gatherTargets);
     if (!automation.gatherEnabled && totalTarget <= 0) {
@@ -464,6 +497,12 @@ export default class FunctionTab {
   adjustGatherTarget(resourceKey, delta) {
     const automation = this._getAutomation();
     if (!automation || !Object.prototype.hasOwnProperty.call(automation.gatherTargets, resourceKey)) return;
+    const tutorial = this._getTutorialManager();
+
+    if (tutorial?.isActive?.()) {
+      tutorial.blockAction("Gather staffing comes after this tutorial step.");
+      return;
+    }
 
     const current = Number(automation.gatherTargets[resourceKey] || 0);
     const next = Phaser.Math.Clamp(current + delta, 0, GATHER_MAX_TARGET);
@@ -821,6 +860,12 @@ export default class FunctionTab {
   }
 
   _runRestAction(groupKey, mode) {
+    const tutorial = this._getTutorialManager();
+    if (tutorial?.isActive?.()) {
+      tutorial.blockAction("Use the highlighted tutorial control first.");
+      return;
+    }
+
     const team = Teams.getTeam(this.teamNumber);
     if (!team) return;
 

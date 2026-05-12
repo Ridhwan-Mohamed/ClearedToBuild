@@ -1,11 +1,11 @@
 const SIX_DIRECTION_KEYS = ["down", "down_left", "down_right", "up", "up_left", "up_right"];
 const SWIM_DIRECTION_KEYS = ["up", "down", "side"];
 
-function createDirectionalAnim(scene, animKey, textureKey, frameRate) {
+function createDirectionalAnim(scene, animKey, textureKey, frameRate, frameEnd = 2) {
     if (scene.anims.exists(animKey)) return;
     scene.anims.create({
         key: animKey,
-        frames: scene.anims.generateFrameNumbers(textureKey, { start: 0, end: 2 }),
+        frames: scene.anims.generateFrameNumbers(textureKey, { start: 0, end: Math.max(0, Number(frameEnd) || 0) }),
         frameRate,
         repeat: -1
     });
@@ -137,6 +137,8 @@ export function attachDirectionalSix(troop, config) {
         swimIdleFrame: Number.isFinite(config.swimIdleFrame) ? config.swimIdleFrame : 1,
         frameRate: Number.isFinite(config.frameRate) ? config.frameRate : 7,
         swimFrameRate: Number.isFinite(config.swimFrameRate) ? config.swimFrameRate : 8,
+        frameEnd: Number.isFinite(config.frameEnd) ? config.frameEnd : 2,
+        swimFrameEnd: Number.isFinite(config.swimFrameEnd) ? config.swimFrameEnd : 2,
         lastDirection: config.defaultDirection || "down",
         lastSwimDirection: "down",
         lastSwimFlipX: false,
@@ -149,7 +151,7 @@ export function attachDirectionalSix(troop, config) {
         if (!textureKey) return;
 
         const animKey = `${config.animPrefix || "unit"}_${dirKey}_walk`;
-        createDirectionalAnim(troop.scene, animKey, textureKey, profile.frameRate);
+        createDirectionalAnim(troop.scene, animKey, textureKey, profile.frameRate, profile.frameEnd);
 
         profile.directions[dirKey] = {
             textureKey,
@@ -162,7 +164,7 @@ export function attachDirectionalSix(troop, config) {
         if (!textureKey) return;
 
         const animKey = `${config.animPrefix || "unit"}_${dirKey}_swim`;
-        createDirectionalAnim(troop.scene, animKey, textureKey, profile.swimFrameRate);
+        createDirectionalAnim(troop.scene, animKey, textureKey, profile.swimFrameRate, profile.swimFrameEnd);
 
         profile.swimDirections[dirKey] = {
             textureKey,

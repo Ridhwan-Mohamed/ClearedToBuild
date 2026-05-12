@@ -61,7 +61,7 @@ export class fightManager{
         const attackerIsPlayerFighter =
             attacker?.body?.team === 1 &&
             Player._isFighterUnit?.(attacker);
-        if (target?.isRaider && attackerIsPlayerFighter) {
+        if (target?.isRaider && attackerIsPlayerFighter && !target?.isBomber) {
             target._raiderRetaliationTarget = attacker;
         }
 
@@ -373,7 +373,10 @@ export class fightManager{
 
     static checkForKillReward(teamNumber, target){
         if(teamNumber && target.killReward){
-            this.scene.updateMoney(target.killReward);
+            this.scene.updateMoney(target.killReward, {
+                sourceWorldX: Number(target?.x),
+                sourceWorldY: Number(target?.y),
+            });
         }
         if (Number(teamNumber) === 1 && target?.body?.team !== 1) {
             this.scene?.registerRunEnemyDefeat?.(target, {

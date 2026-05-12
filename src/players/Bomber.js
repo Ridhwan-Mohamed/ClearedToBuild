@@ -66,7 +66,7 @@ export class Bomber {
         bomber.awareness = 0;
         bomber.maxHealth = 48;
         bomber.health = bomber.maxHealth;
-        bomber.killReward = 65;
+        bomber.killReward = 32;
         bomber.maxStamina = bomber.maxStamina ?? 100;
         bomber.stamina = bomber.stamina ?? bomber.maxStamina;
         bomber.weapon = null;

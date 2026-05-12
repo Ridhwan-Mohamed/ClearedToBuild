@@ -5,7 +5,9 @@ import {
   clearRunSaveStorage,
   readRunSaveMeta,
   readRunSaveSnapshot,
+  readTutorialProfile,
   validateRunSnapshot,
+  writeTutorialProfile,
   writeRunSaveSnapshot,
 } from "./saveSchema.js";
 
@@ -64,9 +66,21 @@ export class SaveManager {
 
   static canSaveScene(scene = this.scene) {
     if (!scene || scene._restoringFromSave) return false;
+    if (scene.tutorialManager?.isBlockingSaves?.()) return false;
     if (!scene.clock || !scene.parcelManager || !scene.towerPressureController) return false;
     if (scene.menu?.active && !scene.parcelSpawnUI) return false;
     return true;
+  }
+
+  static isTutorialCompleted() {
+    return !!readTutorialProfile()?.tutorialCompleted;
+  }
+
+  static setTutorialCompleted(completed = true) {
+    return writeTutorialProfile({
+      tutorialCompleted: !!completed,
+      completedAt: completed ? Date.now() : 0,
+    });
   }
 
   static queueAutosave(reason = "mutation") {

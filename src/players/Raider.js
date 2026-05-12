@@ -68,7 +68,7 @@ export class Raider {
         raider.isSeaRaider = false;   // sea mode is set in spawnSeaRaider
         raider.roam       = false;
         raider.maxHealth  = 100;
-        raider.killReward  = 40;   // reward for player when killed (for contract tracking)
+        raider.killReward  = 18;   // reward for player when killed (for contract tracking)
 
         // Make sure stamina math is well-defined (even if we never drain it)
         raider.maxStamina = raider.maxStamina ?? 100;
@@ -130,15 +130,7 @@ export class Raider {
 
         if(troop.task){
             Raider._rememberMission(troop, troop.task);
-            const retaliationTarget = troop._raiderRetaliationTarget;
-            if (retaliationTarget?.active && retaliationTarget?.body?.team === 1) {
-                Raider._startPlayerChase(troop, retaliationTarget, {
-                    retaliation: true,
-                    reason: "raider_retaliate_fighter",
-                });
-            } else if (retaliationTarget && !retaliationTarget?.active) {
-                troop._raiderRetaliationTarget = null;
-            }
+            Raider._tryAggroNearbyPlayer(troop, { onMission: true });
             return false;
         }
         // -------------------------
@@ -212,10 +204,7 @@ export class Raider {
             return false;
         }
 
-        const nearbyPriorityTarget = Raider._findNearbyUnitTarget(troop);
-        if (nearbyPriorityTarget && Raider._startPlayerChase(troop, nearbyPriorityTarget, {
-            reason: "raider_nearby_player",
-        })) {
+        if (Raider._tryAggroNearbyPlayer(troop, { onMission: false })) {
             return false;
         }
 
@@ -511,7 +500,52 @@ export class Raider {
         return Phaser.Math.Distance.Between(troop.x, troop.y, center.x, center.y);
     }
 
+    static _canAggroPlayerTargets(troop) {
+        return !!(troop?.active && !troop?.isBomber);
+    }
+
+    static _shouldRetaliateToHit(troop, attacker) {
+        if (!Raider._canAggroPlayerTargets(troop)) return false;
+        if (!attacker?.active || attacker.body?.team !== 1) return false;
+        if (troop?.isHunter) return true;
+        return !!Player._isFighterUnit?.(attacker);
+    }
+
+    static _isThreateningRaider(troop, target) {
+        return !!(
+            target?.forcedTarget === troop ||
+            target?.track?.[0]?.gameObject === troop ||
+            troop?._raiderRetaliationTarget === target
+        );
+    }
+
+    static _canRoleChaseTarget(troop, target, { onMission = false } = {}) {
+        if (!Raider._canAggroPlayerTargets(troop)) return false;
+        if (!target?.active || target.body?.team !== 1) return false;
+        if (troop?.isHunter) return true;
+        if (Player._isFighterUnit?.(target)) return true;
+        return !onMission && Raider._isThreateningRaider(troop, target);
+    }
+
+    static _targetPriorityForRole(troop, target) {
+        const threatening = Raider._isThreateningRaider(troop, target);
+        const fighter = !!Player._isFighterUnit?.(target);
+
+        if (troop?.isHunter) {
+            if (threatening && fighter) return 0;
+            if (fighter) return 1;
+            if (threatening) return 2;
+            return 3;
+        }
+
+        if (threatening && fighter) return 0;
+        if (fighter) return 1;
+        if (threatening) return 2;
+        return 5;
+    }
+
     static _canStartPlayerChase(troop, target, opts = {}) {
+        if (!Raider._canAggroPlayerTargets(troop)) return false;
         if (!troop?.active || !target?.active || target.body?.team !== 1) return false;
         const now = Raider._now(troop);
         const dist = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y);
@@ -540,6 +574,7 @@ export class Raider {
             startedAt: now,
             targetId: target.id ?? null,
             retaliation: !!opts.retaliation,
+            role: troop?.isHunter ? "hunter" : "raider",
         };
         troop._raiderRetaliationTarget = null;
         troop.forcedTarget = target;
@@ -557,12 +592,20 @@ export class Raider {
 
         const now = Raider._now(troop);
         const chaseAge = now - Number(chase?.startedAt || now);
-        if (chaseAge >= Raider.PLAYER_CHASE_MAX_MS) return true;
+        const isRetaliation = !!chase?.retaliation;
+        const hunterChase = chase?.role === "hunter";
+        if (!isRetaliation && !hunterChase && chaseAge >= Raider.PLAYER_CHASE_MAX_MS) return true;
+        if (hunterChase && chaseAge >= Raider.PLAYER_CHASE_MAX_MS * 2.2) return true;
 
         const targetDist = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y);
-        if (targetDist > Raider.PLAYER_CHASE_DROP_DIST) return true;
+        const maxDropDist = isRetaliation
+            ? Raider.PLAYER_CHASE_DROP_DIST * 2.5
+            : hunterChase
+                ? Raider.PLAYER_CHASE_DROP_DIST * 2
+                : Raider.PLAYER_CHASE_DROP_DIST;
+        if (targetDist > maxDropDist) return true;
 
-        if (troop._raidMissionTask && Raider._isBuildingTaskValid(troop._raidMissionTask)) {
+        if (!isRetaliation && !hunterChase && troop._raidMissionTask && Raider._isBuildingTaskValid(troop._raidMissionTask)) {
             if (Raider._distanceFromMission(troop) > Raider.PLAYER_CHASE_MAX_MISSION_DIST) return true;
         }
 
@@ -607,7 +650,31 @@ export class Raider {
         return false;
     }
 
-    static _findNearbyUnitTarget(troop) {
+    static _tryAggroNearbyPlayer(troop, { onMission = false } = {}) {
+        if (!Raider._canAggroPlayerTargets(troop)) return false;
+
+        const retaliationTarget = troop._raiderRetaliationTarget;
+        if (retaliationTarget?.active && retaliationTarget?.body?.team === 1) {
+            if (Raider._shouldRetaliateToHit(troop, retaliationTarget)) {
+                return Raider._startPlayerChase(troop, retaliationTarget, {
+                    retaliation: true,
+                    reason: troop?.isHunter ? "hunter_retaliate_player" : "raider_retaliate_fighter",
+                });
+            }
+            troop._raiderRetaliationTarget = null;
+        } else if (retaliationTarget && !retaliationTarget?.active) {
+            troop._raiderRetaliationTarget = null;
+        }
+
+        const nearbyPriorityTarget = Raider._findNearbyUnitTarget(troop, { onMission });
+        if (!nearbyPriorityTarget) return false;
+
+        return Raider._startPlayerChase(troop, nearbyPriorityTarget, {
+            reason: troop?.isHunter ? "hunter_nearby_player" : "raider_nearby_player",
+        });
+    }
+
+    static _findNearbyUnitTarget(troop, { onMission = false } = {}) {
         const radius = Math.max(
             Number(troop?.awareness ?? troop?.type?.awareness ?? Raider.awareness ?? 0),
             Number(troop?.weapon?.range ?? 0) * 2.5
@@ -625,6 +692,7 @@ export class Raider {
             if (regionSystem?.canReachWorldToWorld && !regionSystem.canReachWorldToWorld(troop.x, troop.y, target.x, target.y)) {
                 return;
             }
+            if (!Raider._canRoleChaseTarget(troop, target, { onMission })) return;
 
             candidates.push(target);
         });
@@ -632,9 +700,9 @@ export class Raider {
         if (!candidates.length) return null;
 
         candidates.sort((a, b) => {
-            const aPriority = Player._isFighterUnit?.(a) ? 1 : 0;
-            const bPriority = Player._isFighterUnit?.(b) ? 1 : 0;
-            if (aPriority !== bPriority) return bPriority - aPriority;
+            const aPriority = Raider._targetPriorityForRole(troop, a);
+            const bPriority = Raider._targetPriorityForRole(troop, b);
+            if (aPriority !== bPriority) return aPriority - bPriority;
             return Phaser.Math.Distance.Between(troop.x, troop.y, a.x, a.y) - Phaser.Math.Distance.Between(troop.x, troop.y, b.x, b.y);
         });
 

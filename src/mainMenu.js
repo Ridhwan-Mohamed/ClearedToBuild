@@ -121,9 +121,12 @@ export class MainMenu {
         scene.keyboardSpeed = 10;
         scene.parcelSpawnUI?.setMode?.("detailed");
         scene.parcelSpawnUI?.setVisible?.(true);
+        if (!Map.hasDetailedWorldElements?.()) {
+            Map.reDraw?.();
+        }
+        Map.setDetailedWorldPaused?.(false);
         Map.setDetailedWorldVisible?.(true);
         VisibilitySystem.setOverviewMode(false);
-        Map.reDraw?.();
         if (zoomMixer?.overviewImage) {
             zoomMixer.overviewImage.setAlpha?.(0);
             zoomMixer.overviewImage.setVisible?.(false);
@@ -143,6 +146,16 @@ export class MainMenu {
             if (troop.timer && typeof troop.timer.remove === "function") {
                 troop.timer.remove(false);
                 troop.timer = null;
+            }
+            if (troop.task) {
+                if (!troop.currentPath?.length) {
+                    Player.doAction?.(troop);
+                }
+                continue;
+            }
+            if (Player._isFighterUnit?.(troop)) {
+                Player.updateTracking?.(troop);
+                continue;
             }
             if (OrderRunner.stepUnit(troop)) continue;
             Scheduler.stepUnit(troop);
@@ -220,6 +233,9 @@ export class MainMenu {
         root.buttonArt = buttonArt;
         root.buttonHint = buttonHint;
         root._artBaseScale = baseArtScale;
+        root._hoverTween = null;
+        root._hoverLift = Number(opts.hoverLift ?? 8);
+        root._baseY = y;
         return root;
     }
 
@@ -524,7 +540,7 @@ export class MainMenu {
         scene._setOceanBackdropMode?.("overview");
 
         Map.setDetailedWorldVisible?.(false);
-        Map.deleteAllGridElements?.();
+        Map.setDetailedWorldPaused?.(true);
         VisibilitySystem.setOverviewMode(true);
 
         const overviewImage = zoomMixer.ensureOverviewImage?.();
@@ -578,6 +594,7 @@ export class MainMenu {
         }
 
         Map.setDetailedWorldVisible?.(false);
+        Map.setDetailedWorldPaused?.(true);
         VisibilitySystem.setOverviewMode(true);
         scene._setOceanBackdropMode?.("overview");
 
@@ -773,6 +790,7 @@ export class MainMenu {
         scene._setOceanBackdropMode?.("overview");
         scene.overviewOceanWaves?.setMode?.("overview");
         Map.setDetailedWorldVisible?.(false);
+        Map.setDetailedWorldPaused?.(true);
         VisibilitySystem.setOverviewMode(true);
         MainMenu._setTroopPresentationVisible(scene, false);
 
@@ -795,9 +813,9 @@ export class MainMenu {
         const continueButtonY = centerY + 302;
         const startButton = MainMenu._createMainMenuImageButton(overlayScene, centerX, startButtonY, {
             artKey: 'startBtn',
-            widthFactor: hasContinue ? 0.155 : 0.165,
-            minWidth: hasContinue ? 210 : 230,
-            maxWidth: hasContinue ? 290 : 310,
+            widthFactor: hasContinue ? 0.112 : 0.122,
+            minWidth: hasContinue ? 140 : 150,
+            maxWidth: hasContinue ? 196 : 214,
             hoverLift: 6,
             neighborPush: 20,
         });
@@ -1812,6 +1830,11 @@ export class MainMenu {
                         scene.time?.delayedCall?.(40, () => {
                             MainMenu._resumeFriendlyTroops(scene);
                         });
+                        if (!isContinueTransition) {
+                            scene.time?.delayedCall?.(360, () => {
+                                scene.tutorialManager?.promptIfNeeded?.();
+                            });
+                        }
 
                         overlayScene.tweens.add({
                             targets: loading,
@@ -1980,6 +2003,178 @@ export class MainMenu {
                 blockResourceManager.NavMeshUpdater = this.navMeshUpdater;
                 blockResourceManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
             };
+            scene.prepareParcelNavMeshesAsync = function prepareParcelNavMeshesAsync({ navGrid, enemyNavGrid } = {}) {
+                if (!Array.isArray(navGrid) || !Array.isArray(navGrid[0])) {
+                    return Promise.reject(new Error("Missing player nav grid"));
+                }
+
+                const requestId = `parcel_nav_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+                return new Promise((resolve, reject) => {
+                    const parcelWorker = new Worker(new URL('./workers/navMeshWorker.js', import.meta.url), { type: 'module' });
+                    const timeout = window.setTimeout(() => {
+                        parcelWorker.terminate();
+                        reject(new Error("Timed out preparing parcel navmesh"));
+                    }, 12000);
+
+                    parcelWorker.onmessage = (event) => {
+                        const { success, polys, enemyPolys, error, requestId: returnedId } = event.data || {};
+                        if (returnedId && returnedId !== requestId) return;
+                        window.clearTimeout(timeout);
+                        parcelWorker.terminate();
+
+                        if (!success) {
+                            reject(new Error(error || "Parcel navmesh worker failed"));
+                            return;
+                        }
+
+                        resolve({
+                            navPolys: polys,
+                            enemyPolys: enemyPolys || polys,
+                        });
+                    };
+
+                    parcelWorker.onerror = (err) => {
+                        window.clearTimeout(timeout);
+                        parcelWorker.terminate();
+                        reject(err instanceof Error ? err : new Error(err?.message || "Parcel navmesh worker error"));
+                    };
+
+                    parcelWorker.postMessage({
+                        type: 'buildBoth',
+                        requestId,
+                        navGrid,
+                        enemyNavGrid: Array.isArray(enemyNavGrid) ? enemyNavGrid : navGrid,
+                    });
+                });
+            };
+            scene.applyPreparedNavMeshes = function applyPreparedNavMeshes({
+                navPolys,
+                enemyPolys,
+                navGrid,
+                enemyNavGrid,
+                bounds,
+                refreshOpts = {},
+            } = {}) {
+                if (!Array.isArray(navPolys) || !Array.isArray(navGrid) || !Array.isArray(navGrid[0])) {
+                    return false;
+                }
+
+                const baseBounds = Map._normalizeGridRect?.(bounds?.x, bounds?.y, bounds?.w, bounds?.h, 0) ?? null;
+                const oldPlayerDebug = !!this.navMeshUpdater?.debugEnabled;
+                const oldEnemyDebug = !!this.enemyNavMeshUpdater?.debugEnabled;
+
+                Map.regionDrawer?.destroy?.();
+                Map.enemyRegionDrawer?.destroy?.();
+                this.navMeshUpdater?.destroy?.();
+                this.enemyNavMeshUpdater?.destroy?.();
+
+                Map.navGrid = navGrid;
+                Map.enemyNavGrid = Array.isArray(enemyNavGrid) ? enemyNavGrid : navGrid.map(row => row.slice());
+
+                const assignParcelTags = (mesh) => {
+                    const polygons = mesh?.getPolygons?.() || [];
+                    for (const poly of polygons) {
+                        const points = poly?.polygon?.points || [];
+                        if (!points.length) {
+                            poly.parcelTag = "main";
+                            poly.parcelTags = ["main"];
+                            continue;
+                        }
+
+                        const xs = points.map(point => point.x);
+                        const ys = points.map(point => point.y);
+                        const gridMaxX = Math.max(0, (Map.grid?.[0]?.length ?? 1) - 1);
+                        const gridMaxY = Math.max(0, (Map.grid?.length ?? 1) - 1);
+                        const minX = Math.max(0, Math.floor(Math.min(...xs) / SQUARESIZE));
+                        const minY = Math.max(0, Math.floor(Math.min(...ys) / SQUARESIZE));
+                        const maxX = Math.min(gridMaxX, Math.ceil(Math.max(...xs) / SQUARESIZE) - 1);
+                        const maxY = Math.min(gridMaxY, Math.ceil(Math.max(...ys) / SQUARESIZE) - 1);
+                        const tags = [];
+                        const addTag = (tag) => {
+                            const normalized = tag || "main";
+                            if (!tags.includes(normalized)) tags.push(normalized);
+                        };
+
+                        for (let gy = minY; gy <= maxY; gy++) {
+                            for (let gx = minX; gx <= maxX; gx++) {
+                                const sample = {
+                                    x: gx * SQUARESIZE + SQUARESIZE / 2,
+                                    y: gy * SQUARESIZE + SQUARESIZE / 2,
+                                };
+                                if (poly.contains && !poly.contains(sample)) continue;
+                                addTag(this.resolveParcelTagForTile?.(gx, gy) ?? "main");
+                            }
+                        }
+
+                        if (!tags.length) addTag("main");
+                        tags.sort((a, b) => {
+                            if (a === "main") return -1;
+                            if (b === "main") return 1;
+                            return a.localeCompare(b);
+                        });
+                        poly.parcelTags = tags;
+                        poly.parcelTag = tags.length === 1 ? tags[0] : null;
+                    }
+                };
+
+                Map.navMesh = new NavMesh(navPolys);
+                assignParcelTags(Map.navMesh);
+                const enemySourcePolys = Array.isArray(enemyPolys) ? enemyPolys : navPolys;
+                Map.enemyNavMesh = new NavMesh(enemySourcePolys);
+                assignParcelTags(Map.enemyNavMesh);
+
+                this.navMeshUpdater = new NavMeshUpdater(Map.navMesh, this, { toggleKey: "M" });
+                this.enemyNavMeshUpdater = new NavMeshUpdater(Map.enemyNavMesh, this, { toggleKey: "N" });
+                this.navMeshUpdater.debugEnabled = oldPlayerDebug;
+                this.enemyNavMeshUpdater.debugEnabled = oldEnemyDebug;
+                if (oldPlayerDebug) this.navMeshUpdater.drawDebug();
+                if (oldEnemyDebug) this.enemyNavMeshUpdater.drawDebug();
+
+                PathRegistry.init(Map.navMesh);
+                PathRegistry.init(Map.enemyNavMesh);
+
+                Map.regionSystem = new RegionSystem(Map.navMesh, Map.navGrid);
+                Map.enemyRegionSystem = new RegionSystem(Map.enemyNavMesh, Map.enemyNavGrid);
+                Map.regionDrawer = new RegionDebugDrawer(this, Map.navMesh, Map.regionSystem, { toggleKey: "R" });
+                Map.enemyRegionDrawer = new RegionDebugDrawer(this, Map.enemyNavMesh, Map.enemyRegionSystem, { toggleKey: "Y", alpha: 0.16 });
+
+                waterSourcesQuadTree?.setGrid?.(this.gridData);
+                waterSourcesQuadTree?.setRegionSystem?.(Map.regionSystem);
+                if (baseBounds && refreshOpts?.waterSourceUpdate?.landParcel && refreshOpts?.waterSourceUpdate?.slotId) {
+                    waterSourcesQuadTree?.refreshForParcel?.(baseBounds, refreshOpts.waterSourceUpdate);
+                } else {
+                    waterSourcesQuadTree?.refreshBounds?.(refreshOpts?.waterSourceUpdate ?? {});
+                }
+                this.waterSourcesQuadTree = waterSourcesQuadTree;
+
+                buildingManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
+                buildingManager.NavMeshUpdater = this.navMeshUpdater;
+                blockResourceManager.NavMeshUpdater = this.navMeshUpdater;
+                blockResourceManager.EnemyNavMeshUpdater = this.enemyNavMeshUpdater;
+
+                if (baseBounds) {
+                    const isOverview = this.zoomMixer?.mode === "overview";
+                    if (!isOverview) {
+                        Map.setDetailedWorldPaused?.(false);
+                        Map.setDetailedWorldVisible?.(true);
+                        Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
+                    } else {
+                        Map.setDetailedWorldVisible?.(false);
+                        Map.setDetailedWorldPaused?.(true);
+                    }
+
+                    this.zoomMixer?.updateOverviewCell?.(
+                        baseBounds.minX,
+                        baseBounds.minY,
+                        Map.grid,
+                        baseBounds.width,
+                        baseBounds.height
+                    );
+                }
+
+                Map._uiIgnoreWorldLayer?.();
+                return true;
+            };
             scene.resolveParcelTagForTile = function resolveParcelTagForTile(x, y) {
                 const fortBounds = StageState?.fortObjective?.refs?.parcelBounds;
                 if (fortBounds &&
@@ -2067,10 +2262,12 @@ export class MainMenu {
                 }
 
                 if (!isOverview) {
+                    Map.setDetailedWorldPaused?.(false);
                     Map.setDetailedWorldVisible?.(true);
                     Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
                 } else {
                     Map.setDetailedWorldVisible?.(false);
+                    Map.setDetailedWorldPaused?.(true);
                 }
 
                 this.zoomMixer?.updateOverviewCell?.(
@@ -2121,6 +2318,10 @@ export class MainMenu {
             if (isContinue && overviewPose) {
                 const zoomMixer = MainMenu._ensureZoomMixer(scene);
                 MainMenu._prepareContinueOverviewPresentation(scene, zoomMixer, continueSnapshot, overviewPose);
+            } else if (!isContinue) {
+                Map.reDraw?.();
+                Map.setDetailedWorldVisible?.(false);
+                Map.setDetailedWorldPaused?.(true);
             }
             playReadyLogoSequence(focusPose, {
                 isContinue,

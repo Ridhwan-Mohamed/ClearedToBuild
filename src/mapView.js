@@ -24,6 +24,7 @@ import { Gunslinger } from './players/Gunslinger.js';
 import { Raider } from './players/Raider.js';
 import { Hunter } from './players/Hunter.js';
 import { Bomber } from './players/Bomber.js';
+import { Shocker } from './players/Shocker.js';
 import { Projectile } from './Projectile.js';
 import player from 'url:./assets/Players/player.png'
 import gun1 from 'url:./assets/Players/gun1.png'
@@ -98,6 +99,22 @@ import { addCardToHand, getCardHand } from './UI/Powerups.js';
 import { UI_ITEM_TYPES } from './UI/UIConstants.js';
 import { SaveManager } from './save/SaveManager.js';
 import { AchievementSystem } from './achievements/AchievementSystem.js';
+import { TutorialManager } from './tutorial/TutorialManager.js';
+import { createTutorialAnimations, preloadTutorialAssets } from './tutorial/TutorialAssets.js';
+import {
+    buildEnemyTypeLabel,
+    distributeAcrossLanes,
+    getNightHordeSettings,
+    pickScaledEnemyType,
+} from './balance/GameBalance.js';
+import reliefPackageImg from 'url:./assets/market/relief_package.png'
+import {
+    RELIEF_PACKAGE_CRITICAL_ROLES,
+    RELIEF_PACKAGE_ECONOMY_ROLE_COSTS,
+    RELIEF_PACKAGE_MAX_COUNT,
+    RELIEF_PACKAGE_MONEY_GRANT,
+    RELIEF_PACKAGE_PRICE,
+} from './ReliefPackageConfig.js';
 
 const screenH = window.innerHeight
 const screenW = window.innerWidth
@@ -123,6 +140,10 @@ const TOWN_XP_SOURCE_VALUES = Object.freeze({
 });
 const DEBUG_BOMBER_START_HORDE_INDEX = 1;
 const NIGHT_HORDE_BOMBER_RATIO = 0.2;
+const SHOCKER_BOSS_DAY = 7;
+const SHOCKER_BOSS_NAME = "The Shocker";
+const SHOCKER_BOSS_REWARD_MONEY = 1200;
+const SHOCKER_BOSS_REWARD_PERMITS = 10;
 const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
     wood: {
         action: "Cut down",
@@ -137,6 +158,13 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0x93c5fd,
         textColor: "#bfdbfe",
         alert: "Routed forager to rocks",
+    },
+    gold: {
+        action: "Mine",
+        target: "gold ore",
+        color: 0xfacc15,
+        textColor: "#fde68a",
+        alert: "Routed forager to gold ore",
     },
     seed: {
         action: "Gather",
@@ -198,6 +226,7 @@ export class mapView extends Phaser.Scene {
             nightsSurvived: 0,
             parcelsClaimed: 0,
             enemiesDefeated: 0,
+            moneyEarnedTotal: 0,
             troopUnlockKeys: new Set(),
             troopUnlockLabels: [],
             claimedContractIds: new Set(),
@@ -363,7 +392,7 @@ export class mapView extends Phaser.Scene {
         this.woodAmnt = 4;
         this.stoneAmnt = 4;
         this.berries = 0;
-        this.permits = 0;
+        this.permits = 2;
         this.berryMode = false;
         this.seedGridMode = false;
         this.selectingEnemies = false;
@@ -415,8 +444,22 @@ export class mapView extends Phaser.Scene {
         this._northFortArrivalMarker = null;
         this._activeFort = null;
         this._activeNightHorde = null;
+        this._activeShockerBoss = null;
+        this._shockerBossState = {
+            defeated: false,
+            nightLocked: false,
+            bossId: null,
+            startedOnDay: null,
+        };
         this._cachedNightHordePlan = null;
         this._hordeRewardInProgress = false;
+        this._reliefRecoveryInProgress = false;
+        this._reliefRecoveryQueuedForDawn = false;
+        this._storageCollapseLossInProgress = false;
+        this._storageCollapseCheckQueued = false;
+        this._storageCollapseWarned = false;
+        this._storageCollapseLastCheckedAt = 0;
+        this._pendingStorageCollapseSource = null;
         this._townTowerLossInProgress = false;
         this._restartToMainMenuInProgress = false;
         this._lastTownCoreLost = null;
@@ -428,6 +471,7 @@ export class mapView extends Phaser.Scene {
         this._activeBossRewardUI = null;
         this._activeTownXpRewardUI = null;
         this.achievementSystem = null;
+        this.tutorialManager = null;
         this._debugMilitiaLevel3UnlockShown = false;
         this._movementLocked = false;
         this.stageCompleteLock = false;
@@ -568,6 +612,583 @@ export class mapView extends Phaser.Scene {
             x: Math.floor((bounds.minx + bounds.maxx) * 0.5),
             y: Math.floor((bounds.miny + bounds.maxy) * 0.5),
         };
+    }
+
+    _getPlayerTeam() {
+        return Teams.getTeam?.("1") ?? Teams.teamLists?.["1"] ?? null;
+    }
+
+    getReliefPackageCount(teamNumber = 1) {
+        const team = Teams.getTeam?.(teamNumber) ?? Teams.teamLists?.[`${teamNumber}`] ?? null;
+        return Math.max(0, Number(team?.reliefPackageCount || 0));
+    }
+
+    hasReliefPackage(teamNumber = 1) {
+        return this.getReliefPackageCount(teamNumber) > 0;
+    }
+
+    setReliefPackageCount(nextCount, teamNumber = 1) {
+        const team = Teams.getTeam?.(teamNumber) ?? Teams.teamLists?.[`${teamNumber}`] ?? null;
+        if (!team) return 0;
+
+        const previous = Math.max(0, Number(team.reliefPackageCount || 0));
+        const next = Phaser.Math.Clamp(
+            Math.max(0, Math.floor(Number(nextCount) || 0)),
+            0,
+            RELIEF_PACKAGE_MAX_COUNT
+        );
+        if (previous === next) return next;
+
+        team.reliefPackageCount = next;
+        this.events.emit("relief-package:changed", {
+            teamNumber: Number(teamNumber) || 1,
+            count: next,
+            previous,
+        });
+        SaveManager.queueAutosave("relief_package");
+
+        if ((this._getPlayerTeam()?.storageList?.length || 0) <= 0) {
+            this._queueStorageCollapseEvaluation(this._pendingStorageCollapseSource);
+        }
+
+        return next;
+    }
+
+    grantReliefPackage(teamNumber = 1) {
+        return this.setReliefPackageCount(RELIEF_PACKAGE_MAX_COUNT, teamNumber);
+    }
+
+    consumeReliefPackage(teamNumber = 1) {
+        return this.setReliefPackageCount(
+            Math.max(0, this.getReliefPackageCount(teamNumber) - 1),
+            teamNumber
+        );
+    }
+
+    _countActiveRoleTroops(team, roleKey) {
+        if (!team?.playerList?.length) return 0;
+        return team.playerList.reduce((count, troop) => {
+            if (!troop?.active) return count;
+            if (roleKey === "builder" && troop.isBuilder) return count + 1;
+            if (roleKey === "forager" && troop.isForager) return count + 1;
+            return count;
+        }, 0);
+    }
+
+    _getStorageCollapseEconomySnapshot(teamNumber = 1) {
+        const team = Teams.getTeam?.(teamNumber) ?? Teams.teamLists?.[`${teamNumber}`] ?? null;
+        const troops = (team?.playerList || []).filter((troop) => troop?.active);
+        const roleCounts = {
+            builder: this._countActiveRoleTroops(team, "builder"),
+            forager: this._countActiveRoleTroops(team, "forager"),
+        };
+        const missingRoles = RELIEF_PACKAGE_CRITICAL_ROLES.filter((roleKey) => (roleCounts[roleKey] || 0) <= 0);
+        const requiredMoney = missingRoles.reduce(
+            (sum, roleKey) => sum + Math.max(0, Number(RELIEF_PACKAGE_ECONOMY_ROLE_COSTS[roleKey] || 0)),
+            0
+        );
+
+        const preserveCounts = {
+            builder: roleCounts.builder > 0 ? 1 : 0,
+            forager: roleCounts.forager > 0 ? 1 : 0,
+        };
+        let sellableTroopValue = 0;
+        let sellableTroopCount = 0;
+
+        for (const troop of troops) {
+            if (troop.isBuilder && preserveCounts.builder > 0) {
+                preserveCounts.builder -= 1;
+                continue;
+            }
+            if (troop.isForager && preserveCounts.forager > 0) {
+                preserveCounts.forager -= 1;
+                continue;
+            }
+            sellableTroopValue += Math.max(0, Number(OrderRunner.getTroopSellValue?.(troop) || 0));
+            sellableTroopCount += 1;
+        }
+
+        const currentMoney = Math.max(0, Number(this.money || 0));
+        const totalLiquidity = currentMoney + sellableTroopValue;
+
+        return {
+            team,
+            storageCount: Math.max(0, Number(team?.storageList?.length || 0)),
+            reliefPackageCount: this.getReliefPackageCount(teamNumber),
+            currentMoney,
+            sellableTroopValue,
+            sellableTroopCount,
+            totalLiquidity,
+            requiredMoney,
+            roleCounts,
+            missingRoles,
+            canRecoverFinancially: totalLiquidity >= requiredMoney,
+        };
+    }
+
+    _clearActiveRunPresentations() {
+        this._activeRewardUI?.destroy?.();
+        this._activeRewardUI = null;
+        this._activeBossRewardUI?.destroy?.();
+        this._activeBossRewardUI = null;
+        this._activeTownXpRewardUI?.destroy?.();
+        this._activeTownXpRewardUI = null;
+        this.uiScene?._destroyReliefPackageRecoveryPresentation?.();
+    }
+
+    _queueStorageCollapseEvaluation(sourceStorage = null) {
+        if (sourceStorage) {
+            this._pendingStorageCollapseSource = sourceStorage;
+        }
+        if (this._storageCollapseCheckQueued || !this.time) return;
+        this._storageCollapseCheckQueued = true;
+        this.time.delayedCall(0, () => {
+            this._storageCollapseCheckQueued = false;
+            this._evaluateStorageCollapseState({ sourceStorage: this._pendingStorageCollapseSource });
+        });
+    }
+
+    _shouldDeferStorageCollapseEvaluation() {
+        if (this._townTowerLossInProgress || this._storageCollapseLossInProgress || this._restartToMainMenuInProgress) {
+            return true;
+        }
+        if (this._reliefRecoveryInProgress) return true;
+        if (this._activeRewardUI || this._activeBossRewardUI || this._activeTownXpRewardUI) return true;
+        if (this.menu?.active || this.draftMenu?.active) return true;
+        if (this.uiScene?.pauseMenu?.isOpen) return true;
+        return false;
+    }
+
+    _queueReliefRecoveryForDawn(sourceStorage = null) {
+        if (sourceStorage) {
+            this._pendingStorageCollapseSource = sourceStorage;
+        }
+        if (this._reliefRecoveryQueuedForDawn) return false;
+        this._reliefRecoveryQueuedForDawn = true;
+        showAlert(
+            this,
+            "All storage was lost. The relief package will deploy at dawn.",
+            "#b8f2ff",
+            3200
+        );
+        return true;
+    }
+
+    _getReliefRecoveryFloorType(x, y) {
+        const cell = GameMap.grid?.[y]?.[x];
+        if (cell == null) return null;
+        const floorVal = Array.isArray(cell)
+            ? GameMap.grabDepth(cell, FLOORDEPTH)
+            : cell;
+        return TILE_MAP(floorVal);
+    }
+
+    _isReliefRecoveryRoadTile(x, y) {
+        return this._getReliefRecoveryFloorType(x, y) === "road";
+    }
+
+    _hasReliefRecoveryAdjacencyObstacle(x, y) {
+        if (!!GameMap._wallStructureInfoAt?.(x, y)) return true;
+        if (Teams.getCropAt?.(x, y, 1)) return true;
+        return this._getReliefRecoveryFloorType(x, y) === "crops";
+    }
+
+    _getReliefRecoveryPlacementMetrics(x, y, lenX, lenY, bounds) {
+        const footprintCells = Math.max(1, lenX * lenY);
+        let footprintRoadCount = 0;
+        for (let gy = y; gy < y + lenY; gy += 1) {
+            for (let gx = x; gx < x + lenX; gx += 1) {
+                if (this._isReliefRecoveryRoadTile(gx, gy)) {
+                    footprintRoadCount += 1;
+                }
+            }
+        }
+
+        let ringCells = 0;
+        let ringRoadCount = 0;
+        let ringInBounds = true;
+        let directObstacleCount = 0;
+        for (let gy = y - 1; gy <= y + lenY; gy += 1) {
+            for (let gx = x - 1; gx <= x + lenX; gx += 1) {
+                const insideFootprint =
+                    gx >= x &&
+                    gx < x + lenX &&
+                    gy >= y &&
+                    gy < y + lenY;
+                if (insideFootprint) continue;
+
+                ringCells += 1;
+                const inBounds =
+                    gx >= bounds.minx &&
+                    gy >= bounds.miny &&
+                    gx <= bounds.maxx &&
+                    gy <= bounds.maxy;
+                if (!inBounds) {
+                    ringInBounds = false;
+                    continue;
+                }
+
+                if (this._isReliefRecoveryRoadTile(gx, gy)) {
+                    ringRoadCount += 1;
+                }
+                if (this._hasReliefRecoveryAdjacencyObstacle(gx, gy)) {
+                    directObstacleCount += 1;
+                }
+            }
+        }
+
+        return {
+            footprintRoadCount,
+            footprintCells,
+            allFootprintRoads: footprintRoadCount >= footprintCells,
+            ringRoadCount,
+            ringCells,
+            ringInBounds,
+            allRingRoads: ringInBounds && ringCells > 0 && ringRoadCount >= ringCells,
+            directObstacleCount,
+            totalRoadCount: footprintRoadCount + ringRoadCount,
+        };
+    }
+
+    _compareReliefRecoveryPlacementCandidates(a, b) {
+        const flagCompare = (left, right) => Number(right) - Number(left);
+        const metricCompare = (left, right) => Number(right || 0) - Number(left || 0);
+
+        let delta = flagCompare(a.metrics.allRingRoads, b.metrics.allRingRoads);
+        if (delta !== 0) return delta;
+
+        delta = flagCompare(a.metrics.allFootprintRoads, b.metrics.allFootprintRoads);
+        if (delta !== 0) return delta;
+
+        delta = flagCompare(a.metrics.directObstacleCount <= 0, b.metrics.directObstacleCount <= 0);
+        if (delta !== 0) return delta;
+
+        delta = metricCompare(a.metrics.totalRoadCount, b.metrics.totalRoadCount);
+        if (delta !== 0) return delta;
+
+        delta = Number(a.metrics.directObstacleCount || 0) - Number(b.metrics.directObstacleCount || 0);
+        if (delta !== 0) return delta;
+
+        delta = Number(a.distanceToCenterSq || 0) - Number(b.distanceToCenterSq || 0);
+        if (delta !== 0) return delta;
+
+        delta = Number(a.distanceToReferenceSq || 0) - Number(b.distanceToReferenceSq || 0);
+        if (delta !== 0) return delta;
+
+        if (a.y !== b.y) return a.y - b.y;
+        return a.x - b.x;
+    }
+
+    _findReliefRecoveryStoragePlacement(referenceStorage = null) {
+        const storageType = TILE_TYPES.storage;
+        const lenX = Math.max(1, Number(storageType?.lenX || 1));
+        const lenY = Math.max(1, Number(storageType?.lenY || 1));
+        const bounds = this._getMainIslandBounds();
+        const center = Teams.getTownCenterRoadTile?.(1) || Teams.getTownCenterTile?.(1) || this._getMainIslandCenterGrid();
+        const anchorX = center.x - Math.floor(lenX / 2);
+        const anchorY = center.y - Math.floor(lenY / 2);
+        const strictOptions = {
+            padding: 1,
+            protectFarmSpots: true,
+            paddingAllowWalls: true,
+            paddingProtectFarmSpots: false,
+        };
+        const looseOptions = {};
+
+        const canUse = (x, y, options = strictOptions) => {
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+            if (x < bounds.minx || y < bounds.miny) return false;
+            if ((x + lenX - 1) > bounds.maxx || (y + lenY - 1) > bounds.maxy) return false;
+            return !GameMap.checkBlockPositionGen(x, y, lenX, lenY, options);
+        };
+
+        const makeCandidate = (x, y, options) => {
+            if (!canUse(x, y, options)) return null;
+            const candidateCenterX = x + ((lenX - 1) * 0.5);
+            const candidateCenterY = y + ((lenY - 1) * 0.5);
+            const metrics = this._getReliefRecoveryPlacementMetrics(x, y, lenX, lenY, bounds);
+            return {
+                x,
+                y,
+                metrics,
+                distanceToCenterSq: ((candidateCenterX - center.x) ** 2) + ((candidateCenterY - center.y) ** 2),
+                distanceToReferenceSq: (
+                    Number.isFinite(referenceStorage?.x) && Number.isFinite(referenceStorage?.y)
+                        ? ((candidateCenterX - (Number(referenceStorage.x) + ((lenX - 1) * 0.5))) ** 2)
+                            + ((candidateCenterY - (Number(referenceStorage.y) + ((lenY - 1) * 0.5))) ** 2)
+                        : Number.POSITIVE_INFINITY
+                ),
+            };
+        };
+
+        const strictCandidates = [];
+        const looseCandidates = [];
+        const seen = new Set();
+        const pushCandidate = (x, y) => {
+            if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+            const key = `${x},${y}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+
+            const strictCandidate = makeCandidate(x, y, strictOptions);
+            if (strictCandidate) strictCandidates.push(strictCandidate);
+
+            const looseCandidate = makeCandidate(x, y, looseOptions);
+            if (looseCandidate) looseCandidates.push(looseCandidate);
+        };
+
+        if (Number.isFinite(referenceStorage?.x) && Number.isFinite(referenceStorage?.y)) {
+            pushCandidate(Number(referenceStorage.x), Number(referenceStorage.y));
+        }
+
+        const townRoads = Teams.getTownRoadTiles?.(1) || [];
+        for (const road of townRoads) {
+            for (let oy = 0; oy < lenY; oy += 1) {
+                for (let ox = 0; ox < lenX; ox += 1) {
+                    pushCandidate(road.x - ox, road.y - oy);
+                }
+            }
+        }
+
+        const maxRadius = Math.max(bounds.maxx - bounds.minx, bounds.maxy - bounds.miny);
+        for (let radius = 0; radius <= maxRadius; radius += 1) {
+            for (let dy = -radius; dy <= radius; dy += 1) {
+                for (let dx = -radius; dx <= radius; dx += 1) {
+                    if (radius > 0 && Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+                    pushCandidate(anchorX + dx, anchorY + dy);
+                }
+            }
+        }
+
+        if (strictCandidates.length > 0) {
+            strictCandidates.sort((a, b) => this._compareReliefRecoveryPlacementCandidates(a, b));
+            return { x: strictCandidates[0].x, y: strictCandidates[0].y };
+        }
+
+        if (looseCandidates.length > 0) {
+            looseCandidates.sort((a, b) => this._compareReliefRecoveryPlacementCandidates(a, b));
+            return { x: looseCandidates[0].x, y: looseCandidates[0].y };
+        }
+
+        return null;
+    }
+
+    _spawnReliefRecoveryStorage(referenceStorage = null) {
+        const placement = this._findReliefRecoveryStoragePlacement(referenceStorage);
+        if (!placement) return null;
+        return new StorageBuilding(placement.x, placement.y, 1);
+    }
+
+    _spawnRecoveryTroopIfMissing(roleKey) {
+        const team = this._getPlayerTeam();
+        if (!team) return null;
+        if (roleKey === "builder" && this._countActiveRoleTroops(team, roleKey) > 0) return null;
+        if (roleKey === "forager" && this._countActiveRoleTroops(team, roleKey) > 0) return null;
+
+        const spawnTile = Teams.getTownSpawnTile?.(1) || Teams.getTownCenterTile?.(1) || this._getMainIslandCenterGrid();
+        if (!spawnTile) return null;
+
+        let troop = null;
+        if (roleKey === "builder") {
+            troop = new Builder(spawnTile.x, spawnTile.y, 1);
+        } else if (roleKey === "forager") {
+            troop = new Forager(spawnTile.x, spawnTile.y, 1);
+        }
+
+        if (troop) {
+            House.assignPlayerToHouse?.(troop, 1);
+        }
+        return troop;
+    }
+
+    _applyReliefPackageRecovery(referenceStorage = null) {
+        const storage = this._spawnReliefRecoveryStorage(referenceStorage);
+        if (!storage) {
+            console.error("[ReliefPackage] failed to find placement for recovery storage");
+            this._reliefRecoveryQueuedForDawn = false;
+            this._reliefRecoveryInProgress = false;
+            this._movementLocked = false;
+            if (!this._townTowerLossInProgress && !this._storageCollapseLossInProgress && !this._restartToMainMenuInProgress) {
+                this.clock.paused = false;
+                this.applySimulationSpeed(true);
+            }
+            showAlert(this, "Emergency package deployment failed. Trying again...", "#ffd7a5", 2600);
+            this.time?.delayedCall?.(150, () => {
+                this._queueStorageCollapseEvaluation(referenceStorage);
+            });
+            return false;
+        }
+
+        this._reliefRecoveryQueuedForDawn = false;
+        this.consumeReliefPackage(1);
+        storage.addItem(UI_ITEM_TYPES.seedCrop, Math.max(1, Number(UI_ITEM_TYPES.seedCrop?.stacks || 1)));
+        storage.addItem(UI_ITEM_TYPES.food, 6);
+        storage.addItem(UI_ITEM_TYPES.clean_water, 6);
+        storage.addItem(UI_ITEM_TYPES.wood, 4);
+        storage.addItem(UI_ITEM_TYPES.stone, 4);
+        this.updatePermits(1);
+        this.updateMoney(RELIEF_PACKAGE_MONEY_GRANT);
+
+        for (const roleKey of RELIEF_PACKAGE_CRITICAL_ROLES) {
+            this._spawnRecoveryTroopIfMissing(roleKey);
+        }
+
+        this._pendingStorageCollapseSource = null;
+        this._storageCollapseWarned = false;
+        this._reliefRecoveryInProgress = false;
+        this._movementLocked = false;
+        if (!this._townTowerLossInProgress && !this._storageCollapseLossInProgress && !this._restartToMainMenuInProgress) {
+            this.clock.paused = false;
+            this.applySimulationSpeed(true);
+        }
+        this.events.emit?.("housing:updated", 1);
+        showAlert(this, "Emergency relief package deployed", "#a7f3d0", 2200);
+        return true;
+    }
+
+    _showStorageCollapseWarning() {
+        if (this._storageCollapseWarned) return;
+        this._storageCollapseWarned = true;
+        showAlert(
+            this,
+            `All storage was lost. Buy a relief package for $${RELIEF_PACKAGE_PRICE} or rebuild before the town stalls.`,
+            "#ffd7a5",
+            3200
+        );
+    }
+
+    _buildStorageCollapseLossSummary(analysis = this._getStorageCollapseEconomySnapshot()) {
+        const missingRoles = analysis.missingRoles.length
+            ? analysis.missingRoles.map((roleKey) => roleKey[0].toUpperCase() + roleKey.slice(1)).join(", ")
+            : "None";
+        const builderCount = Math.max(0, Number(analysis.roleCounts?.builder || 0));
+        const foragerCount = Math.max(0, Number(analysis.roleCounts?.forager || 0));
+
+        return {
+            badgeLabel: "ECONOMIC COLLAPSE",
+            title: "Town Storage Collapsed",
+            subtitle: "The town has no storage left, no emergency relief package, and no way to finance the basic builder/forager economy.",
+            primaryStats: [
+                {
+                    label: "Storages",
+                    value: 0,
+                    hint: "All storage buildings destroyed",
+                    accentColor: 0xfca5a5,
+                    panelColor: 0x35243a,
+                },
+                {
+                    label: "Relief Packages",
+                    value: 0,
+                    hint: "Emergency stock depleted",
+                    accentColor: 0xffd7a5,
+                    panelColor: 0x2d3248,
+                },
+                {
+                    label: "Cash On Hand",
+                    value: `$${analysis.currentMoney}`,
+                    hint: "Current liquid funds",
+                    accentColor: 0x8fe7ff,
+                    panelColor: 0x153449,
+                },
+                {
+                    label: "Sell Value",
+                    value: `$${analysis.sellableTroopValue}`,
+                    hint: `${analysis.sellableTroopCount} other troop${analysis.sellableTroopCount === 1 ? "" : "s"} could be sold`,
+                    accentColor: 0xa7f3d0,
+                    panelColor: 0x173743,
+                },
+                {
+                    label: "Recovery Cost",
+                    value: `$${analysis.requiredMoney}`,
+                    hint: missingRoles === "None" ? "No critical roles missing" : `Missing: ${missingRoles}`,
+                    accentColor: 0xc4b5fd,
+                    panelColor: 0x26284a,
+                },
+            ],
+            troopUnlockLabels: [],
+            secondaryStats: [
+                { label: "Builders", value: builderCount },
+                { label: "Foragers", value: foragerCount },
+                { label: "Total Liquidity", value: `$${analysis.totalLiquidity}` },
+            ],
+            restartLabel: "Restart Run",
+        };
+    }
+
+    _triggerStorageCollapseGameOver(analysis = this._getStorageCollapseEconomySnapshot()) {
+        if (this._storageCollapseLossInProgress || this._townTowerLossInProgress) return false;
+
+        this._storageCollapseLossInProgress = true;
+        this._movementLocked = true;
+        this.stageCompleteLock = true;
+        SaveManager.clearRunSave();
+        this._clearActiveRunPresentations();
+
+        AudioManager.playSound?.('sfx_end_stage_explosions');
+        this.cameras.main.shake(220, 0.004);
+        if (this.clock) this.clock.paused = true;
+        this.applySimulationSpeed(true);
+        this._showGameOverOverlay(this._buildStorageCollapseLossSummary(analysis));
+        return true;
+    }
+
+    _evaluateStorageCollapseState({ sourceStorage = null } = {}) {
+        const team = this._getPlayerTeam();
+        if (!team) return false;
+        if (this._townTowerLossInProgress || this._storageCollapseLossInProgress || this._restartToMainMenuInProgress) {
+            return false;
+        }
+        if (Math.max(0, Number(team.townTowerList?.length || 0)) <= 0) {
+            return false;
+        }
+
+        const storageCount = Math.max(0, Number(team.storageList?.length || 0));
+        if (storageCount > 0) {
+            this._reliefRecoveryQueuedForDawn = false;
+            this._storageCollapseWarned = false;
+            this._pendingStorageCollapseSource = null;
+            return false;
+        }
+
+        if (this.hasReliefPackage(1) && this.clock?.isNight?.()) {
+            this._queueReliefRecoveryForDawn(sourceStorage);
+            return true;
+        }
+
+        if (this._shouldDeferStorageCollapseEvaluation()) {
+            this._queueStorageCollapseEvaluation(sourceStorage);
+            return false;
+        }
+
+        if (this.hasReliefPackage(1)) {
+            if (this._reliefRecoveryInProgress) return true;
+            this._reliefRecoveryQueuedForDawn = false;
+            this._reliefRecoveryInProgress = true;
+            this._movementLocked = true;
+            if (this.clock) this.clock.paused = true;
+            this.applySimulationSpeed(true);
+
+            const referenceStorage = sourceStorage || this._pendingStorageCollapseSource;
+            if (this.uiScene?.showReliefPackageRecoveryPresentation) {
+                this.uiScene.showReliefPackageRecoveryPresentation({
+                    onConfirm: () => {
+                        this._applyReliefPackageRecovery(referenceStorage);
+                    },
+                });
+            } else {
+                this._applyReliefPackageRecovery(referenceStorage);
+            }
+            return true;
+        }
+
+        this._reliefRecoveryQueuedForDawn = false;
+        const analysis = this._getStorageCollapseEconomySnapshot(1);
+        if (analysis.canRecoverFinancially) {
+            this._showStorageCollapseWarning();
+            return false;
+        }
+
+        return this._triggerStorageCollapseGameOver(analysis);
     }
 
     _grantTownXpResources(bundle = {}) {
@@ -1263,6 +1884,7 @@ export class mapView extends Phaser.Scene {
             secondaryStats: [
                 { label: "Town Level", value: townXp.level },
                 { label: "Day Reached", value: Math.max(1, Number(this.clock?.day || 1)) },
+                { label: "Money Earned", value: `$${Math.max(0, Math.floor(stats.moneyEarnedTotal || 0))}` },
                 { label: "Money Banked", value: `$${Math.max(0, Math.floor(this.money || 0))}` },
                 { label: "Crew Alive", value: livingPlayers },
                 { label: "Horde Reached", value: Math.max(1, this.getCurrentHordeIndex()) },
@@ -1272,7 +1894,7 @@ export class mapView extends Phaser.Scene {
     }
 
     setSimulationSpeed(multiplier) {
-        const allowed = new Set([1, 2, 4]);
+        const allowed = new Set([1, 1.5, 2]);
         const next = Number(multiplier);
         const normalized = allowed.has(next) ? next : 1;
         if (this.selectedSimSpeed === normalized) {
@@ -1429,40 +2051,202 @@ export class mapView extends Phaser.Scene {
         return removed;
     }
 
-    _estimateNightLaneDetails(edgeKey, difficulty, hordeIndex, modifier = null) {
+    _isShockerBossDay(day = this.clock?.day ?? 1) {
+        return !this._shockerBossState?.defeated && Math.max(1, Number(day || 1)) === SHOCKER_BOSS_DAY;
+    }
+
+    _isShockerBossActive() {
+        return !!(this._activeShockerBoss?.active);
+    }
+
+    _findShockerBossSpawnTile() {
+        const nav = GameMap.enemyNavGrid;
+        if (!Array.isArray(nav) || !nav.length || !Array.isArray(nav[0])) {
+            return { x: 1, y: 1 };
+        }
+
+        const h = nav.length;
+        const w = nav[0].length;
+        const center = this._getMainIslandCenterWorld?.() ?? {
+            x: (w * SQUARESIZE) / 2,
+            y: (h * SQUARESIZE) / 2,
+        };
+        const candidates = [];
+        const pushIfWalkable = (x, y) => {
+            if (x < 0 || y < 0 || x >= w || y >= h) return;
+            if (nav[y]?.[x] !== 1) return;
+            const worldX = x * SQUARESIZE + SQUARESIZE / 2;
+            const worldY = y * SQUARESIZE + SQUARESIZE / 2;
+            if (GameMap.enemyRegionSystem?.canReachWorldToWorld && !GameMap.enemyRegionSystem.canReachWorldToWorld(worldX, worldY, center.x, center.y)) {
+                return;
+            }
+            const d2 = (worldX - center.x) ** 2 + (worldY - center.y) ** 2;
+            candidates.push({ x, y, d2 });
+        };
+
+        for (let x = 0; x < w; x++) {
+            pushIfWalkable(x, 0);
+            pushIfWalkable(x, h - 1);
+        }
+        for (let y = 1; y < h - 1; y++) {
+            pushIfWalkable(0, y);
+            pushIfWalkable(w - 1, y);
+        }
+
+        if (!candidates.length) {
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    pushIfWalkable(x, y);
+                }
+            }
+        }
+
+        candidates.sort((a, b) => b.d2 - a.d2);
+        return candidates[0] || { x: 1, y: 1 };
+    }
+
+    _syncShockerBossUi() {
+        this.uiScene?.setBossStormActive?.(!!this._shockerBossState?.nightLocked);
+        this.uiScene?.setBossTarget?.(this._activeShockerBoss?.active ? this._activeShockerBoss : null);
+    }
+
+    shouldHoldNightAtPeakDarkness() {
+        return !!(this._shockerBossState?.nightLocked && !this._shockerBossState?.defeated);
+    }
+
+    startShockerBossNight() {
+        if (this._isShockerBossActive() || this._shockerBossState?.defeated) return;
+
+        const targetPoint = this._getMainIslandCenterWorld?.() ?? {
+            x: (WORLD_DIMENSIONX * SQUARESIZE) / 2,
+            y: (WORLD_DIMENSIONY * SQUARESIZE) / 2,
+        };
+        const boss = spawnSeaRaider(this, {
+            EnemyClass: Shocker,
+            teamNumber: 0,
+            targetPoint,
+            enemyTypeLabel: SHOCKER_BOSS_NAME,
+            modifierLabel: "Boss Night",
+            nightHordeId: "shocker_boss_night",
+            hordeIndex: this.getCurrentHordeIndex(),
+            swimSpeed: 210,
+        });
+        if (!boss) return;
+
+        boss.nightHordeId = "shocker_boss_night";
+        boss.hordeIndex = this.getCurrentHordeIndex();
+        boss._bossSpawnDay = Math.max(1, Number(this.clock?.day || SHOCKER_BOSS_DAY));
+
+        this._activeShockerBoss = boss;
+        this._shockerBossState = {
+            defeated: false,
+            nightLocked: true,
+            bossId: boss.id ?? null,
+            startedOnDay: boss._bossSpawnDay,
+        };
+        SaveManager.queueAutosave("shocker_boss_night");
+        this._syncShockerBossUi();
+        this.uiScene?.flashStormLightning?.(220, 0.42);
+        this.uiScene?.showBossIncomingPresentation?.({
+            title: SHOCKER_BOSS_NAME.toUpperCase(),
+            subtitle: "SUNDAY NIGHT BOSS",
+            caption: "Night will not end until it is destroyed",
+            portraitKey: getPlayerPortraitKey(boss),
+        });
+    }
+
+    handleShockerBossDefeated(troop) {
+        if (!troop || this._shockerBossState?.defeated) return;
+        this._shockerBossState.defeated = true;
+        this._shockerBossState.nightLocked = false;
+        this._activeShockerBoss = null;
+        this._syncShockerBossUi();
+
+        const reward = {
+            id: "shocker_boss_reward",
+            title: "Storm Broken",
+            description: "The Shocker has been destroyed. The run continues in endless mode.",
+            displayLabel: "Boss Reward",
+            imageKey: getPlayerPortraitKey(troop),
+            accentColor: 0x8fdcff,
+            glowColor: 0xdff6ff,
+            panelColor: 0x101b30,
+            onGrant: (scene) => {
+                scene.updateMoney(SHOCKER_BOSS_REWARD_MONEY);
+                scene.updatePermits(SHOCKER_BOSS_REWARD_PERMITS);
+                scene.addTownXp(TOWN_XP_SOURCE_VALUES.hordeSurvived + 35, "Shocker Defeated", { alert: true });
+                showAlert(scene, `Boss Reward: +$${SHOCKER_BOSS_REWARD_MONEY} and +${SHOCKER_BOSS_REWARD_PERMITS} permits`, "#8fe7ff", 2600);
+            },
+        };
+
+        const finalize = () => {
+            this._syncShockerBossUi();
+            StageState.endlessMode = true;
+            StageState.advanceHorde({ reason: "shocker_boss_defeated", hordeIndex: this.getCurrentHordeIndex() });
+            this._runStats.nightsSurvived += 1;
+            this.clock.day = Math.max(1, Number(this.clock?.day || SHOCKER_BOSS_DAY)) + 1;
+            this.clock.hours = 6;
+            this.clock.minutes = 0;
+            this.clock.wasNight = false;
+            this.clock.spawnedThisNight = 0;
+            AudioManager.setIsNight(false);
+            this.handlePhaseChanged("dawn", this.clock.getPhaseInfo?.());
+            this.handleDayStart();
+            this.events.emit("stage:changed");
+            SaveManager.queueAutosave("shocker_boss_defeated");
+        };
+
+        this._activeBossRewardUI?.destroy?.();
+        this._activeBossRewardUI = openBossUnlockRewardPresentation(this, {
+            reward,
+            onComplete: () => {
+                this._activeBossRewardUI = null;
+                finalize();
+            }
+        });
+    }
+
+    restoreShockerBossState(snapshot = null) {
+        this._shockerBossState = {
+            defeated: !!snapshot?.defeated,
+            nightLocked: !!snapshot?.nightLocked,
+            bossId: snapshot?.bossId ?? null,
+            startedOnDay: snapshot?.startedOnDay ?? null,
+        };
+        this._activeShockerBoss = (Player.troops || []).find((troop) =>
+            troop?.active
+            && troop?.isShocker
+            && (snapshot?.bossId == null || Number(troop.id) === Number(snapshot.bossId))
+        ) || null;
+        this._syncShockerBossUi();
+    }
+
+    _estimateNightLaneDetails(edgeKey, difficulty, hordeIndex, modifier = null, laneEnemyCount = null) {
         const diff = Math.max(1, Math.min(PRESSURE_CONTRACT.MAX_DIFFICULTY ?? 3, difficulty | 0));
-        const extraSpawners = Math.max(0, Number(modifier?.extraSpawners ?? 0) || 0);
-        const spawners = Math.max(1, Math.min(3, diff + extraSpawners));
-        const quotaBase =
-            Math.max(1, Number(PRESSURE_CONTRACT.BASE_QUOTA_PER_SPAWNER ?? 3))
-            + Math.max(0, Number(hordeIndex || 1) - 1);
-        const enemiesPerSpawner = Math.max(
-            1,
-            Math.round(quotaBase * Math.max(0.5, Number(modifier?.quotaMultiplier ?? 1) || 1))
-        );
+        const settings = getNightHordeSettings(hordeIndex);
+        const enemies = Math.max(1, Number((laneEnemyCount ?? settings.totalEnemies) || 1));
         const baseIntervalMs = Math.max(
-            Number(PRESSURE_CONTRACT.MIN_INTERVAL_MS ?? 1500),
-            Number(PRESSURE_CONTRACT.BASE_INTERVAL_MS ?? 6000)
-                - Math.max(0, Number(hordeIndex || 1) - 1) * Number(PRESSURE_CONTRACT.INTERVAL_DROP_PER_STAGE_MS ?? 250)
+            1300,
+            2800 - (Math.max(0, Number(hordeIndex || 1) - 1) * 140)
         );
         const spawnIntervalMs = Math.max(
-            Number(PRESSURE_CONTRACT.MIN_INTERVAL_MS ?? 1500),
+            1200,
             Math.round(baseIntervalMs * Math.max(0.4, Number(modifier?.intervalMultiplier ?? 1) || 1))
         );
         const enemyMods = this._getNightHordeEnemyMods(modifier);
-        const hunterRatio = hordeIndex >= 1 ? 0.25 : 0;
-        const bomberRatio = hordeIndex >= DEBUG_BOMBER_START_HORDE_INDEX ? NIGHT_HORDE_BOMBER_RATIO : 0;
-        const enemyTypes = ["Raiders"];
-        if (hunterRatio > 0) enemyTypes.push("Hunters");
-        if (bomberRatio > 0) enemyTypes.push("Bombers");
-        const enemyTypeLabel = enemyTypes.length > 1 ? enemyTypes.join(" + ") : this._getNightHordeEnemyLabel(modifier);
+        const hunterRatio = Number(settings.hunterRatio || 0);
+        const bomberRatio = Number(settings.bomberRatio || 0);
+        const enemyTypes = ["raider"];
+        if (hunterRatio > 0) enemyTypes.push("hunter");
+        if (bomberRatio > 0) enemyTypes.push("bomber");
+        const enemyTypeLabel = buildEnemyTypeLabel(enemyTypes) || this._getNightHordeEnemyLabel(modifier);
 
         return {
             edgeKey,
             difficulty: diff,
-            spawners,
-            enemiesPerSpawner,
-            enemies: spawners * enemiesPerSpawner,
+            spawners: 1,
+            enemiesPerSpawner: enemies,
+            enemies,
             spawnIntervalMs,
             swimSpeed: Math.max(180, Math.round(220 * Math.max(1, Number(enemyMods.speedMultiplier ?? 1) || 1))),
             enemyType: "raider",
@@ -1477,24 +2261,22 @@ export class mapView extends Phaser.Scene {
 
     _buildNightHordePlan(hordeIndex = this.getCurrentHordeIndex()) {
         const horde = Math.max(1, Number(hordeIndex || 1));
-        const laneCount =
-            horde <= 1 ? 1 :
-            horde <= 3 ? 2 :
-            horde <= 5 ? 3 :
-            4;
+        const settings = getNightHordeSettings(horde);
+        const laneCount = settings.laneCount;
         const baseDifficulty = Math.min(3, 1 + Math.floor(Math.max(0, horde - 1) / 2));
         const modifier = getHordeModifierForIndex(horde);
         const edgeKeys = Phaser.Utils.Array.Shuffle(["top", "right", "bottom", "left"].slice()).slice(0, laneCount);
+        const laneEnemyCounts = distributeAcrossLanes(settings.totalEnemies, laneCount);
         const laneDetails = edgeKeys.map((edgeKey, idx) => {
-            const laneDifficulty = Math.min(3, baseDifficulty + ((idx === edgeKeys.length - 1 && horde >= 4) ? 1 : 0));
-            return this._estimateNightLaneDetails(edgeKey, laneDifficulty, horde, modifier);
+            const laneDifficulty = Math.min(3, baseDifficulty + ((laneEnemyCounts[idx] >= 4 || (idx === edgeKeys.length - 1 && horde >= 5)) ? 1 : 0));
+            return this._estimateNightLaneDetails(edgeKey, laneDifficulty, horde, modifier, laneEnemyCounts[idx]);
         });
         const totalEnemies = laneDetails.reduce((sum, lane) => sum + lane.enemies, 0);
         const includesHunters = laneDetails.some((lane) => Number(lane.hunterRatio || 0) > 0);
         const includesBombers = laneDetails.some((lane) => Number(lane.bomberRatio || 0) > 0);
-        const enemyLabelParts = ["Raiders"];
-        if (includesHunters) enemyLabelParts.push("Hunters");
-        if (includesBombers) enemyLabelParts.push("Bombers");
+        const enemyLabelParts = ["raider"];
+        if (includesHunters) enemyLabelParts.push("hunter");
+        if (includesBombers) enemyLabelParts.push("bomber");
 
         return {
             hordeIndex: horde,
@@ -1502,7 +2284,7 @@ export class mapView extends Phaser.Scene {
             baseDifficulty,
             edgeKeys,
             modifier,
-            enemyLabel: enemyLabelParts.length > 1 ? enemyLabelParts.join(" + ") : this._getNightHordeEnemyLabel(modifier),
+            enemyLabel: buildEnemyTypeLabel(enemyLabelParts) || this._getNightHordeEnemyLabel(modifier),
             laneDetails,
             totalEnemies,
         };
@@ -1544,6 +2326,17 @@ export class mapView extends Phaser.Scene {
 
     getUpcomingNightHordePlan() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return null;
+        if (this._isShockerBossDay() && !this._isShockerBossActive()) {
+            return {
+                hordeIndex: this.getCurrentHordeIndex(),
+                laneCount: 1,
+                modifier: { key: "shocker_boss", label: "Boss Night" },
+                enemyLabel: SHOCKER_BOSS_NAME,
+                laneDetails: [],
+                totalEnemies: 1,
+                boss: true,
+            };
+        }
         if (this._activeNightHorde?.plan) return this._activeNightHorde.plan;
         if (Number(this.clock?.day || 1) < 2) return null;
         return this._getNightHordePlan();
@@ -1555,6 +2348,22 @@ export class mapView extends Phaser.Scene {
 
     getUpcomingHordePreviewSummary() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return null;
+
+        if (this._isShockerBossActive()) {
+            return {
+                phase: "night",
+                hordeIndex: this.getCurrentHordeIndex(),
+                laneCount: 1,
+                modifierLabel: "Boss Night",
+                enemyLabel: SHOCKER_BOSS_NAME,
+                totalEnemies: 1,
+                aliveEnemies: this._activeShockerBoss?.active ? 1 : 0,
+                countdownText: "Night is frozen until the boss dies",
+                headline: "Storm Boss Active",
+                bannerText: `Storm Boss Active | ${SHOCKER_BOSS_NAME}`,
+                boss: true,
+            };
+        }
 
         if (this._activeNightHorde) {
             const totalEnemies = Math.max(
@@ -1583,6 +2392,21 @@ export class mapView extends Phaser.Scene {
 
         const plan = this.getUpcomingNightHordePlan();
         if (!plan) return null;
+
+        if (plan?.boss) {
+            return {
+                phase: this.clock?.getPhaseKey?.() || "day",
+                hordeIndex: plan.hordeIndex,
+                laneCount: 1,
+                modifierLabel: "Boss Night",
+                enemyLabel: SHOCKER_BOSS_NAME,
+                totalEnemies: 1,
+                countdownText: this.clock?.getPhaseCountdownText?.() || "",
+                headline: "Storm Boss Tonight",
+                bannerText: `Storm Boss Tonight | ${SHOCKER_BOSS_NAME}`,
+                boss: true,
+            };
+        }
 
         const totalEnemies = Math.max(0, Number(plan.totalEnemies || 0));
         const enemyLabel = plan.enemyLabel || this._getNightHordeEnemyLabel(plan.modifier);
@@ -1672,6 +2496,11 @@ export class mapView extends Phaser.Scene {
     handleDuskStart() {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         SaveManager.queueAutosave("phase_dusk");
+        if (this._isShockerBossDay()) {
+            showAlert(this, "Stormfront detected. A boss arrives tonight.", "#d8b4fe", 2600);
+            this.uiScene?.flashStormLightning?.(180, 0.26);
+            return;
+        }
         const preview = this.getUpcomingHordePreviewSummary();
         if (preview) {
             const alertText = `${preview.headline || "Coastal Assault Tonight"} | H${preview.hordeIndex} | ${Math.max(0, Number(preview.totalEnemies || 0))} ${preview.enemyLabel || "Raiders"}${preview.modifierLabel ? ` | ${preview.modifierLabel}` : ""}`;
@@ -1683,8 +2512,13 @@ export class mapView extends Phaser.Scene {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         SaveManager.queueAutosave("phase_night");
         if (this._activeNightHorde?.startedOnDay === this.clock?.day) return;
+        if (this._shockerBossState?.defeated && Math.max(1, Number(this.clock?.day || 1)) === SHOCKER_BOSS_DAY) return;
         if (Number(this.clock?.day || 1) < 2) {
             showAlert(this, "Free day: the first horde arrives tomorrow night", "#a7f3d0");
+            return;
+        }
+        if (this._isShockerBossDay()) {
+            this.startShockerBossNight();
             return;
         }
         this.startNightlyHorde();
@@ -1694,13 +2528,20 @@ export class mapView extends Phaser.Scene {
         this._resetParcelUiState();
         this.grantTownTowerDawnIncome();
         SaveManager.queueDailyAutosave(this.clock?.day, "day_start");
+        if (this._reliefRecoveryQueuedForDawn) {
+            this.time?.delayedCall?.(0, () => {
+                this._queueStorageCollapseEvaluation(this._pendingStorageCollapseSource);
+            });
+        }
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
+        if (this._shockerBossState?.nightLocked) return;
         this.finishNightlyHordeAtDawn();
         this._syncNightPressurePreviewPanels();
     }
 
     isDailyAutosaveReady() {
-        if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return false;
+        if (this._townTowerLossInProgress || this._storageCollapseLossInProgress || this._restartToMainMenuInProgress) return false;
+        if (this._reliefRecoveryInProgress) return false;
         if (this._hordeRewardInProgress || this.stageCompleteLock) return false;
         if (this._activeRewardUI || this._activeBossRewardUI || this._activeTownXpRewardUI) return false;
         if (Math.max(0, Number(this._townXp?.pendingLevelRewards || 0)) > 0) return false;
@@ -1723,19 +2564,14 @@ export class mapView extends Phaser.Scene {
     }
 
     handleTownCoreLost(tower) {
-        if (this._townTowerLossInProgress) return;
+        if (this._townTowerLossInProgress || this._storageCollapseLossInProgress) return;
         this._townTowerLossInProgress = true;
         this._lastTownCoreLost = tower || null;
         this._movementLocked = true;
         this.stageCompleteLock = true;
         SaveManager.clearRunSave();
 
-        this._activeRewardUI?.destroy?.();
-        this._activeRewardUI = null;
-        this._activeBossRewardUI?.destroy?.();
-        this._activeBossRewardUI = null;
-        this._activeTownXpRewardUI?.destroy?.();
-        this._activeTownXpRewardUI = null;
+        this._clearActiveRunPresentations();
 
         AudioManager.playSound?.('sfx_end_stage_explosions');
         this.cameras.main.shake(260, 0.006);
@@ -1776,9 +2612,9 @@ export class mapView extends Phaser.Scene {
         return [...primaryLines, ...secondaryLines];
     }
 
-    _showGameOverOverlay() {
+    _showGameOverOverlay(summaryData = this._getRunSummaryData()) {
         if (this.uiScene?.showTownLossPresentation) {
-            this.uiScene.showTownLossPresentation(this._getRunSummaryData());
+            this.uiScene.showTownLossPresentation(summaryData);
             return;
         }
 
@@ -1796,7 +2632,10 @@ export class mapView extends Phaser.Scene {
             stroke: "#08131d",
             strokeThickness: 6,
         }).setOrigin(0.5).setScrollFactor(0);
-        const summary = this.add.text(cam.centerX, cam.centerY + 26, this._getRunSummaryLines().join("\n"), {
+        const primaryLines = (summaryData.primaryStats || []).map((entry) => `${entry.label}: ${entry.value}`);
+        const secondaryLines = (summaryData.secondaryStats || []).map((entry) => `${entry.label}: ${entry.value}`);
+        const summaryLines = [...primaryLines, ...secondaryLines];
+        const summary = this.add.text(cam.centerX, cam.centerY + 26, summaryLines.join("\n"), {
             fontFamily: "Bungee",
             fontSize: "14px",
             color: "#dbeafe",
@@ -1907,6 +2746,8 @@ export class mapView extends Phaser.Scene {
         this._activeBossRewardUI = null;
         this._activeTownXpRewardUI?.destroy?.();
         this._activeTownXpRewardUI = null;
+        this.tutorialManager?.destroy?.();
+        this.tutorialManager = null;
         this.menu?.destroy?.();
         this.menu = null;
         this.logo?.destroy?.();
@@ -2014,29 +2855,16 @@ export class mapView extends Phaser.Scene {
         active.laneDetails.forEach((lane, laneIndex) => {
             const intervalMs = Math.max(350, Number(lane.spawnIntervalMs || 1500));
             const initialDelay = Phaser.Math.Between(0, Math.max(400, Math.round(intervalMs * 0.35)));
-
-            for (let spawnerIndex = 0; spawnerIndex < Math.max(1, Number(lane.spawners || 1)); spawnerIndex++) {
-                const streamOffset = initialDelay + laneIndex * 180 + spawnerIndex * 320;
-                for (let enemyIndex = 0; enemyIndex < Math.max(1, Number(lane.enemiesPerSpawner || 1)); enemyIndex++) {
-                    const delay = Math.max(0, streamOffset + enemyIndex * intervalMs);
-                    const hunterEvery = lane.hunterRatio > 0
-                        ? Math.max(3, Math.round(1 / lane.hunterRatio))
-                        : 0;
-                    const bomberEvery = lane.bomberRatio > 0
-                        ? Math.max(4, Math.round(1 / lane.bomberRatio))
-                        : 0;
-                    const streamIndex = enemyIndex + spawnerIndex + laneIndex;
-                    const enemyType = bomberEvery > 0
-                        && (streamIndex % bomberEvery === bomberEvery - 1)
-                        ? "bomber"
-                        : hunterEvery > 0
-                        && (streamIndex % hunterEvery === hunterEvery - 1)
-                        ? "hunter"
-                        : "raider";
-                    events.push(this.time.delayedCall(delay, () => {
-                        this._spawnNightlyHordeTroop(active, lane, enemyType);
-                    }));
-                }
+            for (let enemyIndex = 0; enemyIndex < Math.max(1, Number(lane.enemies || lane.enemiesPerSpawner || 1)); enemyIndex++) {
+                const delay = Math.max(0, initialDelay + laneIndex * 180 + enemyIndex * intervalMs);
+                const enemyType = pickScaledEnemyType({
+                    hunterRatio: lane.hunterRatio,
+                    bomberRatio: lane.bomberRatio,
+                    sequenceIndex: enemyIndex + laneIndex,
+                });
+                events.push(this.time.delayedCall(delay, () => {
+                    this._spawnNightlyHordeTroop(active, lane, enemyType);
+                }));
             }
         });
 
@@ -2465,6 +3293,7 @@ export class mapView extends Phaser.Scene {
         this.load.image('stoneIcon', stoneIcon);
         this.load.image('playerIcon', playerIcon);
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
+        this.load.image('relief_package', reliefPackageImg);
         this.load.image('sparkle', waterParticle);
         this.load.image('zoomOutWaterTxt1', zoomOutWaterTxt1);
         this.load.image('zoomOutWaterTxt2', zoomOutWaterTxt2);
@@ -2487,7 +3316,9 @@ export class mapView extends Phaser.Scene {
         Raider.preload(this);
         Hunter.preload(this);
         Bomber.preload(this);
+        Shocker.preload(this);
         preloadPlayerPortraits(this);
+        preloadTutorialAssets(this);
         this.brushGraphics = this.add.graphics(); // Graphics for tinting tiles
         itemTab.preload(this);
         Projectile.init(this);
@@ -2606,6 +3437,7 @@ export class mapView extends Phaser.Scene {
         this.createAnim('crops',0,1)
         this.createAnim('char', -1, 5, 3)
         createPlayerPortraitAnimations(this);
+        createTutorialAnimations(this);
         if (!this.anims.exists('rock_projectile_spin')) {
             this.anims.create({
                 key: 'rock_projectile_spin',
@@ -2628,7 +3460,14 @@ export class mapView extends Phaser.Scene {
         this.uiScene?.bindWorldScene?.(this);
         SaveManager.attachScene(this);
         this.achievementSystem = new AchievementSystem(this);
+        this.tutorialManager = new TutorialManager(this);
         this.events.on('store:unlock-changed', () => SaveManager.queueAutosave('store_unlock'));
+        this.events.on("storage:removed", (storage) => {
+            if (storage?.teamNumber === 1) {
+                this._pendingStorageCollapseSource = storage;
+                this._queueStorageCollapseEvaluation(storage);
+            }
+        });
         this.cameras.main.useBounds = false;
         this._applyStartupCameraPose({ applyZoom: true });
         this._trackScaleResize(() => {
@@ -3722,7 +4561,7 @@ export class mapView extends Phaser.Scene {
             return true;
         }
 
-        const issued = OrderRunner.issueGatherSetOrder(profile.troops, [node]);
+        const issued = OrderRunner.issueGatherTypeOrder(profile.troops, type, this);
         if (!issued) {
             showAlert(this, `Could not route selected foragers to ${cfg.target}`, "#fecaca");
             return true;
@@ -3735,6 +4574,10 @@ export class mapView extends Phaser.Scene {
         this.functionTab?.updateVisuals?.();
         this.uiScene?.functionTab?.updateVisuals?.();
         showAlert(this, cfg.alert, cfg.textColor);
+        this.tutorialManager?.notifyAction?.("forager.route", {
+            resourceType: type,
+            node,
+        });
         return true;
     }
 
@@ -4323,6 +5166,13 @@ cancelFarmSelection(exitFarmMode = false) {
 
             if (addedCount > 0) {
                 AudioManager.playBuildingComplete({ volume: 0.2 });
+                this.tutorialManager?.notifyAction?.("farm.planted", {
+                    count: addedCount,
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                });
             }
 
             // IMPORTANT: do NOT turn farmMode off here.
@@ -4492,11 +5342,15 @@ cancelFarmSelection(exitFarmMode = false) {
     static refreshUICameraIgnores() {}
 
 
-    updateMoney(amountDelta) {
+    updateMoney(amountDelta, opts = {}) {
         this.money += amountDelta;
+        if (amountDelta > 0) {
+            const stats = this._runStats || (this._runStats = this._createRunStats());
+            stats.moneyEarnedTotal = Math.max(0, Number(stats.moneyEarnedTotal || 0) + Number(amountDelta || 0));
+        }
         SaveManager.queueAutosave("money");
         if (this.uiScene?.onMoneyChanged) {
-            this.uiScene.onMoneyChanged(amountDelta);
+            this.uiScene.onMoneyChanged(amountDelta, opts);
             return;
         }
         if (!this.moneyText) return;
@@ -4699,11 +5553,21 @@ cancelFarmSelection(exitFarmMode = false) {
             this._prevFarmMode = this.farmMode;
         }
         Player.update();
+        if (this._shockerBossState?.nightLocked && !this._activeShockerBoss?.active) {
+            this._activeShockerBoss = (Player.troops || []).find((troop) => troop?.active && troop?.isShocker) || null;
+        }
+        if (this.uiScene && (this._shockerBossState?.nightLocked || this._activeShockerBoss)) {
+            this._syncShockerBossUi();
+        }
         this.updateForagerRouteAssist();
         ClayOvenUI.updateAllOvens(effectiveSimSpeed);
         this._refreshNorthFortArrivalMarker();
         this._syncNightPressurePreviewPanels();
         this._tryPresentPendingTownXpReward();
+        if ((this.time?.now ?? 0) - this._storageCollapseLastCheckedAt >= 180) {
+            this._storageCollapseLastCheckedAt = this.time?.now ?? 0;
+            this._evaluateStorageCollapseState({ sourceStorage: this._pendingStorageCollapseSource });
+        }
         this.achievementSystem?.update?.();
         SaveManager.tick(this);
         if (this._startupCameraLocked && (this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive)) {

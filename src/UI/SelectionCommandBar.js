@@ -107,8 +107,15 @@ export class SelectionCommandBar {
         showAlert(this.scene, `Distributed ${result.fed} berr${result.fed === 1 ? "y" : "ies"} (+${result.healAmount} HP, +${result.staminaAmount} STA)`, "#e9d5ff");
       }, { iconKey: "berry" }),
       sell: this._makeButton("sell", "CASH OUT", (snapshot) => {
-        const result = OrderRunner.sellTroops(this._getActionTroops(snapshot), this.scene);
-        if (!result.ok) return;
+        const result = OrderRunner.sellTroops(this._getActionTroops(snapshot), this.scene, {
+          sourceUiTarget: this.buttons.sell?.root ?? null,
+        });
+        if (!result.ok) {
+          if (result.reason === "phase_locked") {
+            showAlert(this.scene, result.message || "Troops can only be sold during dawn or day.", "#fecaca");
+          }
+          return;
+        }
         this._dismissForCurrentSelection(snapshot?.troops);
         showAlert(this.scene, `Sold ${result.sold} troop${result.sold === 1 ? "" : "s"} for $${result.money}`, "#fcd34d");
       }),
@@ -165,6 +172,12 @@ export class SelectionCommandBar {
   }
 
   update() {
+    const tutorial = this.scene.worldScene?.tutorialManager || this.scene.tutorialManager || null;
+    if (tutorial?.isActive?.()) {
+      this._hide();
+      return;
+    }
+
     if (this.externalContext) {
       this._updateExternalContext();
       return;
@@ -200,10 +213,6 @@ export class SelectionCommandBar {
       layoutKeys.push("details");
     }
     layoutKeys.push("return", "cancel", "auto", "sleep", "berry", "sell");
-    if (profile.allGunslingers) {
-      layoutKeys.push("hold");
-    }
-
     this._setDynamicLabels(profile);
 
     const gap = 6;
@@ -514,21 +523,9 @@ export class SelectionCommandBar {
       );
     }
 
-    if (key === "defendTown") {
-      return profile.allCombatants && profile.troops.length > 0 && profile.troops.every(troop =>
-        troop?.currentOrder?.kind === "defend_town"
-      );
-    }
-
     if (key === "makeWater") {
       return profile.allFiremen && profile.troops.length > 0 && profile.troops.every(troop =>
         troop?.currentOrder?.kind === "make_water"
-      );
-    }
-
-    if (key === "hold") {
-      return profile.allGunslingers && profile.troops.length > 0 && profile.troops.every(troop =>
-        troop?.currentOrder?.kind === "hold_position"
       );
     }
 

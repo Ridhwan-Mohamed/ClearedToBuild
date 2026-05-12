@@ -15,63 +15,70 @@ export class StorageUI {
     static refreshStatus(storage) {
         if (!this.scene || !storage?.sprite) return;
 
-        const state = storage.getStorageWarningState?.();
+        const state = storage.getStatusBadgeState?.();
         if (!state) {
             this.hideStatus(storage);
             return;
         }
 
-        const style = state === 'full'
-            ? { label: 'FULL\nCAPACITY', bg: 0xb42318, text: '#fff4f2', low: 0.38, high: 1, width: 60, height: 24 }
-            : { label: 'SLOTS\nFULL', bg: 0xd97706, text: '#fff7d6', low: 0.5, high: 0.95, width: 60, height: 24 };
-
         let ui = storage.statusUI;
         if (!ui) {
-            const container = createBuildingHoverPanel(this.scene, {
-                width: style.width + 16,
-                height: style.height + 8,
-                depth: UIDEPTH + 1,
-                scrollFactor: 0,
-                accentColor: style.bg,
-            });
-            const bg = container.panelBg;
-            const text = this.scene.add.text(0, 0, style.label, {
-                ...BUILDING_PANEL_TEXT_STYLES.compactBody,
-                color: style.text,
-                align: 'center'
-            }).setOrigin(0.5).setLineSpacing(-2);
+            const container = this.scene.add.container(0, 0)
+                .setDepth(UIDEPTH + 1)
+                .setScrollFactor(0);
 
-            container.add(text);
+            const title = this.scene.add.text(0, -6, '', {
+                ...BUILDING_PANEL_TEXT_STYLES.compact,
+                fontSize: '10px',
+                color: state.textColor,
+                align: 'center',
+                stroke: '#04111a',
+                strokeThickness: 5,
+            }).setOrigin(0.5);
+            const detail = this.scene.add.text(0, 8, '', {
+                ...BUILDING_PANEL_TEXT_STYLES.compactBody,
+                fontSize: '8px',
+                color: state.detailColor,
+                align: 'center',
+                stroke: '#04111a',
+                strokeThickness: 4,
+            }).setOrigin(0.5);
+
+            container.add([title, detail]);
 
             const updatePosition = () => {
                 if (!storage?.sprite?.active) return;
-                const { x, y } = storage.sprite;
-                const spriteTop = y - ((storage.sprite.displayHeight || 0) * 0.5);
+                const cam = this.scene.cameras.main;
+                const bounds = storage.sprite.getBounds?.();
+                const centerX = bounds?.centerX ?? storage.sprite.x;
+                const topY = bounds?.top ?? (storage.sprite.y - ((storage.sprite.displayHeight || 0) * 0.5));
+                const bodyOffset = bounds
+                    ? Math.max(18, Math.min(bounds.height * 0.36, 30))
+                    : 20;
                 container.setPosition(
-                    x - this.scene.cameras.main.scrollX,
-                    spriteTop + 6 - this.scene.cameras.main.scrollY
+                    centerX - cam.scrollX,
+                    topY + bodyOffset - cam.scrollY
                 );
             };
 
             updatePosition();
             this.scene.events.on('update', updatePosition);
 
-            ui = { container, bg, text, updatePosition, tween: null, state: null };
+            ui = { container, title, detail, updatePosition, tween: null, state: null };
             storage.statusUI = ui;
         }
 
-        ui.bg.setSize?.(style.width, style.height);
-        ui.bg.setFillStyle(style.bg, 0.95);
-        ui.text.setText(style.label).setColor(style.text);
-        ui.state = state;
+        ui.title.setText(state.title).setColor(state.textColor);
+        ui.detail.setText(state.detail).setColor(state.detailColor);
+        ui.state = state.key;
         ui.updatePosition?.();
 
         ui.tween?.remove();
-        ui.container.setAlpha(style.high);
+        ui.container.setAlpha(state.key === 'full' ? 1 : 0.94);
         ui.tween = this.scene.tweens.add({
             targets: ui.container,
-            alpha: { from: style.high, to: style.low },
-            duration: state === 'full' ? 420 : 700,
+            alpha: { from: state.key === 'full' ? 1 : 0.94, to: state.key === 'full' ? 0.44 : 0.58 },
+            duration: state.key === 'full' ? 430 : 720,
             ease: 'Sine.easeInOut',
             yoyo: true,
             repeat: -1,

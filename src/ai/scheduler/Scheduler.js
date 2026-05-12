@@ -50,6 +50,18 @@ export class Scheduler {
         return false;
     }
 
+    static hasAvailableBuilderBuildWork(troop) {
+        if (!troop?.active || !troop.isBuilder) return false;
+        const policy = POLICIES.Builder;
+        if (!policy) return false;
+
+        const tickets = TaskBoard.fromTeam(troop.body.team);
+        const candidates = policy.collectCandidates(troop, tickets);
+        return candidates.some((candidate) =>
+            candidate?.kind === "build_block" || candidate?.kind === "build_tile"
+        );
+    }
+
     static _tryCarryRecovery(troop) {
         if (troop.isFarmer) {
             if (troop.pendingFarmSpot && troop.carrying === UI_ITEM_TYPES.seedCrop) {

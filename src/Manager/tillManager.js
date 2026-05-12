@@ -49,7 +49,6 @@ export class tillManager {
         // Reward and reset
         Teams.resetCrop(cropData);
         this.scene?.achievementSystem?.addStat?.("cropsHarvested", 1);
-        this.scene.updateMoney(10);
         StorageManager.addCarriedItem(sprite,UI_ITEM_TYPES.crop);
         AudioManager.playCropHarvest();
         Teams.removeFromStateArray(sprite.body.team, "TeamFarmSpots", sprite.task);

@@ -1,5 +1,6 @@
 export const RUN_SAVE_STORAGE_KEY = "processv2.run_save_v1";
 export const RUN_SAVE_META_STORAGE_KEY = "processv2.run_save_meta_v1";
+export const TUTORIAL_PROFILE_STORAGE_KEY = "processv2.tutorial_profile_v1";
 export const SAVE_SCHEMA_VERSION = 1;
 export const SAVE_BUILD_LABEL = "v0.9.9";
 
@@ -95,4 +96,16 @@ export function writeRunSaveSnapshot(snapshot) {
 export function clearRunSaveStorage() {
   removeJson(RUN_SAVE_STORAGE_KEY);
   removeJson(RUN_SAVE_META_STORAGE_KEY);
+}
+
+export function readTutorialProfile() {
+  const profile = readJson(TUTORIAL_PROFILE_STORAGE_KEY, null);
+  return isPlainObject(profile) ? profile : {};
+}
+
+export function writeTutorialProfile(profile = {}) {
+  return writeJson(TUTORIAL_PROFILE_STORAGE_KEY, {
+    tutorialCompleted: !!profile.tutorialCompleted,
+    completedAt: Number(profile.completedAt || 0),
+  });
 }

@@ -166,6 +166,20 @@ export class ZoomMixer {
     return markers;
   }
 
+  _unscaledTweenTimeScale() {
+    const scale = Number(ZoomMixer.scene?.tweens?.timeScale);
+    return Number.isFinite(scale) && scale > 0 ? 1 / scale : 1;
+  }
+
+  _addUnscaledTween(config) {
+    const scene = ZoomMixer.scene;
+    if (!scene?.tweens) return null;
+    return scene.tweens.add({
+      ...config,
+      timeScale: config.timeScale ?? this._unscaledTweenTimeScale(),
+    });
+  }
+
   // Zoom to targetZoom around the camera center (no pointer reference)
   smoothCenterZoomTo(targetZoom, duration = 300, ease = 'Quad.easeInOut') {
     const scene = ZoomMixer.scene;
@@ -209,7 +223,7 @@ export class ZoomMixer {
       }
     };
 
-    scene.tweens.add({
+    this._addUnscaledTween({
       targets: cam,
       zoom: targetZoom,
       duration,
@@ -226,7 +240,7 @@ export class ZoomMixer {
     if (mode === 'overview') {
       scene.keyboardSpeed = 30;
       Map.setDetailedWorldVisible?.(false);
-      Map.deleteAllGridElements();
+      Map.setDetailedWorldPaused?.(true);
       scene.parcelSpawnUI?.setMode?.("overview");
       scene.parcelSpawnUI?.setVisible(true);
       VisibilitySystem.setOverviewMode(true);
@@ -234,13 +248,13 @@ export class ZoomMixer {
       const overviewImage = this.ensureOverviewImage();
       if (overviewImage) {
         overviewImage.setVisible(true);
-        scene.tweens.add({ targets: overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
+        this._addUnscaledTween({ targets: overviewImage, alpha: 1, duration, ease: 'Quad.easeInOut' });
       }
 
       // fade in map icons
       if (ZoomMixer.mapIconContainer) {
         ZoomMixer.mapIconContainer.setVisible(true);
-        scene.tweens.add({ targets: ZoomMixer.mapIconContainer, alpha: 1, duration, ease: 'Quad.easeInOut' });
+        this._addUnscaledTween({ targets: ZoomMixer.mapIconContainer, alpha: 1, duration, ease: 'Quad.easeInOut' });
       }
 
       this.mode = 'overview';
@@ -248,11 +262,14 @@ export class ZoomMixer {
       scene.keyboardSpeed = 10;
       scene.parcelSpawnUI?.setMode?.("detailed");
       scene.parcelSpawnUI?.setVisible(true);
+      if (!Map.hasDetailedWorldElements?.()) {
+        Map.reDraw();
+      }
+      Map.setDetailedWorldPaused?.(false);
       Map.setDetailedWorldVisible?.(true);
-      Map.reDraw();
       VisibilitySystem.setOverviewMode(false);
       if (this.overviewImage) {
-        scene.tweens.add({
+        this._addUnscaledTween({
           targets: this.overviewImage,
           alpha: 0,
           duration,
@@ -262,7 +279,7 @@ export class ZoomMixer {
       }
       // fade out map icons
       if (ZoomMixer.mapIconContainer) {
-        scene.tweens.add({
+        this._addUnscaledTween({
           targets: ZoomMixer.mapIconContainer,
           alpha: 0,
           duration,

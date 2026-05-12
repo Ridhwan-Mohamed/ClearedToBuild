@@ -7,9 +7,12 @@ import { POWERUP_CARDS } from "./Cards/PowerupCards";
 export class Teams {
     static teamLists = {};
     static houseCapacityPerBuilding = 2;
+    static _townSpawnReservations = new globalThis.Map();
+    static TOWN_SPAWN_RESERVATION_MS = 2000;
 
     static resetAll() {
       this.teamLists = {};
+      this._townSpawnReservations = new globalThis.Map();
     }
 
     static createTownAutomationState() {
@@ -158,6 +161,7 @@ export class Teams {
           deck: {},
           consumables: {},
         },
+        reliefPackageCount: Number(teamNumber) === 1 ? 1 : 0,
         townAutomation: this.createTownAutomationState(),
         buildings: [],
         buildingFixTasks: [],
@@ -288,6 +292,81 @@ export class Teams {
       });
     }
 
+    static _tileKey(x, y) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return `${x},${y}`;
+    }
+
+    static _worldToTile(worldX, worldY) {
+      if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return null;
+      return {
+        x: Math.floor(worldX / SQUARESIZE),
+        y: Math.floor(worldY / SQUARESIZE),
+      };
+    }
+
+    static _roadHashForTroop(troop, road) {
+      const troopId = Number(troop?.id ?? 0) + 1;
+      const x = Number(road?.x ?? 0) + 17;
+      const y = Number(road?.y ?? 0) + 31;
+      return (troopId * 92821 + x * 6151 + y * 31337) >>> 0;
+    }
+
+    static _collectReservedTownRoadKeys(teamNumber, {
+      excludeTroop = null,
+      extraReservedKeys = null,
+    } = {}) {
+      const reserved = new Set(extraReservedKeys instanceof Set ? extraReservedKeys : []);
+
+      for (const troop of Player.troops || []) {
+        if (!troop?.active || troop === excludeTroop) continue;
+        if ((troop.body?.team ?? troop._teamNumber) !== teamNumber) continue;
+        if (!troop.currentPath?.length && troop.state !== CONTROL_STATES.BACK_TO_TOWN) continue;
+
+        const tile = this._worldToTile(troop.finalPos?.x, troop.finalPos?.y);
+        if (!tile) continue;
+        if (!this.isTownRoadTile(teamNumber, tile.x, tile.y)) continue;
+
+        const key = this._tileKey(tile.x, tile.y);
+        if (key) reserved.add(key);
+      }
+
+      return reserved;
+    }
+
+    static _pruneTownSpawnReservations(now = Date.now()) {
+      for (const [key, reservation] of this._townSpawnReservations.entries()) {
+        if (!reservation || Number(reservation.expiresAt || 0) <= now) {
+          this._townSpawnReservations.delete(key);
+        }
+      }
+    }
+
+    static _collectReservedTownSpawnKeys(teamNumber, {
+      extraReservedKeys = null,
+      now = Date.now(),
+    } = {}) {
+      this._pruneTownSpawnReservations(now);
+      const reserved = new Set(extraReservedKeys instanceof Set ? extraReservedKeys : []);
+
+      for (const [key, reservation] of this._townSpawnReservations.entries()) {
+        if (!reservation) continue;
+        if (Number(reservation.teamNumber) !== Number(teamNumber)) continue;
+        reserved.add(key);
+      }
+
+      return reserved;
+    }
+
+    static _reserveTownSpawnTile(teamNumber, tile, now = Date.now()) {
+      const key = this._tileKey(tile?.x, tile?.y);
+      if (!key) return;
+      this._townSpawnReservations.set(key, {
+        teamNumber,
+        expiresAt: now + this.TOWN_SPAWN_RESERVATION_MS,
+      });
+    }
+
     static isTownRoadTile(teamNumber, x, y) {
       if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
       if (x < 0 || x >= WORLD_DIMENSIONX || y < 0 || y >= WORLD_DIMENSIONY) return false;
@@ -344,18 +423,54 @@ export class Teams {
     static getTownSpawnTile(teamNumber) {
       const roads = this.getTownRoadTiles(teamNumber);
       if (!roads.length) return null;
-      return roads.find((road) => !this._isOccupiedTile(road.x, road.y)) ?? roads[0];
+      const now = Date.now();
+      const reservedKeys = this._collectReservedTownSpawnKeys(teamNumber, { now });
+      const pick =
+        roads.find((road) => {
+          const key = this._tileKey(road.x, road.y);
+          return !this._isOccupiedTile(road.x, road.y) && !reservedKeys.has(key);
+        }) ??
+        roads.find((road) => !this._isOccupiedTile(road.x, road.y)) ??
+        roads.find((road) => {
+          const key = this._tileKey(road.x, road.y);
+          return !reservedKeys.has(key);
+        }) ??
+        roads[0];
+
+      if (pick) {
+        this._reserveTownSpawnTile(teamNumber, pick, now);
+      }
+      return pick;
     }
 
-    static findTownReturnTarget(troop) {
+    static findTownReturnTarget(troop, {
+      extraReservedKeys = null,
+    } = {}) {
       const teamNumber = troop?.body?.team;
       const roads = this.getTownRoadTiles(teamNumber);
       if (!troop?.body || !roads.length) return null;
 
+      const reservedKeys = this._collectReservedTownRoadKeys(teamNumber, {
+        excludeTroop: troop,
+        extraReservedKeys,
+      });
+      const groupedRoads = [[], [], []];
+
       for (const road of roads) {
-        const path = Player.pathTo(troop, road.x, road.y);
-        if (path?.length) {
-          return { tile: road, path };
+        const key = this._tileKey(road.x, road.y);
+        const reserved = key ? reservedKeys.has(key) : false;
+        const occupied = this._isOccupiedTile(road.x, road.y);
+        const bucket = !reserved && !occupied ? 0 : (!reserved ? 1 : 2);
+        groupedRoads[bucket].push(road);
+      }
+
+      for (const group of groupedRoads) {
+        group.sort((a, b) => this._roadHashForTroop(troop, a) - this._roadHashForTroop(troop, b));
+        for (const road of group) {
+          const path = Player.pathTo(troop, road.x, road.y);
+          if (path?.length) {
+            return { tile: road, path };
+          }
         }
       }
 
@@ -462,7 +577,7 @@ export class Teams {
     }
       
      
-    static sendTroopToTown(troop) {
+    static sendTroopToTown(troop, options = {}) {
       if (!troop?.body) return null;
       const teamNum = troop.body.team;
       const team = Teams.teamLists[teamNum];
@@ -471,7 +586,7 @@ export class Teams {
         return null;
       }
 
-      const returnTarget = this.findTownReturnTarget(troop);
+      const returnTarget = this.findTownReturnTarget(troop, options);
       if (!returnTarget?.path?.length) {
         console.warn(`No valid town road return path for troop with team ${teamNum}.`);
         return null;

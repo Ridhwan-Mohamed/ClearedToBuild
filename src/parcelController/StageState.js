@@ -9,8 +9,11 @@ export const StageState = {
   endlessMode: true,
   fortObjectiveEnabled: false,
   START_OVERRIDE: {
+    // Debug boss-test start point. Set `day` back to `1` and `stageIndex` back to `1`
+    // when you want the normal run start again.
     seasonIndex: 1,
     stageIndex: 1,
+    day: 1,
   },
 
   // Fort towers that exist in the world (registered by TowerBuilding)

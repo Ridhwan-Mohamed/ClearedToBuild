@@ -11,51 +11,61 @@ import { Blademaster } from "../players/Blademaster.js";
 import { Gunslinger } from "../players/Gunslinger.js";
 import { Raider } from "../players/Raider.js";
 import { FortGrunt } from "../players/FortGrunt.js";
+import { Shocker } from "../players/Shocker.js";
 import { ClayOven } from "../buildings/ClayOven.js";
 
 export const TROOP_TYPE_REGISTRY = Object.freeze({
-  farmer: Farmer,
-  builder: Builder,
-  forager: Forager,
-  fireman: Fireman,
-  brawler: Brawler,
-  blademaster: Blademaster,
-  gunslinger: Gunslinger,
-  raider: Raider,
-  fort_grunt: FortGrunt,
+  get farmer() { return Farmer; },
+  get builder() { return Builder; },
+  get forager() { return Forager; },
+  get fireman() { return Fireman; },
+  get brawler() { return Brawler; },
+  get blademaster() { return Blademaster; },
+  get gunslinger() { return Gunslinger; },
+  get raider() { return Raider; },
+  get shocker() { return Shocker; },
+  get fort_grunt() { return FortGrunt; },
 });
 
 export const CARD_REGISTRY = new Map((POWERUP_CARDS || []).map((card) => [card.id, card]));
 export const MARKET_CARD_REGISTRY = new Map((MARKET_CARDS || []).map((card) => [card.id, card]));
 
-const CARD_DEFAULTS = Object.freeze({
-  Farmer: { speed: Farmer.speed, stamina: Farmer.stamina, maxWaterPailCarry: Farmer.maxWaterPailCarry },
-  Builder: { speed: Builder.speed, stamina: Builder.stamina },
-  Forager: { speed: Forager.speed, stamina: Forager.stamina },
-  Fireman: { speed: Fireman.speed, stamina: Fireman.stamina },
-  Brawler: { speed: Brawler.speed, stamina: Brawler.stamina },
-  Blademaster: { speed: Blademaster.speed, stamina: Blademaster.stamina },
-  Gunslinger: { speed: Gunslinger.speed, stamina: Gunslinger.stamina },
-  ClayOven: { cookDuration: ClayOven.cookDuration },
-});
+let cardDefaults = null;
+
+function getCardDefaults() {
+  if (!cardDefaults) {
+    cardDefaults = Object.freeze({
+      Farmer: { speed: Farmer.speed, stamina: Farmer.stamina, maxWaterPailCarry: Farmer.maxWaterPailCarry },
+      Builder: { speed: Builder.speed, stamina: Builder.stamina },
+      Forager: { speed: Forager.speed, stamina: Forager.stamina },
+      Fireman: { speed: Fireman.speed, stamina: Fireman.stamina },
+      Brawler: { speed: Brawler.speed, stamina: Brawler.stamina },
+      Blademaster: { speed: Blademaster.speed, stamina: Blademaster.stamina },
+      Gunslinger: { speed: Gunslinger.speed, stamina: Gunslinger.stamina },
+      ClayOven: { cookDuration: ClayOven.cookDuration },
+    });
+  }
+  return cardDefaults;
+}
 
 export function resetCardModifiedDefaults() {
-  Farmer.speed = CARD_DEFAULTS.Farmer.speed;
-  Farmer.stamina = CARD_DEFAULTS.Farmer.stamina;
-  Farmer.maxWaterPailCarry = CARD_DEFAULTS.Farmer.maxWaterPailCarry;
-  Builder.speed = CARD_DEFAULTS.Builder.speed;
-  Builder.stamina = CARD_DEFAULTS.Builder.stamina;
-  Forager.speed = CARD_DEFAULTS.Forager.speed;
-  Forager.stamina = CARD_DEFAULTS.Forager.stamina;
-  Fireman.speed = CARD_DEFAULTS.Fireman.speed;
-  Fireman.stamina = CARD_DEFAULTS.Fireman.stamina;
-  Brawler.speed = CARD_DEFAULTS.Brawler.speed;
-  Brawler.stamina = CARD_DEFAULTS.Brawler.stamina;
-  Blademaster.speed = CARD_DEFAULTS.Blademaster.speed;
-  Blademaster.stamina = CARD_DEFAULTS.Blademaster.stamina;
-  Gunslinger.speed = CARD_DEFAULTS.Gunslinger.speed;
-  Gunslinger.stamina = CARD_DEFAULTS.Gunslinger.stamina;
-  ClayOven.cookDuration = CARD_DEFAULTS.ClayOven.cookDuration;
+  const defaults = getCardDefaults();
+  Farmer.speed = defaults.Farmer.speed;
+  Farmer.stamina = defaults.Farmer.stamina;
+  Farmer.maxWaterPailCarry = defaults.Farmer.maxWaterPailCarry;
+  Builder.speed = defaults.Builder.speed;
+  Builder.stamina = defaults.Builder.stamina;
+  Forager.speed = defaults.Forager.speed;
+  Forager.stamina = defaults.Forager.stamina;
+  Fireman.speed = defaults.Fireman.speed;
+  Fireman.stamina = defaults.Fireman.stamina;
+  Brawler.speed = defaults.Brawler.speed;
+  Brawler.stamina = defaults.Brawler.stamina;
+  Blademaster.speed = defaults.Blademaster.speed;
+  Blademaster.stamina = defaults.Blademaster.stamina;
+  Gunslinger.speed = defaults.Gunslinger.speed;
+  Gunslinger.stamina = defaults.Gunslinger.stamina;
+  ClayOven.cookDuration = defaults.ClayOven.cookDuration;
 }
 
 export function reapplySavedCards(cardIds = []) {
@@ -90,6 +100,7 @@ export function getTroopTypeKey(troop) {
   if (ctor === Blademaster) return "blademaster";
   if (ctor === Gunslinger) return "gunslinger";
   if (troop?.isFortGrunt || ctor === FortGrunt) return "fort_grunt";
+  if (troop?.isShocker || ctor === Shocker) return "shocker";
   if (troop?.isRaider || ctor === Raider) return "raider";
   return null;
 }

@@ -20,7 +20,6 @@ import { Blademaster } from "../../players/Blademaster";
 import { Gunslinger } from "../../players/Gunslinger";
 import { formatPermitCostText } from "../../permitSystem";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../../parcel_system/StoreUnlockSystem";
-import { RELIEF_PACKAGE_PRICE } from "../../ReliefPackageConfig";
 import { getRecruitCost } from "../../balance/GameBalance";
 import {
   BOTTOM_BAR_THEME,
@@ -168,10 +167,6 @@ function ensureBuildTabIcons(scene) {
   buildIconTexture(scene, "icon_catapult_store", (rt) => {
     drawCenteredTexture(scene, rt, { key: "catapult_base", scale: 0.76, x: 32, y: 38 });
     drawCenteredTexture(scene, rt, { key: "catapult_top", frame: 1, scale: 0.76, x: 32, y: 24, useSprite: true });
-  });
-
-  buildIconTexture(scene, "icon_relief_package_store", (rt) => {
-    drawCenteredTexture(scene, rt, { key: "relief_package", scale: 0.9 });
   });
 
   UNIT_STORE.forEach((unit) => {
@@ -325,12 +320,9 @@ export default class BuildTab {
       this.refreshAvailableDefs();
     };
     scene.events.on("phase:changed", this._onPhaseChanged);
-    this._onReliefPackageChanged = () => this.refreshAvailableDefs();
-    scene.events.on("relief-package:changed", this._onReliefPackageChanged);
     scene.events.once("shutdown", () => {
       scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
       scene.events.off("housing:updated", this._onHousingChanged);
-      scene.events.off("relief-package:changed", this._onReliefPackageChanged);
     });
 
     this._makeUI();
@@ -343,7 +335,6 @@ export default class BuildTab {
     this.scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
     this.scene.events.off("housing:updated", this._onHousingChanged);
     this.scene.events.off("phase:changed", this._onPhaseChanged);
-    this.scene.events.off("relief-package:changed", this._onReliefPackageChanged);
     if (this._onCardsPointerUp) {
       this.scene.input.off("pointerup", this._onCardsPointerUp);
       this._onCardsPointerUp = null;
@@ -421,7 +412,7 @@ export default class BuildTab {
   }
 
   _makeUnitDefs() {
-    const defs = UNIT_STORE.filter((unit) => !unit.unlockKey || hasStoreUnlock(unit.unlockKey)).map((unit) => ({
+    return UNIT_STORE.filter((unit) => !unit.unlockKey || hasStoreUnlock(unit.unlockKey)).map((unit) => ({
       costMoney: getRecruitCost(unit.key, this.scene),
       key: unit.key,
       name: unit.name,
@@ -433,21 +424,6 @@ export default class BuildTab {
       cost: unit.cost,
       isUnit: true,
     }));
-
-    const hasReliefPackage = !!this.scene.worldScene?.hasReliefPackage?.();
-    if (!hasReliefPackage) {
-      defs.push({
-        key: "relief_package",
-        name: "Relief Package",
-        desc: "Emergency storage recovery. Auto-deploys when all storages are lost. Limit 1.",
-        rarity: "epic",
-        iconKey: "icon_relief_package_store",
-        cost: { money: RELIEF_PACKAGE_PRICE },
-        storePurchaseType: "relief_package",
-      });
-    }
-
-    return defs;
   }
 
   _getCurrentDefs() {
@@ -816,39 +792,10 @@ export default class BuildTab {
     });
   }
 
-  _purchaseReliefPackage(def) {
-    const tutorial = this._getTutorialManager();
-    if (tutorial && !tutorial.canPerformAction?.("build.recruit", { key: def.key })) {
-      return;
-    }
-
-    if (this.scene.worldScene?.hasReliefPackage?.()) {
-      showAlert(this.scene, "Relief package already stocked", "#ffdd88");
-      return;
-    }
-
-    if (!hasResources(this.scene, def.cost ?? {})) {
-      showAlert(this.scene, "Not enough money", "#ff5555");
-      return;
-    }
-
-    spendResources(this.scene, def.cost ?? {});
-    this.scene.worldScene?.grantReliefPackage?.();
-    showAlert(this.scene, "Relief package stocked", "#a7f3d0");
-    tutorial?.notifyAction?.("build.recruit", {
-      key: def.key,
-    });
-  }
-
   _select(key) {
     const scene = this.scene;
     const def = this._getCurrentDefs().find(d => d.key === key);
     if (!def) return;
-
-    if (def.storePurchaseType === "relief_package") {
-      this._purchaseReliefPackage(def);
-      return;
-    }
 
     if (def.isUnit) {
       this._recruitUnit(def);

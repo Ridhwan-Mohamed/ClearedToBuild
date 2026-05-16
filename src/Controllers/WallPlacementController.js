@@ -688,6 +688,8 @@ finalize() {
     if (!Map.navGrid[y]?.[x]) return false;
 
     const cell = Map.grid[y]?.[x];
+    if (!GameMap.isWithinMainIslandBuildInterior(x, y, 1, 1)) return false;
+
     const wallName = this.wallTypeName;
 
     // if cell is paired [floor, block], ensure block slot is empty or not a wall

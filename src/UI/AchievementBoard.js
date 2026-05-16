@@ -5,6 +5,11 @@ const BOARD_W = 300;
 const HEADER_H = 30;
 const ROW_H = 58;
 const ROW_GAP = 15;
+const PANEL_BOTTOM_PAD = 35;
+const PROGRESS_X = (BOARD_W / 2) - 106;
+const PROGRESS_Y = 4;
+const PROGRESS_W = 86;
+const PROGRESS_H = 22;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -143,6 +148,8 @@ export class AchievementBoard {
     }).setOrigin(0.5);
 
     const progressBg = this.scene.add.graphics();
+    const progressFill = this.scene.add.graphics();
+    const progressShine = this.scene.add.graphics();
     const progressText = this.scene.add.text((BOARD_W / 2) - 70, 14, "", {
       fontFamily: "Bungee",
       fontSize: "10px",
@@ -162,7 +169,7 @@ export class AchievementBoard {
       strokeThickness: 2,
     }).setOrigin(0.5).setVisible(false);
 
-    root.add([bg, shine, completeFlash, completeSweep, rewardBg, progressBg, tag, title, desc, rewardText, progressText, strike, completeText]);
+    root.add([bg, shine, completeFlash, completeSweep, rewardBg, progressBg, progressFill, progressShine, tag, title, desc, rewardText, progressText, strike, completeText]);
     root.setPosition(0, root.baseY);
 
     return {
@@ -176,6 +183,8 @@ export class AchievementBoard {
       rewardBg,
       rewardText,
       progressBg,
+      progressFill,
+      progressShine,
       progressText,
       strike,
       completeFlash,
@@ -200,7 +209,7 @@ export class AchievementBoard {
     this.headerShine.fillStyle(0xffffff, 0.08);
     this.headerShine.fillRoundedRect(-(BOARD_W / 2) + 10, -HEADER_H / 2 + 5, BOARD_W - 20, 11, 9);
 
-    const panelH = this.rows.length * ROW_H + (this.rows.length - 1) * ROW_GAP + 20;
+    const panelH = this.rows.length * ROW_H + (this.rows.length - 1) * ROW_GAP + PANEL_BOTTOM_PAD;
     this.panelShadow.clear();
     this.panelShadow.fillStyle(0x02060d, 0.26);
     this.panelShadow.fillRoundedRect(-(BOARD_W / 2) + 3, HEADER_H - 5, BOARD_W, panelH, 20);
@@ -279,10 +288,51 @@ export class AchievementBoard {
     row.rewardText.setColor(completed ? "#d9ffe4" : "#fff4cf");
 
     row.progressBg.clear();
+    row.progressFill.clear();
+    row.progressShine.clear();
     row.progressBg.fillStyle(completed ? 0x2f7d4f : 0x16364d, 0.96);
     row.progressBg.lineStyle(2, completed ? 0xbff6d3 : accent, 0.28);
-    row.progressBg.fillRoundedRect((BOARD_W / 2) - 106, 4, 86, 22, 11);
-    row.progressBg.strokeRoundedRect((BOARD_W / 2) - 106, 4, 86, 22, 11);
+    row.progressBg.fillRoundedRect(PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H, 11);
+    row.progressBg.strokeRoundedRect(PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H, 11);
+    const progressRatio = completed
+      ? 1
+      : clamp(
+        Number(goal.progressRatio ?? (
+          Number(goal.progressTarget || 0) > 0
+            ? Number(goal.progressValue || 0) / Number(goal.progressTarget || 1)
+            : 0
+        )),
+        0,
+        1
+      );
+    const fillInset = 3;
+    const maxFillWidth = PROGRESS_W - (fillInset * 2);
+    const minFillWidth = Math.min(maxFillWidth, PROGRESS_H - (fillInset * 2));
+    const fillWidth = progressRatio <= 0
+      ? 0
+      : Math.min(maxFillWidth, Math.max(minFillWidth, Math.round(maxFillWidth * progressRatio)));
+    if (fillWidth > 0) {
+      row.progressFill.fillStyle(completed ? 0x7ce3a2 : accent, completed ? 0.96 : 0.92);
+      row.progressFill.fillRoundedRect(
+        PROGRESS_X + fillInset,
+        PROGRESS_Y + fillInset,
+        fillWidth,
+        PROGRESS_H - (fillInset * 2),
+        8
+      );
+
+      const shineWidth = Math.max(0, Math.min(fillWidth - 4, Math.round(fillWidth * 0.72)));
+      if (shineWidth > 0) {
+        row.progressShine.fillStyle(0xffffff, completed ? 0.12 : 0.16);
+        row.progressShine.fillRoundedRect(
+          PROGRESS_X + fillInset + 2,
+          PROGRESS_Y + fillInset + 1,
+          shineWidth,
+          5,
+          5
+        );
+      }
+    }
     row.progressText.setText(completed ? "DONE" : `${goal.progressValue}/${goal.progressTarget}`);
     row.progressText.setColor(completed ? "#f0fff5" : "#e6f7ff");
 

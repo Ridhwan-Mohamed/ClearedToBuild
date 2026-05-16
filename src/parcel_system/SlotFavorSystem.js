@@ -10,8 +10,8 @@ export const SLOT_FAVOR_TYPES = Object.freeze({
     weight: 45,
     shortLabel: "SALE",
     title: "Sale",
-    description: "Cash costs -20% here.",
-    moneyMultiplier: 0.8,
+    description: "Cash costs -50% here.",
+    moneyMultiplier: 0.5,
     iconText: "$",
   }),
   extended: Object.freeze({
@@ -19,9 +19,9 @@ export const SLOT_FAVOR_TYPES = Object.freeze({
     weight: 35,
     shortLabel: "LONG",
     title: "Long Run",
-    description: "Eligible contracts last +20s here.",
-    durationBonusMs: 20_000,
-    iconText: "+20",
+    description: "Eligible contracts last +30s here.",
+    durationBonusMs: 30_000,
+    iconText: "+30",
   }),
   completion: Object.freeze({
     kind: "completion",

@@ -15,6 +15,7 @@ import {
 } from "./PlayerDirectionalAnimator";
 import { InterruptController } from "../ai/scheduler/InterruptController";
 import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
+import { fightManager } from "../Manager/fightManager";
 import raiderWalkDown from 'url:../assets/players/raider/raider_walk_down.png';
 import raiderWalkDownLeft from 'url:../assets/players/raider/raider_walk_down_left.png';
 import raiderWalkDownRight from 'url:../assets/players/raider/raider_walk_down_right.png';
@@ -507,6 +508,7 @@ export class Raider {
     static _shouldRetaliateToHit(troop, attacker) {
         if (!Raider._canAggroPlayerTargets(troop)) return false;
         if (!attacker?.active || attacker.body?.team !== 1) return false;
+        if (!Player._isCombatTargetableUnit?.(attacker)) return false;
         if (troop?.isHunter) return true;
         return !!Player._isFighterUnit?.(attacker);
     }
@@ -522,6 +524,7 @@ export class Raider {
     static _canRoleChaseTarget(troop, target, { onMission = false } = {}) {
         if (!Raider._canAggroPlayerTargets(troop)) return false;
         if (!target?.active || target.body?.team !== 1) return false;
+        if (!Player._isCombatTargetableUnit?.(target)) return false;
         if (troop?.isHunter) return true;
         if (Player._isFighterUnit?.(target)) return true;
         return !onMission && Raider._isThreateningRaider(troop, target);
@@ -547,6 +550,7 @@ export class Raider {
     static _canStartPlayerChase(troop, target, opts = {}) {
         if (!Raider._canAggroPlayerTargets(troop)) return false;
         if (!troop?.active || !target?.active || target.body?.team !== 1) return false;
+        if (!Player._isCombatTargetableUnit?.(target)) return false;
         const now = Raider._now(troop);
         const dist = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y);
         const immediate = dist <= Math.max((troop.weapon?.range || 0) + 14, SQUARESIZE * 0.9);
@@ -589,6 +593,7 @@ export class Raider {
         const target = troop?.forcedTarget;
         if (!chase && !target) return false;
         if (!target?.active || target.body?.team !== 1) return true;
+        if (!Player._isCombatTargetableUnit?.(target)) return true;
 
         const now = Raider._now(troop);
         const chaseAge = now - Number(chase?.startedAt || now);
@@ -689,6 +694,7 @@ export class Raider {
             if (!body || body === troop.body || body.team !== 1 || body.dontTrack) return;
             const target = body.gameObject;
             if (!target?.active || !target?.body) return;
+            if (!Player._isCombatTargetableUnit?.(target)) return;
             if (regionSystem?.canReachWorldToWorld && !regionSystem.canReachWorldToWorld(troop.x, troop.y, target.x, target.y)) {
                 return;
             }
@@ -971,6 +977,9 @@ export class Raider {
         const scene = troop.scene;
         const silentStageCleanup = !!opts.silentStageCleanup;
 
+        fightManager.clearAttackRecovery(troop);
+        fightManager.clearHitReaction(troop);
+        Player._playDeathAnimation?.(troop);
         Player._destroyMiniBars(troop)
         if (!silentStageCleanup) {
             troop.spawner?.notifyEnemyDied?.();

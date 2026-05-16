@@ -1102,6 +1102,14 @@ export default class StorageTab {
     this.scroll.layout();
   }
 
+  getStorageCountLabel(storage, filledSlots) {
+    const totalSlots = Math.max(0, Number(storage?.storageItems?.length || 0));
+    if (totalSlots > 0 && filledSlots >= totalSlots) {
+      return "ALL SLOTS\nFILLED";
+    }
+    return `${filledSlots} / ${totalSlots} slots`;
+  }
+
   createCard(storage, idx) {
     const scene = this.scene;
     const selected = storage === this.selected;
@@ -1121,7 +1129,7 @@ export default class StorageTab {
       color: BOTTOM_BAR_THEME.textMuted,
       stroke: "#081621",
       strokeThickness: 2,
-    });
+    }).setLineSpacing(-2);
 
     const iconsRow = scene.rexUI.add.sizer({
       orientation: "x",
@@ -1192,7 +1200,7 @@ export default class StorageTab {
 
     const hpBar = makeHpBar(Math.max(80, fullWidth - 24), 6);
     hpBar.setPercent((storage.health ?? 0) / (storage.maxHealth || 1));
-    countText.setText(`${items.length} / ${storage.storageItems?.length ?? 0} slots`);
+    countText.setText(this.getStorageCountLabel(storage, items.length));
 
     const textCol = scene.rexUI.add.sizer({
       orientation: "y",
@@ -1282,7 +1290,7 @@ export default class StorageTab {
       nameText.setText(`${base}(${storage.x ?? 0},${storage.y ?? 0})`);
     }
     if (countText?.setText) {
-      countText.setText(`${items.length} / ${storage.storageItems?.length ?? 0} slots`);
+      countText.setText(this.getStorageCountLabel(storage, items.length));
     }
 
     if (hpBar?.setPercent) {

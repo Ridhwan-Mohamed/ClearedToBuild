@@ -28,6 +28,11 @@ export class StaminaManager {
             return true;
         }
 
+        Player.showStatusEmote?.(troop, "\u{1F634}", {
+            key: "going_to_sleep",
+            cooldownMs: 2600,
+        });
+
         InterruptController.interruptTroop(troop, "sleep_request", CONTROL_STATES.TRACK_MODE);
         Player.clearPoseLock(troop, troop.idle);
 
@@ -51,6 +56,7 @@ export class StaminaManager {
         troop.setVisible(false);
         troop.body.setEnable(false);
         Teams.movePlayerState(troop, CONTROL_STATES.SLEEP_MODE);
+        Player._dropTargetingAgainstUnit?.(troop);
 
         if (troop.home) {
             const house = troop.home;

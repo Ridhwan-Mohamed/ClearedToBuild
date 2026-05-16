@@ -2946,8 +2946,14 @@ export class buildingManager{
                 }
             }
 
-            // refresh overview
-            this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+            // Patch the overview texture locally instead of forcing a full rebuild.
+            this.scene?.zoomMixer?.updateOverviewCell?.(
+                task.x,
+                task.y,
+                Map.grid,
+                task.type.lenX,
+                task.type.lenY
+            );
 
             // unblock normal navmesh
             const change = this.NavMeshUpdater.blockTiles(blockTiles, true);
@@ -2997,9 +3003,6 @@ export class buildingManager{
         // stop repeating
         if (sprite.timer) { sprite.timer.remove(false); sprite.timer = null; }
 
-        // update overview + visuals
-        this.scene.zoomMixer.updateOverviewCell(tx, ty, Map.grid);
-
         // remove wall sprite + clear grid overlay
         Wall.destroyAt(tx, ty);
 
@@ -3007,8 +3010,8 @@ export class buildingManager{
         Map.navGrid[ty][tx] = 1;
         Map.enemyNavGrid[ty][tx] = 1;
 
-        // minimap/overview refresh
-        this.scene.zoomMixer.buildOverviewTextureFromGrid(Map.grid, SQUARESIZE, (cell) => colorFor(cell));
+        // Patch the overview texture locally after the wall overlay is removed.
+        this.scene?.zoomMixer?.updateOverviewCell?.(tx, ty, Map.grid);
 
         // --- navmesh unblock rules ---
         // Walls (woodWall/wall) unblock BOTH meshes.
@@ -3205,6 +3208,9 @@ export class buildingManager{
             const before = (building[key] ?? 0);
             const healed = Math.min(5, maxHealth - before);
             building[key] = Math.min(maxHealth, before + healed);
+            if (healed > 0) {
+                this.scene?.achievementSystem?.addStat?.("repairPoints", healed);
+            }
             building.updateHealthBar?.();
 
             // green flash + shake

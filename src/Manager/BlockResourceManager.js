@@ -157,6 +157,17 @@ export class blockResourceManager{
         AudioManager.setHarvestActive(sprite, material, isActive);
     }
 
+    static _recordGatherAchievement(scene, task) {
+        const resourceName = task?.resource?.name || task?.value?.resourceKind || task?.type?.resourceKind || null;
+        if (resourceName === "wood") {
+            scene?.achievementSystem?.addStat?.("woodGathered", 1);
+            return;
+        }
+        if (resourceName === "stone") {
+            scene?.achievementSystem?.addStat?.("stoneGathered", 1);
+        }
+    }
+
     static ensureTaskForNode(nodeOrTask, { teamNumber = 1, queue = false, directOrderId = undefined } = {}) {
         if (!nodeOrTask) return null;
 
@@ -584,20 +595,19 @@ export class blockResourceManager{
                     for(let i = task.y; i < task.type.lenY + task.y; i++){
                         for(let j = task.x; j < task.type.lenX + task.x; j++){
                             blockTiles.push({x: j, y: i});
+                            if (Array.isArray(Map.grid?.[i]?.[j])) {
+                                Map.grid[i][j] = Map.grid[i][j][0];
+                            }
                         }
                     }
                     // 🔵 overview: reflect cleared resource tiles
-                    if (this.scene?.zoomMixer) {
-                        for (const t of blockTiles) {
-                            this.scene.zoomMixer.updateOverviewCell(
-                                t.x,
-                                t.y,
-                                Map.grid,
-                                task.type.lenX,
-                                task.type.lenY
-                            );
-                        }
-                    }
+                    this.scene?.zoomMixer?.updateOverviewCell?.(
+                        task.x,
+                        task.y,
+                        Map.grid,
+                        task.type.lenX,
+                        task.type.lenY
+                    );
                     
                     this.NavMeshUpdater.blockTiles(blockTiles, true);
                     this.EnemyNavMeshUpdater.blockTiles(blockTiles, true);
@@ -608,6 +618,7 @@ export class blockResourceManager{
                 if (material) {
                     AudioManager.playBlockBreak(material);
                 }
+                this._recordGatherAchievement(this.scene, task);
                 if (!rewardHandled && task.resource) {
                     StorageManager.addCarriedItem(sprite, task.resource);
                 }

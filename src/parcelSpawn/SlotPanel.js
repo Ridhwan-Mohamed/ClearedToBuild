@@ -4,6 +4,7 @@ import { getContractMoneyCost } from "../balance/GameBalance.js";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
 import {
   getSlotFavorBannerText,
+  getSlotFavorConfig,
   getSlotFavorShortLabel,
 } from "../parcel_system/SlotFavorSystem.js";
 
@@ -23,6 +24,7 @@ export class SlotPanel {
     this._pressureText = null;
     this._overviewStatusPrimary = null;
     this._overviewStatusSecondary = null;
+    this._overviewFavorBg = null;
     this._overviewCards = [];
     this._overviewPressureCards = [];
     this._overviewPressureObjects = [];
@@ -35,6 +37,7 @@ export class SlotPanel {
     this.gridObjects = [];
     this._buildOverviewGrid();
     this.setMode("detailed");
+    this._lastMilitiaAccess = this._canAccessMilitia();
     this._onTownXpChanged = () => this.refreshMilitiaLockState();
     this._onStoreUnlockChanged = () => this.refreshMilitiaLockState();
 
@@ -130,9 +133,10 @@ export class SlotPanel {
       return;
     }
 
-    g.lineStyle(3, 0xffffff, 0.35);
+    const theme = this._getSlotFavorTheme();
+    g.lineStyle(3, theme.stroke, 0.58);
     g.strokeRoundedRect(-this.W / 2, -this.H / 2, this.W, this.H, 16);
-    g.fillStyle(0x0b1020, 0.10);
+    g.fillStyle(theme.fill, theme.fillAlpha);
     g.fillRoundedRect(-this.W / 2 + 4, -this.H / 2 + 4, this.W - 8, this.H - 8, 14);
   }
 
@@ -172,6 +176,66 @@ export class SlotPanel {
     return pm.getContractPurchaseContext(this.id, type, difficulty);
   }
 
+  _getSlotFavorTheme() {
+    const config = getSlotFavorConfig(this._getSlotFavor());
+    if (config?.kind === "discount") {
+      return {
+        stroke: 0xf87171,
+        fill: 0x341318,
+        fillAlpha: 0.22,
+        badgeFill: 0x48151c,
+        badgeStroke: 0xfca5a5,
+        glow: 0xffb4b4,
+        priceColor: "#ffb4b4",
+        favorColor: "#ffc3c3",
+      };
+    }
+    if (config?.kind === "extended") {
+      return {
+        stroke: 0x60a5fa,
+        fill: 0x0f2748,
+        fillAlpha: 0.20,
+        badgeFill: 0x15365f,
+        badgeStroke: 0x93c5fd,
+        glow: 0x9ed0ff,
+        priceColor: "#dcebff",
+        favorColor: "#dcebff",
+      };
+    }
+    if (config?.kind === "completion") {
+      return {
+        stroke: 0xfbbf24,
+        fill: 0x3b2c12,
+        fillAlpha: 0.20,
+        badgeFill: 0x493611,
+        badgeStroke: 0xfcd34d,
+        glow: 0xffdd89,
+        priceColor: "#fff0c4",
+        favorColor: "#fff0c4",
+      };
+    }
+    return {
+      stroke: 0xffffff,
+      fill: 0x0b1020,
+      fillAlpha: 0.10,
+      badgeFill: 0x113048,
+      badgeStroke: 0xb7ecff,
+      glow: 0x9ee6ff,
+      priceColor: "#ffffff",
+      favorColor: "#dff7ff",
+    };
+  }
+
+  _getOverviewFavorBannerText() {
+    const favor = this._getSlotFavor();
+    const config = getSlotFavorConfig(favor);
+    if (!config) return "";
+    if (config.kind === "discount") return "50% OFF";
+    if (config.kind === "extended") return "+30s LONGER";
+    if (config.kind === "completion") return "BONUS PAY";
+    return String(config.title || "").toUpperCase();
+  }
+
   _setDetailedProxyHovered(hovered) {
     this._detailHovered = !!hovered;
     this._refreshDetailedProxyVisual();
@@ -183,8 +247,10 @@ export class SlotPanel {
     const visible = this.container.visible && !hasActiveContract && isDetailed;
     const isPressure = !!this._pressureMode;
     const hovered = !!this._detailHovered;
+    const favorTheme = this._getSlotFavorTheme();
 
     this.header?.setVisible(false);
+    if (!isPressure) this._drawFrameTheme(false);
     this.frameG?.setVisible(this.container.visible && !hasActiveContract);
     this.detailProxyGlow?.setVisible(visible);
     this.detailProxyBadge?.setVisible(visible);
@@ -205,8 +271,8 @@ export class SlotPanel {
     this.frameG?.setAlpha?.(frameAlpha);
     this.detailProxyLabel?.setText?.(this._directionLabel());
 
-    const badgeFill = isPressure ? 0x4e1717 : hovered ? 0x173e57 : 0x113048;
-    const badgeStroke = isPressure ? 0xffb0b0 : 0xb7ecff;
+    const badgeFill = isPressure ? 0x4e1717 : hovered ? 0x173e57 : favorTheme.badgeFill;
+    const badgeStroke = isPressure ? 0xffb0b0 : favorTheme.badgeStroke;
     const badgeStrokeAlpha = hovered ? 0.82 : 0.46;
     const badgeScale = hovered ? 1.06 : 1;
     const glowAlpha = hovered ? (isPressure ? 0.20 : 0.18) : (isPressure ? 0.14 : 0.08);
@@ -214,7 +280,7 @@ export class SlotPanel {
     this.scene.tweens.killTweensOf([this.detailProxyGlow, this.detailProxyBadge, this.detailProxyLabel]);
     this.detailProxyBadge?.setFillStyle?.(badgeFill, hovered ? 0.96 : 0.88);
     this.detailProxyBadge?.setStrokeStyle?.(hovered ? 3 : 2, badgeStroke, badgeStrokeAlpha);
-    this.detailProxyGlow?.setFillStyle?.(isPressure ? 0xffb0b0 : 0x9ee6ff, glowAlpha);
+    this.detailProxyGlow?.setFillStyle?.(isPressure ? 0xffb0b0 : favorTheme.glow, glowAlpha);
     this.detailProxyLabel?.setColor?.(hovered ? "#ffffff" : "#e9f7ff");
 
     this.scene.tweens.add({
@@ -233,33 +299,6 @@ export class SlotPanel {
 
   _buildGrid() {
     this.gridObjects = [];
-  }
-
-  refreshMilitiaLockState() {
-    if (Array.isArray(this.gridObjects)) {
-      for (const obj of this.gridObjects) {
-        try { obj?.destroy?.(); } catch {}
-      }
-    }
-    this.gridObjects = [];
-
-    if (Array.isArray(this.overviewGridObjects)) {
-      for (const obj of this.overviewGridObjects) {
-        try { obj?.destroy?.(); } catch {}
-      }
-    }
-    this.overviewGridObjects = [];
-
-    if (Array.isArray(this._overviewCards)) {
-      this._overviewCards.length = 0;
-    }
-
-    this._buildGrid();
-    this._buildOverviewGrid();
-
-    const showDetailed = this.mode !== "overview";
-    this.gridObjects?.forEach?.((obj) => obj?.setVisible?.(showDetailed));
-    this.overviewGridObjects?.forEach?.((obj) => obj?.setVisible?.(!showDetailed));
   }
 
   _getOverviewDefs() {
@@ -375,37 +414,35 @@ export class SlotPanel {
       wordWrap: { width: this.W - 36 },
     }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
 
-    this._overviewFavorLabel = this.scene.add.text(0, -this.H / 2 + 46, "", {
+    const favorY = this.id === "S" ? (this.H / 2 + 20) : (-this.H / 2 - 58);
+    this._overviewFavorBg = this.scene.add.rectangle(0, favorY + 24, Math.min(this.W - 48, 286), 72, 0x06111d, 0.94)
+      .setStrokeStyle(3, this._getSlotFavorTheme().stroke, 0.72)
+      .setScrollFactor(1)
+      .setVisible(false);
+
+    this._overviewFavorLabel = this.scene.add.text(0, favorY, "", {
       fontFamily: "Bungee",
-      fontSize: "18px",
+      fontSize: "36px",
       color: "#dff7ff",
       stroke: "#001018",
-      strokeThickness: 6,
+      strokeThickness: 10,
       align: "center",
-      wordWrap: { width: this.W - 36 },
-      lineSpacing: 6,
+      wordWrap: { width: Math.min(this.W - 72, 260) },
+      lineSpacing: 5,
     }).setOrigin(0.5, 0).setScrollFactor(1).setVisible(false);
 
-    this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary, this._overviewFavorLabel]);
+    this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary, this._overviewFavorBg, this._overviewFavorLabel]);
     this._buildOverviewPressureMenu(cellW, cellH, innerW, innerH);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
     this._refreshOverviewFavorLabel();
   }
 
-  _isMilitiaUnlocked() {
-    return hasStoreUnlock(STORE_UNLOCK_KEYS.militiaParcel);
-  }
-
-  _getMilitiaLockedLabel() {
-    return "🔒 Level 3";
-  }
-
-  _showMilitiaLockedMessage() {
-    showAlert(this.scene, "Militia parcel unlocks at Town Level 3.", "#ffcc66");
-  }
-
   refreshMilitiaLockState() {
+    const nextMilitiaAccess = this._canAccessMilitia();
+    if (nextMilitiaAccess === this._lastMilitiaAccess) return;
+
+    this._lastMilitiaAccess = nextMilitiaAccess;
     this._rebuildGrid();
     this._rebuildOverviewGrid();
   }
@@ -435,9 +472,11 @@ export class SlotPanel {
     this._overviewPressureCards = [];
     this._overviewStatusPrimary?.destroy?.();
     this._overviewStatusSecondary?.destroy?.();
+    this._overviewFavorBg?.destroy?.();
     this._overviewFavorLabel?.destroy?.();
     this._overviewStatusPrimary = null;
     this._overviewStatusSecondary = null;
+    this._overviewFavorBg = null;
     this._overviewFavorLabel = null;
     this._buildOverviewGrid();
 
@@ -448,18 +487,23 @@ export class SlotPanel {
 
   _refreshOverviewGridCosts() {
     const canBuy = this._canBuyContracts();
+    const favorTheme = this._getSlotFavorTheme();
+    const isSale = this._getSlotFavor()?.kind === "discount";
     for (const card of this._overviewCards) {
       if (!canBuy) {
+        card.costText.setColor("#ffffff");
         card.costText.setText("LOCK\nDAY");
         continue;
       }
       if (card.def.type === "PRESSURE") {
+        card.costText.setColor("#ffffff");
         card.costText.setText("PICK\nLEVEL");
         continue;
       }
       const permitCost = Number(card.def.cost?.() ?? 0);
       const purchase = this._getPurchaseContext(card.def.type, card.def.difficulty ?? 1);
       const moneyCost = Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.scene, card.def.type, card.def.difficulty ?? 1)));
+      card.costText.setColor(isSale ? "#ffb4b4" : favorTheme.priceColor);
       card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
     }
     this._refreshOverviewFavorLabel();
@@ -548,9 +592,13 @@ export class SlotPanel {
     if (!banner) {
       this._overviewFavorLabel.setText("");
       this._overviewFavorLabel.setVisible(false);
+      this._overviewFavorBg?.setVisible(false);
       return;
     }
-    this._overviewFavorLabel.setText(`${banner.title}\n${banner.detail}`);
+    const theme = this._getSlotFavorTheme();
+    this._overviewFavorLabel.setColor(theme.favorColor);
+    this._overviewFavorLabel.setText(this._getOverviewFavorBannerText());
+    this._overviewFavorBg?.setStrokeStyle?.(3, theme.stroke, 0.72);
   }
 
   _syncOverviewFavorVisibility(showGrid = false) {
@@ -564,6 +612,7 @@ export class SlotPanel {
       && !showingStatus
       && !this._pressureMode
       && !!this._getSlotFavor();
+    this._overviewFavorBg?.setVisible(showFavor);
     this._overviewFavorLabel?.setVisible(showFavor);
   }
 
@@ -633,6 +682,7 @@ export class SlotPanel {
     this._overviewStatusSecondary?.setText(secondary ?? "");
     this._overviewStatusPrimary?.setVisible(true);
     this._overviewStatusSecondary?.setVisible(true);
+    this._overviewFavorBg?.setVisible(false);
     this._overviewFavorLabel?.setVisible(false);
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
@@ -646,6 +696,9 @@ export class SlotPanel {
 
   _applyModeVisibilityState() {
     const hasActiveContract = this._hasActiveContract();
+    if (!hasActiveContract && !this._pressureMode) {
+      this._drawFrameTheme(false);
+    }
 
     if (hasActiveContract) {
       this.frameG?.setVisible(false);
@@ -689,6 +742,11 @@ export class SlotPanel {
     const isOverview = this.mode === "overview";
     const hasActiveContract = this._hasActiveContract();
     if (!isOverview) this._overviewMenu = "GRID";
+    if (isOverview) {
+      this.detailProxyGlow?.setVisible(false);
+      this.detailProxyBadge?.setVisible(false);
+      this.detailProxyLabel?.setVisible(false);
+    }
 
     this.header?.setVisible(false);
     this._refreshOverviewGridCosts();

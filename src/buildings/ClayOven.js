@@ -169,9 +169,73 @@ export class ClayOven {
     static getOvensNeedingStorage() {
         return Teams.getOvens(1).filter(oven => {
             return oven.outputSlots.some(slot => 
-                slot && (slot.amount >= 10 || slot.forceStore)
+                slot?.item &&
+                Number(slot.amount || 0) > 0 &&
+                (slot.forceStore || Teams.getStorageWithCapacity(oven.teamNumber, slot.item, 1))
             );
         });
+    }
+
+    _syncOutputPickupTask(slotIndex) {
+        const team = Teams.teamLists?.[this.teamNumber];
+        if (!team || !Array.isArray(team.ovenPickupJobs)) return false;
+
+        const outSlot = this.outputSlots?.[slotIndex] || null;
+        const taskList = team.ovenPickupJobs;
+        const existingTask = taskList.find(task => task?.oven === this && task.outputidx === slotIndex) || null;
+
+        if (!outSlot?.item || Number(outSlot.amount || 0) <= 0) {
+            if (existingTask && Number(existingTask.assigned || 0) <= 0) {
+                Teams.removeFromStateArray(this.teamNumber, "ovenPickupJobs", existingTask);
+                return true;
+            }
+            return false;
+        }
+
+        const canStoreOutput = !!Teams.getStorageWithCapacity(this.teamNumber, outSlot.item, 1);
+        if (!canStoreOutput && !outSlot.forceStore) {
+            if (existingTask && Number(existingTask.assigned || 0) <= 0) {
+                Teams.removeFromStateArray(this.teamNumber, "ovenPickupJobs", existingTask);
+                return true;
+            }
+            return false;
+        }
+
+        const desiredAmount = Math.max(
+            1,
+            Number(outSlot.amount || 0),
+            Number(existingTask?.assigned || 0)
+        );
+
+        if (existingTask) {
+            const beforeAmount = Number(existingTask.amount || 0);
+            existingTask.type = TILE_TYPES.clayOven;
+            existingTask.x = this.x;
+            existingTask.y = this.y;
+            existingTask.taskType = "ovenPickup";
+            existingTask.amount = desiredAmount;
+            return beforeAmount !== desiredAmount;
+        }
+
+        taskList.push({
+            oven: this,
+            outputidx: slotIndex,
+            x: this.x,
+            y: this.y,
+            type: TILE_TYPES.clayOven,
+            assigned: 0,
+            amount: desiredAmount,
+            taskType: "ovenPickup",
+        });
+        return true;
+    }
+
+    _syncOutputPickupJobs() {
+        let changed = false;
+        for (let i = 0; i < (this.outputSlots?.length || 0); i++) {
+            changed = this._syncOutputPickupTask(i) || changed;
+        }
+        return changed;
     }
 
     static isOpenOven() {
@@ -414,7 +478,13 @@ export class ClayOven {
                 gridY,
                 lenX,
                 lenY,
-                { padding: 1, protectFarmSpots: true, paddingAllowWalls: true, paddingProtectFarmSpots: false }
+                {
+                    padding: 1,
+                    protectFarmSpots: true,
+                    paddingAllowWalls: true,
+                    paddingProtectFarmSpots: false,
+                    enforceMainIslandInterior: true,
+                }
             );
 
             ghost.setTint(isBlocked ? 0xff4444 : 0x44ff44);
@@ -502,32 +572,10 @@ export class ClayOven {
                     this.cookTimers[i] = 0;
                     this.cookDurations[i] = 0;
                 }
-                const slotOut = this.outputSlots[i];
-                if (slotOut?.amount >= 5 || slotOut?.forceStore) {
-                    const teamList = Teams.teamLists['1'].ovenPickupJobs;
-                    
-                    // Check if a task already exists for this oven/output slot
-                    let task = teamList.find(t => t.oven === this && t.outputidx === i);
-
-                    if (task) {
-                        // Add to the tracked amount
-                        task.amount += 1;
-                    } else {
-                        // Create a new task for pickup
-                        teamList.push({
-                            oven: this,
-                            outputidx: i,
-                            x: this.x,
-                            y: this.y,
-                            type: TILE_TYPES.clayOven,
-                            assigned: 0,
-                            amount: slotOut.amount,
-                            taskType: 'ovenPickup'
-                        });
-                    }
-                }
             }
         }
+
+        changed = this._syncOutputPickupJobs() || changed;
 
         if (changed) {
            ClayOven.scene.events.emit('oven:updated', this);

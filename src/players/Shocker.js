@@ -81,6 +81,7 @@ export class Shocker {
         shocker._bobPhase = Math.random() * Math.PI * 2;
         shocker._bobAppliedOffset = 0;
         shocker._shockerChargeFx = null;
+        shocker._shockerChargeTween = null;
         shocker._shockerChargeEvent = null;
         shocker._shockerLightningSerial = 0;
 
@@ -146,8 +147,9 @@ export class Shocker {
         if (!plan) {
             if (state === CONTROL_STATES.ATTACK_MODE) {
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_TARGET);
+                return true;
             }
-            return true;
+            return false;
         }
 
         troop.body?.setVelocity?.(0, 0);
@@ -170,25 +172,33 @@ export class Shocker {
     static _startShockCycle(troop, plan) {
         const scene = troop.scene;
         const cycleDelay = Shocker._currentCooldownMs(troop);
+        troop._shockerChargeEvent?.remove?.(false);
+        troop._shockerChargeEvent = null;
+        troop._shockerChargeTween?.remove?.();
+        troop._shockerChargeTween = null;
+        troop?._shockerChargeFx?.destroy?.();
+        troop._shockerChargeFx = null;
         const chargeFx = scene.add.circle(troop.x, troop.y, 10, 0x9dd7ff, 0.12)
             .setStrokeStyle(2, 0xe6fbff, 0.8)
             .setDepth((troop.depth ?? UIDEPTH) + 1);
         troop._shockerChargeFx = chargeFx;
 
-        scene.tweens.add({
+        troop._shockerChargeTween = scene.tweens.add({
             targets: chargeFx,
             radius: plan.primary?.kind === "wall" ? 34 : 26,
             alpha: 0,
             duration: CHARGE_MS,
             ease: "Cubic.easeOut",
             onComplete: () => {
-                chargeFx.destroy();
+                if (troop._shockerChargeTween?.targets?.includes?.(chargeFx)) {
+                    troop._shockerChargeTween = null;
+                }
+                if (chargeFx.active) chargeFx.destroy();
                 if (troop._shockerChargeFx === chargeFx) troop._shockerChargeFx = null;
             },
         });
 
         troop.setTint?.(0xdff6ff);
-        troop._shockerChargeEvent?.remove?.(false);
         troop._shockerChargeEvent = scene.time.delayedCall(CHARGE_MS, () => {
             troop._shockerChargeEvent = null;
             if (!troop?.active) return;
@@ -216,6 +226,8 @@ export class Shocker {
         troop.timer = null;
         troop?._shockerChargeEvent?.remove?.(false);
         troop._shockerChargeEvent = null;
+        troop?._shockerChargeTween?.remove?.();
+        troop._shockerChargeTween = null;
         troop?._shockerChargeFx?.destroy?.();
         troop._shockerChargeFx = null;
         troop?.clearTint?.();

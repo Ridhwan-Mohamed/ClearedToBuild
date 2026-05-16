@@ -189,10 +189,10 @@ export class DraftStartMenu {
     const headerHeight = Math.round((compact ? 110 : 126) * scale);
     const headerTopGap = 5;
     const headerY = headerTopGap + Math.round(headerHeight / 2);
-    const footerHeight = Math.round((compact ? 98 : 110) * scale);
-    const footerY = height - Math.round((compact ? 56 : 78) * scale);
+    const footerHeight = clamp(Math.round(62 * scale), 50, 64);
+    const footerY = height - pagePad - Math.round(footerHeight / 2);
     const topDeckStart = headerY + (headerHeight / 2) + Math.round(14 * scale);
-    const bottomDeckEnd = footerY - (footerHeight / 2) - Math.round(4 * scale);
+    const bottomDeckEnd = footerY - (footerHeight / 2) - Math.round(24 * scale);
     const deckWidth = Math.min(
       Math.floor((width - pagePad * 2 - gap * 2) / 3),
       Math.round(392 * scale),
@@ -203,10 +203,11 @@ export class DraftStartMenu {
     );
     const rowCenterY = topDeckStart + (deckHeight / 2);
     const teamInputWidth = compact ? 228 : 262;
-    const confirmButtonWidth = clamp(Math.round(438 * scale), 332, 468);
-    const confirmButtonHeight = clamp(Math.round(58 * scale), 46, 58);
+    const confirmButtonWidth = clamp(Math.round(228 * scale), 184, 248);
+    const confirmButtonHeight = clamp(Math.round(60 * scale), 48, 62);
     const confirmGlowWidth = confirmButtonWidth + Math.round(16 * scale);
     const confirmGlowHeight = confirmButtonHeight + Math.round(8 * scale);
+    const backButtonWidth = clamp(Math.round(180 * scale), 148, 190);
 
     return {
       width,
@@ -229,11 +230,16 @@ export class DraftStartMenu {
       confirmButtonHeight,
       confirmGlowWidth,
       confirmGlowHeight,
-      layoutInfoWidth: Math.min(Math.round(438 * scale), Math.round(width * 0.28)),
-      layoutInfoHeight: Math.round((compact ? 250 : 272) * scale),
-      layoutLegendWidth: Math.min(Math.round(360 * scale), Math.round(width * 0.24)),
-      layoutLegendHeight: Math.round((compact ? 300 : 300) * scale),
-      layoutPanelY: headerY + (headerHeight / 2) + Math.round(142 * scale) + 20,
+      backButtonWidth,
+      layoutInfoWidth: Math.min(Math.round(332 * scale), Math.round(width * 0.22)),
+      layoutInfoHeight: Math.round((compact ? 220 : 244) * scale),
+      layoutLegendWidth: Math.min(Math.round(332 * scale), Math.round(width * 0.22)),
+      layoutLegendHeight: Math.round((compact ? 248 : 266) * scale),
+      layoutPanelY: clamp(
+        Math.round(height * 0.36),
+        headerY + (headerHeight / 2) + Math.round(96 * scale),
+        footerY - Math.round(180 * scale),
+      ),
     };
   }
 
@@ -321,12 +327,38 @@ export class DraftStartMenu {
   }
 
   _updateFooterSummaryLayout(confirmWidth = this.layout.confirmButtonWidth) {
+    const rects = [...(this.ui.layoutPanelRects ?? [])];
+    const buttonY = this.layout.footerY;
+
+    if (this.ui.confirmButton && this.ui.confirmLabel) {
+      const confirmX = this.layout.width - this.layout.pagePad - (confirmWidth / 2);
+      this.ui.confirmX = confirmX;
+      this.ui.confirmButton.setX(confirmX);
+      this.ui.confirmLabel.setX(confirmX);
+      this.ui.confirmGlow?.setX(confirmX);
+      rects.push({
+        left: confirmX - confirmWidth / 2,
+        right: confirmX + confirmWidth / 2,
+        top: buttonY - this.layout.confirmButtonHeight / 2,
+        bottom: buttonY + this.layout.confirmButtonHeight / 2,
+      });
+    }
+
+    if (this.phase === "layout" && this.ui.backButton && this.ui.backLabel) {
+      const backWidth = this.ui.backButtonWidth ?? this.layout.backButtonWidth;
+      rects.push({
+        left: this.ui.backX - backWidth / 2,
+        right: this.ui.backX + backWidth / 2,
+        top: buttonY - this.layout.confirmButtonHeight / 2,
+        bottom: buttonY + this.layout.confirmButtonHeight / 2,
+      });
+    }
+
+    this.ui.mapInteractionRects = rects;
+
     if (!this.ui.footerSummary) return;
 
-    const backWidth = this.phase === "layout" ? (this.ui.backButtonWidth ?? 0) : 0;
-    const summaryLeft = this.phase === "layout"
-      ? this.ui.backX + (backWidth / 2) + Math.round(24 * this.layout.scale)
-      : this.ui.footerSummaryBaseX;
+    const summaryLeft = this.ui.footerSummaryBaseX;
     const summaryRight =
       this.ui.confirmX
       - (confirmWidth / 2)
@@ -417,7 +449,6 @@ export class DraftStartMenu {
 
   _isPointerOnLayoutUi(pointer) {
     if (pointer.y <= this.layout.headerY + (this.layout.headerHeight / 2) + Math.round(10 * this.layout.scale)) return true;
-    if (pointer.y >= this.layout.footerY - (this.layout.footerHeight / 2) - Math.round(8 * this.layout.scale)) return true;
     return (this.ui.mapInteractionRects ?? []).some((rect) =>
       pointer.x >= rect.left
       && pointer.x <= rect.right
@@ -1081,29 +1112,24 @@ export class DraftStartMenu {
       shadowOffsetY: Math.round(12 * scale),
     });
     const infoTitle = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(30 * scale), "Town Layout", {
-      fontSize: this._fontPx(20, 13),
+      fontSize: this._fontPx(24, 16),
       color: TEXT_LIGHT,
       stroke: "#09131c",
       strokeThickness: Math.max(2, Math.round(4 * scale)),
     }).setOrigin(0, 0.5);
-    const infoDeck = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(68 * scale), "", {
-      fontSize: this._fontPx(13, 10),
-      color: TEXT_WARM,
-    }).setOrigin(0, 0.5);
-    const infoBody = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(106 * scale), "", {
-      fontSize: this._fontPx(12, 9),
+    const infoBody = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(72 * scale), "You may move buildings.\nKeep one land tile between buildings and water.", {
+      fontSize: this._fontPx(14, 10),
       color: TEXT_MUTED,
       wordWrap: { width: infoWidth - Math.round(54 * scale) },
       lineSpacing: Math.round(5 * scale),
     }).setOrigin(0, 0);
-    const infoSelected = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), infoHeight / 2 - Math.round(26 * scale), "Select a building to move it.", {
-      fontFamily: "Arial",
-      fontSize: this._fontPx(12, 9),
-      color: TEXT_SUBTLE,
+    const infoSelected = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), infoHeight / 2 - Math.round(28 * scale), "Click a building, then click an open tile.", {
+      fontSize: this._fontPx(13, 10),
+      color: TEXT_WARM,
       wordWrap: { width: infoWidth - Math.round(54 * scale) },
       lineSpacing: Math.round(4 * scale),
     }).setOrigin(0, 1);
-    info.add([infoShell, infoTitle, infoDeck, infoBody, infoSelected]);
+    info.add([infoShell, infoTitle, infoBody, infoSelected]);
 
     const legend = scene.add.container(legendX, panelY);
     const legendShell = this._makeRoundedPanel(legendWidth, legendHeight, {
@@ -1116,8 +1142,8 @@ export class DraftStartMenu {
       shadowAlpha: 0.22,
       shadowOffsetY: Math.round(12 * scale),
     });
-    const legendTitle = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), -legendHeight / 2 + Math.round(28 * scale), "Buildings", {
-      fontSize: this._fontPx(19, 13),
+    const legendTitle = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), -legendHeight / 2 + Math.round(30 * scale), "Legend", {
+      fontSize: this._fontPx(24, 16),
       color: TEXT_LIGHT,
       stroke: "#09131c",
       strokeThickness: Math.max(2, Math.round(4 * scale)),
@@ -1133,25 +1159,17 @@ export class DraftStartMenu {
       const lineY = -legendHeight / 2 + Math.round((78 + index * 50) * scale);
       const marker = scene.add.circle(-legendWidth / 2 + Math.round(30 * scale), lineY, Math.max(4, Math.round(6 * scale)), hexToColorInt(entry.color, 0xffffff), 0.95);
       const label = scene.add.text(-legendWidth / 2 + Math.round(46 * scale), lineY, `${entry.emoji} ${entry.label}`, {
-        fontFamily: "Arial",
-        fontSize: this._fontPx(16, 12),
+        fontSize: this._fontPx(18, 13),
         color: entry.color,
       }).setOrigin(0, 0.5);
       const count = scene.add.text(legendWidth / 2 - Math.round(24 * scale), lineY, "x0", {
-        fontSize: this._fontPx(13, 10),
+        fontSize: this._fontPx(16, 11),
         color: entry.color,
       }).setOrigin(1, 0.5);
       legendRefs.push({ ...entry, marker, label, count });
       legend.add([marker, label, count]);
     });
-
-    const legendHint = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), legendHeight / 2 - Math.round(24 * scale), "Hover a building to see its type. Click it, then click a new spot to move it.", {
-      fontSize: this._fontPx(11, 8),
-      color: TEXT_MUTED,
-      wordWrap: { width: legendWidth - Math.round(48 * scale) },
-      lineSpacing: Math.round(4 * scale),
-    }).setOrigin(0, 1);
-    legend.add([legendShell, legendTitle, legendHint]);
+    legend.add([legendShell, legendTitle]);
     legend.sendToBack(legendShell);
 
     const tooltip = scene.add.container(0, 0)
@@ -1175,7 +1193,6 @@ export class DraftStartMenu {
     this.container.add(stage);
 
     this.ui.layoutStage = stage;
-    this.ui.layoutInfoDeck = infoDeck;
     this.ui.layoutInfoBody = infoBody;
     this.ui.layoutInfoSelected = infoSelected;
     this.ui.layoutLegendRefs = legendRefs;
@@ -1184,7 +1201,7 @@ export class DraftStartMenu {
       bg: tooltipBg,
       label: tooltipLabel,
     };
-    this.ui.mapInteractionRects = [
+    this.ui.layoutPanelRects = [
       {
         left: infoX - infoWidth / 2,
         right: infoX + infoWidth / 2,
@@ -1198,6 +1215,7 @@ export class DraftStartMenu {
         bottom: panelY + legendHeight / 2,
       },
     ];
+    this.ui.mapInteractionRects = [...this.ui.layoutPanelRects];
   }
 
   _buildResourceChips(deck, deckWidth, centerY, contentScale = 1) {
@@ -1379,16 +1397,15 @@ export class DraftStartMenu {
   _buildFooter(width, height) {
     const scene = this.scene;
     const layout = this.layout;
-    const footer = scene.add.container(width / 2, layout.footerY);
+    const footer = scene.add.container(0, 0);
     const footerWidth = layout.footerWidth;
     const footerHeight = layout.footerHeight;
     const footerInset = Math.round(30 * layout.scale);
-    const backWidth = clamp(Math.round(196 * layout.scale), 152, 206);
-    const backHeight = clamp(Math.round(48 * layout.scale), 40, 48);
-    const backX = -footerWidth / 2 + (backWidth / 2) + Math.round(24 * layout.scale);
-    const confirmX = footerWidth / 2 - (layout.confirmButtonWidth / 2) - Math.round(18 * layout.scale);
-    const labelY = -footerHeight / 2 + Math.round(18 * layout.scale) - 5;
-    const summaryY = labelY + Math.round(16 * layout.scale);
+    const backWidth = layout.backButtonWidth;
+    const backHeight = layout.confirmButtonHeight;
+    const backX = layout.pagePad + (backWidth / 2);
+    const confirmX = width - layout.pagePad - (layout.confirmButtonWidth / 2);
+    const buttonY = layout.footerY;
 
     const shell = this._makeRoundedPanel(footerWidth, footerHeight, {
       fillColor: HEADER_FILL,
@@ -1400,13 +1417,19 @@ export class DraftStartMenu {
       shadowAlpha: 0.28,
       shadowOffsetY: Math.round(12 * layout.scale),
     });
+    shell.x = width / 2;
+    shell.y = buttonY;
 
-    const pickLabel = scene.add.text(-footerWidth / 2 + footerInset, labelY, "Opening Summary", {
+    const labelY = buttonY - (footerHeight / 2) + Math.round(18 * layout.scale) - 5;
+    const summaryY = labelY + Math.round(16 * layout.scale);
+    const summaryLeft = (width / 2) - (footerWidth / 2) + footerInset;
+
+    const pickLabel = scene.add.text(summaryLeft, labelY, "Opening Summary", {
       fontSize: this._fontPx(11, 8),
       color: TEXT_SUBTLE,
     }).setOrigin(0, 0.5);
 
-    const summary = scene.add.text(-footerWidth / 2 + footerInset, summaryY, "", {
+    const summary = scene.add.text(summaryLeft, summaryY, "", {
       fontSize: this._fontPx(12, 9),
       color: TEXT_MUTED,
       wordWrap: { width: 220 },
@@ -1414,21 +1437,22 @@ export class DraftStartMenu {
     }).setOrigin(0, 0);
 
     const backButton = this._makeRoundedPanel(backWidth, backHeight, {
-      fillColor: 0x173247,
-      fillAlpha: 0.92,
+      fillColor: 0xcc493f,
+      fillAlpha: 0.96,
       strokeColor: 0xffffff,
-      strokeAlpha: 0.12,
+      strokeAlpha: 0.18,
       radius: Math.round(20 * layout.scale),
     });
     backButton.x = backX;
+    backButton.y = buttonY;
     backButton.setVisible(false).setAlpha(0);
     backButton.setInteractive(
       new Phaser.Geom.Rectangle(-backWidth / 2, -backHeight / 2, backWidth, backHeight),
       Phaser.Geom.Rectangle.Contains,
     );
 
-    const backLabel = scene.add.text(backX, 0, "Back To Decks", {
-      fontSize: this._fontPx(14, 10),
+    const backLabel = scene.add.text(backX, buttonY, "Back", {
+      fontSize: this._fontPx(18, 12),
       color: TEXT_LIGHT,
       stroke: "#0a1420",
       strokeThickness: Math.max(2, Math.round(3 * layout.scale)),
@@ -1440,22 +1464,24 @@ export class DraftStartMenu {
       radius: Math.round(24 * layout.scale),
     });
     confirmGlow.x = confirmX;
+    confirmGlow.y = buttonY;
 
     const confirmButton = this._makeRoundedPanel(layout.confirmButtonWidth, layout.confirmButtonHeight, {
-      fillColor: 0x2d88ff,
+      fillColor: 0x1f7a3f,
       fillAlpha: 0.98,
       strokeColor: 0xffffff,
       strokeAlpha: 0.18,
       radius: Math.round(22 * layout.scale),
     });
     confirmButton.x = confirmX;
+    confirmButton.y = buttonY;
     confirmButton.setInteractive(
       new Phaser.Geom.Rectangle(-layout.confirmButtonWidth / 2, -layout.confirmButtonHeight / 2, layout.confirmButtonWidth, layout.confirmButtonHeight),
       Phaser.Geom.Rectangle.Contains,
     );
 
-    const confirmLabel = scene.add.text(confirmX, 0, "Begin Run", {
-      fontSize: this._fontPx(18, 12),
+    const confirmLabel = scene.add.text(confirmX, buttonY, "Town Layout", {
+      fontSize: this._fontPx(20, 13),
       color: TEXT_LIGHT,
       stroke: "#0a1420",
       strokeThickness: Math.max(2, Math.round(4 * layout.scale)),
@@ -1531,6 +1557,8 @@ export class DraftStartMenu {
     ]);
 
     this.container.add(footer);
+    this.ui.footerShell = shell;
+    this.ui.footerLabel = pickLabel;
     this.ui.footerSummary = summary;
     this.ui.confirmButton = confirmButton;
     this.ui.confirmGlow = confirmGlow;
@@ -1540,7 +1568,7 @@ export class DraftStartMenu {
     this.ui.backLabel = backLabel;
     this.ui.backX = backX;
     this.ui.backButtonWidth = backWidth;
-    this.ui.footerSummaryBaseX = -footerWidth / 2 + footerInset;
+    this.ui.footerSummaryBaseX = summaryLeft;
     this._updateFooterSummaryLayout(layout.confirmButtonWidth);
   }
 
@@ -1711,7 +1739,7 @@ export class DraftStartMenu {
     if (this.ui.headerSubtitle) {
       this.ui.headerSubtitle.setText(
         isLayout
-          ? "Arrange your starting town. Click a building, then click a new open spot to move it before the run begins."
+          ? ""
           : "Pick one starter deck. Your farmer, fireman, forager, and builder are locked in from the start.",
       );
     }
@@ -1720,26 +1748,24 @@ export class DraftStartMenu {
     }
 
     if (this.ui.footerSummary) {
-        this.ui.footerSummary.setText(
-          isLayout
-          ? `Set your town tower, houses, storage, and clay oven where you want them, then start the run. ${selectedDeck?.tradeoff ? `Tradeoff: ${selectedDeck.tradeoff}` : ""}`.trim()
-          : `${selectedDeck?.summary ?? ""} ${selectedDeck?.tradeoff ? `Tradeoff: ${selectedDeck.tradeoff}` : ""}`.trim(),
+      this.ui.footerSummary.setText(
+        `${selectedDeck?.summary ?? ""} ${selectedDeck?.tradeoff ? `Tradeoff: ${selectedDeck.tradeoff}` : ""}`.trim(),
       );
     }
 
     if (this.ui.confirmLabel) {
       this.ui.confirmLabel.setText(
         isLayout
-          ? `Start ${selectedDeck?.name ?? "Run"}`
-          : `Arrange ${selectedDeck?.name ?? "Deck"}`,
+          ? "Start"
+          : "Town Layout",
       );
     }
 
-    const accent = hexToColorInt(selectedDeck?.accent, 0x2d88ff);
+    const accent = isLayout ? 0x1f7a3f : hexToColorInt(selectedDeck?.accent, 0x2d88ff);
     const confirmWidth = clamp(
       Math.max(this.layout.confirmButtonWidth, Math.round((this.ui.confirmLabel?.width ?? 0) + (70 * this.layout.scale))),
       this.layout.confirmButtonWidth,
-      Math.min(this.layout.footerWidth - Math.round(90 * this.layout.scale), 460),
+      Math.min(this.layout.width - Math.round(90 * this.layout.scale), 320),
     );
     const confirmGlowWidth = confirmWidth + Math.round(16 * this.layout.scale);
 
@@ -1772,22 +1798,26 @@ export class DraftStartMenu {
       this.ui.backLabel.setAlpha(isLayout ? 1 : 0);
     }
 
+    if (this.ui.footerShell && this.ui.footerLabel && this.ui.footerSummary) {
+      this.ui.footerShell.setVisible(!isLayout);
+      this.ui.footerLabel.setVisible(!isLayout);
+      this.ui.footerSummary.setVisible(!isLayout);
+      this.ui.footerShell.setAlpha(isLayout ? 0 : 1);
+      this.ui.footerLabel.setAlpha(isLayout ? 0 : 1);
+      this.ui.footerSummary.setAlpha(isLayout ? 0 : 1);
+    }
+
     this._updateFooterSummaryLayout(confirmWidth);
 
-    if (this.ui.layoutInfoDeck) {
-      this.ui.layoutInfoDeck.setText(selectedDeck?.name ?? "Starter Deck");
-    }
     if (this.ui.layoutInfoBody) {
-      this.ui.layoutInfoBody.setText(
-        `${selectedDeck?.summary ?? ""}\n${selectedDeck?.tradeoff ? `Tradeoff: ${selectedDeck.tradeoff}` : ""}`.trim(),
-      );
+      this.ui.layoutInfoBody.setText("You may move buildings.\nKeep one land tile between buildings and water.");
     }
     if (this.ui.layoutInfoSelected) {
       if (this.selectedPlacedBuilding) {
         const meta = this._getBuildingMeta(this.selectedPlacedBuilding.typeKey ?? this.selectedPlacedBuilding.type?.name);
-        this.ui.layoutInfoSelected.setText(`${meta.emoji} ${meta.label} selected. Click a new open spot on the map.`);
+        this.ui.layoutInfoSelected.setText(`${meta.emoji} ${meta.label} selected. Click an open tile.`);
       } else {
-        this.ui.layoutInfoSelected.setText("Select a building to move it. The town tower, houses, storage, and the clay oven can all be rearranged.");
+        this.ui.layoutInfoSelected.setText("Click a building, then click an open tile.");
       }
     }
     for (const entry of this.ui.layoutLegendRefs ?? []) {

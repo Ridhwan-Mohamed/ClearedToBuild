@@ -2,6 +2,7 @@ import { Teams } from "../../Teams";
 import { CONTROL_STATES } from "../../constants";
 import { CombatSpacingCoordinator } from "../CombatSpacingCoordinator";
 import { StorageManager } from "../../Manager/StorageManager";
+import { AudioManager } from "../../Manager/AudioManager";
 
 export class InterruptController {
     static interruptTroop(troop, reason = "generic_interrupt", targetState = null) {
@@ -119,6 +120,18 @@ export class InterruptController {
         if (troop.isFireman && !deferred) {
             troop.pendingFuelJob = null;
             troop.pendingOvenJob = null;
+        }
+        if (troop.gatherSwingTween) {
+            troop.gatherSwingTween.remove();
+            troop.gatherSwingTween = null;
+        }
+        if (troop.gatherSwingFx) {
+            troop.gatherSwingFx.destroy();
+            troop.gatherSwingFx = null;
+        }
+        if (troop.isForager) {
+            AudioManager.setHarvestActive(troop, "wood", false);
+            AudioManager.setHarvestActive(troop, "rock", false);
         }
         if (troop.isFarmer && troop.pendingFarmSpot?.reservedBy === troop) {
             troop.pendingFarmSpot.reservedBy = null;

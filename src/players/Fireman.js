@@ -407,6 +407,12 @@ export class Fireman {
             }
 
             StorageManager.removeCarriedItem(troop);
+        } else {
+            Player.showStatusEmote?.(troop, "OVEN FULL", {
+                key: "oven_full",
+                cooldownMs: 3200,
+                fontSize: 12,
+            });
         }
 
         troop.pendingOvenJob = null;

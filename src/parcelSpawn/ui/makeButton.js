@@ -11,6 +11,14 @@ export function makeButton(scene, cfg) {
   const w = cfg.w ?? 120;
   const h = cfg.h ?? 34;
   const label = cfg.label ?? "Button";
+  const fillColor = cfg.fillColor ?? 0xffffff;
+  const fillAlpha = cfg.fillAlpha ?? 0.10;
+  const hoverFillAlpha = cfg.hoverFillAlpha ?? Math.min(fillAlpha + 0.06, 0.24);
+  const pressedFillAlpha = cfg.pressedFillAlpha ?? Math.min(fillAlpha + 0.12, 0.34);
+  const strokeColor = cfg.strokeColor ?? 0xffffff;
+  const strokeAlpha = cfg.strokeAlpha ?? 0.22;
+  const textColor = cfg.textColor ?? "#ffffff";
+  const fontSize = cfg.fontSize ?? "12px";
 
   const c = scene.add.container(x, y);
   c.setScrollFactor(1);
@@ -18,14 +26,15 @@ export function makeButton(scene, cfg) {
   c.tutorialW = w;
   c.tutorialH = h;
 
-  const bg = scene.add.rectangle(0, 0, w, h, 0xffffff, 0.10);
-  bg.setStrokeStyle(2, 0xffffff, 0.22);
+  const bg = scene.add.rectangle(0, 0, w, h, fillColor, fillAlpha);
+  bg.setStrokeStyle(2, strokeColor, strokeAlpha);
   bg.setScrollFactor(1);
 
   const t = scene.add.text(0, 0, label, {
     fontFamily: "Bungee",
-    fontSize: "12px",
-    color: "#ffffff"
+    fontSize,
+    color: textColor,
+    align: "center"
   }).setOrigin(0.5);
   t.setScrollFactor(1);
 
@@ -33,11 +42,11 @@ export function makeButton(scene, cfg) {
   c.bg = bg;
   c.label = t;
 
-  bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
-  bg.on("pointerout",  () => bg.setFillStyle(0xffffff, 0.10));
-  bg.on("pointerdown", () => bg.setFillStyle(0xffffff, 0.22));
+  bg.on("pointerover", () => bg.setFillStyle(fillColor, hoverFillAlpha));
+  bg.on("pointerout",  () => bg.setFillStyle(fillColor, fillAlpha));
+  bg.on("pointerdown", () => bg.setFillStyle(fillColor, pressedFillAlpha));
   bg.on("pointerup", () => {
-    bg.setFillStyle(0xffffff, 0.16);
+    bg.setFillStyle(fillColor, hoverFillAlpha);
     cfg.onClick?.();
   });
 

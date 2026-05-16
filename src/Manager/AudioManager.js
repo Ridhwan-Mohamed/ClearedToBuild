@@ -38,6 +38,15 @@ import swimming_sfx from 'url:../assets/audio/swimming.ogg';
 import error_sfx from 'url:../assets/audio/error.ogg';
 import type_sfx from 'url:../assets/audio/type.ogg';
 import thud_click from 'url:../assets/audio/thud_click.ogg';
+import coins_sfx from 'url:../assets/audio/coins.ogg';
+import xp_gain_sfx from 'url:../assets/audio/xp.ogg';
+import level_up_sfx from 'url:../assets/audio/level_up.ogg';
+import scream1 from 'url:../assets/audio/scream1.ogg';
+import scream2 from 'url:../assets/audio/scream2.ogg';
+import scream3 from 'url:../assets/audio/scream3.ogg';
+import scream4 from 'url:../assets/audio/scream4.ogg';
+import scream5 from 'url:../assets/audio/scream5.ogg';
+import scream6 from 'url:../assets/audio/scream6.ogg';
 
 export class AudioManager {
   static scene = null;
@@ -68,6 +77,8 @@ export class AudioManager {
   static _nextUiHoverAt = 0;
   static LAYOUT_MOVE_COOLDOWN_MS = 55;
   static _nextLayoutMoveAt = 0;
+  static FLEE_SCREAM_WINDOW_MS = 850;
+  static recentFleeStarts = [];
 
   // construction loop
   static constructionWorkers = new Set(); // sprite.id numbers
@@ -127,6 +138,15 @@ export class AudioManager {
     scene.load.audio("sfx_ui_error", error_sfx);
     scene.load.audio("sfx_ui_type", type_sfx);
     scene.load.audio("sfx_ui_thud_click", thud_click);
+    scene.load.audio("sfx_ui_coins_gain", coins_sfx);
+    scene.load.audio("sfx_ui_xp_gain", xp_gain_sfx);
+    scene.load.audio("sfx_ui_level_up", level_up_sfx);
+    scene.load.audio("sfx_flee_scream_1", scream1);
+    scene.load.audio("sfx_flee_scream_2", scream2);
+    scene.load.audio("sfx_flee_scream_3", scream3);
+    scene.load.audio("sfx_flee_scream_4", scream4);
+    scene.load.audio("sfx_flee_scream_5", scream5);
+    scene.load.audio("sfx_flee_scream_6", scream6);
   }
 
   static _loadSettings() {
@@ -306,6 +326,63 @@ export class AudioManager {
         this.scene.sound.play("sfx_water_pickup", {
         volume: opts.volume ?? 0.40,
         rate: opts.rate ?? (0.95 + Math.random() * 0.1),
+        });
+    }
+
+    static playFleeScream(opts = {}) {
+        if (!this.scene) return;
+
+        const keys = [
+            "sfx_flee_scream_1",
+            "sfx_flee_scream_2",
+            "sfx_flee_scream_3",
+            "sfx_flee_scream_4",
+            "sfx_flee_scream_5",
+            "sfx_flee_scream_6",
+        ].filter((key) => this.scene.cache.audio.exists(key));
+
+        if (!keys.length) return;
+
+        const now = this.scene.time?.now ?? 0;
+        this.recentFleeStarts = (this.recentFleeStarts || []).filter(
+            (stamp) => (now - stamp) <= this.FLEE_SCREAM_WINDOW_MS
+        );
+        this.recentFleeStarts.push(now);
+
+        const crowdCount = this.recentFleeStarts.length;
+        const key = keys[Math.floor(Math.random() * keys.length)];
+        const volume = this._clamp(
+            Number(opts.volume ?? (0.15 + crowdCount * 0.06)),
+            0.12,
+            0.62
+        );
+
+        this.scene.sound.play(key, {
+            volume,
+            rate: opts.rate ?? (0.96 + Math.random() * 0.12),
+        });
+    }
+
+    static playCoinsGain(amount = 0, opts = {}) {
+        const normalized = Math.max(1, Number(amount || 0));
+        this.playSound("sfx_ui_coins_gain", {
+            volume: opts.volume ?? this._clamp(0.18 + Math.min(0.18, normalized / 220), 0.18, 0.36),
+            rate: opts.rate ?? this._clamp(1.08 - Math.min(0.16, normalized / 320), 0.92, 1.08),
+        });
+    }
+
+    static playTownXpGain(amount = 0, opts = {}) {
+        const normalized = Math.max(1, Number(amount || 0));
+        this.playSound("sfx_ui_xp_gain", {
+            volume: opts.volume ?? this._clamp(0.18 + Math.min(0.16, normalized / 90), 0.18, 0.34),
+            rate: opts.rate ?? this._clamp(0.96 + Math.min(0.14, normalized / 140), 0.96, 1.1),
+        });
+    }
+
+    static playTownLevelUp(opts = {}) {
+        this.playSound("sfx_ui_level_up", {
+            volume: opts.volume ?? 0.34,
+            rate: opts.rate ?? 1,
         });
     }
 

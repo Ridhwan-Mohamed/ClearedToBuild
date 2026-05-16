@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { UIDEPTH } from "../constants";
 import { STORE_UNLOCK_KEYS, unlockStoreItem } from "./StoreUnlockSystem";
+import { applyPortraitKeyToSprite } from "../players/playerPortraits.js";
 
 const DEFAULT_ACCENT_COLOR = 0xf6c86c;
 const DEFAULT_GLOW_COLOR = 0xffefb1;
@@ -133,7 +134,21 @@ function getDisplayEntries(reward) {
       {
         key: reward.compositeArt.textureKey ?? null,
         compositeArt: reward.compositeArt,
+        portraitKey: null,
         emoji: reward.emoji ?? null,
+        label: reward.displayLabel ?? "Store Preview",
+        tintColor: reward.imageTint,
+      },
+    ];
+  }
+
+  if (typeof reward?.portraitKey === "string" && reward.portraitKey.trim()) {
+    return [
+      {
+        key: null,
+        compositeArt: null,
+        portraitKey: reward.portraitKey,
+        emoji: null,
         label: reward.displayLabel ?? "Store Preview",
         tintColor: reward.imageTint,
       },
@@ -145,6 +160,7 @@ function getDisplayEntries(reward) {
       {
         key: null,
         compositeArt: null,
+        portraitKey: null,
         emoji: reward.emoji,
         label: reward.displayLabel ?? "Store Preview",
         tintColor: reward.imageTint,
@@ -163,6 +179,7 @@ function getDisplayEntries(reward) {
   return keys.map((key, index) => ({
     key,
     compositeArt: null,
+    portraitKey: null,
     emoji: null,
     label: keys.length === 1 ? reward.displayLabel ?? "Store Preview" : `Preview ${index + 1}`,
     tintColor: index === 1 && reward.imageTint2 != null ? reward.imageTint2 : reward.imageTint,
@@ -176,6 +193,7 @@ function createArtSlot(
     y,
     key,
     compositeArt,
+    portraitKey,
     emoji,
     label,
     accentColor,
@@ -198,10 +216,19 @@ function createArtSlot(
 
   const compositeKey = compositeArt ? ensureCompositeTexture(scene, compositeArt) : null;
   const resolvedKey = compositeKey ?? key;
+  const hasPortrait = typeof portraitKey === "string" && scene.textures.exists(portraitKey);
   const hasTexture = typeof resolvedKey === "string" && scene.textures.exists(resolvedKey);
   let art;
 
-  if (hasTexture) {
+  if (hasPortrait) {
+    const portraitPlate = scene.add
+      .circle(0, -8, 56, 0xffffff, 0.08)
+      .setStrokeStyle(2, accentColor, 0.28);
+    art = scene.add.sprite(0, -8, portraitKey).setOrigin(0.5);
+    applyPortraitKeyToSprite(scene, art, portraitKey, 92);
+    slot.add(portraitPlate);
+    slot.sendToBack(portraitPlate);
+  } else if (hasTexture) {
     art = scene.add.image(0, -8, resolvedKey);
     const scale = Math.min(118 / Math.max(art.width, 1), 118 / Math.max(art.height, 1));
     art.setScale(Math.min(2.25, Math.max(0.65, scale)));
@@ -367,9 +394,9 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
   const centerHalo = hostScene.add.circle(0, 8, 248, accentColor, 0.08);
 
   const panel = hostScene.add.container(0, 0);
-  const panelShadow = hostScene.add.rectangle(0, 18, 724, 454, 0x000000, 0.32);
+  const panelShadow = hostScene.add.rectangle(0, 18, 724, 510, 0x000000, 0.32);
   const panelBg = hostScene.add
-    .rectangle(0, 0, 696, 430, panelColor, 0.98)
+    .rectangle(0, 0, 696, 486, panelColor, 0.98)
     .setStrokeStyle(3, accentColor, 0.94);
   const topStrip = hostScene.add.rectangle(0, -184, 696, 10, accentColor, 1);
   const badgeBg = hostScene.add.rectangle(0, -145, 272, 34, accentColor, 0.96);
@@ -426,6 +453,7 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
       y: 0,
       key: entry.key,
       compositeArt: entry.compositeArt,
+      portraitKey: entry.portraitKey,
       label: entry.label,
       accentColor,
       panelColor,
@@ -436,11 +464,11 @@ export function openBossUnlockRewardPresentation(scene, { reward, onComplete } =
   });
 
   const continueBg = hostScene.add
-    .rectangle(0, 182, 220, 48, accentColor, 0.92)
+    .rectangle(0, 230, 220, 48, accentColor, 0.92)
     .setStrokeStyle(2, 0xffffff, 0.18)
     .setInteractive({ useHandCursor: true });
   const continueText = hostScene.add
-    .text(0, 182, "Continue", {
+    .text(0, 230, "Continue", {
       fontSize: "18px",
       fontFamily: "Bungee",
       color: "#1a1407",

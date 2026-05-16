@@ -42,11 +42,16 @@ export class GameUIScene extends Phaser.Scene {
     this.alertHud = null;
     this._activeAlerts = [];
     this.topHud = null;
+    this._topHudLeftGroups = [];
+    this._topHudLayoutConfig = null;
     this.moneyIcon = null;
+    this.moneyHoverTarget = null;
     this.moneyIconBaseScaleX = 1;
     this.moneyIconBaseScaleY = 1;
     this.moneyTextBaseScaleX = 1;
     this.moneyTextBaseScaleY = 1;
+    this.permitIcon = null;
+    this.housingIcon = null;
     this.reliefPackageIcon = null;
     this.reliefPackageHoverTarget = null;
     this.townXpHud = null;
@@ -373,7 +378,6 @@ export class GameUIScene extends Phaser.Scene {
       "permits",
       "farmMode",
       "seedGridMode",
-      "attackMode",
       "stoneWallMode",
       "woodWallMode",
       "destroyWallMode",
@@ -674,37 +678,49 @@ export class GameUIScene extends Phaser.Scene {
     drawBar(W);
     this._trackScaleResize(({ width }) => drawBar(width));
 
+    const topHudTextStyle = {
+      fontSize: "14px",
+      fill: "#fff",
+      fontFamily: "Bungee",
+      stroke: "#000",
+      strokeThickness: 2,
+    };
+    const topHudEmojiStyle = {
+      fontSize: "18px",
+      fontFamily: "Arial",
+      color: "#ffffff",
+      stroke: "#000000",
+      strokeThickness: 2,
+    };
+    const measureTextWidth = (sample) => {
+      const probe = this.add.text(-1000, -1000, sample, topHudTextStyle).setVisible(false);
+      const width = probe.width;
+      probe.destroy();
+      return width;
+    };
+
     const makeIcon = (x, key) =>
       this.add.image(x, H / 2, key).setDisplaySize(20, 20).setOrigin(0, 0.5).setDepth(UIDEPTH);
 
     const makeText = (x, text, color = "#fff") =>
       this.add
         .text(x, H / 2, text, {
-          fontSize: "14px",
+          ...topHudTextStyle,
           fill: color,
-          fontFamily: "Bungee",
-          stroke: "#000",
-          strokeThickness: 2,
         })
         .setOrigin(0, 0.5)
         .setDepth(UIDEPTH);
 
     const makeEmojiIcon = (x, emoji) =>
       this.add
-        .text(x, H / 2, emoji, {
-          fontSize: "18px",
-          fontFamily: "Arial",
-          color: "#ffffff",
-          stroke: "#000000",
-          strokeThickness: 2,
-        })
+        .text(x, H / 2, emoji, topHudEmojiStyle)
         .setOrigin(0, 0.5)
         .setDepth(UIDEPTH);
 
     const registerHover = (leftX, rightX, label) => {
       const width = Math.max(22, rightX - leftX);
       const hit = this.add
-        .rectangle(leftX + width / 2, H / 2, width, H, 0xffffff, 0.001)
+        .zone(leftX + width / 2, H / 2, width, H)
         .setOrigin(0.5, 0.5)
         .setDepth(UIDEPTH + 1)
         .setInteractive({ useHandCursor: true });
@@ -721,6 +737,25 @@ export class GameUIScene extends Phaser.Scene {
     const needs = DailyNeedsTracker.getValues();
     this.topHudElements = [];
     this.topHudHoverTargets = [];
+    this._topHudLeftGroups = [];
+    this._topHudLayoutConfig = {
+      startX: 12,
+      spacing,
+      barHeight: H,
+      measureTextWidth,
+      moneyGap: 6,
+    };
+
+    const addLeftGroup = ({ icon, text = null, hover = null, minTextWidth = 0, iconGap = 4, visibleWhen = null }) => {
+      this._topHudLeftGroups.push({
+        icon,
+        text,
+        hover,
+        minTextWidth,
+        iconGap,
+        visibleWhen,
+      });
+    };
 
     for (const item of needs) {
       const leftX = x;
@@ -735,7 +770,14 @@ export class GameUIScene extends Phaser.Scene {
       if (item.key === "waterIcon") this.waterText = text;
 
       this.topHudElements.push(icon, text);
-      this.topHudHoverTargets.push(registerHover(leftX, x - spacing, item.key === "foodIcon" ? "Food" : "Water"));
+      const hover = registerHover(leftX, x - spacing, item.key === "foodIcon" ? "Food" : "Water");
+      this.topHudHoverTargets.push(hover);
+      addLeftGroup({
+        icon,
+        text,
+        hover,
+        minTextWidth: () => this._getTopHudScaledRatioWidth(text),
+      });
     }
 
     const resources = [
@@ -774,7 +816,14 @@ export class GameUIScene extends Phaser.Scene {
         woodIcon: "Wood",
         stoneIcon: "Stone",
       };
-      this.topHudHoverTargets.push(registerHover(leftX, x - spacing, labelMap[r.key] || r.key));
+      const hover = registerHover(leftX, x - spacing, labelMap[r.key] || r.key);
+      this.topHudHoverTargets.push(hover);
+      addLeftGroup({
+        icon,
+        text,
+        hover,
+        minTextWidth: () => this._getTopHudScaledCompactWidth(text),
+      });
     }
 
     const permitLeftX = x;
@@ -782,8 +831,16 @@ export class GameUIScene extends Phaser.Scene {
     x += permitIcon.width + 4;
     this.permitText = makeText(x, `${world.permits ?? 0}`);
     x += this.permitText.width + spacing;
+    this.permitIcon = permitIcon;
     this.topHudElements.push(permitIcon, this.permitText);
-    this.topHudHoverTargets.push(registerHover(permitLeftX, x - spacing, "Growth Permits"));
+    const permitHover = registerHover(permitLeftX, x - spacing, "Growth Permits");
+    this.topHudHoverTargets.push(permitHover);
+    addLeftGroup({
+      icon: permitIcon,
+      text: this.permitText,
+      hover: permitHover,
+      minTextWidth: () => this._getTopHudScaledCompactWidth(this.permitText),
+    });
 
     const reliefLeftX = x;
     this.reliefPackageIcon = makeIcon(x, "relief_package");
@@ -800,14 +857,27 @@ export class GameUIScene extends Phaser.Scene {
       this.reliefPackageHoverTarget.input.enabled = false;
     }
     this.topHudHoverTargets.push(this.reliefPackageHoverTarget);
+    addLeftGroup({
+      icon: this.reliefPackageIcon,
+      hover: this.reliefPackageHoverTarget,
+      visibleWhen: () => !!this.worldScene?.hasReliefPackage?.(),
+    });
 
     const housingLeftX = x;
     const housingIcon = makeEmojiIcon(x, "🏠");
     x += housingIcon.width + 4;
     this.housingText = makeText(x, "0/0");
     x += this.housingText.width + spacing;
+    this.housingIcon = housingIcon;
     this.topHudElements.push(housingIcon, this.housingText);
-    this.topHudHoverTargets.push(registerHover(housingLeftX, x - spacing, () => this._getHousingHoverLabel()));
+    const housingHover = registerHover(housingLeftX, x - spacing, () => this._getHousingHoverLabel());
+    this.topHudHoverTargets.push(housingHover);
+    addLeftGroup({
+      icon: housingIcon,
+      text: this.housingText,
+      hover: housingHover,
+      minTextWidth: () => this._getTopHudScaledRatioWidth(this.housingText),
+    });
 
     const centerX = W / 2;
     const moneyLeftX = centerX - 30;
@@ -819,11 +889,113 @@ export class GameUIScene extends Phaser.Scene {
     this.moneyTextBaseScaleX = this.moneyText.scaleX;
     this.moneyTextBaseScaleY = this.moneyText.scaleY;
     this.topHudElements.push(moneyIcon, this.moneyText);
-    this.topHudHoverTargets.push(registerHover(moneyLeftX, centerX - 4 + this.moneyText.width, "Money"));
+    this.moneyHoverTarget = registerHover(moneyLeftX, centerX - 4 + this.moneyText.width, "Money");
+    this.topHudHoverTargets.push(this.moneyHoverTarget);
 
     this.topHud = this.add.container(0, 0, [shadow, bg, inset, shine, ...this.topHudElements]).setDepth(UIDEPTH);
     this._refreshTopHudValues(true);
     this._buildPauseMenuButton();
+  }
+
+  _setTopHudHoverBounds(target, leftX, rightX, height = 44) {
+    if (!target) return;
+    const width = Math.max(22, rightX - leftX);
+    target.setPosition(leftX + width / 2, height / 2);
+    target.setSize?.(width, height);
+  }
+
+  _getTopHudScaledRatioWidth(textNode) {
+    const current = String(textNode?.text ?? "");
+    const [haveRaw = "", needRaw = ""] = current.split("/");
+    const getDigitCount = (value) => {
+      const digitsOnly = String(value).replace(/\D/g, "");
+      if (digitsOnly.length > 0) return digitsOnly.length;
+      return Math.max(1, String(value).trim().length || 1);
+    };
+    const haveDigits = getDigitCount(haveRaw);
+    const needDigits = getDigitCount(needRaw);
+    const sample = `${"8".repeat(haveDigits)}/${"8".repeat(needDigits)}`;
+    return Number(this._topHudLayoutConfig?.measureTextWidth?.(sample) || textNode?.width || 0);
+  }
+
+  _getTopHudScaledCompactWidth(textNode) {
+    const current = String(textNode?.text ?? "");
+    const digitsOnly = current.replace(/\D/g, "");
+    const digitCount = Math.max(1, digitsOnly.length || current.trim().length || 1);
+    const sample = `${"8".repeat(digitCount)}`;
+    return Number(this._topHudLayoutConfig?.measureTextWidth?.(sample) || textNode?.width || 0);
+  }
+
+  _layoutTopHudMoneyGroup(leftFlowRight = 0) {
+    if (!this.moneyIcon || !this.moneyText) return;
+
+    const width = Number(this.scale?.width || 0);
+    const iconWidth = Number(this.moneyIcon.displayWidth || this.moneyIcon.width || 0);
+    const textWidth = Number(this.moneyText.width || 0);
+    const moneyGap = Number(this._topHudLayoutConfig?.moneyGap || 6);
+    const totalWidth = iconWidth + moneyGap + textWidth;
+    const baseIconX = (width / 2) - 30;
+    const minIconX = Math.max(baseIconX, Number(leftFlowRight || 0) + 16);
+    const maxIconX = Math.max(baseIconX, width - 12 - totalWidth);
+    const iconX = Math.min(minIconX, maxIconX);
+
+    this.moneyIcon.setX(iconX);
+    this.moneyText.setX(iconX + iconWidth + moneyGap);
+
+    if (this.moneyHoverTarget) {
+      this._setTopHudHoverBounds(
+        this.moneyHoverTarget,
+        iconX,
+        this.moneyText.x + this.moneyText.width,
+        Number(this._topHudLayoutConfig?.barHeight || 44)
+      );
+    }
+  }
+
+  _layoutTopHudLeftGroups() {
+    if (!this._topHudLeftGroups?.length) return;
+
+    const {
+      startX = 12,
+      spacing = 8,
+      barHeight = 44,
+    } = this._topHudLayoutConfig || {};
+
+    let x = startX;
+    for (const group of this._topHudLeftGroups) {
+      const isVisible = typeof group.visibleWhen === "function" ? !!group.visibleWhen() : true;
+      group.icon?.setVisible(isVisible);
+      group.text?.setVisible(isVisible);
+
+      if (!isVisible) {
+        group.hover?.setVisible(false);
+        if (group.hover?.input) group.hover.input.enabled = false;
+        continue;
+      }
+
+      const leftX = x;
+      group.icon?.setX(x);
+      const iconWidth = Number(group.icon?.displayWidth || group.icon?.width || 0);
+      x += iconWidth + Number(group.iconGap ?? 4);
+
+      if (group.text) {
+        group.text.setX(x);
+        const resolvedMinWidth = typeof group.minTextWidth === "function"
+          ? Number(group.minTextWidth(group) || 0)
+          : Number(group.minTextWidth || 0);
+        x += Math.max(Number(group.text.width || 0), resolvedMinWidth);
+      }
+
+      x += spacing;
+
+      if (group.hover) {
+        this._setTopHudHoverBounds(group.hover, leftX, x - spacing, barHeight);
+        group.hover.setVisible(true);
+        if (group.hover.input) group.hover.input.enabled = true;
+      }
+    }
+
+    this._layoutTopHudMoneyGroup(x - spacing);
   }
 
   _getTopHudNeedCount() {
@@ -917,6 +1089,7 @@ export class GameUIScene extends Phaser.Scene {
       node.setColor(housingColor);
     });
     this._mutateText(this.moneyText, (node) => node.setText(`$${snapshot.money}`));
+    this._layoutTopHudLeftGroups();
   }
 
   _buildTownXpHud() {
@@ -1171,6 +1344,9 @@ export class GameUIScene extends Phaser.Scene {
       if (xp.gainSerial !== this._townXpLastGainSerial) {
         if (this._townXpLastGainSerial !== 0) {
           this._playTownXpGainFx(xp);
+          if (levelChanged) {
+            this._playTownLevelUpFx(xp);
+          }
         }
         this._townXpLastGainSerial = xp.gainSerial;
       }
@@ -1184,6 +1360,14 @@ export class GameUIScene extends Phaser.Scene {
   _playTownXpGainFx(xp) {
     const root = this.townXpHud;
     if (!root || this._sceneShuttingDown) return;
+    const gainAmount = Math.max(0, Number(xp?.lastGainAmount || 0));
+    const impactDelay = this._getHudGainImpactDelay(gainAmount, {
+      base: 480,
+      stepAmount: 4,
+      stepDelay: 18,
+      min: 420,
+      max: 680,
+    });
 
     this.tweens.killTweensOf(root);
     root.setScale(1);
@@ -1197,14 +1381,18 @@ export class GameUIScene extends Phaser.Scene {
     });
 
     this._playTownXpSourceParticles(xp, root);
+    this.time?.delayedCall?.(impactDelay, () => {
+      if (this._sceneShuttingDown) return;
+      AudioManager.playTownXpGain(gainAmount);
+    });
 
     const shouldShowLabel =
-      Math.max(0, Number(xp?.lastGainAmount || 0)) >= 8
+      gainAmount >= 8
       || Math.max(0, Number(xp?.pendingLevelRewards || 0)) > 0
       || !/raider defeated/i.test(String(xp?.lastGainLabel || ""));
     if (!shouldShowLabel) return;
 
-    const label = this.add.text(root.x - (root.panelWidth / 2) + 18, root.y - 32, `+${Math.max(0, Number(xp?.lastGainAmount || 0))} XP`, {
+    const label = this.add.text(root.x - (root.panelWidth / 2) + 18, root.y - 32, `+${gainAmount} XP`, {
       fontFamily: "Bungee",
       fontSize: "12px",
       color: xp?.pendingLevelRewards > 0 ? "#fff0c9" : "#8fe7ff",
@@ -1220,6 +1408,95 @@ export class GameUIScene extends Phaser.Scene {
       ease: "Cubic.easeOut",
       onComplete: () => label.destroy(),
     });
+  }
+
+  _playTownLevelUpFx(xp) {
+    const root = this.townXpHud;
+    if (!root || this._sceneShuttingDown) return;
+
+    const badgeText = root.badgeText;
+    const badgeBg = root.badgeBg;
+    const badgeWidth = 58;
+    const badgeHeight = 32;
+    const badgeLeft = -(Number(root.panelWidth || 248) / 2) + 14;
+    const badgeTop = -16;
+    const badgeBurst = this.add.graphics()
+      .setPosition(root.x, root.y)
+      .setDepth((UIDEPTH ?? 0) + 18)
+      .setAlpha(0)
+      .setScale(0.86);
+
+    badgeBurst.fillStyle(0xffefb0, 0.18);
+    badgeBurst.lineStyle(3, 0xfff7d1, 0.9);
+    badgeBurst.fillRoundedRect(badgeLeft, badgeTop, badgeWidth, badgeHeight, 18);
+    badgeBurst.strokeRoundedRect(badgeLeft, badgeTop, badgeWidth, badgeHeight, 18);
+    badgeBurst.setBlendMode(Phaser.BlendModes.ADD);
+
+    this.tweens.killTweensOf(root);
+    root.setScale(1);
+    this.tweens.add({
+      targets: root,
+      scaleX: 1.06,
+      scaleY: 1.06,
+      duration: 180,
+      ease: "Back.Out",
+      yoyo: true,
+    });
+
+    if (badgeText) {
+      this.tweens.killTweensOf(badgeText);
+      badgeText.setScale(1);
+      this.tweens.add({
+        targets: badgeText,
+        scaleX: 1.28,
+        scaleY: 1.28,
+        duration: 180,
+        ease: "Back.Out",
+        yoyo: true,
+        repeat: 1,
+      });
+    }
+
+    if (badgeBg) {
+      this.tweens.killTweensOf(badgeBg);
+      badgeBg.setAlpha(1);
+      this.tweens.add({
+        targets: badgeBg,
+        alpha: 0.66,
+        duration: 170,
+        ease: "Sine.Out",
+        yoyo: true,
+        repeat: 1,
+      });
+    }
+
+    this.tweens.add({
+      targets: badgeBurst,
+      alpha: { from: 0.96, to: 0 },
+      scaleX: 1.26,
+      scaleY: 1.26,
+      duration: 560,
+      ease: "Cubic.easeOut",
+      onComplete: () => badgeBurst.destroy(),
+    });
+
+    AudioManager.playTownLevelUp({
+      volume: Math.max(0.3, Math.min(0.44, 0.32 + (Math.max(1, Number(xp?.level || 1)) * 0.002))),
+    });
+  }
+
+  _getHudGainImpactDelay(amount = 0, opts = {}) {
+    const normalized = Math.max(1, Number(amount || 0));
+    const base = Number(opts.base ?? 480);
+    const stepAmount = Math.max(1, Number(opts.stepAmount ?? 8));
+    const stepDelay = Number(opts.stepDelay ?? 18);
+    const min = Number(opts.min ?? 380);
+    const max = Number(opts.max ?? 700);
+    return Phaser.Math.Clamp(
+      base + Math.floor(normalized / stepAmount) * stepDelay,
+      min,
+      max
+    );
   }
 
   _playTownXpSourceParticles(xp, root) {
@@ -1241,7 +1518,15 @@ export class GameUIScene extends Phaser.Scene {
     const targetX = root.x + Number(root.trackLeft || 0) + (Number(root.trackWidth || 180) * targetRatio);
     const targetY = root.y + 14;
     const depth = (UIDEPTH ?? 0) + 32;
-    const count = Math.max(5, Math.min(10, 5 + Math.floor(Number(xp?.lastGainAmount || 0) / 2)));
+    const gainAmount = Math.max(0, Number(xp?.lastGainAmount || 0));
+    const count = Math.max(5, Math.min(10, 5 + Math.floor(gainAmount / 2)));
+    const impactDelay = this._getHudGainImpactDelay(gainAmount, {
+      base: 480,
+      stepAmount: 4,
+      stepDelay: 18,
+      min: 420,
+      max: 680,
+    });
 
     for (let i = 0; i < count; i += 1) {
       const shard = this.add.sprite(
@@ -1271,12 +1556,14 @@ export class GameUIScene extends Phaser.Scene {
 
     const spark = this.add.circle(targetX, targetY, 3, xp?.pendingLevelRewards > 0 ? 0xffe1a8 : 0x8fe7ff, 0.75)
       .setDepth(depth + 1)
-      .setBlendMode(Phaser.BlendModes.ADD);
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setScale(0.2);
     this.tweens.add({
       targets: spark,
-      scale: 3.1,
-      alpha: 0,
-      delay: 520,
+      scale: { from: 0.2, to: 3.1 },
+      alpha: { from: 0.78, to: 0 },
+      delay: impactDelay,
       duration: 280,
       ease: "Quad.easeOut",
       onComplete: () => spark.destroy(),
@@ -1349,6 +1636,13 @@ export class GameUIScene extends Phaser.Scene {
     if (!source) return;
 
     const target = this._getMoneyHudTargetPoint();
+    const impactDelay = this._getHudGainImpactDelay(amountDelta, {
+      base: 500,
+      stepAmount: 25,
+      stepDelay: 18,
+      min: 440,
+      max: 720,
+    });
     const count = Math.max(6, Math.min(14, 5 + Math.floor(Number(amountDelta || 0) / 25)));
     const depth = (UIDEPTH ?? 0) + 160;
     const palette = [0xfacc15, 0xfbbf24, 0xfde68a];
@@ -1381,12 +1675,14 @@ export class GameUIScene extends Phaser.Scene {
     const spark = this.add.circle(target.x, target.y, 4, 0xfff1a8, 0.82)
       .setDepth(depth + 1)
       .setBlendMode(Phaser.BlendModes.ADD)
-      .setScale(0.2);
+      .setScale(0.2)
+      .setAlpha(0);
     this.tweens.add({
       targets: spark,
-      scaleX: 2.8,
-      scaleY: 2.8,
-      alpha: 0,
+      scaleX: { from: 0.2, to: 2.8 },
+      scaleY: { from: 0.2, to: 2.8 },
+      alpha: { from: 0.82, to: 0 },
+      delay: impactDelay,
       duration: 260,
       ease: "Quad.easeOut",
       onComplete: () => spark.destroy(),
@@ -1593,36 +1889,6 @@ export class GameUIScene extends Phaser.Scene {
     return Phaser.Math.DegToRad(-90 + (hour / 24) * 360);
   }
 
-  _buildPhaseClockHitPolygon(cx, cy, innerRadius, outerRadius, startHour, endHour, steps = 20) {
-    const points = [];
-    const pushArc = (radius, fromHour, toHour, reverse = false) => {
-      const startAngle = this._phaseClockAngleForHour(reverse ? toHour : fromHour);
-      const endAngle = this._phaseClockAngleForHour(reverse ? fromHour : toHour);
-      const stepCount = Math.max(2, steps);
-      for (let i = 0; i <= stepCount; i++) {
-        const t = i / stepCount;
-        const angle = startAngle + (endAngle - startAngle) * t;
-        points.push(new Phaser.Geom.Point(
-          cx + Math.cos(angle) * radius,
-          cy + Math.sin(angle) * radius
-        ));
-      }
-    };
-
-    if (endHour <= 24) {
-      pushArc(outerRadius, startHour, endHour, false);
-      pushArc(innerRadius, endHour, startHour, true);
-      return new Phaser.Geom.Polygon(points);
-    }
-
-    const wrapEnd = endHour - 24;
-    pushArc(outerRadius, startHour, 24, false);
-    pushArc(outerRadius, 0, wrapEnd, false);
-    pushArc(innerRadius, wrapEnd, 0, true);
-    pushArc(innerRadius, 24, startHour, true);
-    return new Phaser.Geom.Polygon(points);
-  }
-
   _buildPhaseClock() {
     if (this.phaseClock) return;
 
@@ -1689,48 +1955,25 @@ export class GameUIScene extends Phaser.Scene {
     const phaseSegments = [
       {
         key: "dawn",
-        help: "Dawn\nTower income, permits, and queued village rewards.\nParcel buying stays open.",
         ranges: [[6, 7]],
         color: 0x7dd3fc,
       },
       {
         key: "day",
-        help: "Day\nBuild, gather, and expand.\nParcel buying is open.",
         ranges: [[7, 16]],
         color: 0x4ade80,
       },
       {
         key: "dusk",
-        help: "Dusk\nFinal prep before the coastal assault.\nParcel buying stays open.",
         ranges: [[16, 18]],
         color: 0xfb923c,
       },
       {
         key: "night",
-        help: "Night\nSurvive the horde until dawn.\nParcels stay usable all night.",
         ranges: [[18, 30]],
         color: 0xf87171,
       },
     ];
-
-    const hoverZones = [];
-    for (const segment of phaseSegments) {
-      for (const [startHour, endHour] of segment.ranges) {
-        const poly = this._buildPhaseClockHitPolygon(DIAL_CX, DIAL_CY, INNER_R - 4, OUTER_R + 8, startHour, endHour);
-        const zone = this.add.zone(0, 0, PANEL_W, PANEL_H)
-          .setOrigin(0.5)
-          .setInteractive(poly, Phaser.Geom.Polygon.Contains);
-        zone.on("pointerover", () => {
-          this._showTopHudHover(segment.help, root.x + DIAL_CX, root.y + PANEL_H / 2 + 26);
-        });
-        zone.on("pointerout", () => {
-          this._topHudHoverHideTimer?.remove?.(false);
-          this._topHudHoverHideTimer = this.time.delayedCall(40, () => this._hideTopHudHover());
-        });
-        hoverZones.push(zone);
-        root.add(zone);
-      }
-    }
 
     const drawPanel = () => {
       shadow.clear();
@@ -1826,7 +2069,6 @@ export class GameUIScene extends Phaser.Scene {
     this.scale.on("resize", layout);
     this.events.once("shutdown", () => {
       this.scale.off("resize", layout);
-      hoverZones.forEach((zone) => zone.destroy());
     });
 
     this.phaseClock = root;
@@ -2762,6 +3004,45 @@ export class GameUIScene extends Phaser.Scene {
     }
   }
 
+  _getPauseHudObscureTargets() {
+    return [
+      this.topHud,
+      this.townXpHud,
+      this.phaseClock,
+      this.townStatusHud,
+      this.achievementBoard?.root,
+      this.alertHud,
+      this.contractHud?.root,
+      this.uiBottomBar?.ui,
+      this.raiderEdgeHud,
+      this.pauseMenuButton,
+    ].filter(Boolean);
+  }
+
+  _setPauseHudObscured(obscured = true) {
+    if (!this._pauseHudObscureState) {
+      this._pauseHudObscureState = new Map();
+    }
+
+    const targets = this._getPauseHudObscureTargets();
+    if (obscured) {
+      targets.forEach((target) => {
+        if (!target || this._pauseHudObscureState.has(target)) return;
+        this._pauseHudObscureState.set(target, {
+          alpha: Number.isFinite(target.alpha) ? target.alpha : 1,
+        });
+        target.setAlpha(0.24);
+      });
+      return;
+    }
+
+    this._pauseHudObscureState.forEach((state, target) => {
+      if (!target?.active) return;
+      target.setAlpha(Number.isFinite(state?.alpha) ? state.alpha : 1);
+    });
+    this._pauseHudObscureState.clear();
+  }
+
   _clearPauseBackdropFx() {
     const cam = this.worldScene?.cameras?.main;
     if (cam?.postFX?.remove && this._pauseBlurFx) {
@@ -2776,7 +3057,7 @@ export class GameUIScene extends Phaser.Scene {
   _buildPauseMenu() {
     if (this.pauseMenu) return this.pauseMenu;
 
-    const root = this.add.container(0, 0).setDepth(UIDEPTH + 120).setAlpha(0).setVisible(false);
+    const root = this.add.container(0, 0).setDepth((UIDEPTH ?? 0) + 10020).setAlpha(0).setVisible(false);
     root.isOpen = false;
 
     const blocker = this.add.rectangle(0, 0, this.scale.width, this.scale.height, 0x02070d, 0)
@@ -2824,15 +3105,6 @@ export class GameUIScene extends Phaser.Scene {
       color: "#f3fbff",
       stroke: "#04111a",
       strokeThickness: 5,
-    }).setOrigin(0.5);
-    const subtitle = this.add.text(0, -98, "Take a breath, tune the mix, save up, or head back out.", {
-      fontFamily: "Bungee",
-      fontSize: "11px",
-      color: "#b8d9ea",
-      stroke: "#051119",
-      strokeThickness: 3,
-      align: "center",
-      wordWrap: { width: panelWidth - 120 },
     }).setOrigin(0.5);
 
     const closeBg = this.add.rectangle((panelWidth / 2) - 34, -(panelHeight / 2) + 28, 36, 36, 0x163a50, 0.001)
@@ -2891,13 +3163,15 @@ export class GameUIScene extends Phaser.Scene {
     const isTutorialSaveBlocked = () => !!this.worldScene?.tutorialManager?.isBlockingSaves?.();
     const makeActionButton = (x, y, width, label, hint, palette, onClick) => {
       const bg = this.add.graphics();
+      const hasHint = typeof hint === "string" && hint.trim().length > 0;
+      const buttonHeight = hasHint ? 64 : 54;
       const isDisabled = () => {
         if (typeof palette.disabled === "function") return !!palette.disabled();
         return !!palette.disabled;
       };
       const draw = (hovered = false) => {
         const disabled = isDisabled();
-        this._drawRoundedPanel(bg, width, 64, {
+        this._drawRoundedPanel(bg, width, buttonHeight, {
           radius: 20,
           fillColor: disabled ? 0x26313a : (hovered ? palette.hoverFill : palette.fill),
           fillAlpha: disabled ? 0.72 : 0.98,
@@ -2910,30 +3184,33 @@ export class GameUIScene extends Phaser.Scene {
       };
       draw(false);
       bg.setPosition(x, y);
-      bg.setInteractive(new Phaser.Geom.Rectangle(-(width / 2), -32, width, 64), Phaser.Geom.Rectangle.Contains);
-      const titleText = this.add.text(x, y - 9, label, {
+      bg.setInteractive(new Phaser.Geom.Rectangle(-(width / 2), -(buttonHeight / 2), width, buttonHeight), Phaser.Geom.Rectangle.Contains);
+      const titleText = this.add.text(x, y + (hasHint ? -9 : 0), label, {
         fontFamily: "Bungee",
         fontSize: "16px",
         color: palette.text,
         stroke: "#04111a",
         strokeThickness: 3,
       }).setOrigin(0.5);
-      const hintText = this.add.text(x, y + 12, hint, {
+      const hintText = this.add.text(x, y + 12, hasHint ? hint : "", {
         fontFamily: "Bungee",
         fontSize: "10px",
         color: palette.subtext,
         stroke: "#04111a",
         strokeThickness: 2,
-      }).setOrigin(0.5);
+      }).setOrigin(0.5).setVisible(hasHint);
       const refresh = (hovered = false) => {
         const disabled = isDisabled();
         draw(hovered && !disabled);
         titleText.setColor(disabled ? "#9aa7b2" : palette.text);
         hintText.setColor(disabled ? "#c5ced6" : palette.subtext);
-        hintText.setText(disabled ? (palette.disabledHint || "Finish tutorial first") : hint);
+        hintText.setVisible(hasHint);
+        if (hasHint) {
+          hintText.setText(disabled ? (palette.disabledHint || "Finish tutorial first") : hint);
+        }
         bg.setAlpha(disabled ? 0.88 : 1);
         titleText.setAlpha(disabled ? 0.78 : 1);
-        hintText.setAlpha(disabled ? 0.82 : 1);
+        hintText.setAlpha(hasHint ? (disabled ? 0.82 : 1) : 0);
       };
       bg.on("pointerover", () => {
         if (!isDisabled()) AudioManager.playUiHover({ volume: 0.16 });
@@ -3009,6 +3286,12 @@ export class GameUIScene extends Phaser.Scene {
       draggingSlider: false,
       actionButtonRefs,
       panelBaseY: this.scale.height * 0.54,
+      getDisplayVolume: () => {
+        const sceneVolume = Number(this.sound?.volume);
+        const audioVolume = Number(AudioManager.getMasterVolume());
+        const resolved = Number.isFinite(sceneVolume) ? sceneVolume : audioVolume;
+        return Phaser.Math.Clamp(Number.isFinite(resolved) ? resolved : 1, 0, 1);
+      },
       setVolume: (nextValue, commit = true) => {
         const value = Phaser.Math.Clamp(Number(nextValue ?? 1), 0, 1);
         pauseMenu.volume = value;
@@ -3073,7 +3356,7 @@ export class GameUIScene extends Phaser.Scene {
     const showLeavePrompt = () => this._showPauseExitConfirm();
 
     const buttons = [
-      ...makeActionButton(-150, 138, 180, "SAVE", "Write a local continue save", {
+      ...makeActionButton(-150, 138, 180, "SAVE", null, {
         fill: 0x1a5f57,
         hoverFill: 0x238074,
         stroke: 0xb9fff0,
@@ -3083,7 +3366,7 @@ export class GameUIScene extends Phaser.Scene {
         disabled: isTutorialSaveBlocked,
         disabledHint: "Finish tutorial first",
       }, saveAction),
-      ...makeActionButton(0, 218, 250, "BACK TO GAME", "Close the menu and resume play", {
+      ...makeActionButton(0, 218, 250, "BACK TO GAME", null, {
         fill: 0x6dd3f5,
         hoverFill: 0x8de7ff,
         stroke: 0xdff9ff,
@@ -3091,7 +3374,7 @@ export class GameUIScene extends Phaser.Scene {
         text: "#effbff",
         subtext: "#d7f6ff",
       }, () => this.closePauseMenu()),
-      ...makeActionButton(150, 138, 220, "MAIN MENU", "Choose whether to save first", {
+      ...makeActionButton(150, 138, 220, "MAIN MENU", null, {
         fill: 0x3a2645,
         hoverFill: 0x523164,
         stroke: 0xf0c3ff,
@@ -3116,7 +3399,7 @@ export class GameUIScene extends Phaser.Scene {
       this.closePauseMenu();
     });
 
-    panel.add([
+      panel.add([
       panelBg,
       accentOrbA,
       accentOrbB,
@@ -3124,7 +3407,6 @@ export class GameUIScene extends Phaser.Scene {
       panelShine,
       ...(logo ? [logo] : []),
       title,
-      subtitle,
       closeBg,
       closeLabel,
       audioCard,
@@ -3176,7 +3458,7 @@ export class GameUIScene extends Phaser.Scene {
         this.worldScene?.restartToMainMenu?.({ hostScene: this });
       };
       const promptButtons = [
-        ...makeActionButton(-118, 54, 144, "SAVE + EXIT", "Keep this run", {
+        ...makeActionButton(-118, 54, 144, "SAVE + EXIT", null, {
           fill: 0x1f6258,
           hoverFill: 0x2b8477,
           stroke: 0xc5fff3,
@@ -3194,7 +3476,7 @@ export class GameUIScene extends Phaser.Scene {
           SaveManager.saveNow("manual", { silent: false });
           leave();
         }),
-        ...makeActionButton(118, 54, 176, "EXIT WITHOUT SAVE", "Return immediately", {
+        ...makeActionButton(118, 54, 176, "EXIT WITHOUT SAVE", null, {
           fill: 0x5b2431,
           hoverFill: 0x7a3244,
           stroke: 0xffd0db,
@@ -3202,7 +3484,7 @@ export class GameUIScene extends Phaser.Scene {
           text: "#fff3f5",
           subtext: "#f0c0cb",
         }, leave),
-        ...makeActionButton(0, 122, 130, "CANCEL", "Stay here", {
+        ...makeActionButton(0, 122, 130, "CANCEL", null, {
           fill: 0x22384a,
           hoverFill: 0x2f4a62,
           stroke: 0xd7f6ff,
@@ -3228,7 +3510,7 @@ export class GameUIScene extends Phaser.Scene {
     });
 
     root.refresh = () => {
-      pauseMenu.setVolume(AudioManager.getMasterVolume(), false);
+      pauseMenu.setVolume(pauseMenu.getDisplayVolume(), false);
       pauseMenu.refreshMute();
       pauseMenu.actionButtonRefs?.forEach((entry) => entry.refresh?.(false));
       this.pauseMenuButton?.refresh?.();
@@ -3241,9 +3523,13 @@ export class GameUIScene extends Phaser.Scene {
       panel.setPosition(width * 0.5, pauseMenu.panelBaseY);
       if (pauseMenu.confirm?.card) pauseMenu.confirm.card.setPosition(width * 0.5, pauseMenu.panelBaseY);
       if (pauseMenu.confirm?.shade) pauseMenu.confirm.shade.setSize(width, height);
+      pauseMenu.setVolume(pauseMenu.getDisplayVolume(), false);
+      pauseMenu.refreshMute();
     };
     relayout(this.scale);
     this._trackScaleResize(relayout);
+    pauseMenu.refreshMute();
+    pauseMenu.setVolume(pauseMenu.getDisplayVolume(), false);
 
     this.pauseMenu = pauseMenu;
     return pauseMenu;
@@ -3296,6 +3582,7 @@ export class GameUIScene extends Phaser.Scene {
 
     this._setPauseWorldInputEnabled(false);
     world.setSimulationPause?.("pause_menu", true);
+    this._setPauseHudObscured(true);
     this._applyPauseBackdropFx();
     this._hidePauseExitConfirm();
     pauseMenu.refresh?.();
@@ -3343,6 +3630,7 @@ export class GameUIScene extends Phaser.Scene {
     const finish = () => {
       pauseMenu.root.setVisible(false);
       this._clearPauseBackdropFx();
+      this._setPauseHudObscured(false);
     };
 
     if (immediate) {
@@ -3351,6 +3639,7 @@ export class GameUIScene extends Phaser.Scene {
       pauseMenu.blueWash.setAlpha(0);
       pauseMenu.panel.setScale(1).setAlpha(1);
       this._clearPauseBackdropFx();
+      this._setPauseHudObscured(false);
       return true;
     }
 
@@ -3391,6 +3680,7 @@ export class GameUIScene extends Phaser.Scene {
       this._setPauseWorldInputEnabled(true);
     }
     this._clearPauseBackdropFx();
+    this._setPauseHudObscured(false);
     this._pauseBackdropFx?.destroy?.();
     this._pauseBackdropFx = null;
     this.pauseMenu?.root?.destroy?.(true);
@@ -3536,8 +3826,17 @@ export class GameUIScene extends Phaser.Scene {
         const chipX = (index - ((contents.length - 1) / 2)) * chipGap;
         const chipBg = this.add.circle(chipX, visualTop + 60, 15, 0x0d2334, 0.96)
           .setStrokeStyle(2, 0xffffff, 0.12);
-        const icon = this.add.image(chipX, visualTop + 60, entry?.key || "__WHITE")
-          .setDisplaySize(16, 16);
+        const icon = typeof entry?.emoji === "string" && entry.emoji.trim()
+          ? this.add.text(chipX, visualTop + 60, entry.emoji, {
+              fontFamily: "Arial",
+              fontSize: "14px",
+              color: "#ffffff",
+              stroke: "#08131d",
+              strokeThickness: 2,
+              align: "center",
+            }).setOrigin(0.5)
+          : this.add.image(chipX, visualTop + 60, entry?.key || "__WHITE")
+              .setDisplaySize(16, 16);
         const amount = this.add.text(chipX + 15, visualTop + 70, `x${Math.max(0, Number(entry?.amount || 0))}`, {
           fontFamily: "Bungee",
           fontSize: "8px",
@@ -4321,7 +4620,7 @@ export class GameUIScene extends Phaser.Scene {
       150,
       [
         "This recovery consumes your current relief package.",
-        `You can buy a new one later in the store for $${RELIEF_PACKAGE_PRICE}.`,
+        `You can buy a new one later at the market for $${RELIEF_PACKAGE_PRICE}.`,
         "Only 1 relief package can be held at a time.",
         `The package also includes a $${RELIEF_PACKAGE_MONEY_GRANT} emergency stipend.`,
       ].join("\n"),
@@ -4766,6 +5065,17 @@ export class GameUIScene extends Phaser.Scene {
     if (isGain) {
       this._playMoneySourceParticles(amountDelta, opts);
       this._pulseMoneyHud(color);
+      const impactDelay = this._getHudGainImpactDelay(amountDelta, {
+        base: 500,
+        stepAmount: 25,
+        stepDelay: 18,
+        min: 440,
+        max: 720,
+      });
+      this.time?.delayedCall?.(impactDelay, () => {
+        if (this._sceneShuttingDown) return;
+        AudioManager.playCoinsGain(amountDelta);
+      });
       return;
     }
     this.moneyIcon?.clearTint?.();

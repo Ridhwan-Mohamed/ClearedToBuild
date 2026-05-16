@@ -81,6 +81,23 @@ export class DraftStartPreviewController {
     );
   }
 
+  _touchesWaterBuffer(gridX, gridY, width, height, buffer = 1) {
+    for (let yy = gridY - buffer; yy < gridY + height + buffer; yy++) {
+      for (let xx = gridX - buffer; xx < gridX + width + buffer; xx++) {
+        if (xx < 0 || yy < 0 || xx >= this.srcW || yy >= this.srcH) {
+          return true;
+        }
+
+        const terrainCell = this.terrainGrid?.[yy]?.[xx];
+        if (TILE_MAP(getFloorVal(terrainCell)) === "water") {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   _canPlaceAt(typeKey, gridX, gridY) {
     const t = this._getType(typeKey);
     if (!t) return { ok:false, reason:"bad type" };
@@ -106,11 +123,15 @@ export class DraftStartPreviewController {
       }
     }
 
+    if (this._touchesWaterBuffer(gridX, gridY, t.lenX, t.lenY)) {
+      return { ok:false, reason:"too close to water" };
+    }
+
     // 2) must be 1 tile away from OTHER BUILDINGS (not terrain)
     // Expand NEW rect by +1 in every direction, then ensure it doesn't overlap any placed building rect.
     const expanded = { x: gridX - 1, y: gridY - 1, w: t.lenX + 2, h: t.lenY + 2 };
 
-    for (const b of (this.placedBuildings ?? [])) {
+    for (const b of (this.placed ?? [])) {
       const bt = this._getType(b.typeKey);
       if (!bt) continue;
       const br = { x: b.x, y: b.y, w: bt.lenX, h: bt.lenY };
@@ -444,6 +465,8 @@ export class DraftStartPreviewController {
         }
       }
     }
+
+    if (this._touchesWaterBuffer(x, y, type.lenX, type.lenY)) return false;
 
     return true;
   }
@@ -994,6 +1017,10 @@ export class DraftStartPreviewController {
           if (TILE_TYPES[key]?.block) return { ok:false, reason:"terrain blocked" };
         }
       }
+    }
+
+    if (this._touchesWaterBuffer(gridX, gridY, t.lenX, t.lenY)) {
+      return { ok:false, reason:"too close to water" };
     }
 
     // 2) Must be 1 tile away from OTHER buildings (ignore selected itself)

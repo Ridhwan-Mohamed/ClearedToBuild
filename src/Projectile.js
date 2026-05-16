@@ -74,6 +74,7 @@ export class Projectile {
 
         Projectile.applyTravelScaleArc(newCube, weapon, options);
         Projectile.startProjectileTrail(newCube, weapon);
+        Projectile.attachBoundsCull(newCube, weapon);
     }
 
     static ensureWeaponEffectAnimations() {
@@ -132,6 +133,46 @@ export class Projectile {
             ease: "Sine.easeOut",
             onComplete: () => ring.destroy(),
         });
+    }
+
+    static attachBoundsCull(projectile, weapon = null) {
+        if (!projectile || !Projectile.scene?.events) return;
+
+        const updateHandler = () => {
+            if (!projectile?.active) return;
+            if (Projectile.isOutsideMapBounds(projectile, weapon)) {
+                projectile.destroy();
+            }
+        };
+
+        Projectile.scene.events.on("update", updateHandler);
+        projectile.once("destroy", () => {
+            Projectile.scene?.events?.off?.("update", updateHandler);
+        });
+    }
+
+    static isOutsideMapBounds(projectile, weapon = null) {
+        const grid = Map.grid;
+        if (!Array.isArray(grid) || grid.length === 0 || !Array.isArray(grid[0])) return false;
+
+        const mapWidth = grid[0].length * SQUARESIZE;
+        const mapHeight = grid.length * SQUARESIZE;
+        const halfDisplayWidth = Number(projectile.displayWidth ?? projectile.width ?? 0) * 0.5;
+        const halfDisplayHeight = Number(projectile.displayHeight ?? projectile.height ?? 0) * 0.5;
+        const extraPadding = Math.max(
+            Number(weapon?.impactRadius ?? 0),
+            Number(weapon?.projectileTrailRadius ?? 0),
+            8
+        );
+        const padX = halfDisplayWidth + extraPadding;
+        const padY = halfDisplayHeight + extraPadding;
+
+        return (
+            projectile.x < -padX ||
+            projectile.y < -padY ||
+            projectile.x > mapWidth + padX ||
+            projectile.y > mapHeight + padY
+        );
     }
 
     static getTravelDurationMs(weapon, options = null) {
@@ -421,10 +462,6 @@ export class Projectile {
                     Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE);
                     projectile.player.track = null;
                     projectile.player.forcedTarget = null;
-                    if (projectile.player.timer) {
-                        projectile.player.timer.remove(false);
-                        projectile.player.timer = null;
-                    }
                     Player.setAnimState(projectile.player, projectile.player.idle);
                 }
 

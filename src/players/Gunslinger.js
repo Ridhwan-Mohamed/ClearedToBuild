@@ -56,8 +56,8 @@ export class Gunslinger {
 
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
-        sprite.health = 200;
-        sprite.maxHealth = 200;
+        sprite.health = 100;
+        sprite.maxHealth = 100;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.body.pushable = false;

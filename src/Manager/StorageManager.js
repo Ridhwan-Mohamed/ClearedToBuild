@@ -1,7 +1,7 @@
-import { walkUpBindingElementsAndPatterns } from "typescript";
 import { StorageBuilding } from "../buildings/Storage";
 import { CONTROL_STATES, SQUARESIZE, TILE_TYPES, WORLD_DIMENSIONX } from "../constants";
 import { Fireman } from "../players/Fireman";
+import { Player } from "../players/Player";
 import { Teams } from "../Teams";
 import { DailyNeedsTracker } from "../UI/DailyNeedsTracker";
 import { StorageUI } from "../UI/StorageUI";
@@ -248,7 +248,14 @@ export class StorageManager {
                 this.releaseDeliveryReservation(troop);
             }
             const result = StorageBuilding.canAcceptItem(carryEntry, teamNumber, null, troop);
-            if (!result) return false;
+            if (!result) {
+                Player.showStatusEmote?.(troop, "STORAGE FULL", {
+                    key: "storage_full",
+                    cooldownMs: 3200,
+                    fontSize: 12,
+                });
+                return false;
+            }
             storage = result.storage;
             idx = result.idx;
             remaining = result.remaining;
@@ -377,6 +384,11 @@ export class StorageManager {
         this.pruneTeamDeliveryTasks(troop.body.team);
 
         if (!success && troop.carrying) {
+            Player.showStatusEmote?.(troop, "STORAGE FULL", {
+                key: "storage_full",
+                cooldownMs: 3200,
+                fontSize: 12,
+            });
             this.tryCreateStorageDeliveryTask(troop);
         }
     }

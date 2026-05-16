@@ -14,6 +14,58 @@ export class fightManager{
 
     static scene; 
 
+    static hasAttackRecovery(sprite) {
+        return !!sprite?._attackRecoveryTimer;
+    }
+
+    static clearAttackRecovery(sprite) {
+        if (!sprite?._attackRecoveryTimer) return;
+        sprite._attackRecoveryTimer.remove(false);
+        sprite._attackRecoveryTimer = null;
+    }
+
+    static clearHitReaction(target, { restoreVisual = false } = {}) {
+        if (!target) return;
+        target._hitFlashResetEvent?.remove?.(false);
+        target._hitFlashResetEvent = null;
+
+        const restoreTint = target._hitFlashRestoreTint;
+        target._hitFlashRestoreTint = undefined;
+
+        if (!restoreVisual || !target.active || !target.setTint) return;
+        if (restoreTint !== undefined) {
+            target.setTint(restoreTint);
+        } else {
+            target.clearTint?.();
+        }
+    }
+
+    static disengageFromCombat(sprite, reason = "combat_target_lost") {
+        if (!sprite) return false;
+
+        if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
+            InterruptController.interruptTroop(sprite, reason, CONTROL_STATES.TRACK_MODE);
+        }
+
+        if (sprite._raiderPlayerChase && typeof sprite.type?._dropPlayerChase === "function") {
+            sprite.type._dropPlayerChase(sprite);
+            Player.setAnimState(sprite, sprite.idle);
+            return true;
+        }
+
+        CombatSpacingCoordinator.clearTroopFocus(sprite);
+        Player.resetRoamState(sprite);
+        sprite.track = null;
+        sprite.forcedTarget = null;
+        sprite.currentPath?.splice?.(0);
+        sprite.body?.setVelocity?.(0, 0);
+        if (sprite.state === CONTROL_STATES.TRACK_TARGET) {
+            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
+        }
+        Player.setAnimState(sprite, sprite.idle);
+        return true;
+    }
+
     // 🔴 Common on-hit effects: flash red, cancel target timer, knockback team 0
     static applyHitReaction(target, attacker, weapon = attacker?.weapon) {
         if (!target || !target.scene || !target.active) return;
@@ -28,19 +80,24 @@ export class fightManager{
 
         const scene = target.scene;
 
-        // 2) Flash red briefly
-        const originalTint = target.tintTopLeft; // Phaser sprites expose this
+        // 2) Flash red briefly. Preserve the pre-flash tint across repeated hits.
+        if (target._hitFlashRestoreTint === undefined) {
+            target._hitFlashRestoreTint = target.tintTopLeft;
+        }
         if (target.setTint) {
             target.setTint(0xff0000);
         }
-
-        scene.time.delayedCall(120, () => {
+        target._hitFlashResetEvent?.remove?.(false);
+        target._hitFlashResetEvent = scene.time.delayedCall(120, () => {
+            target._hitFlashResetEvent = null;
+            const restoreTint = target._hitFlashRestoreTint;
+            target._hitFlashRestoreTint = undefined;
             if (!target.active || !target.setTint) return;
 
-            if (originalTint !== undefined) {
-                target.setTint(originalTint);
+            if (restoreTint !== undefined) {
+                target.setTint(restoreTint);
             } else {
-                target.clearTint();
+                target.clearTint?.();
             }
         });
 
@@ -217,10 +274,10 @@ export class fightManager{
     }
 
     static _scheduleAttackRecovery(sprite, weapon) {
-        if (!sprite?.active || !weapon || sprite.timer) return;
+        if (!sprite?.active || !weapon || this.hasAttackRecovery(sprite)) return;
 
-        sprite.timer = sprite.scene.time.delayedCall(weapon.duration, () => {
-            sprite.timer = null;
+        sprite._attackRecoveryTimer = sprite.scene.time.delayedCall(weapon.duration, () => {
+            sprite._attackRecoveryTimer = null;
             if (!sprite?.active) return;
 
             const currentTracked = sprite.track && sprite.track[0];
@@ -230,15 +287,7 @@ export class fightManager{
                 !currentTracked.gameObject.active ||
                 currentTracked.gameObject.health <= 0
             ) {
-                if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
-                    InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
-                }
-                CombatSpacingCoordinator.clearTroopFocus(sprite);
-                Player.resetRoamState(sprite);
-                sprite.track = null;
-                sprite.forcedTarget = null;
-                Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-                Player.setAnimState(sprite, sprite.idle);
+                this.disengageFromCombat(sprite, "combat_target_lost");
                 return;
             }
 
@@ -276,19 +325,12 @@ export class fightManager{
     }
 
     static attack(sprite) {
-        if (sprite?.timer) return;
+        if (this.hasAttackRecovery(sprite)) return;
 
         // Always resolve the current tracked target from sprite.track
         const tracked = sprite.track && sprite.track[0];
         if (!tracked || !tracked.gameObject || !tracked.gameObject.active) {
-            if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
-                InterruptController.interruptTroop(sprite, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
-            }
-            CombatSpacingCoordinator.clearTroopFocus(sprite);
-            Player.resetRoamState(sprite);
-            sprite.track = null;
-            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            Player.setAnimState(sprite, sprite.idle);
+            this.disengageFromCombat(sprite, "combat_target_lost");
             return;
         }
 
@@ -299,10 +341,6 @@ export class fightManager{
         const inRangeNow = Phaser.Math.Distance.Between(sprite.x, sprite.y, target.x, target.y) <= weapon.range;
         const hasLoSNow = !weapon.projectile || Projectile.hasLineOfSight(sprite, target);
         if (!inRangeNow || !hasLoSNow) {
-            if (sprite.timer) {
-                sprite.timer.remove(false);
-                sprite.timer = null;
-            }
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_TARGET);
             Player.setAnimState(sprite, sprite.walk);
             Player.updateTracking(sprite);
@@ -354,16 +392,8 @@ export class fightManager{
         if (target.health <= 0) {
             this.checkForKillReward(sprite.body.team, target);
             Player._cleanupCombatTicketForTarget?.(sprite.body.team, target);
-            if (sprite.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
-                InterruptController.interruptTroop(sprite, "combat_target_killed", CONTROL_STATES.TRACK_MODE);
-            }
-            CombatSpacingCoordinator.clearTroopFocus(sprite);
             Player.destroyPlayer(target);
-            Player.resetRoamState(sprite);
-            sprite.track = null;
-            sprite.forcedTarget = null;
-            Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
-            Player.setAnimState(sprite, sprite.idle);
+            this.disengageFromCombat(sprite, "combat_target_killed");
             return;
         }
 

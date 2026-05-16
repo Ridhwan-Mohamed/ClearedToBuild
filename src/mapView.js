@@ -96,6 +96,7 @@ import { hasStoreUnlock, STORE_UNLOCK_KEYS, unlockStoreItem } from './parcel_sys
 import { createPlayerPortraitAnimations, getPlayerPortraitKey, preloadPlayerPortraits } from './players/playerPortraits.js';
 import { getHordeModifierForIndex } from './parcel_system/HordeModifiers.js';
 import { addCardToHand, getCardHand } from './UI/Powerups.js';
+import { ensureCardInventory } from './Cards/CardInventory.js';
 import { UI_ITEM_TYPES } from './UI/UIConstants.js';
 import { SaveManager } from './save/SaveManager.js';
 import { AchievementSystem } from './achievements/AchievementSystem.js';
@@ -281,6 +282,35 @@ export class mapView extends Phaser.Scene {
         };
     }
 
+    _emitTownXpChangedNow() {
+        this._townXpChangedQueued = false;
+        if (this._townXpChangedTimer) {
+            this._townXpChangedTimer.remove?.(false);
+            this._townXpChangedTimer = null;
+        }
+        this.events.emit("townxp:changed", this.getTownXpSnapshot());
+    }
+
+    _queueTownXpChanged({ immediate = false } = {}) {
+        if (immediate) {
+            this._emitTownXpChangedNow();
+            return;
+        }
+
+        if (this._townXpChangedQueued) return;
+        this._townXpChangedQueued = true;
+
+        const flush = () => {
+            if (!this._townXpChangedQueued) return;
+            this._emitTownXpChangedNow();
+        };
+
+        this._townXpChangedTimer = this.time?.delayedCall?.(0, flush) || null;
+        if (this._townXpChangedTimer) return;
+
+        Promise.resolve().then(flush);
+    }
+
     getAchievementBoardSnapshot() {
         return this.achievementSystem?.getBoardSnapshot?.() ?? {
             serial: 0,
@@ -345,7 +375,7 @@ export class mapView extends Phaser.Scene {
                 unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, this);
             }
 
-            this.events.emit("townxp:changed", this.getTownXpSnapshot());
+            this._queueTownXpChanged({ immediate: true });
             this._showMilitiaParcelUnlockPresentation();
         });
     }
@@ -892,8 +922,9 @@ export class mapView extends Phaser.Scene {
             protectFarmSpots: true,
             paddingAllowWalls: true,
             paddingProtectFarmSpots: false,
+            enforceMainIslandInterior: true,
         };
-        const looseOptions = {};
+        const looseOptions = { enforceMainIslandInterior: true };
 
         const canUse = (x, y, options = strictOptions) => {
             if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
@@ -1051,7 +1082,7 @@ export class mapView extends Phaser.Scene {
         this._storageCollapseWarned = true;
         showAlert(
             this,
-            `All storage was lost. Buy a relief package for $${RELIEF_PACKAGE_PRICE} or rebuild before the town stalls.`,
+            `All storage was lost. Buy a relief package at the market for $${RELIEF_PACKAGE_PRICE} or rebuild before the town stalls.`,
             "#ffd7a5",
             3200
         );
@@ -1287,7 +1318,31 @@ export class mapView extends Phaser.Scene {
     }
 
     _getAvailableTownXpCardPool() {
-        return POWERUP_CARDS.filter((card) => this._isTownXpCardEligible(card));
+        const ownedCardIds = this._getOwnedTownXpCardIds(TOWN_XP_TEAM_ID);
+        return POWERUP_CARDS.filter((card) => {
+            const cardId = String(card?.id || "").trim();
+            return this._isTownXpCardEligible(card) && (!cardId || !ownedCardIds.has(cardId));
+        });
+    }
+
+    _getOwnedTownXpCardIds(teamNumber = TOWN_XP_TEAM_ID) {
+        const owned = new Set();
+
+        for (const card of getCardHand(teamNumber) || []) {
+            const cardId = String(card?.id || "").trim();
+            if (cardId) owned.add(cardId);
+        }
+
+        const inventory = ensureCardInventory(teamNumber);
+        for (const bucket of ["deck", "consumables"]) {
+            for (const [cardId, count] of Object.entries(inventory?.[bucket] || {})) {
+                if (Number(count || 0) > 0 && cardId) {
+                    owned.add(String(cardId));
+                }
+            }
+        }
+
+        return owned;
     }
 
     _getTownXpOverflowUnitValue(itemKey) {
@@ -1506,108 +1561,120 @@ export class mapView extends Phaser.Scene {
 
     _createTownXpSupplyOption(kind, level = 1) {
         const bonusScale = Math.max(0, Number(level || 1) - 1);
-        if (kind === "treasury") {
-            const reward = {
-                money: 180 + (bonusScale * 35),
-                permits: 1 + Math.floor(bonusScale / 3),
-            };
-            return {
-                id: `treasury:${level}`,
+        const supplyDefs = {
+            money: {
                 badgeLabel: "TREASURY",
                 title: "Sunny Treasury",
-                subtitle: `+$${reward.money} and +${reward.permits} permit${reward.permits === 1 ? "" : "s"}`,
+                reward: { money: 190 + (bonusScale * 36) },
+                subtitle: (reward) => `+$${reward.money}`,
                 hint: "A clean little bankroll boost for your next build spree.",
-                presentationType: "chest",
-                chestContents: [
-                    { key: "monies", label: "Money", amount: reward.money },
-                    { key: "playerIcon", label: "Permits", amount: reward.permits },
-                ],
+                chestContents: (reward) => [{ key: "monies", label: "Money", amount: reward.money }],
                 accentColor: TOWN_XP_COLORS.cyan,
                 panelColor: 0x153449,
-                grant: () => {
-                    const result = this._grantTownXpResources(reward);
-                    showAlert(this, `Town reward: +$${reward.money} and ${reward.permits} permit${reward.permits === 1 ? "" : "s"}`, "#8fe7ff");
-                    this._showTownXpOverflowCompensationAlert(result);
-                },
-            };
-        }
-
-        if (kind === "builder_cache") {
-            const reward = {
-                wood: 6 + Math.floor(bonusScale * 1.5),
-                stone: 6 + Math.floor(bonusScale * 1.5),
-                seeds: 4 + Math.floor(bonusScale / 2),
-            };
-            return {
-                id: `builder_cache:${level}`,
+                alertColor: "#8fe7ff",
+                alertText: (reward) => `Town reward: +$${reward.money}`,
+            },
+            permits: {
+                badgeLabel: "PERMITS",
+                title: "Permit Parade",
+                reward: { permits: 2 + Math.floor((bonusScale + 1) / 3) },
+                subtitle: (reward) => `+${reward.permits} permit${reward.permits === 1 ? "" : "s"}`,
+                hint: "A juicy expansion nudge for grabbing the next parcel ring.",
+                chestContents: (reward) => [{ emoji: "📜", label: "Permits", amount: reward.permits }],
+                accentColor: TOWN_XP_COLORS.lilac,
+                panelColor: 0x26284a,
+                alertColor: "#d8c4ff",
+                alertText: (reward) => `Town reward: +${reward.permits} permit${reward.permits === 1 ? "" : "s"}`,
+            },
+            wood: {
                 badgeLabel: "SUPPLIES",
                 title: "Builder Cache",
-                subtitle: `+${reward.wood} wood, +${reward.stone} stone, +${reward.seeds} seeds`,
-                hint: "Perfect for throwing down defenses and fresh plots fast.",
-                presentationType: "chest",
-                chestContents: [
-                    { key: "woodIcon", label: "Wood", amount: reward.wood },
-                    { key: "stoneIcon", label: "Stone", amount: reward.stone },
-                    { key: "seeds", label: "Seeds", amount: reward.seeds },
-                ],
+                reward: { wood: 8 + Math.floor(bonusScale * 1.5) },
+                subtitle: (reward) => `+${reward.wood} wood`,
+                hint: "Quick lumber for walls, roads, and emergency patch jobs.",
+                chestContents: (reward) => [{ key: "woodIcon", label: "Wood", amount: reward.wood }],
                 accentColor: TOWN_XP_COLORS.peach,
                 panelColor: 0x2c3347,
-                grant: () => {
-                    const result = this._grantTownXpResources(reward);
-                    showAlert(this, `Town reward: +${reward.wood} wood, +${reward.stone} stone, +${reward.seeds} seeds`, "#ffd7a5");
-                    this._showTownXpOverflowCompensationAlert(result);
-                },
-            };
-        }
-
-        if (kind === "camp_chow") {
-            const reward = {
-                food: 8 + Math.floor(bonusScale * 1.5),
-                cleanWater: 8 + Math.floor(bonusScale * 1.5),
-                berries: 3 + Math.floor(bonusScale / 2),
-            };
-            return {
-                id: `camp_chow:${level}`,
+                alertColor: "#ffd7a5",
+                alertText: (reward) => `Town reward: +${reward.wood} wood`,
+            },
+            stone: {
+                badgeLabel: "SUPPLIES",
+                title: "Stone Reserve",
+                reward: { stone: 8 + Math.floor(bonusScale * 1.5) },
+                subtitle: (reward) => `+${reward.stone} stone`,
+                hint: "Solid masonry stock for heavier defenses and upgrades.",
+                chestContents: (reward) => [{ key: "stoneIcon", label: "Stone", amount: reward.stone }],
+                accentColor: TOWN_XP_COLORS.cream,
+                panelColor: 0x233042,
+                alertColor: "#fff0c9",
+                alertText: (reward) => `Town reward: +${reward.stone} stone`,
+            },
+            seeds: {
+                badgeLabel: "SEEDS",
+                title: "Seed Crate",
+                reward: { seeds: 5 + Math.floor(bonusScale / 2) },
+                subtitle: (reward) => `+${reward.seeds} seeds`,
+                hint: "Fresh crop starters for a wider farm footprint.",
+                chestContents: (reward) => [{ key: "seeds", label: "Seeds", amount: reward.seeds }],
+                accentColor: TOWN_XP_COLORS.peach,
+                panelColor: 0x2a3441,
+                alertColor: "#ffd7a5",
+                alertText: (reward) => `Town reward: +${reward.seeds} seeds`,
+            },
+            food: {
                 badgeLabel: "SUPPER",
                 title: "Camp Chow",
-                subtitle: `+${reward.food} food, +${reward.cleanWater} water, +${reward.berries} berry seeds`,
-                hint: "A comfy bump that keeps the crew cheerful through the next day.",
-                presentationType: "chest",
-                chestContents: [
-                    { key: "foodIcon", label: "Food", amount: reward.food },
-                    { key: "waterIcon", label: "Water", amount: reward.cleanWater },
-                    { key: "berry", label: "Berry", amount: reward.berries },
-                ],
+                reward: { food: 10 + Math.floor(bonusScale * 1.5) },
+                subtitle: (reward) => `+${reward.food} food`,
+                hint: "A clean pantry bump that keeps morale stable.",
+                chestContents: (reward) => [{ key: "foodIcon", label: "Food", amount: reward.food }],
                 accentColor: TOWN_XP_COLORS.mint,
                 panelColor: 0x173743,
-                grant: () => {
-                    const result = this._grantTownXpResources(reward);
-                    showAlert(this, `Town reward: +${reward.food} food and +${reward.cleanWater} water`, "#a7f3d0");
-                    this._showTownXpOverflowCompensationAlert(result);
-                },
-            };
-        }
-
-        const reward = {
-            money: 110 + (bonusScale * 18),
-            permits: 2 + Math.floor((bonusScale + 1) / 3),
+                alertColor: "#a7f3d0",
+                alertText: (reward) => `Town reward: +${reward.food} food`,
+            },
+            water: {
+                badgeLabel: "WATER",
+                title: "Water Wagon",
+                reward: { cleanWater: 10 + Math.floor(bonusScale * 1.5) },
+                subtitle: (reward) => `+${reward.cleanWater} water`,
+                hint: "A tidy clean-water refill before the next scramble.",
+                chestContents: (reward) => [{ key: "waterIcon", label: "Water", amount: reward.cleanWater }],
+                accentColor: TOWN_XP_COLORS.cyan,
+                panelColor: 0x17324c,
+                alertColor: "#8fe7ff",
+                alertText: (reward) => `Town reward: +${reward.cleanWater} water`,
+            },
+            berries: {
+                badgeLabel: "SEEDS",
+                title: "Berry Pouch",
+                reward: { berries: 4 + Math.floor(bonusScale / 2) },
+                subtitle: (reward) => `+${reward.berries} berry seeds`,
+                hint: "A niche growable boost for longer food recovery.",
+                chestContents: (reward) => [{ key: "berry", label: "Berry Seeds", amount: reward.berries }],
+                accentColor: TOWN_XP_COLORS.mint,
+                panelColor: 0x1b3a3f,
+                alertColor: "#a7f3d0",
+                alertText: (reward) => `Town reward: +${reward.berries} berry seeds`,
+            },
         };
+
+        const def = supplyDefs[kind] || supplyDefs.money;
+        const reward = { ...def.reward };
         return {
-            id: `permit_parade:${level}`,
-            badgeLabel: "PERMITS",
-            title: "Permit Parade",
-            subtitle: `+${reward.permits} permits and +$${reward.money}`,
-            hint: "A juicy expansion nudge for grabbing the next parcel ring.",
+            id: `${kind}:${level}`,
+            badgeLabel: def.badgeLabel,
+            title: def.title,
+            subtitle: def.subtitle(reward),
+            hint: def.hint,
             presentationType: "chest",
-            chestContents: [
-                { key: "playerIcon", label: "Permits", amount: reward.permits },
-                { key: "monies", label: "Money", amount: reward.money },
-            ],
-            accentColor: TOWN_XP_COLORS.lilac,
-            panelColor: 0x26284a,
+            chestContents: def.chestContents(reward),
+            accentColor: def.accentColor,
+            panelColor: def.panelColor,
             grant: () => {
                 const result = this._grantTownXpResources(reward);
-                showAlert(this, `Town reward: +${reward.permits} permits`, "#d8c4ff");
+                showAlert(this, def.alertText(reward), def.alertColor);
                 this._showTownXpOverflowCompensationAlert(result);
             },
         };
@@ -1689,7 +1756,7 @@ export class mapView extends Phaser.Scene {
             options.push(entry);
         };
 
-        const supplyKinds = ["treasury", "builder_cache", "camp_chow", "permit_parade"];
+        const supplyKinds = ["money", "permits", "wood", "stone", "seeds", "food", "water", "berries"];
         Phaser.Utils.Array.Shuffle(supplyKinds);
 
         addOption(this._createTownXpCardOption(level));
@@ -1701,7 +1768,7 @@ export class mapView extends Phaser.Scene {
             addOption(this._createTownXpSupplyOption(supplyKinds.shift(), level));
         }
         while (options.length < 3) {
-            addOption(this._createTownXpSupplyOption("treasury", level + options.length));
+            addOption(this._createTownXpSupplyOption("money", level + options.length));
         }
 
         Phaser.Utils.Array.Shuffle(options);
@@ -1748,6 +1815,9 @@ export class mapView extends Phaser.Scene {
                 "#ffe8b8",
                 1700
             );
+            this.time?.delayedCall?.(360, () => {
+                this._tryPresentPendingTownXpReward();
+            });
         } else if (opts.alert) {
             showAlert(this, `${reason}: +${normalized} XP`, "#8fe7ff", 1100);
         }
@@ -1766,7 +1836,7 @@ export class mapView extends Phaser.Scene {
             });
         }
 
-        this.events.emit("townxp:changed", this.getTownXpSnapshot());
+        this._queueTownXpChanged();
         SaveManager.queueAutosave("town_xp");
         return levelsGained;
     }
@@ -1815,7 +1885,7 @@ export class mapView extends Phaser.Scene {
                         this.clock.paused = false;
                         this.applySimulationSpeed(true);
                     }
-                    this.events.emit("townxp:changed", this.getTownXpSnapshot());
+                    this._queueTownXpChanged({ immediate: true });
                 }
             },
             onCancel: () => {
@@ -2174,6 +2244,7 @@ export class mapView extends Phaser.Scene {
             onGrant: (scene) => {
                 scene.updateMoney(SHOCKER_BOSS_REWARD_MONEY);
                 scene.updatePermits(SHOCKER_BOSS_REWARD_PERMITS);
+                scene.achievementSystem?.addStat?.("shockersDefeated", 1);
                 scene.addTownXp(TOWN_XP_SOURCE_VALUES.hordeSurvived + 35, "Shocker Defeated", { alert: true });
                 showAlert(scene, `Boss Reward: +$${SHOCKER_BOSS_REWARD_MONEY} and +${SHOCKER_BOSS_REWARD_PERMITS} permits`, "#8fe7ff", 2600);
             },
@@ -2469,6 +2540,9 @@ export class mapView extends Phaser.Scene {
     handlePhaseChanged(phaseKey, phaseInfo = null) {
         this._currentPhaseKey = phaseKey;
         this.events.emit("phase:changed", phaseKey, phaseInfo || this.clock?.getPhaseInfo?.());
+        if (phaseKey !== "night") {
+            this.time?.delayedCall?.(0, () => this._tryPresentPendingTownXpReward());
+        }
 
         const marker = `${this.clock?.day || 1}:${phaseKey}`;
         if (this._lastPhaseAnnouncement === marker) return;
@@ -3930,9 +4004,10 @@ export class mapView extends Phaser.Scene {
             inputY *= inv;
         }
 
-        const accel = 2600;          // px/s^2
-        const maxSpeed = 980;        // px/s
-        const dampingPerSec = 9.5;   // higher = quicker stop
+        const isOverview = this.zoomMixer?.mode === "overview";
+        const accel = isOverview ? 7200 : 2600;          // px/s^2
+        const maxSpeed = isOverview ? 2650 : 980;        // px/s
+        const dampingPerSec = isOverview ? 11.5 : 9.5;   // higher = quicker stop
 
         const st = this._camPanState;
         if (inputX !== 0 || inputY !== 0) {
@@ -4877,6 +4952,7 @@ setFarmInstructionPhase2(previewData) {
 // Valid start tile rules (matches your getSelectedCells(1) behavior)
 getFarmTilePlacementType(x, y) {
     if (!this.isFarmTileInWorld(x, y)) return null;
+    if (!GameMap.isWithinMainIslandBuildInterior(x, y, 1, 1)) return null;
     if (buildingManager.isFarmTileBlockedByBuildReservation?.(x, y, 1)) return null;
 
     const cell = GameMap.grid?.[y]?.[x];

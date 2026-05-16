@@ -214,28 +214,36 @@ export default class ClayOvenTab {
   }
 
   bar(width = 150, height = 12) {
-    const s = this.scene.rexUI.add.overlapSizer({ width, height });
+    const root = this.scene.add.container(0, 0).setSize(width, height);
     const bg = this.panelBg(width, height, height / 2, 0x08121a, 0.92, 0x92ddff, 0.08);
-    const fill = this.scene.rexUI.add.roundRectangle(0, 0, 1, height - 4, (height - 4) / 2, 0x49cf73, 1).setOrigin(0, 0.5);
-    const text = this.txt("Idle", { fontSize: (width < 110 || this.scene.scale.width < 1080) ? 8 : 9, color: "#9fb3bf" }).setOrigin(0.5);
-    s.addBackground(bg);
-    s.add(fill, { align: "left", padding: { left: 2, right: 2 } });
-    s.add(text, { align: "center" });
-    s.setValue = (pct, label = "Idle", color = 0x49cf73) => {
+    const fill = this.scene.add.graphics();
+    const text = this.txt("Idle", {
+      fontSize: (width < 110 || this.scene.scale.width < 1080) ? 8 : 9,
+      color: "#9fb3bf"
+    }).setOrigin(0.5);
+
+    root.add([bg, fill, text]);
+
+    root.setValue = (pct, label = "Idle", color = 0x49cf73) => {
       const progress = Phaser.Math.Clamp(pct || 0, 0, 1);
-      const fillWidth = Math.max(0, Math.round((width - 4) * progress));
+      const innerHeight = Math.max(1, height - 4);
+      const fillWidth = Math.max(innerHeight, Math.round((width - 4) * progress));
       const active = progress > 0;
-      fill.setVisible(active);
+      fill.clear();
       if (active) {
-        fill.setSize(fillWidth, height - 4);
-        fill.setRadius((height - 4) / 2);
-        fill.setFillStyle(color, 1);
+        fill.fillStyle(color, 1);
+        fill.fillRoundedRect(
+          (-width / 2) + 2,
+          (-innerHeight) / 2,
+          fillWidth,
+          innerHeight,
+          Math.max(1, innerHeight / 2)
+        );
       }
       text.setText(label);
       text.setColor(active ? "#d7f3dc" : "#9fb3bf");
-      s.layout();
     };
-    return s;
+    return root;
   }
 
   cookJob(oven) { return (Teams.teamLists[this.team]?.ovenJobs || []).find((j) => !j.canceled && j.oven === oven && j.inputidx === 0); }
@@ -630,8 +638,9 @@ export default class ClayOvenTab {
   }
 
   update() {
-    if (this.scene.uiBottomBar?.currentPage !== "ovens" || !this.selected) return;
+    if (this.scene.uiBottomBar?.currentPage !== "ovens") return;
+    this.cardByOven.forEach((_row, oven) => this.updateCard(oven));
+    if (!this.selected) return;
     this.detail?.setOven?.(this.selected);
-    this.updateCard(this.selected);
   }
 }

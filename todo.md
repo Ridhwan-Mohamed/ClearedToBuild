@@ -1,115 +1,139 @@
 # Release Checklist
 ## v1.0.0 Launch Demo Priorities
 
-### Tutorial [done]
-- Add a talking guide/player that walks new players through the core systems. [done]
-- Teach farming basics. [done]
-- Teach building placement and town expansion basics. [done]
-- Teach parcel purchasing. [done]
-- Teach defending yourself and the town. [done]
-- Keep the rest of the game light-touch and self-explanatory. [done]
-
-### Achievements Bar [done]
-- Reposition the achievements dropdown so it opens to the right of the contract HUD squares. [done]
-- Extend the town level bar so the achievements dropdown has a clear attached source. [done]
-- Keep a visible closed dropdown tab so players can tell the goals panel opens there. [done]
-- Open the achievements dropdown on game start. [done]
-- Improve the closed state so completed achievements are visible through a clear alert or notification. [done]
-- Add a nicer completion animation when the achievements bar is open. [done]
-- Animate progress bar movement as XP is added instead of jumping instantly. [done]
-- Replace the XP pill with the current level display. [done]
-- Remove text from inside the progress bar. [done]
-- Show completion text separately, for example `0/100 XP`. [done]
-
 ### Player Polish
-- let foragers be retouted by clicking on them then parcel. [done]
 - Improve player art, movement, and sprite logic.
 - Improve awareness logic so players and raiders do not crowd or stand on the same spot.
-- Imporove projectile players pathing and logic and defense
-- Improve flee behavior so players do not twitch or panic without a clear reason. [done]
-- Improve raider attack priorities so they do not chase one player forever. [done]
-- Make raiders focus more on destroying the town than hunting individual players. [done]
+- Improve projectile player pathing and logic and defense.
 
-### Status updates
-- mention if storages are all full [done]
-- mention if players cant put their items in storage [done]
-- mention if cooking is in process somehow [done]
-- redisgn to make larger and more self-explanatory
-
-### Enemies [done-ish]
-- Add a run-and-explode enemy type that detonates when it reaches its target. [done]
-- Allow players to stop the exploding enemy by killing it before detonation. [done] 
-- Add a projectile-shooting enemy type similar to the Gunslinger, but less powerful. [done]
-- Improve off-screen enemy indicators. [done]
-- Reduce indicator size and fix cases where indicators do not appear. [done]
-- make them prefer attacking troops, less so non offensive ones [done]
-
-### Balancing [done]
-- Balance money gathering so players cannot earn too much too quickly. [done]
-- Tune progression so the game gets difficult at a good rate. [done]
-- Balance parcel item pricing. [done]
-- Scale parcel prices over time. [done]
-- Balance market item pricing. [done]
-- Scale market item prices over time. [done]
-- Balance player costs. [done]
-- Scale player costs over time. [done]
-
-### Market Tab Art [done]
-- Add art for market tab items. [done]
-- Add more market tab items. [done]
-- Replace placeholder market item art with finished art. [done]
-
-### contract deals [done]
-- implement contract sales based on least usage [done]
-- add sale and duration bonusses [done]
+### Status Updates
+- Redesign to make larger and more self-explanatory.
 
 ### UI
-- Reduce the size of the speed-up and zoom buttons. [done]
-- Align town XP HUD, contract HUD, clock, and town goals top-bar spacing. [done]
-- Remove idle backgrounds from top-bar pause, speed, and zoom buttons. [done]
-- Prevent world parcel hover from changing contract HUD square visuals. [done]
-- Fix bottom bar edge spill. [done]
-- use a bullet with effects for projctiles [done]
-- add explosion smoke effects and shake when buildings and walls break and projectiles hit [done]
-- add player death animations [done]
-- receive xp for killing players with animation to xp bar [done]
 - Improve fonts for smaller screens.
-- remove attack button from bottom bar [done]
 
-### parcel polish
-- animate parcel addby the tile [done]
-- make parcel add work on thread [done]
+### The Shocker
+- Fix wall preference.
 
-### the shocker
-- make the shocker [done]
-- fix wall preference
+### tutorial
+- processv2 lol
+- mention rock gives you money and rock
 
-### bugs
-- store items on game load not syncing with level [done]
-- crops on game load regen for free [done]
-- bottom bar sleep buttons not working [done]
-- turret and catapults are not properly configurable
-- Fix overview mode UI issues.
-- Fix parcel contract UI issues.
-- Fix farm mode and wall placement sometimes eating clicks when starting a plot or segment. [done]
-- Improve destroy mode drag so it feels as good as select drag. [done]
+### Bugs
+- Turret and catapults are not properly configurable.
+- Fix overview mode UI issues.  [done]
+- Fix parcel contract UI issues. [done]
 - Fix players showing as selected when they are not selected.
-- Fix building health bars sitting too high. [done]
-- Fix building health bars lingering if a raider dies unexpectedly. [done]
-- Fix building health values changing inconsistently when multiple raiders hit the same building. [done]
-- Prevent raiders from pathing toward buildings that are already broken. [done]
-- Improve fighter tracking logic. [done]
-- Check fighter recovery path/state after fights. [done]
-- Allow builders to cancel queued destroy jobs cleanly if needed. [done]
-- debug fighters and make sure they prioiritize enemies closest to town or are attacking town and not bunch up and also not do nothing if there is an enemy [done]
-- yes and no button keep moving up on hover [done]
-- placed to be built should act as placement blockers [done]
-- continue causing crops to always have water sign even when nothing there [done]
-- raiders having pathing issues after fighting (possible clean up issue)
-- builders are prioiritizing fixing over new build jobs [done]
-- debug issue of forager after getting reosurce [done]
-- debug fireman sometimes not getting wood [done]
+- Raiders having pathing issues after fighting (possible cleanup issue).
 
-## audio
+### Audio
 - Finish sound rebalance for overly loud and overly quiet sounds.
 - Aim for a cleaner, more intentional audio mix across the whole game.
+
+### Main Menu
+- Space the logo and the two buttons better.
+- Add the studio logo somewhere.
+- Handle resize better here.
+
+### Starting Draft
+- Fix the small text and lack of sharpness.
+- Use a different font for small text.
+- Make sure team fits in the starting crew row properly.
+
+### Town Layout
+- Make sure zoom does not stop the player from placing troops around the map fully. [done-ish]
+- Add hover to player icons like buildings.
+- Fix small text issues here too.
+- Remove useless text and bars. [done]
+- Make the back and start button design more comprehensive. [done]
+
+### Continue And Draft Menu
+- Fix zoom being angled.
+
+### Contract Parcel UI Bugs [done]
+- Fix overview mode style bleeding into detailed mode. [done]
+- Make direction labels hidden in overview mode. [done]
+- Make pressure parcel prices in overview mode more readable. [done]
+- Fix sale/longer UI filling up the contract HUD page in detail mode. [done] 
+- Fix sale/longer UI not looking good in overview mode. [done]
+- Make parcel descriptions better. [done]
+
+### Bottom Bar
+- Make it less wide.
+- Remove forager stuff. [done]
+- Remove attack button. [done]
+- Make scrolling comprehensive and evident in scrollables.
+- Either remove the clay oven cook bar or fix it so it moves. [done]
+- On destruction of all players, houses, ovens, and storages, keep the design format size the same and do not shrink sections. 
+- Add an icon distinction for cards in deck vs consumables.
+- Lower the description text for cards. [done]
+- Make cards not always need confirms based on type.
+- Fix the label design for number of cards.
+
+### Rewards
+- town reward from xp should open anytime during day/dawn/dusk, only night it waits [done]
+- Move the continue button down on horde unlock. [done]
+- Use portraits for player unlocks instead of walking-down art. [done]
+- Fix text issues here too.
+- no more crazy level up rewards, pick 1 commodity [done]
+- permit reward is player icon why? [done]
+- offering cards already have [done]
+
+### Town Status Bar
+- Make it bigger with graphs.
+- Show when something is full vs when all slots are used more clearly.
+
+### Game UI Stuff
+- Make the storage UI filled-slots text better. [done]
+- day, night and dawn top bar hovers should leave [done]
+- coin/xp audio when being added [done]
+- On relief package use, refresh the left side of the top bar and remove hover. [done]
+- no relief package in sotre tab, should be in market [done]
+
+### achievements
+- fixed height [done]
+- check for scalability [done]
+- progress bar not filling up, figure out or remove [done]
+
+### projectile players
+- movement still weird, fix
+- some buildings bullets go through
+- delete bullets that miss [done]
+
+### Players
+- Make them emote when going to sleep, when tired, and when idle. [done]
+- Make them emote after missing food, water, or both. [done]
+- Make them emote with a cooldown when fleeing. [done]
+- Add yelling sounds and scale them based on more people fleeing. [done]
+- Figure out why speech text cannot be seen when storage is full. [done]
+- sleeping players shouldnt flee and enemies shouldnt try to hit/track sleeping players (be unaware of them) [done]
+- hunger/thirst death doesnt show animation for death [done]
+- animation death a bit slower [done]
+
+### Workers
+- Fireman should add cooked water to storage whenever made, even if in `idle` mode. [done]
+<!-- - Foragers are not coming back when done foraging.
+- Builders should not be fixing a building simultaneously while it is being hit. -->
+
+### Pause Menu [done]
+- Remove useless text. [done]
+- Make the scroller match percent on open. [done]
+- Make the mute button not hidden. [done]
+- Make all other HUD UI stuff also altered, not just world scene stuff. [done]
+
+### Enemies
+- Raiders sometimes multi-hit way too fast. [done]
+- Bombers need to be redesigned or removed.
+- Hunter and bomber art need to be redone.
+- Make raiders aggro more if someone is within their local area bounds.
+
+### balancing
+- blademaster and gunslinger and maybe brawler need nerfs [done]
+
+### Overview Mode
+- Make movement faster here. [done]
+- Make updates happen locally when stuff changes. [done]
+
+### Map
+- Make building placements stop messing up the ground. [done]
+- Do not let players place anything on the outermost ring of the main island or any farther. [done]

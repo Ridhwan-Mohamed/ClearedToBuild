@@ -1,4 +1,4 @@
-import { SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, showAlert } from "./constants";
+import { SQUARESIZE, FLOORDEPTH, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, TILE_MAP, TILE_ARR, BLOCKDEPTH, CONTROL_STATES, UIDEPTH, PARCEL, showAlert } from "./constants";
 import Phaser from "phaser";
 import { Turret } from "./buildings/Turret";
 import { Catapult } from "./buildings/Catapult";
@@ -241,6 +241,9 @@ export class Map{
         placingItem.setPosition(x + Math.floor(item.lenX/2)*SQUARESIZE, y + Math.floor(item.lenY/2)*SQUARESIZE); // Finalize position
         x = Math.floor(x/SQUARESIZE)
         y = Math.floor(y/SQUARESIZE)
+        if (item?.block && !this.isWithinMainIslandBuildInterior(x, y, item.lenX, item.lenY)) {
+            return null;
+        }
         this.drawRoadAround(x,y,item)
         this.addBlockItem(x,y,item)
         const itemToPlace = placingItem
@@ -289,12 +292,21 @@ export class Map{
         const inBounds = (gx, gy) =>
             gy >= 0 && gx >= 0 && gy < Map.grid.length && gx < Map.grid[0].length;
 
+        const canPaintRoadOverBase = (baseTypeName) =>
+            baseTypeName === "grass" ||
+            baseTypeName === "dark_grass" ||
+            baseTypeName === "road" ||
+            baseTypeName === "dirt" ||
+            baseTypeName === "fort_floor";
+
         // Floor-only gate: allow painting floor where base isn't blocking.
         const canWriteFloorHere = (gx, gy) => {
             if (!inBounds(gx, gy)) return false;
             const cell    = Map.grid[gy][gx];
             const baseVal = Array.isArray(cell) ? Map._pickFloorValFromCell(cell) : cell;
-            const baseTyp = TILE_TYPES[TILE_MAP(baseVal)];
+            const baseTypeName = TILE_MAP(baseVal);
+            const baseTyp = TILE_TYPES[baseTypeName];
+            if (!canPaintRoadOverBase(baseTypeName)) return false;
             return !baseTyp?.block; // floor must not be blocking
         };
 
@@ -320,12 +332,14 @@ export class Map{
             const baseVal = Array.isArray(cell) ? Map._pickFloorValFromCell(cell) : cell;
             const topVal  = Array.isArray(cell) ? (cell[0] === baseVal ? cell[1] : cell[0]) : null;
 
-            const baseType = TILE_TYPES[TILE_MAP(baseVal)];
+            const baseTypeName = TILE_MAP(baseVal);
+            const baseType = TILE_TYPES[baseTypeName];
             const topType  = topVal != null ? TILE_TYPES[TILE_MAP(topVal)] : null;
             const topIsWall = !!Map._wallStructureInfoAt?.(gx, gy);
 
             // skip if a blocking top building is present, but allow painting road under walls/doors
             if (topType?.block && !topIsWall) return false;
+            if (!canPaintRoadOverBase(baseTypeName)) return false;
             // skip if base already road (no need to repaint)
             if (TILE_MAP(baseVal) === 'road') return false;
             // leave crops / queued farm spots alone on the perimeter ring
@@ -402,6 +416,28 @@ export class Map{
 
         // NEW: let _tileIsBlocking handle scalar OR array OR nested arrays
         return this._tileIsBlocking(cell);
+    }
+
+    static getMainIslandBounds() {
+        const origin = this.scene?.parcelManager?.mainIslandOrigin ?? PARCEL.MAIN_ORIGIN;
+        const minX = Number(origin?.x ?? PARCEL.MAIN_ORIGIN.x);
+        const minY = Number(origin?.y ?? PARCEL.MAIN_ORIGIN.y);
+        return {
+            minX,
+            minY,
+            maxX: minX + PARCEL.SIZE - 1,
+            maxY: minY + PARCEL.SIZE - 1,
+        };
+    }
+
+    static isWithinMainIslandBuildInterior(posX, posY, lenX = 1, lenY = 1, margin = 1) {
+        const { minX, minY, maxX, maxY } = this.getMainIslandBounds();
+        return (
+            posX >= minX + margin &&
+            posY >= minY + margin &&
+            (posX + lenX - 1) <= maxX - margin &&
+            (posY + lenY - 1) <= maxY - margin
+        );
     }
 
     static _cellHasProtectedFarmSpot(x, y, teamNumber = 1) {
@@ -496,7 +532,9 @@ export class Map{
 
     // New array-aware placement check (used for building previews)
     static checkBlockPosition(posX, posY, lenX, lenY, previewItem = this.placingItem, options = {}) {
-        const blocked = this._placementIsBlocked(posX, posY, lenX, lenY, options);
+        const blocked =
+            !this.isWithinMainIslandBuildInterior(posX, posY, lenX, lenY) ||
+            this._placementIsBlocked(posX, posY, lenX, lenY, options);
         if (previewItem) previewItem.blocked = blocked;
         if (blocked) {
             return Phaser.Display.Color.GetColor(200, 49, 19); // red
@@ -506,14 +544,26 @@ export class Map{
 
     // (Optional) make the generator check consistent with the new rules
     static checkBlockPositionGen(posX, posY, lenX, lenY, options = {}) {
+        if (options?.enforceMainIslandInterior && !this.isWithinMainIslandBuildInterior(posX, posY, lenX, lenY)) {
+            return true;
+        }
         return this._placementIsBlocked(posX, posY, lenX, lenY, options);
     }
 
     static checkSpreadPosition(posX, posY, endX, endY){
-        let lenX = endX - posX;
-        let lenY = endY - posY;
-        for (let y = posY; y < posY + lenY + 1; y++) {
-            for (let x = posX; x < posX + lenX + 1; x++) {
+        const startX = Math.min(posX, endX);
+        const startY = Math.min(posY, endY);
+        const maxX = Math.max(posX, endX);
+        const maxY = Math.max(posY, endY);
+        const lenX = (maxX - startX) + 1;
+        const lenY = (maxY - startY) + 1;
+
+        if (!this.isWithinMainIslandBuildInterior(startX, startY, lenX, lenY)) {
+            return true;
+        }
+
+        for (let y = startY; y <= maxY; y++) {
+            for (let x = startX; x <= maxX; x++) {
                 if(this._cellIsBlocking(x,y)){
                     return true;
                 }

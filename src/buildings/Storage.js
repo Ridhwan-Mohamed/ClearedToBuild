@@ -162,8 +162,8 @@ export class StorageBuilding {
 
         return {
             key: 'slots',
-            title: 'STACKS',
-            detail: 'SLOTS USED',
+            title: 'ALL SLOTS',
+            detail: 'FILLED',
             fillColor: 0x5c3d10,
             fillAlpha: 0.94,
             strokeColor: 0xffe0a3,

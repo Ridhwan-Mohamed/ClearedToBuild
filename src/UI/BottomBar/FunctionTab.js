@@ -13,11 +13,7 @@ const CONTENT_PADDING_X = 14;
 const CONTENT_PADDING_TOP = 0;
 const CONTENT_PADDING_BOTTOM = 0;
 const MAIN_BUTTON_GAP = 8;
-const CARD_GAP = 8;
 const MAIN_BUTTON_HEIGHT = 44;
-const GATHER_CARD_HEIGHT = 58;
-const MINI_BUTTON_SIZE = 22;
-const GATHER_MAX_TARGET = 9;
 const REST_BUTTON_GAP = 8;
 const REST_BUTTON_HEIGHT = 34;
 
@@ -28,16 +24,14 @@ const REST_GROUPS = [
   { key: "all", label: "ALL TROOPS", color: 0x581c87 },
 ];
 
-const MODE_KEYS = ["Farm", "Attack", "Destroy"];
+const MODE_KEYS = ["Farm", "Destroy"];
 const MODE_COLORS = {
   Farm: 0xd28d58,
-  Attack: 0xff8a7d,
   Destroy: 0xff6a87,
 };
 
 const TOGGLE_COLORS = {
   water: 0x74cbff,
-  gather: 0xffcb79,
 };
 
 const GATHER_RESOURCES = [
@@ -61,7 +55,6 @@ export default class FunctionTab {
       if (!mode) return;
 
       if (mode === "Farm") this.scene.farmMode = false;
-      if (mode === "Attack") this.scene.attackMode = false;
       if (mode === "Destroy") {
         this.scene.destroyWallMode = false;
         this.scene.wallDestroyer?.stop?.();
@@ -73,7 +66,6 @@ export default class FunctionTab {
     };
 
     this._onKeyFarm = () => this.toggleMode("Farm");
-    this._onKeyAttack = () => this.toggleMode("Attack");
     this._onResize = (gameSize) => {
       this.width = Number(gameSize?.width || this.scene.scale.width || this.width);
       this.relayout();
@@ -85,7 +77,6 @@ export default class FunctionTab {
 
     this.mainButtons = {};
     this.mainButtonOrder = [];
-    this.gatherCards = {};
     this.restButtons = {};
     this.restButtonOrder = [];
 
@@ -110,12 +101,7 @@ export default class FunctionTab {
     });
 
     this.mainButtons.water = this._createMainButton("water", TOGGLE_COLORS.water, () => this.toggleWaterAutomation());
-    this.mainButtons.gatherToggle = this._createMainButton("gatherToggle", TOGGLE_COLORS.gather, () => this.toggleGatherAutomation());
-    this.mainButtonOrder.push(this.mainButtons.water, this.mainButtons.gatherToggle);
-
-    GATHER_RESOURCES.forEach((resource) => {
-      this.gatherCards[resource.key] = this._createGatherCard(resource);
-    });
+    this.mainButtonOrder.push(this.mainButtons.water);
 
     REST_GROUPS.forEach((cfg) => {
       const button = this._createMainButton(cfg.key, cfg.color, () => this._runRestAction(cfg.key, this._getRestButtonMode(cfg.key)));
@@ -188,107 +174,6 @@ export default class FunctionTab {
     return button;
   }
 
-  _createMiniButton(label, accentColor, onClick) {
-    const root = this.scene.add.container(0, 0);
-    const bg = this.scene.add.graphics();
-    const text = this.scene.add.text(0, 0, label, {
-      fontFamily: "Bungee",
-      fontSize: "15px",
-      fontStyle: "bold",
-      align: "center",
-      color: "#f8fafc",
-      stroke: "#081621",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-    const hit = this.scene.add.zone(0, 0, MINI_BUTTON_SIZE, MINI_BUTTON_SIZE)
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    const button = {
-      label,
-      accentColor,
-      onClick,
-      root,
-      bg,
-      text,
-      hit,
-      size: MINI_BUTTON_SIZE,
-      hovered: false,
-      pressed: false,
-      disabled: false,
-    };
-
-    hit.on("pointerover", (_pointer, _lx, _ly, event) => {
-      event?.stopPropagation?.();
-      if (button.disabled) return;
-      button.hovered = true;
-      this._drawMiniButton(button);
-    });
-    hit.on("pointerout", (_pointer, event) => {
-      event?.stopPropagation?.();
-      button.hovered = false;
-      button.pressed = false;
-      this._drawMiniButton(button);
-    });
-    hit.on("pointerdown", (_pointer, _lx, _ly, event) => {
-      event?.stopPropagation?.();
-      if (button.disabled) return;
-      button.pressed = true;
-      this._drawMiniButton(button);
-    });
-    hit.on("pointerup", (_pointer, _lx, _ly, event) => {
-      event?.stopPropagation?.();
-      if (button.disabled) return;
-      button.pressed = false;
-      this._drawMiniButton(button);
-      AudioManager.playBottomBarClick();
-      button.onClick?.();
-    });
-
-    root.add([bg, text, hit]);
-    return button;
-  }
-
-  _createGatherCard(resource) {
-    const root = this.scene.add.container(0, 0);
-    const bg = this.scene.add.graphics();
-    const title = this.scene.add.text(0, -18, resource.label, {
-      fontFamily: "Bungee",
-      fontSize: "13px",
-      fontStyle: "bold",
-      color: resource.text,
-      stroke: "#081621",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-    const status = this.scene.add.text(0, 0, "0 / 0", {
-      fontFamily: "Bungee",
-      fontSize: "16px",
-      fontStyle: "bold",
-      color: "#f8fafc",
-      stroke: "#081621",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
-
-    const minus = this._createMiniButton("-", resource.color, () => this.adjustGatherTarget(resource.key, -1));
-    const plus = this._createMiniButton("+", resource.color, () => this.adjustGatherTarget(resource.key, 1));
-
-    root.add([bg, title, status, minus.root, plus.root]);
-    this.view.add(root);
-
-    return {
-      key: resource.key,
-      resource,
-      root,
-      bg,
-      title,
-      status,
-      minus,
-      plus,
-      width: 0,
-      height: GATHER_CARD_HEIGHT,
-    };
-  }
-
   relayout() {
     const liveWidth = Math.max(
       this.width,
@@ -312,23 +197,20 @@ export default class FunctionTab {
     this.view.setSize(this.width, this.height);
 
     const availableHeight = Math.max(90, this.height - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM);
-    const rowGapA = 4;
-    const rowGapB = 4;
-    const usableHeight = availableHeight - rowGapA - rowGapB;
+    const rowGap = 8;
+    const usableHeight = availableHeight - rowGap;
 
-    const topRowHeight = Math.max(MAIN_BUTTON_HEIGHT, Math.floor(usableHeight * 0.34));
-    const middleRowHeight = Math.max(GATHER_CARD_HEIGHT, Math.floor(usableHeight * 0.4));
-    const bottomRowHeight = Math.max(REST_BUTTON_HEIGHT, usableHeight - topRowHeight - middleRowHeight);
+    const topRowHeight = Math.max(MAIN_BUTTON_HEIGHT, Math.floor(usableHeight * 0.5));
+    const bottomRowHeight = Math.max(REST_BUTTON_HEIGHT, usableHeight - topRowHeight);
 
     const top = -this.height / 2 + CONTENT_PADDING_TOP;
     const row1Y = top + topRowHeight / 2;
-    const row2Y = top + topRowHeight + rowGapA + middleRowHeight / 2;
-    const restRowY = top + topRowHeight + rowGapA + middleRowHeight + rowGapB + bottomRowHeight / 2;
+    const restRowY = top + topRowHeight + rowGap + bottomRowHeight / 2;
 
     const usableWidth = Math.max(360, this.width - CONTENT_PADDING_X * 2);
 
     const mainButtonWidth = Math.max(
-      92,
+      124,
       Math.floor((usableWidth - MAIN_BUTTON_GAP * (this.mainButtonOrder.length - 1)) / this.mainButtonOrder.length)
     );
     const mainStartX = -((mainButtonWidth * this.mainButtonOrder.length) + (MAIN_BUTTON_GAP * (this.mainButtonOrder.length - 1))) / 2 + mainButtonWidth / 2;
@@ -341,28 +223,6 @@ export default class FunctionTab {
       button.text.setPosition(0, 0);
       button.text.setFixedSize(button.width - 14, button.height - 10);
       button.text.setOrigin(0.5);
-    });
-
-    const gatherCards = Object.values(this.gatherCards);
-    const cardWidth = Math.max(
-      104,
-      Math.floor((usableWidth - CARD_GAP * (gatherCards.length - 1)) / gatherCards.length)
-    );
-    const cardStartX = -((cardWidth * gatherCards.length) + (CARD_GAP * (gatherCards.length - 1))) / 2 + cardWidth / 2;
-
-    gatherCards.forEach((card, index) => {
-      card.width = cardWidth;
-      card.height = middleRowHeight;
-      card.root.setPosition(cardStartX + index * (cardWidth + CARD_GAP), row2Y);
-      card.title.setPosition(0, -Math.floor(card.height * 0.24));
-      card.status.setPosition(0, 0);
-      const miniY = Math.floor(card.height * 0.28);
-      card.minus.root.setPosition(-card.width / 2 + 18, miniY);
-      card.plus.root.setPosition(card.width / 2 - 18, miniY);
-      card.minus.hit.setSize(MINI_BUTTON_SIZE, MINI_BUTTON_SIZE);
-      card.plus.hit.setSize(MINI_BUTTON_SIZE, MINI_BUTTON_SIZE);
-      this._drawMiniButton(card.minus);
-      this._drawMiniButton(card.plus);
     });
 
     const restButtons = this.restButtonOrder;
@@ -385,7 +245,6 @@ export default class FunctionTab {
 
   _getSceneActiveMode() {
     if (this.scene.destroyWallMode) return "Destroy";
-    if (this.scene.attackMode) return "Attack";
     if (this.scene.farmMode) return "Farm";
     return null;
   }
@@ -411,7 +270,6 @@ export default class FunctionTab {
 
     this.scene.farmMode = false;
     this.scene.seedGridMode = false;
-    this.scene.attackMode = false;
     this.scene.stoneWallMode = false;
     this.scene.woodWallMode = false;
     this.scene.destroyWallMode = false;
@@ -423,7 +281,6 @@ export default class FunctionTab {
 
     if (turningOn) {
       if (mode === "Farm") this.scene.farmMode = true;
-      if (mode === "Attack") this.scene.attackMode = true;
       if (mode === "Destroy") {
         this.scene.destroyWallMode = true;
         this.scene.wallDestroyer?.start?.();
@@ -462,60 +319,6 @@ export default class FunctionTab {
     tutorial?.notifyAction?.("function.water", {
       enabled,
     });
-  }
-
-  toggleGatherAutomation() {
-    const automation = this._getAutomation();
-    if (!automation) return;
-    const tutorial = this._getTutorialManager();
-
-    if (tutorial?.isActive?.()) {
-      tutorial.blockAction("Gather staffing comes after this tutorial step.");
-      return;
-    }
-
-    const totalTarget = this._sumGatherTargets(automation.gatherTargets);
-    if (!automation.gatherEnabled && totalTarget <= 0) {
-      automation.gatherTargets.wood = 1;
-    }
-
-    automation.gatherEnabled = !automation.gatherEnabled;
-    if (this._sumGatherTargets(automation.gatherTargets) <= 0) {
-      automation.gatherEnabled = false;
-    }
-
-    this._reconcileTownAutomation(true);
-    this.updateVisuals();
-
-    showAlert(
-      this.scene,
-      automation.gatherEnabled ? "Town gather staffing enabled" : "Town gather staffing winding down",
-      "#fde68a"
-    );
-  }
-
-  adjustGatherTarget(resourceKey, delta) {
-    const automation = this._getAutomation();
-    if (!automation || !Object.prototype.hasOwnProperty.call(automation.gatherTargets, resourceKey)) return;
-    const tutorial = this._getTutorialManager();
-
-    if (tutorial?.isActive?.()) {
-      tutorial.blockAction("Gather staffing comes after this tutorial step.");
-      return;
-    }
-
-    const current = Number(automation.gatherTargets[resourceKey] || 0);
-    const next = Phaser.Math.Clamp(current + delta, 0, GATHER_MAX_TARGET);
-    if (next === current) return;
-
-    automation.gatherTargets[resourceKey] = next;
-    if (delta > 0) automation.gatherEnabled = true;
-    if (this._sumGatherTargets(automation.gatherTargets) <= 0) {
-      automation.gatherEnabled = false;
-    }
-
-    this._reconcileTownAutomation(true);
-    this.updateVisuals();
   }
 
   _getAutomation() {
@@ -939,24 +742,6 @@ export default class FunctionTab {
     return "WATER OFF\nStandby";
   }
 
-  _getGatherSummary(automation, foragers) {
-    const planned = this._sumGatherTargets(automation.gatherTargets);
-    const staffed = GATHER_RESOURCES.reduce((sum, resource) => {
-      const active = this._managedGatherTroops(foragers, resource.key)
-        .filter((troop) => !troop?.currentOrder?.shuttingDown)
-        .length;
-      return sum + active;
-    }, 0);
-
-    if (automation.gatherEnabled) {
-      return `GATHER ON\n${staffed} / ${planned} staffed`;
-    }
-    if (planned > 0) {
-      return `GATHER OFF\n${planned} planned`;
-    }
-    return "GATHER OFF\nNo staffing";
-  }
-
   _setMainButtonLabel(button, label) {
     if (!button || button.label === label) return;
     button.label = label;
@@ -988,75 +773,6 @@ export default class FunctionTab {
     button.root.setScale(button.pressed ? 0.99 : active ? 1.015 : button.hovered ? 1.01 : 1);
   }
 
-  _drawMiniButton(button) {
-    const size = button.size;
-    const x = -size / 2;
-    const y = -size / 2;
-    const fillAlpha = button.disabled
-      ? 0.12
-      : button.pressed ? 0.92 : button.hovered ? 0.86 : 0.78;
-    const strokeAlpha = button.disabled ? 0.08 : button.hovered ? 0.32 : 0.18;
-    const fillColor = mixColor(BOTTOM_BAR_THEME.panelFill, button.accentColor, button.hovered ? 0.3 : 0.2);
-
-    button.bg.clear();
-    button.bg.fillStyle(0x031019, 0.16);
-    button.bg.fillRoundedRect(x, y + 2, size, size, 9);
-    button.bg.fillStyle(fillColor, fillAlpha);
-    button.bg.fillRoundedRect(x, y, size, size, 9);
-    button.bg.fillStyle(0xffffff, button.disabled ? 0.02 : 0.08);
-    button.bg.fillRoundedRect(x + 4, y + 3, Math.max(8, size - 8), 7, 6);
-    button.bg.lineStyle(1.5, button.accentColor, strokeAlpha);
-    button.bg.strokeRoundedRect(x, y, size, size, 9);
-    button.text.setAlpha(button.disabled ? 0.35 : 1);
-    button.root.setScale(button.disabled ? 1 : button.pressed ? 0.96 : button.hovered ? 1.04 : 1);
-  }
-
-  _drawGatherCard(card, automation, activeCount, targetCount) {
-    const available = OrderRunner.isGatherCommandAvailable(card.key, this.scene);
-    const paused = !automation.gatherEnabled && targetCount > 0;
-    const hasTarget = targetCount > 0;
-    const blocked = hasTarget && automation.gatherEnabled && !available;
-    const full = hasTarget && activeCount >= targetCount && !blocked;
-    const accentColor = hasTarget && !available ? 0xf59e0b : card.resource.color;
-    const fillAlpha = hasTarget
-      ? full ? 0.94 : blocked ? 0.86 : paused ? 0.82 : 0.88
-      : 0.74;
-    const strokeAlpha = hasTarget
-      ? full ? 0.34 : blocked ? 0.28 : paused ? 0.18 : 0.24
-      : 0.12;
-
-    card.bg.clear();
-    card.bg.fillStyle(0x031019, 0.14);
-    card.bg.fillRoundedRect(-card.width / 2, -card.height / 2 + 3, card.width, card.height, 14);
-    card.bg.fillStyle(mixColor(BOTTOM_BAR_THEME.panelFill, accentColor, hasTarget ? 0.18 : 0.08), fillAlpha);
-    card.bg.fillRoundedRect(-card.width / 2, -card.height / 2, card.width, card.height, 12);
-    card.bg.fillStyle(0xffffff, hasTarget ? 0.08 : 0.05);
-    card.bg.fillRoundedRect(-card.width / 2 + 8, -card.height / 2 + 6, Math.max(16, card.width - 16), 14, 9);
-    card.bg.lineStyle(2, mixColor(accentColor, 0xffffff, 0.14), strokeAlpha);
-    card.bg.strokeRoundedRect(-card.width / 2, -card.height / 2, card.width, card.height, 12);
-    card.bg.lineStyle(1, 0xffffff, hasTarget ? 0.12 : 0.06);
-    card.bg.strokeRoundedRect(-card.width / 2 + 1, -card.height / 2 + 1, card.width - 2, card.height - 2, 11);
-
-    card.status.setText(`${activeCount} / ${targetCount}`);
-    card.status.setColor(
-      !hasTarget
-        ? "#94a3b8"
-        : blocked
-          ? "#fde68a"
-          : full
-          ? "#f8fafc"
-          : paused
-            ? "#cbd5e1"
-            : "#e2e8f0"
-    );
-    card.title.setAlpha(hasTarget ? 1 : 0.78);
-
-    card.minus.disabled = targetCount <= 0;
-    card.plus.disabled = targetCount >= GATHER_MAX_TARGET;
-    this._drawMiniButton(card.minus);
-    this._drawMiniButton(card.plus);
-  }
-
   updateVisuals() {
     const automation = this._getAutomation() || Teams.createTownAutomationState();
     const team = Teams.getTeam(this.teamNumber) || {
@@ -1068,7 +784,6 @@ export default class FunctionTab {
       firemanList: [],
     };
 
-    const foragers = this._getTeamTroops(team?.foragerList);
     const firemen = this._getTeamTroops(team?.firemanList);
 
     this.activeMode = this._getSceneActiveMode();
@@ -1080,21 +795,6 @@ export default class FunctionTab {
 
     this._setMainButtonLabel(this.mainButtons.water, this._getWaterSummary(automation, firemen));
     this._drawMainButton(this.mainButtons.water, !!automation?.waterEnabled);
-
-    this._setMainButtonLabel(this.mainButtons.gatherToggle, this._getGatherSummary(automation, foragers));
-    this._drawMainButton(
-      this.mainButtons.gatherToggle,
-      !!automation?.gatherEnabled && this._sumGatherTargets(automation?.gatherTargets) > 0
-    );
-
-    GATHER_RESOURCES.forEach((resource) => {
-      const card = this.gatherCards[resource.key];
-      const target = Math.max(0, Number(automation?.gatherTargets?.[resource.key] || 0));
-      const active = this._managedGatherTroops(foragers, resource.key)
-        .filter((troop) => !troop?.currentOrder?.shuttingDown)
-        .length;
-      this._drawGatherCard(card, automation, active, target);
-    });
 
     REST_GROUPS.forEach((cfg) => {
       const button = this.restButtons[cfg.key];
@@ -1121,7 +821,6 @@ export default class FunctionTab {
 
   registerHotkeys() {
     this.scene.input.keyboard.on("keydown-F", this._onKeyFarm);
-    this.scene.input.keyboard.on("keydown-K", this._onKeyAttack);
   }
 
   getContainer() {
@@ -1131,13 +830,11 @@ export default class FunctionTab {
   destroy() {
     this.scene.events.off("mode:completed", this._onModeCompleted);
     this.scene.input.keyboard.off("keydown-F", this._onKeyFarm);
-    this.scene.input.keyboard.off("keydown-K", this._onKeyAttack);
     this.scene.scale.off("resize", this._onResize);
     this.container?.destroy?.(true);
     this.view = null;
     this.mainButtons = {};
     this.mainButtonOrder = [];
-    this.gatherCards = {};
     this.restButtons = {};
     this.restButtonOrder = [];
   }

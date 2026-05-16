@@ -63,6 +63,13 @@ export class Player {
     static FLEE_REPATH_COOLDOWN_MS = 900;
     static FLEE_SAFE_GRACE_MS = 850;
     static FLEE_DEST_EPSILON = SQUARESIZE * 0.65;
+    static STATUS_EMOTE_DURATION_MS = 1250;
+    static STATUS_EMOTE_COOLDOWN_MS = 2400;
+    static STATUS_EMOTE_Y_OFFSET = 30;
+    static IDLE_EMOTE_DELAY_MS = 6500;
+    static IDLE_EMOTE_COOLDOWN_MS = 11000;
+    static TIRED_EMOTE_COOLDOWN_MS = 9000;
+    static TIRED_STAMINA_RATIO = 0.26;
 
     static resetRuntimeState(scene = null) {
         this.scene = scene ?? null;
@@ -87,7 +94,7 @@ export class Player {
         this.createAnim('carryWalk', 'playerCarry', 0, 2)
         this.createAnim('carryIdle', 'playerCarry', 0, 0)
         this.createAnim('swim', 'playerSwim', 0, 2, -1, 8);
-        this.createAnim('player_death_anim', 'player_death', 0, 5, 0, 14);
+        this.createAnim('player_death_anim', 'player_death', 0, 5, 0, 8);
         this.setUpBackToTown()
         PathDebugDrawer.init(scene);
     }
@@ -126,7 +133,10 @@ export class Player {
 
         const teamNum = player.body?.team ?? player._teamNumber ?? null;
         const state = player.state;
+        fightManager.clearAttackRecovery(player);
+        fightManager.clearHitReaction(player);
         this._playDeathAnimation(player);
+        this._clearStatusEmote(player);
         this._removePlayerFromHouse(player);
 
         // Call the troop-specific destroy logic if defined
@@ -167,7 +177,10 @@ export class Player {
     }
 
     static _destroyGenericPlayer(player) {
+        fightManager.clearAttackRecovery(player);
+        fightManager.clearHitReaction(player);
         this._destroyMiniBars(player);
+        this._clearStatusEmote(player);
 
         this._releaseTaskAssignment(player);
         if (player.carrying) player.carrying = null;
@@ -359,6 +372,207 @@ export class Player {
         if (troop) troop._selectionIndicator = null;
     }
 
+    static _clearStatusEmote(troop) {
+        const bubble = troop?._statusEmote;
+        if (!bubble) return;
+        bubble.updateEventOwner?.events?.off?.("update", bubble.updatePosition);
+        bubble.hideEvent?.remove?.(false);
+        bubble.hideTween?.stop?.();
+        bubble.showTween?.stop?.();
+        bubble.destroy?.();
+        troop._statusEmote = null;
+    }
+
+    static _ensureStatusEmoteState(troop) {
+        if (!troop) return null;
+        troop._statusEmoteCooldowns ||= Object.create(null);
+        return troop._statusEmoteCooldowns;
+    }
+
+    static _getStatusEmoteAnchor(troop, anchorFn = null) {
+        if (typeof anchorFn === "function") {
+            const custom = anchorFn(troop);
+            if (custom && Number.isFinite(custom.x) && Number.isFinite(custom.y)) {
+                return custom;
+            }
+        }
+
+        return {
+            x: troop.x,
+            y: troop.y - Math.max(
+                this.STATUS_EMOTE_Y_OFFSET,
+                ((troop.displayHeight || SQUARESIZE) * 0.5) + 12
+            ),
+        };
+    }
+
+    static showStatusEmote(troop, text, opts = {}) {
+        if (!troop?.active || !text || !this.scene) return false;
+
+        const scene = troop.scene || this.scene;
+        if (!scene) return false;
+        if (!opts.allowSleeping && troop.state === CONTROL_STATES.SLEEP_MODE) return false;
+
+        const cooldowns = this._ensureStatusEmoteState(troop);
+        const now = this._sceneNowMs(troop);
+        const key = String(opts.key || text);
+        const cooldownMs = Math.max(0, Number(opts.cooldownMs ?? this.STATUS_EMOTE_COOLDOWN_MS) || 0);
+        const nextAllowedAt = Number(cooldowns?.[key] || 0);
+        if (cooldownMs > 0 && now < nextAllowedAt) return false;
+        cooldowns[key] = now + cooldownMs;
+
+        this._clearStatusEmote(troop);
+
+        const label = scene.add.text(0, 0, String(text), {
+            fontFamily: "Bungee",
+            fontSize: `${Math.max(12, Number(opts.fontSize || 14))}px`,
+            color: opts.textColor || "#f8fafc",
+            stroke: opts.strokeColor || "#020617",
+            strokeThickness: Math.max(2, Number(opts.strokeThickness || 3)),
+            align: "center",
+        }).setOrigin(0.5);
+
+        const paddingX = Math.max(10, Number(opts.paddingX || 12));
+        const paddingY = Math.max(6, Number(opts.paddingY || 7));
+        const width = Math.max(28, Math.ceil(label.width) + paddingX * 2);
+        const height = Math.max(24, Math.ceil(label.height) + paddingY * 2);
+        const radius = Math.max(10, Number(opts.radius || 13));
+        const bg = scene.add.graphics();
+
+        bg.fillStyle(Number(opts.bgColor ?? 0x0f172a), Number(opts.bgAlpha ?? 0.92));
+        bg.lineStyle(2, Number(opts.borderColor ?? 0xe2e8f0), Number(opts.borderAlpha ?? 0.58));
+        bg.fillRoundedRect(-width / 2, -height / 2, width, height, radius);
+        bg.strokeRoundedRect(-width / 2, -height / 2, width, height, radius);
+        bg.fillTriangle(-7, height / 2 - 1, 7, height / 2 - 1, 0, height / 2 + 10);
+
+        const bubble = scene.add.container(0, 0, [bg, label])
+            .setDepth(Math.max(BLOCKDEPTH + 5, (troop.depth ?? BLOCKDEPTH) + 4))
+            .setScale(0.9)
+            .setAlpha(0);
+
+        const anchorFn = typeof opts.anchor === "function" ? opts.anchor : null;
+        const bubbleRecord = bubble;
+        bubbleRecord.updateEventOwner = scene;
+        bubbleRecord.updatePosition = () => {
+            if (!bubble.active || !troop?.active) {
+                this._clearStatusEmote(troop);
+                return;
+            }
+
+            if (!anchorFn && (troop.visible === false || troop.alpha === 0 || troop.state === CONTROL_STATES.SLEEP_MODE)) {
+                this._clearStatusEmote(troop);
+                return;
+            }
+
+            const anchor = this._getStatusEmoteAnchor(troop, anchorFn);
+            bubble.setPosition(anchor.x, anchor.y);
+            bubble.setDepth(Math.max(BLOCKDEPTH + 5, (troop.depth ?? BLOCKDEPTH) + 4));
+        };
+
+        bubbleRecord.hideEvent = scene.time.delayedCall(
+            Math.max(100, Number(opts.durationMs ?? this.STATUS_EMOTE_DURATION_MS) || this.STATUS_EMOTE_DURATION_MS),
+            () => {
+                if (!bubble.active || troop?._statusEmote !== bubble) return;
+                bubbleRecord.hideTween = scene.tweens.add({
+                    targets: bubble,
+                    alpha: 0,
+                    scaleX: 0.94,
+                    scaleY: 0.94,
+                    duration: 140,
+                    ease: "Quad.easeIn",
+                    onComplete: () => this._clearStatusEmote(troop),
+                });
+            }
+        );
+
+        scene.events.on("update", bubbleRecord.updatePosition);
+        bubbleRecord.updatePosition();
+        bubbleRecord.showTween = scene.tweens.add({
+            targets: bubble,
+            alpha: 1,
+            scaleX: 1,
+            scaleY: 1,
+            duration: 120,
+            ease: "Back.easeOut",
+        });
+        bubble.once?.("destroy", () => {
+            scene.events.off("update", bubbleRecord.updatePosition);
+        });
+
+        troop._statusEmote = bubble;
+        troop.once?.("destroy", () => this._clearStatusEmote(troop));
+        return true;
+    }
+
+    static _isCombatTargetableUnit(target) {
+        if (!target?.active || !target?.body) return false;
+        if (target.state === CONTROL_STATES.SLEEP_MODE) return false;
+        if (target.visible === false || target.alpha === 0) return false;
+        if (target.body?.enable === false) return false;
+        return true;
+    }
+
+    static _dropTargetingAgainstUnit(targetTroop) {
+        if (!targetTroop?.active) return;
+
+        for (const troop of this.troops || []) {
+            if (!troop?.active || troop === targetTroop) continue;
+
+            if (troop._raiderRetaliationTarget === targetTroop) {
+                troop._raiderRetaliationTarget = null;
+            }
+
+            const forced = troop.forcedTarget === targetTroop;
+            const tracked = troop.track?.[0]?.gameObject === targetTroop;
+            if (!forced && !tracked) continue;
+
+            fightManager.disengageFromCombat(troop, "combat_target_untargetable");
+        }
+    }
+
+    static _updateAmbientEmotes(troop) {
+        if (!troop?.active || troop.body?.team !== 1) return;
+
+        const now = this._sceneNowMs(troop);
+        const maxStamina = Math.max(1, Number(troop.maxStamina ?? 100) || 100);
+        const stamina = Math.max(0, Number(troop.stamina ?? maxStamina) || 0);
+        const tired = (stamina / maxStamina) <= this.TIRED_STAMINA_RATIO;
+        const inEligibleState =
+            troop.state === CONTROL_STATES.TRACK_MODE &&
+            troop.visible !== false &&
+            troop.alpha !== 0 &&
+            !troop.task &&
+            !troop.track &&
+            !troop.timer &&
+            !troop.currentPath?.length &&
+            !troop.roam;
+
+        if (tired && troop.state !== CONTROL_STATES.SLEEP_MODE && troop.state !== CONTROL_STATES.GO_HOME_MODE) {
+            this.showStatusEmote(troop, "\u{1F971}", {
+                key: "tired",
+                cooldownMs: this.TIRED_EMOTE_COOLDOWN_MS,
+            });
+        }
+
+        if (!inEligibleState) {
+            troop._idleSinceAt = 0;
+            return;
+        }
+
+        if (!troop._idleSinceAt) {
+            troop._idleSinceAt = now;
+            return;
+        }
+
+        if ((now - troop._idleSinceAt) < this.IDLE_EMOTE_DELAY_MS) return;
+        if (this.showStatusEmote(troop, "\u{1F4AC}", {
+            key: "idle",
+            cooldownMs: this.IDLE_EMOTE_COOLDOWN_MS,
+        })) {
+            troop._idleSinceAt = now;
+        }
+    }
+
     static _updateSelectionIndicator(troop) {
         const ring = troop?._selectionIndicator;
         if (!troop?.active || !troop?.scene) {
@@ -516,7 +730,7 @@ export class Player {
             scene.anims?.create?.({
                 key: 'player_death_anim',
                 frames: scene.anims.generateFrameNumbers('player_death', { start: 0, end: 5 }),
-                frameRate: 14,
+                frameRate: 8,
                 repeat: 0,
             });
         }
@@ -525,12 +739,14 @@ export class Player {
             .setOrigin(0.5, 0.58)
             .setDepth(Math.max(BLOCKDEPTH + 3, (player.depth ?? BLOCKDEPTH) + 2))
             .setAlpha(0.92);
+        const tint = player?.isShocker ? 0xb58cff : (player?.body?.team === 1 ? 0x57e389 : 0xff6b6b);
         const targetHeight = Math.max(28, Math.min(52, (player.displayHeight || SQUARESIZE) * 1.45));
         const scale = targetHeight / 44;
         fx.setScale(scale);
+        fx.setTint(tint);
         fx.play('player_death_anim');
         fx.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => fx.destroy());
-        scene.time?.delayedCall?.(700, () => fx?.destroy?.());
+        scene.time?.delayedCall?.(1100, () => fx?.destroy?.());
     }
 
     static _worldTileIsWalkableForTroop(troop, worldX, worldY) {
@@ -824,6 +1040,7 @@ export class Player {
             if (attackTarget && this._isAttackReady(sprite, attackTarget)) {
                 sprite.body.setVelocity(0, 0);
                 if (sprite.currentPath && sprite.currentPath.length) sprite.currentPath.length = 0;
+                sprite.finalPos = null;
                 Teams.movePlayerState(sprite, CONTROL_STATES.ATTACK_MODE);
                 this.doAction(sprite);
                 return;
@@ -834,6 +1051,7 @@ export class Player {
         // 2) If we aren't walking anywhere, just idle.
         if (!sprite.currentPath || sprite.currentPath.length === 0) {
             CombatSpacingCoordinator.clearRoamReservation(sprite);
+            sprite.finalPos = null;
             if (sprite.poseLock?.textureKey) {
                 sprite.body.setVelocity(0, 0);
                 sprite.rotation = 0;
@@ -864,6 +1082,7 @@ export class Player {
             if (ok) {
                 sprite.body.setVelocity(0, 0);
                 sprite.currentPath.length = 0;
+                sprite.finalPos = null;
                 this.doAction(sprite);
                 return;
             }
@@ -1223,6 +1442,7 @@ export class Player {
                 if (!canReachTarget(neighbour)) return;
                 const target = neighbour.gameObject;
                 if (!target?.active) return;
+                if (target?.body && !this._isCombatTargetableUnit(target)) return;
                 candidates.push(target);
             });
 
@@ -1249,6 +1469,11 @@ export class Player {
 
             const go = trackedBody?.gameObject;
             if (!go) return false;
+            if (go?.body && !this._isCombatTargetableUnit(go)) {
+                CombatSpacingCoordinator.clearTroopFocus(troop);
+                troop.track = null;
+                return false;
+            }
             CombatSpacingCoordinator.setTroopFocusTarget(troop, go, { forced: troop.forcedTarget === go });
 
             const lastTileX = Math.floor(troop.track[1].x / SQUARESIZE);
@@ -1271,6 +1496,7 @@ export class Player {
             if (!canReachTarget(mostClosest)) return false;
             const go = mostClosest.gameObject;
             if (!go) return false;
+            if (go?.body && !this._isCombatTargetableUnit(go)) return false;
             CombatSpacingCoordinator.setTroopFocusTarget(troop, go, { forced: troop.forcedTarget === go });
 
             troop.track = [
@@ -1300,6 +1526,7 @@ export class Player {
 
             const go = body.gameObject;
             if (go && !go.active) return;
+            if (go?.body && !this._isCombatTargetableUnit(go)) return;
 
             const dx = body.x - tx;
             const dy = body.y - ty;
@@ -1346,6 +1573,11 @@ export class Player {
             troop.track = null;
             troop._fleeNextRepathAt = 0;
             troop._fleeDest = null;
+            this.showStatusEmote(troop, "\u{1F631}", {
+                key: "flee",
+                cooldownMs: 1800,
+            });
+            AudioManager.playFleeScream?.();
         }
 
         const hasPath = !!troop.currentPath?.length;
@@ -1595,6 +1827,10 @@ export class Player {
 
     static handlePlayerCollision(player1, player2){
         if (player1 === player2) return; // Prevent self overlap
+        if (!player1.finalPos || !player2.finalPos) return;
+        const player1InCombat = !!(player1.track || player1.forcedTarget || player1.state === CONTROL_STATES.TRACK_TARGET || player1.state === CONTROL_STATES.ATTACK_MODE);
+        const player2InCombat = !!(player2.track || player2.forcedTarget || player2.state === CONTROL_STATES.TRACK_TARGET || player2.state === CONTROL_STATES.ATTACK_MODE);
+        if (player1InCombat || player2InCombat) return;
         if(player1.finalPos?.x == player2.finalPos?.x && player1.finalPos?.y == player2.finalPos?.y){
             if(player1.body.velocity.x == 0 && player1.body.velocity.y == 0 && player2.currentPath.length && !player1.currentPath.length){
                 let newVelocity = new Phaser.Math.Vector2(
@@ -1738,25 +1974,16 @@ export class Player {
     static _clearInvalidForcedTarget(troop) {
         const target = troop.forcedTarget;
         if (!target) return false;
-        if (target?.active && target?.body) return false;
+        if (target?.active && target?.body && this._isCombatTargetableUnit(target)) return false;
         if (target) this._cleanupCombatTicketForTarget(troop.body.team, target);
-        if (troop.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
-            InterruptController.interruptTroop(troop, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
-        }
-        CombatSpacingCoordinator.clearTroopFocus(troop);
-        troop.forcedTarget = null;
-        this.resetRoamState(troop);
-        if (troop.track && troop.state === CONTROL_STATES.TRACK_TARGET) {
-            troop.track = null;
-            troop.currentPath?.splice?.(0);
-            troop.body?.setVelocity?.(0, 0);
-            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-        }
+        fightManager.disengageFromCombat(troop, "combat_target_lost");
         return true;
     }
 
     static _isAttackReady(troop, target) {
         if (!troop?.weapon || !target?.active) return false;
+        if (target?.body && !this._isCombatTargetableUnit(target)) return false;
+        if (troop._attackRecoveryTimer) return false;
         const inRange = Phaser.Math.Distance.Between(troop.x, troop.y, target.x, target.y) <= troop.weapon.range;
         if (!inRange) return false;
         if (troop.weapon.projectile && !Projectile.hasLineOfSight(troop, target)) return false;
@@ -1765,9 +1992,9 @@ export class Player {
 
     static _resolveEnemyFocusedFriendly(enemy) {
         const forcedTarget = enemy?.forcedTarget;
-        if (forcedTarget?.active && forcedTarget?.body?.team === 1) return forcedTarget;
+        if (forcedTarget?.active && forcedTarget?.body?.team === 1 && this._isCombatTargetableUnit(forcedTarget)) return forcedTarget;
         const tracked = enemy?.track?.[0]?.gameObject;
-        if (tracked?.active && tracked?.body?.team === 1) return tracked;
+        if (tracked?.active && tracked?.body?.team === 1 && this._isCombatTargetableUnit(tracked)) return tracked;
         return null;
     }
 
@@ -1836,19 +2063,14 @@ export class Player {
 
         const troopRegion = regionSystem.getRegionIdForWorldPoint?.(troop.x, troop.y);
         const enemyRegion = regionSystem.getRegionIdForWorldPoint?.(enemy.x, enemy.y);
-        const townRegion = townCenter
-            ? regionSystem.getRegionIdForWorldPoint?.(townCenter.x, townCenter.y)
-            : troopRegion;
 
         if (
             Number.isFinite(troopRegion) &&
             Number.isFinite(enemyRegion) &&
-            Number.isFinite(townRegion) &&
             troopRegion >= 0 &&
-            enemyRegion >= 0 &&
-            townRegion >= 0
+            enemyRegion >= 0
         ) {
-            return enemyRegion === townRegion && troopRegion === townRegion;
+            return enemyRegion === troopRegion;
         }
 
         if (!regionSystem.canReachWorldToWorld) return true;
@@ -1879,7 +2101,7 @@ export class Player {
     static _isCommittedToCombatTarget(troop, target) {
         if (!troop?.active || !target?.active || !troop.weapon) return false;
         if (troop.state === CONTROL_STATES.ATTACK_MODE) return true;
-        if (troop.timer) return true;
+        if (troop._attackRecoveryTimer) return true;
         if (this._isAttackReady(troop, target)) return true;
 
         const commitDistance = Math.max(
@@ -2157,12 +2379,22 @@ export class Player {
         }
 
         troop.currentPath = [];
+        troop.finalPos = null;
         troop.body?.setVelocity?.(0, 0);
         this._planBreachTicketsForTarget(troop, target);
         return false;
     }
 
     static updateTracking(troop){
+        if (!troop?.active) return;
+        if (troop.state === CONTROL_STATES.SLEEP_MODE) {
+            troop.track = null;
+            troop.forcedTarget = null;
+            troop.currentPath?.splice?.(0);
+            troop.body?.setVelocity?.(0, 0);
+            return;
+        }
+
         const fallbackDist = troop.body.team ? 100 : 20;
         const awareness = troop?.awareness ?? troop?.type?.awareness;
         const overlapDist = Number.isFinite(awareness) ? awareness : fallbackDist;
@@ -2230,28 +2462,17 @@ export class Player {
             troop.state === CONTROL_STATES.TRACK_TARGET ||
             troop.taskMeta?.state === CONTROL_STATES.TRACK_TARGET;
         const defenseSelection = isPlayerFighter ? this._selectTownDefenseTarget(troop) : null;
-        const hasTrackedEnemy = defenseSelection
-            ? !!defenseSelection.target
-            : this.mostClosestEnemy(troop, neighbours);
-        const trackedGO = defenseSelection
+        const hasDefenseTarget = !!defenseSelection?.target;
+        const fallbackTrackedEnemy = hasDefenseTarget ? false : this.mostClosestEnemy(troop, neighbours);
+        const hasTrackedEnemy = hasDefenseTarget || fallbackTrackedEnemy;
+        const trackedGO = hasDefenseTarget
             ? defenseSelection.target
             : troop.track?.[0]?.gameObject;
         if (!trackedGO?.active) {
             if (!hadTrackedTarget) {
                 return;
             }
-            if (troop.taskMeta?.state === CONTROL_STATES.TRACK_TARGET) {
-                InterruptController.interruptTroop(troop, "combat_target_lost", CONTROL_STATES.TRACK_MODE);
-            }
-            CombatSpacingCoordinator.clearTroopFocus(troop);
-            this.resetRoamState(troop);
-            troop.track = null;
-            troop.forcedTarget = null;
-            troop.currentPath?.splice?.(0);
-            troop.body?.setVelocity?.(0, 0);
-            if (troop.state === CONTROL_STATES.TRACK_TARGET) {
-                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-            }
+            fightManager.disengageFromCombat(troop, "combat_target_lost");
             return;
         }
         if (!hasTrackedEnemy && troop.state === CONTROL_STATES.TRACK_TARGET && !troop.track) {
@@ -2287,7 +2508,7 @@ export class Player {
         this._chaseOrBreachTarget(
             troop,
             trackedGO,
-            (defenseSelection?.shouldRepath ?? hasTrackedEnemy) || !troop.currentPath?.length
+            ((hasDefenseTarget ? defenseSelection?.shouldRepath : fallbackTrackedEnemy) ?? hasTrackedEnemy) || !troop.currentPath?.length
         );
     }
 
@@ -2352,7 +2573,7 @@ export class Player {
         return null;
     }
 
-    static _resumeAfterWaterInterrupt(troop, resume) {
+    static _resumeAfterBlockedTileInterrupt(troop, resume) {
         if (!troop?.active || !troop?.body) return;
 
         if (resume?.state != null) {
@@ -2398,13 +2619,16 @@ export class Player {
         if (troop.body.team !== 1) return false;
 
         const onWater = this._isOnWater(troop);
-        const swimming = troop._returnSwimActive === true;
-        if (onWater && !swimming && this._worldTileIsWalkableForTroop(troop, troop.x, troop.y)) {
-            return false;
-        }
-        if (!onWater && !swimming) return false;
+        const onBlockedTile = !this._worldTileIsWalkableForTroop(troop, troop.x, troop.y);
+        const hasCurrentPath = !!troop.currentPath?.length;
+        const blocked = onBlockedTile && !hasCurrentPath;
+        const recovering = troop._returnSwimActive === true;
+        if (!blocked && !recovering) return false;
 
-        if (onWater && !swimming) {
+        if (blocked && !recovering) {
+            const { navMesh } = this._getNavForTroop(troop);
+            if (navMesh) PathRegistry.unregisterUnit(navMesh, troop);
+            troop.__pendingPolyIds = [];
             troop._returnSwimResume = {
                 state: troop.state,
                 finalPos: troop.finalPos ? { x: troop.finalPos.x, y: troop.finalPos.y } : null,
@@ -2412,7 +2636,9 @@ export class Player {
             troop._returnSwimActive = true;
             troop._returnSwimTarget = this._nearestWalkableWorld(troop);
             troop.currentPath?.splice?.(0);
+            troop.finalPos = null;
             troop.body.setVelocity(0, 0);
+            PathDebugDrawer.onPathEnd(troop);
         }
 
         if (!troop._returnSwimTarget) {
@@ -2429,24 +2655,37 @@ export class Player {
         const dy = target.y - troop.y;
         const dist = Math.hypot(dx, dy);
 
-        if (!onWater) {
+        if (!blocked) {
             const resume = troop._returnSwimResume || null;
             troop._returnSwimActive = false;
             troop._returnSwimTarget = null;
             troop._returnSwimResume = null;
             troop.body.setVelocity(0, 0);
-            this._resumeAfterWaterInterrupt(troop, resume);
+            this._resumeAfterBlockedTileInterrupt(troop, resume);
             return true;
         }
 
         const speedBase = troop?.type?.speed ?? troop.speed ?? 90;
         const speedMultiplier = Math.max(0.5, Number(troop?.moveSpeedMultiplier ?? 1) || 1) * getMarketMoveMultiplier(troop);
         const swimSpeed = Math.max(60, speedBase * 0.85 * speedMultiplier * this.getMovementSlowFactor(troop));
+        const arrivalRadius = this._getPathArrivalRadius(troop, swimSpeed);
+        if (dist <= arrivalRadius) {
+            this._snapTroopToPoint(troop, target);
+            if (this._worldTileIsWalkableForTroop(troop, troop.x, troop.y)) {
+                const resume = troop._returnSwimResume || null;
+                troop._returnSwimActive = false;
+                troop._returnSwimTarget = null;
+                troop._returnSwimResume = null;
+                troop.body.setVelocity(0, 0);
+                this._resumeAfterBlockedTileInterrupt(troop, resume);
+                return true;
+            }
+        }
         const inv = dist > 0.001 ? 1 / dist : 0;
         const vx = dx * inv * swimSpeed;
         const vy = dy * inv * swimSpeed;
 
-        this.setAnimState(troop, troop.swim || troop.idle);
+        this.setAnimState(troop, onWater ? (troop.swim || troop.idle) : troop.walk);
         troop.body.setVelocity(vx, vy);
         AudioManager.tryPlayStep(troop);
 
@@ -2539,6 +2778,7 @@ export class Player {
             if (troop.state != CONTROL_STATES.SLEEP_MODE) {
                 this.followPath(troop);
             }
+            this._updateAmbientEmotes(troop);
 
             // 🔥 update world mini HP/ST bars
             this._updateMiniBars(troop);
@@ -2933,6 +3173,7 @@ export class Player {
         this._hideMiniBars(troop);
 
         this.clearPoseLock(troop, troop.idle);
+        this._clearStatusEmote(troop);
         troop.deferredCarry = null;
         troop.carrying = null;
         StorageManager.releaseDeliveryReservation(troop);

@@ -1,4 +1,4 @@
-import { UIDEPTH, estimatePressureContract, showAlert } from "../constants.js";
+import { UIDEPTH, showAlert } from "../constants.js";
 import { PRESSURE } from "../parcel_system/ParcelConfig.js";
 import { StageState } from "../parcelController/StageState.js";
 import { Teams } from "../Teams.js";
@@ -7,10 +7,10 @@ import { formatPermitCostText, getContractPermitCost } from "../permitSystem.js"
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../parcel_system/StoreUnlockSystem.js";
 import { getContractMoneyCost } from "../balance/GameBalance.js";
 import {
-  getSlotFavorBannerText,
-  getSlotFavorEffectText,
+  getSlotFavorConfig,
   getSlotFavorIconText,
   getSlotFavorShortLabel,
+  formatFavorDurationMs,
 } from "../parcel_system/SlotFavorSystem.js";
 
 const SLOT_ORDER = ["N", "E", "S", "W"];
@@ -31,9 +31,6 @@ const CONTRACT_DEFS = {
     lines: (scene) => [
       "Spawns a forest parcel.",
       "Timer-based resource run.",
-      "",
-      `Permit Cost: ${formatPermitCostText(getContractPermitCost("FOREST"))}`,
-      `Cash Cost: $${getContractMoneyCost(scene, "FOREST")}`,
     ],
   },
   ROCK: {
@@ -43,9 +40,6 @@ const CONTRACT_DEFS = {
     lines: (scene) => [
       "Spawns a rock parcel.",
       "Timer-based resource run.",
-      "",
-      `Permit Cost: ${formatPermitCostText(getContractPermitCost("ROCK"))}`,
-      `Cash Cost: $${getContractMoneyCost(scene, "ROCK")}`,
     ],
   },
   PRESSURE: {
@@ -58,11 +52,7 @@ const CONTRACT_DEFS = {
     title: "Market Contract",
     color: 0x14384c,
     lines: (scene) => [
-      "Temporary parcel storefront.",
-      "Sells bailout cards only.",
-      "",
-      `Permit Cost: ${formatPermitCostText(getContractPermitCost("MARKET"))}`,
-      `Cash Cost: $${getContractMoneyCost(scene, "MARKET")}`,
+      "Storefront with various goods.",
     ],
   },
   FARM: {
@@ -70,11 +60,7 @@ const CONTRACT_DEFS = {
     title: "Field Contract",
     color: 0x15803d,
     lines: (scene) => [
-      "Dark field parcel.",
-      "Mixed seed and berry bushes grow there.",
-      "",
-      `Permit Cost: ${formatPermitCostText(getContractPermitCost("FARM"))}`,
-      `Cash Cost: $${getContractMoneyCost(scene, "FARM")}`,
+      "Field Parcel containing seeds and berry bushes.",
     ],
   },
   MILITIA: {
@@ -82,11 +68,7 @@ const CONTRACT_DEFS = {
     title: "Militia Contract",
     color: 0x0f172a,
     lines: (scene) => [
-      "Hire temporary fighters.",
-      "Extra bodies for a short run.",
-      "",
-      `Permit Cost: ${formatPermitCostText(getContractPermitCost("MILITIA"))}`,
-      `Cash Cost: $${getContractMoneyCost(scene, "MILITIA")}`,
+      "Temporary defensive structure.",
     ],
   },
   LOCKED_MILITIA: {
@@ -113,12 +95,21 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
+function formatBonusDurationShort(ms = 0) {
+  const totalSeconds = Math.max(0, Math.ceil(Number(ms || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes > 0 && seconds > 0) return `${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${seconds}s`;
+}
+
 export class ContractHud {
   constructor(scene) {
     this.scene = scene;
     this.world = scene.worldScene;
     this.popupW = 280;
-    this.popupH = 256;
+    this.popupH = 262;
     this.root = scene.add.container(0, 0).setDepth(UIDEPTH + 5);
     this.squares = new Map();
     this.popupObjects = [];
@@ -315,6 +306,65 @@ export class ContractHud {
     return this.world?.parcelManager?.getSlotFavor?.(slotId) ?? null;
   }
 
+  _getSlotFavorTone(favor = null) {
+    const config = getSlotFavorConfig(favor);
+    if (config?.kind === "discount") {
+      return {
+        strokeColor: 0xf87171,
+        fillColor: 0x301116,
+        timerColor: "#fca5a5",
+        bodyColor: "#ffd9d9",
+        subtitleColor: "#ff9b9b",
+        buttonTextColor: "#ffb4b4",
+      };
+    }
+    if (config?.kind === "extended") {
+      return {
+        strokeColor: 0x60a5fa,
+        fillColor: 0x102744,
+        timerColor: "#93c5fd",
+        bodyColor: "#dcebff",
+        subtitleColor: "#9ed0ff",
+        buttonTextColor: "#dcebff",
+      };
+    }
+    if (config?.kind === "completion") {
+      return {
+        strokeColor: 0xfbbf24,
+        fillColor: 0x35260d,
+        timerColor: "#fcd34d",
+        bodyColor: "#fff0c4",
+        subtitleColor: "#ffd776",
+        buttonTextColor: "#fff0c4",
+      };
+    }
+    return {
+      strokeColor: 0xdbeafe,
+      fillColor: 0x0b1220,
+      timerColor: "#ffffff",
+      bodyColor: "#eef7ff",
+      subtitleColor: "#dbeafe",
+      buttonTextColor: "#ffffff",
+    };
+  }
+
+  _getSlotFavorHeadline(slotId, favor = null) {
+    const slotLabel = String(SLOT_LABELS[slotId] || "THIS").toLowerCase();
+    const config = getSlotFavorConfig(favor);
+    if (!config) return "";
+    if (config.kind === "discount") {
+      const percentOff = Math.round((1 - Math.max(0, Number(config.moneyMultiplier || 1))) * 100);
+      return `${percentOff}% off all ${slotLabel} contracts.`;
+    }
+    if (config.kind === "extended") {
+      return `All parcels last ${formatBonusDurationShort(config.durationBonusMs)} longer for ${slotLabel} contracts.`;
+    }
+    if (config.kind === "completion") {
+      return `Completed ${slotLabel} contracts pay an extra cash bonus.`;
+    }
+    return "";
+  }
+
   refreshForParcelStateChange() {
     this._refreshSquares();
     if (this.popup.visible && this.popupState) {
@@ -479,7 +529,7 @@ export class ContractHud {
         align: "center",
       }).setOrigin(0.5);
 
-      const timer = this.scene.add.text(0, 72, "BUY", {
+      const timer = this.scene.add.text(0, 66, "BUY", {
         fontFamily: "Bungee",
         fontSize: "12px",
         color: "#ffffff",
@@ -560,10 +610,20 @@ export class ContractHud {
       color: "#ffffff",
       stroke: "#000000",
       strokeThickness: 4,
-      wordWrap: { width: 244 },
+      wordWrap: { width: 206 },
     }).setOrigin(0, 0);
 
-    this.popupBody = this.scene.add.text(18, 52, "", {
+    this.popupSubtitle = this.scene.add.text(18, 42, "", {
+      fontFamily: "Bungee",
+      fontSize: "10px",
+      color: "#dbeafe",
+      stroke: "#000000",
+      strokeThickness: 3,
+      lineSpacing: 4,
+      wordWrap: { width: 226 },
+    }).setOrigin(0, 0).setVisible(false);
+
+    this.popupBody = this.scene.add.text(18, 74, "", {
       fontFamily: "Bungee",
       fontSize: "12px",
       color: "#f8fbff",
@@ -573,25 +633,35 @@ export class ContractHud {
       wordWrap: { width: 244 },
     }).setOrigin(0, 0);
 
-    this.popup.add([this.popupFrame, this.popupTitle, this.popupBody]);
+    this.popup.add([this.popupFrame, this.popupTitle, this.popupSubtitle, this.popupBody]);
     this.root.add(this.popup);
     this._setPopupTheme();
   }
 
   _setPopupTheme({
-    bgColor = 0x1f2937,
-    bgAlpha = 0.36,
+    bgColor = 0x101827,
+    bgAlpha = 0.82,
     strokeColor = 0xffffff,
     titleColor = "#ffffff",
     bodyColor = "#f8fbff",
+    subtitleColor = "#dbeafe",
   } = {}) {
     this.popupFrame.clear();
     this.popupFrame.fillStyle(bgColor, bgAlpha);
     this.popupFrame.fillRoundedRect(0, 0, this.popupW, this.popupH, 16);
-    this.popupFrame.lineStyle(2, strokeColor, 0.22);
+    this.popupFrame.lineStyle(2, strokeColor, 0.40);
     this.popupFrame.strokeRoundedRect(0, 0, this.popupW, this.popupH, 16);
     this.popupTitle.setColor(titleColor);
     this.popupBody.setColor(bodyColor);
+    this.popupSubtitle.setColor(subtitleColor);
+  }
+
+  _setPopupSubtitle(text = "", color = null) {
+    const next = String(text || "").trim();
+    this.popupSubtitle.setText(next);
+    this.popupSubtitle.setVisible(!!next);
+    if (color) this.popupSubtitle.setColor(color);
+    this.popupBody.setPosition(18, next ? 74 : 52);
   }
 
   _layout() {
@@ -620,7 +690,7 @@ export class ContractHud {
   _positionPopupFor(slotId) {
     const slot = this.squares.get(slotId);
     if (!slot) return;
-    const x = clamp(slot.group.x + 82, 160, Math.max(160, this.scene.scale.width - 150));
+    const x = clamp(slot.group.x + 20, 120, Math.max(160, this.scene.scale.width - 150));
     const y = clamp(slot.group.y - 12, 52, Math.max(52, this.scene.scale.height - (this.popupH + 20)));
     this.popup.setPosition(x, y);
   }
@@ -635,12 +705,13 @@ export class ContractHud {
     const slot = this.squares.get(slotId);
     if (!slot || !status) return;
 
-    const fillAlpha = status.fillAlpha ?? 0.94;
-    const isHovered = !!slot.hovered || !!slot.externalHovered;
-    const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
-    const iconColor = status.iconColor ?? "#ffffff";
+      const fillAlpha = status.fillAlpha ?? 0.94;
+      const isHovered = !!slot.hovered || !!slot.externalHovered;
+      const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
+      const iconColor = status.iconColor ?? "#ffffff";
+      const hasFavorTag = status.kind === "empty" && !!status.favor;
 
-    slot.frame.clear();
+      slot.frame.clear();
     if (fillAlpha > 0) {
       const boostedFill = isHovered ? Math.min(fillAlpha + 0.08, 1) : fillAlpha;
       slot.frame.fillStyle(status.fillColor ?? 0x111827, boostedFill);
@@ -652,9 +723,23 @@ export class ContractHud {
     slot.icon.setText(status.iconText);
     slot.icon.setColor(iconColor);
     slot.icon.setFontSize(status.iconSize ?? 24);
-    slot.timer.setText(status.timerText ?? "");
-    slot.timer.setVisible(!!status.timerText);
-    slot.timer.setColor(status.timerColor ?? "#ffffff");
+      slot.timer.setText(status.timerText ?? "");
+      slot.timer.setVisible(!!status.timerText);
+      slot.timer.setColor(status.timerColor ?? "#ffffff");
+      slot.timer.setY(hasFavorTag ? 62 : 66);
+      this.scene.tweens.killTweensOf(slot.timer);
+      slot.timer.setScale(1);
+      if (hasFavorTag) {
+        this.scene.tweens.add({
+          targets: slot.timer,
+          scaleX: 1.08,
+          scaleY: 1.08,
+          duration: 720,
+          yoyo: true,
+          repeat: -1,
+          ease: "Sine.easeInOut",
+        });
+      }
   }
 
   _getSlotStatus(slotId) {
@@ -715,14 +800,16 @@ export class ContractHud {
 
     const favor = this._getSlotFavor(slotId);
     if (favor) {
+      const tone = this._getSlotFavorTone(favor);
       return {
         kind: "empty",
         iconText: getSlotFavorIconText(favor),
         timerText: getSlotFavorShortLabel(favor),
-        fillColor: 0x10263a,
-        strokeColor: 0x86d7ff,
+        fillColor: tone.fillColor,
+        strokeColor: tone.strokeColor,
         iconSize: 24,
         fillAlpha: 0.88,
+        timerColor: tone.timerColor,
         favor,
       };
     }
@@ -1009,7 +1096,7 @@ export class ContractHud {
       const fortPopup = this._getFortPopupConfig();
       this._setPopupTheme(fortPopup.theme);
       this.popupTitle.setText(fortPopup.title);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("");
       this.popupBody.setText(fortPopup.body);
       return;
     }
@@ -1047,26 +1134,28 @@ export class ContractHud {
   _refreshSummaryPopup(slotId, status, withButtons = false) {
     const slotLabel = SLOT_LABELS[slotId];
     const skull = "\u{1F480}";
+    this._setPopupSubtitle("");
 
     if (status.kind === "pressure-incoming") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
-        bgAlpha: 0.34,
+        bgAlpha: 0.84,
         strokeColor: 0xfca5a5,
         titleColor: "#fff1f1",
         bodyColor: "#ffe1e1",
+        subtitleColor: "#ffd4d4",
       });
       const info = status.incoming;
       this.popupTitle.setText(`${skull} ${slotLabel} Pressure`);
-      this.popupBody.setPosition(18, 52);
       this.popupBody.setText(this._getPressureSummaryLines(info).join("\n"));
     } else if (status.kind === "pressure-live") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
-        bgAlpha: 0.36,
+        bgAlpha: 0.86,
         strokeColor: 0xfca5a5,
         titleColor: "#fff1f1",
         bodyColor: "#ffe1e1",
+        subtitleColor: "#ffd4d4",
       });
       const inst = status.contract;
       const totalSpawners = inst?.spawners?.length || inst?.difficulty || 1;
@@ -1074,7 +1163,6 @@ export class ContractHud {
       const totalRaiders = inst?.totalPlannedEnemies || (inst?.difficulty || 1) * (PRESSURE.baseEnemiesPerSpawner ?? 3);
       const aliveRaiders = Math.max(0, Number(inst?.spawned || 0) - Number(inst?.killed || 0));
       this.popupTitle.setText(`${skull} ${slotLabel} Pressure`);
-      this.popupBody.setPosition(18, 52);
       this.popupBody.setText(this._getPressureSummaryLines({
         hordeIndex: inst?.pressureHordeIndex ?? null,
         difficulty: inst?.difficulty || 1,
@@ -1093,14 +1181,14 @@ export class ContractHud {
       const def = CONTRACT_DEFS[inst?.type] || CONTRACT_DEFS.FOREST;
       this._setPopupTheme({
         bgColor: def.color ?? 0x1f2937,
-        bgAlpha: 0.34,
+        bgAlpha: 0.84,
         strokeColor: 0xffffff,
         titleColor: "#ffffff",
         bodyColor: "#eef7ff",
+        subtitleColor: "#dbeafe",
       });
       const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - this._getWorldNowMs());
       this.popupTitle.setText(`${def.emoji} ${slotLabel} ${def.title}`);
-      this.popupBody.setPosition(18, 52);
       this.popupBody.setText([
         `Time Left: ${fmtMMSS(remainingMs)}`,
         `${def.title} is active.`,
@@ -1109,9 +1197,7 @@ export class ContractHud {
     }
 
     if (withButtons) {
-      this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
-      ]);
+      this._addPopupCloseButton();
     }
   }
 
@@ -1123,26 +1209,9 @@ export class ContractHud {
       const fortPopup = this._getFortPopupConfig();
       this._setPopupTheme(fortPopup.theme);
       this.popupTitle.setText(fortPopup.title);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("");
       this.popupBody.setText(fortPopup.body);
-      this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
-      ]);
-      return;
-
-      this._setPopupTheme({
-        bgColor: 0x4c1d95,
-        bgAlpha: 0.34,
-        strokeColor: 0xfbbf24,
-        titleColor: "#fff5cf",
-        bodyColor: "#f6ecff",
-      });
-      this.popupTitle.setText("👑 North Fort");
-      this.popupBody.setPosition(18, 52);
-      this.popupBody.setText(this._getFortSummaryLines().join("\n"));
-      this._addPopupButtons([
-        { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
-      ]);
+      this._addPopupCloseButton();
       return;
     }
 
@@ -1150,34 +1219,27 @@ export class ContractHud {
     const slotLabel = SLOT_LABELS[slotId];
 
     if (view === "chooser") {
+      const slotFavor = this._getSlotFavor(slotId);
+      const tone = this._getSlotFavorTone(slotFavor);
+      const favorHeadline = this._getSlotFavorHeadline(slotId, slotFavor);
       this._setPopupTheme({
-        bgColor: 0x374151,
-        bgAlpha: 0.34,
-        strokeColor: 0xffffff,
+        bgColor: 0x0b1220,
+        bgAlpha: 0.86,
+        strokeColor: tone.strokeColor,
         titleColor: "#ffffff",
         bodyColor: "#e5edf7",
+        subtitleColor: tone.subtitleColor,
       });
       this.popupTitle.setText(`${slotLabel} Contract`);
-      this.popupBody.setPosition(18, 52);
-      const slotFavor = this._getSlotFavor(slotId);
-      const favorBanner = getSlotFavorBannerText(slotFavor);
-      this.popupBody.setText(
-        favorBanner
-          ? [
-              "Pick a contract to inspect, then buy it here.",
-              "",
-              `Slot Bonus: ${favorBanner.title}`,
-              favorBanner.detail,
-            ].join("\n")
-          : "Pick a contract to inspect, then buy it here."
-      );
+      this._setPopupSubtitle(favorHeadline, tone.subtitleColor);
+      this.popupBody.setText("");
       const buttons = [];
       this._getBuyableTypes().forEach((type, index) => {
         const def = CONTRACT_DEFS[type];
         const row = Math.floor(index / 2);
         const col = index % 2;
         const x = 74 + col * 132;
-        const y = 108 + row * 40;
+        const y = 102 + row * 46;
 
         const isLockedMilitia = type === "LOCKED_MILITIA";
         const cost = isLockedMilitia ? 0 : getContractPermitCost(type, 1);
@@ -1192,6 +1254,12 @@ export class ContractHud {
           label: isLockedMilitia
             ? `🔒 Level 3`
             : `${def.emoji} ${def.title.replace(" Contract", "")}\n${formatPermitCostText(cost)} + $${moneyCost}`,
+          textColor: slotFavor?.kind === "discount" && !isLockedMilitia ? "#ffb4b4" : "#ffffff",
+          strokeColor: slotFavor?.kind === "discount" && !isLockedMilitia ? 0xf87171 : 0xffffff,
+          fillColor: slotFavor?.kind === "discount" && !isLockedMilitia ? 0x341317 : 0xffffff,
+          fillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.20 : 0.10,
+          hoverFillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.30 : 0.16,
+          pressedFillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.38 : 0.22,
           tutorialKey: isLockedMilitia ? null : `contract:${type}`,
           onClick: () => {
             if (isLockedMilitia) {
@@ -1202,8 +1270,8 @@ export class ContractHud {
           },
         });
       });
-      buttons.push({ x: 140, y: 228, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() });
       this._addPopupButtons(buttons);
+      this._addPopupCloseButton();
       return;
     }
 
@@ -1211,76 +1279,204 @@ export class ContractHud {
       const type = this.popupState.type;
       if (type === "MILITIA" && !this._canAccessMilitia()) {
         this._setPopupTheme({
-          bgColor: 0x374151,
-          bgAlpha: 0.36,
+          bgColor: 0x111827,
+          bgAlpha: 0.86,
           strokeColor: 0xfbbf24,
           titleColor: "#ffffff",
           bodyColor: "#eef7ff",
+          subtitleColor: "#ffe08a",
         });
         this.popupTitle.setText("🔒 Locked");
-        this.popupBody.setPosition(18, 52);
+        this._setPopupSubtitle("", "#ffe08a");
         this.popupBody.setText([
           "Unlocks at Town XP Level 3.",
           "Militia parcel is not available yet.",
         ].join("\n"));
         this._addPopupButtons([
-          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
+          {
+            x: 78,
+            y: 226,
+            w: 90,
+            h: 32,
+            label: "Back",
+            fillColor: 0x581c24,
+            fillAlpha: 0.92,
+            hoverFillAlpha: 1,
+            pressedFillAlpha: 1,
+            strokeColor: 0xfca5a5,
+            strokeAlpha: 0.7,
+            textColor: "#ffe2e2",
+            onClick: () => this._tryBackToChooser(slotId),
+          },
         ]);
+        this._addPopupCloseButton();
         return;
       }
       if (type === "PRESSURE") {
         this._setPopupTheme({
           bgColor: 0x7f1d1d,
-          bgAlpha: 0.36,
+          bgAlpha: 0.86,
           strokeColor: 0xfca5a5,
           titleColor: "#fff1f1",
           bodyColor: "#ffe1e1",
+          subtitleColor: "#ffd4d4",
         });
         const diff = this.popupState.difficulty ?? 1;
-        const est = estimatePressureContract(this.world ?? this.scene, diff);
         this.popupTitle.setText("💀 Pressure Contract");
-        this.popupBody.setPosition(18, 52);
+        this._setPopupSubtitle("", "#ffd4d4");
+        this.popupBody.setPosition(18, 64);
         this.popupBody.setText([
-          `Difficulty: ${"💀".repeat(diff)}`,
-          `Permit Cost: ${formatPermitCostText(getContractPermitCost("PRESSURE", diff))}`,
-          `Cash Cost: $${getContractMoneyCost(this.world ?? this.scene, "PRESSURE", diff)}`,
-          `Max payout: $${est.gross}`,
-          `Spawners: ${est.spawners}`,
-          `Enemies: ${est.totalKills}`,
+          `${formatPermitCostText(getContractPermitCost("PRESSURE", diff))} + $${getContractMoneyCost(this.world ?? this.scene, "PRESSURE", diff)}`,
+          "Bigger raid contracts send more enemies and pay more if you clear the parcel.",
         ].join("\n"));
 
+        const selectedBtnFill = 0x4a0f14;
+        const selectedBtnStroke = 0xffd3d3;
+        const unselectedBtnFill = 0x241015;
+        const unselectedBtnStroke = 0xfca5a5;
         const buttons = [
-          { x: 56, y: 158, w: 60, h: 32, label: "💀 1", onClick: () => { this.popupState.difficulty = 1; this._renderPopup(); } },
-          { x: 140, y: 158, w: 60, h: 32, label: "💀 2", onClick: () => { this.popupState.difficulty = 2; this._renderPopup(); } },
-          { x: 224, y: 158, w: 60, h: 32, label: "💀 3", onClick: () => { this.popupState.difficulty = 3; this._renderPopup(); } },
-          { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
-          { x: 202, y: 220, w: 90, h: 32, label: "Start", tutorialKey: "contractBuy:PRESSURE", onClick: () => this._commit(slotId, { type: "PRESSURE", difficulty: diff }) },
+          {
+            x: 56,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "💀",
+            fillColor: diff === 1 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 1 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 1 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 1 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 1 ? 0.9 : 0.58,
+            textColor: "#fff1f1",
+            onClick: () => { this.popupState.difficulty = 1; this._renderPopup(); },
+          },
+          {
+            x: 140,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "💀💀",
+            fontSize: "11px",
+            fillColor: diff === 2 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 2 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 2 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 2 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 2 ? 0.9 : 0.58,
+            textColor: "#fff1f1",
+            onClick: () => { this.popupState.difficulty = 2; this._renderPopup(); },
+          },
+          {
+            x: 224,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "💀💀💀",
+            fontSize: "10px",
+            fillColor: diff === 3 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 3 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 3 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 3 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 3 ? 0.9 : 0.58,
+            textColor: "#fff1f1",
+            onClick: () => { this.popupState.difficulty = 3; this._renderPopup(); },
+          },
+          {
+            x: 78,
+            y: 226,
+            w: 90,
+            h: 32,
+            label: "Back",
+            fillColor: 0x581c24,
+            fillAlpha: 0.92,
+            hoverFillAlpha: 1,
+            pressedFillAlpha: 1,
+            strokeColor: 0xfca5a5,
+            strokeAlpha: 0.7,
+            textColor: "#ffe2e2",
+            onClick: () => this._tryBackToChooser(slotId),
+          },
+          {
+            x: 202,
+            y: 226,
+            w: 90,
+            h: 32,
+            label: "Buy",
+            fillColor: 0x14532d,
+            fillAlpha: 0.94,
+            hoverFillAlpha: 1,
+            pressedFillAlpha: 1,
+            strokeColor: 0x86efac,
+            strokeAlpha: 0.76,
+            textColor: "#eafff1",
+            tutorialKey: "contractBuy:PRESSURE",
+            onClick: () => this._commit(slotId, { type: "PRESSURE", difficulty: diff }),
+          },
         ];
         this._addPopupButtons(buttons);
+        this._addPopupCloseButton();
         return;
       }
 
       const def = CONTRACT_DEFS[type];
       const purchase = this._getPurchaseContext(slotId, type, 1);
-      const favorBanner = getSlotFavorBannerText(purchase.favor);
-      const favorEffect = getSlotFavorEffectText(this.world ?? this.scene, purchase.favor, { type, difficulty: 1 });
+      const tone = this._getSlotFavorTone(purchase.favor);
+      const stayText = type === "MILITIA"
+        ? "1 day"
+        : formatFavorDurationMs(purchase.durationMs);
       this._setPopupTheme({
         bgColor: def.color ?? 0x1f2937,
-        bgAlpha: 0.36,
-        strokeColor: 0xffffff,
+        bgAlpha: 0.86,
+        strokeColor: tone.strokeColor,
         titleColor: "#ffffff",
-        bodyColor: "#eef7ff",
+        bodyColor: purchase.favor?.kind === "discount" ? tone.bodyColor : "#eef7ff",
+        subtitleColor: tone.subtitleColor,
       });
       this.popupTitle.setText(`${def.emoji} ${def.title}`);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("", tone.subtitleColor);
       this.popupBody.setText([
+        `Stays for: ${stayText}`,
+        "",
         ...(def.lines?.(this.world ?? this.scene) ?? []),
-        ...(favorBanner ? ["", `Slot Bonus: ${favorBanner.title}`, favorEffect || favorBanner.detail] : []),
+        "",
+        `Permit Cost: ${formatPermitCostText(getContractPermitCost(type, 1))}`,
+        `Cash Cost: $${Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, 1)))}`,
       ].join("\n"));
       this._addPopupButtons([
-        { x: 78, y: 220, w: 90, h: 32, label: "← Back", onClick: () => this._tryBackToChooser(slotId) },
-        { x: 202, y: 220, w: 90, h: 32, label: "Buy", tutorialKey: `contractBuy:${type}`, onClick: () => this._commit(slotId, { type }) },
+        {
+          x: 78,
+          y: 226,
+          w: 90,
+          h: 32,
+          label: "Back",
+          fillColor: 0x581c24,
+          fillAlpha: 0.92,
+          hoverFillAlpha: 1,
+          pressedFillAlpha: 1,
+          strokeColor: 0xfca5a5,
+          strokeAlpha: 0.7,
+          textColor: "#ffe2e2",
+          onClick: () => this._tryBackToChooser(slotId),
+        },
+        {
+          x: 202,
+          y: 226,
+          w: 90,
+          h: 32,
+          label: "Buy",
+          fillColor: 0x14532d,
+          fillAlpha: 0.94,
+          hoverFillAlpha: 1,
+          pressedFillAlpha: 1,
+          strokeColor: 0x86efac,
+          strokeAlpha: 0.76,
+          textColor: "#eafff1",
+          tutorialKey: `contractBuy:${type}`,
+          onClick: () => this._commit(slotId, { type }),
+        },
       ]);
+      this._addPopupCloseButton();
       return;
     }
 
@@ -1288,22 +1484,24 @@ export class ContractHud {
     if (status.kind === "pressure-incoming") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
-        bgAlpha: 0.34,
+        bgAlpha: 0.84,
         strokeColor: 0xfca5a5,
         titleColor: "#fff1f1",
         bodyColor: "#ffe1e1",
+        subtitleColor: "#ffd4d4",
       });
       const info = status.incoming;
       this.popupTitle.setText(`💀 ${slotLabel} Pressure`);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("");
       this.popupBody.setText(this._getPressureSummaryLines(info).join("\n"));
     } else if (status.kind === "pressure-live") {
       this._setPopupTheme({
         bgColor: 0x7f1d1d,
-        bgAlpha: 0.36,
+        bgAlpha: 0.86,
         strokeColor: 0xfca5a5,
         titleColor: "#fff1f1",
         bodyColor: "#ffe1e1",
+        subtitleColor: "#ffd4d4",
       });
       const inst = status.contract;
       const totalSpawners = inst?.spawners?.length || inst?.difficulty || 1;
@@ -1311,7 +1509,7 @@ export class ContractHud {
       const totalRaiders = inst?.totalPlannedEnemies || (inst?.difficulty || 1) * (PRESSURE.baseEnemiesPerSpawner ?? 3);
       const aliveRaiders = Math.max(0, Number(inst?.spawned || 0) - Number(inst?.killed || 0));
       this.popupTitle.setText(`💀 ${slotLabel} Pressure`);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("");
       this.popupBody.setText(this._getPressureSummaryLines({
         hordeIndex: inst?.pressureHordeIndex ?? null,
         difficulty: inst?.difficulty || 1,
@@ -1328,32 +1526,52 @@ export class ContractHud {
     } else if (status.kind === "active") {
       const inst = status.contract;
       const def = CONTRACT_DEFS[inst?.type] || CONTRACT_DEFS.FOREST;
+      const tone = this._getSlotFavorTone(inst?.slotFavor);
       this._setPopupTheme({
         bgColor: def.color ?? 0x1f2937,
-        bgAlpha: 0.34,
-        strokeColor: 0xffffff,
+        bgAlpha: 0.84,
+        strokeColor: tone.strokeColor,
         titleColor: "#ffffff",
         bodyColor: "#eef7ff",
+        subtitleColor: tone.subtitleColor,
       });
       const remainingMs = Math.max(0, Number(inst?.expireAt || 0) - this._getWorldNowMs());
       this.popupTitle.setText(`${def.emoji} ${slotLabel} ${def.title}`);
-      this.popupBody.setPosition(18, 52);
+      this._setPopupSubtitle("", tone.subtitleColor);
       this.popupBody.setText([
         `Time Left: ${fmtMMSS(remainingMs)}`,
         `${def.title} is active.`,
         ...(inst?.slotFavor ? [`Slot Bonus: ${getSlotFavorShortLabel(inst.slotFavor)}`] : []),
       ].join("\n"));
     }
-
-    this._addPopupButtons([
-      { x: 140, y: 220, w: 90, h: 32, label: "Close", onClick: () => this._tryClosePopup() },
-    ]);
+    this._addPopupCloseButton();
   }
 
   _clearPopupButtons() {
     this.popupObjects.forEach((obj) => obj?.destroy?.());
     this.popupObjects = [];
     this.popupButtonRefs.clear();
+  }
+
+  _addPopupCloseButton() {
+    const btn = makeButton(this.scene, {
+      x: this.popupW - 22,
+      y: 22,
+      w: 24,
+      h: 24,
+      label: "X",
+      fontSize: "11px",
+      fillColor: 0x581c24,
+      fillAlpha: 0.92,
+      hoverFillAlpha: 1,
+      pressedFillAlpha: 1,
+      strokeColor: 0xfca5a5,
+      strokeAlpha: 0.7,
+      textColor: "#ffe2e2",
+      onClick: () => this._tryClosePopup(),
+    });
+    this.popup.add(btn);
+    this.popupObjects.push(btn);
   }
 
   _addPopupButtons(defs) {

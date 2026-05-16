@@ -12,6 +12,25 @@ import { getMarketWorkDuration } from "../Cards/MarketBuffs";
 export class seedManager {
     static scene;
 
+    static _recordGatherAchievement(scene, itemType) {
+        const name = itemType?.name || null;
+        if (name === UI_ITEM_TYPES.seedCrop.name) {
+            scene?.achievementSystem?.addStat?.("seedsGathered", 1);
+            return;
+        }
+        if (name === UI_ITEM_TYPES.seedBerry.name) {
+            scene?.achievementSystem?.addStat?.("berriesGathered", 1);
+            return;
+        }
+        if (name === UI_ITEM_TYPES.wood.name) {
+            scene?.achievementSystem?.addStat?.("woodGathered", 1);
+            return;
+        }
+        if (name === UI_ITEM_TYPES.stone.name) {
+            scene?.achievementSystem?.addStat?.("stoneGathered", 1);
+        }
+    }
+
     static _isWorldPickupTask(task) {
         return !!(task?.value?.resourceTileType?.gatherMode === "pickup");
     }
@@ -63,6 +82,7 @@ export class seedManager {
 
             if (itemType) {
                 StorageManager.addCarriedItem(sprite, itemType);
+                this._recordGatherAchievement(this.scene, itemType);
                 AudioManager.playPickup();
             }
 
@@ -100,6 +120,9 @@ export class seedManager {
             itemType = UI_ITEM_TYPES.stone;
         }
         const added = StorageManager.addCarriedItem(sprite, itemType)
+        if (added && itemType) {
+            this._recordGatherAchievement(this.scene, itemType);
+        }
         if (sprite.task && sprite.task.block && sprite.task.block.queuedOutline) {
             sprite.task.block.queuedOutline.destroy();
             sprite.task.block.queuedOutline = null;

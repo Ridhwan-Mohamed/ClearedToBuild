@@ -427,7 +427,10 @@ export default class CardsTab {
       wordWrap: { width: CARD_W - 124 },
       originY: 0,
     });
-    const body = makeText(scene, -CARD_W / 2 + 102, -CARD_H / 2 + 55, card.text, {
+    const bodyY = this.mode === "consumables"
+      ? -CARD_H / 2 + 55
+      : -CARD_H / 2 + 73;
+    const body = makeText(scene, -CARD_W / 2 + 102, bodyY, card.text, {
       fontSize: "10px",
       color: BOTTOM_BAR_THEME.textSoft,
       lineSpacing: 2,

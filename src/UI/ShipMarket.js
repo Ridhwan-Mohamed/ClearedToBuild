@@ -9,6 +9,7 @@ import { AudioManager } from "../Manager/AudioManager";
 import { addCardToInventory } from "../Cards/CardInventory";
 import {
   MARKET_CARD_OFFERS,
+  MARKET_CARD_SECTION,
   MARKET_CARD_SECTIONS,
   MARKET_CARDS_BY_SECTION,
   MARKET_PLACEHOLDER_ASSETS,
@@ -16,9 +17,13 @@ import {
   loadMarketCardPlaceholderAssets,
 } from "../Cards/MarketCards";
 import { getCardOutlineTint } from "./CardPreview";
+import { RELIEF_PACKAGE_PRICE } from "../ReliefPackageConfig";
 
 export const DEFAULT_MARKET_PRICES = Object.freeze(
-  Object.fromEntries(MARKET_CARD_OFFERS.map((card) => [card.id, card.price]))
+  Object.fromEntries([
+    ...MARKET_CARD_OFFERS.map((card) => [card.id, card.price]),
+    ["relief_package", RELIEF_PACKAGE_PRICE],
+  ])
 );
 
 export function loadParcelMarketAssets(scene) {
@@ -219,9 +224,99 @@ function makeCardOffer(scene, card, {
         return;
       }
       scene.events.emit("cards:updated");
+      scene.achievementSystem?.addStat?.("marketPurchases", 1);
       AudioManager.playMarketPurchase?.();
       showAlert(scene, `Bought ${card.name}`, "#aaffaa");
       onSold?.(card.id);
+    },
+  });
+
+  root.add([bg, iconPlate, icon, name, desc, priceText, buyButton]);
+  root._marketHitZones = [buyButton._marketHit].filter(Boolean);
+  return root;
+}
+
+function makeReliefPackageOffer(scene, {
+  x,
+  y,
+  w,
+  h,
+  price,
+  sold,
+  teamNumber,
+  onSold,
+}) {
+  const tint = 0xffd47c;
+  const alreadyStocked = !!scene?.hasReliefPackage?.(teamNumber);
+  const disabled = sold || alreadyStocked;
+  const buttonLabel = sold ? "SOLD" : alreadyStocked ? "STOCKED" : "BUY";
+  const root = scene.add.container(x, y);
+  const bg = scene.add.graphics();
+  drawGlassRect(bg, -w / 2, -h / 2, w, h, 8, {
+    fill: mixIntColor(0x17384d, tint, 0.12),
+    alpha: disabled ? 0.34 : 0.78,
+    stroke: tint,
+    strokeAlpha: disabled ? 0.14 : 0.38,
+    shineAlpha: disabled ? 0.02 : 0.06,
+    shadowAlpha: 0.06,
+  });
+
+  const iconPlate = scene.add.rectangle(-w / 2 + 30, -14, 42, 42, 0x0b1c27, 0.58)
+    .setStrokeStyle(2, tint, 0.38);
+  const icon = scene.textures.exists("relief_package")
+    ? scene.add.image(-w / 2 + 30, -14, "relief_package").setDisplaySize(30, 30)
+    : scene.add.rectangle(-w / 2 + 30, -14, 28, 28, tint, 0.3);
+  icon.setAlpha(disabled ? 0.35 : 1);
+
+  const name = scene.add.text(-w / 2 + 58, -33, "Relief Package", {
+    fontFamily: "Bungee",
+    fontSize: "10px",
+    color: disabled ? "#8fa1aa" : "#fff9ef",
+    stroke: "#081621",
+    strokeThickness: 3,
+    wordWrap: { width: w - 70 },
+  }).setOrigin(0, 0);
+
+  const desc = scene.add.text(-w / 2 + 58, -12, "Emergency storage recovery. Auto-deploys when all storages are lost. Limit 1.", {
+    fontFamily: "Bungee",
+    fontSize: "7px",
+    color: disabled ? "#6f8895" : "#d3edf9",
+    stroke: "#081621",
+    strokeThickness: 2,
+    lineSpacing: 1,
+    wordWrap: { width: w - 70 },
+  }).setOrigin(0, 0);
+
+  const priceText = scene.add.text(-w / 2 + 14, h / 2 - 20, `$${price}`, {
+    fontFamily: "Bungee",
+    fontSize: "11px",
+    color: disabled ? "#8fa1aa" : "#fff1b3",
+    stroke: "#081621",
+    strokeThickness: 3,
+  }).setOrigin(0, 0.5);
+
+  const buyButton = makeWorldButton(scene, w / 2 - 42, h / 2 - 20, 74, 26, buttonLabel, {
+    fill: disabled ? 0x2b3238 : 0x1f5c42,
+    stroke: disabled ? 0x74838c : 0x9dffa5,
+    disabled,
+    onClick: () => {
+      if (disabled) return;
+      if (!canAfford(scene, price)) {
+        AudioManager.playError?.();
+        return;
+      }
+      spend(scene, price);
+      const stockedCount = Number(scene.grantReliefPackage?.(teamNumber) || 0);
+      if (!(stockedCount > 0)) {
+        scene.updateMoney?.(price);
+        showAlert(scene, "Couldn't stock the relief package", "#ff5555");
+        AudioManager.playError?.();
+        return;
+      }
+      scene.achievementSystem?.addStat?.("marketPurchases", 1);
+      AudioManager.playMarketPurchase?.();
+      showAlert(scene, "Relief package stocked", "#aaffaa");
+      onSold?.("relief_package");
     },
   });
 
@@ -285,7 +380,7 @@ export function spawnParcelMarketStorefront(scene, {
     strokeThickness: 4,
   }).setOrigin(0, 0.5);
 
-  const subtitle = scene.add.text(-panelW / 2 + 28, -panelH / 2 + 56, "Cards bought here move to your card inventory.", {
+  const subtitle = scene.add.text(-panelW / 2 + 28, -panelH / 2 + 56, "Cards and emergency supplies are bought here.", {
     fontFamily: "Bungee",
     fontSize: "8px",
     color: "#d3edf9",
@@ -323,19 +418,39 @@ export function spawnParcelMarketStorefront(scene, {
       detailedLayer.add([headerBg, headerText]);
       detailedLayer._offerNodes.push(headerBg, headerText);
 
-      const cards = MARKET_CARDS_BY_SECTION[section.key] || [];
-      cards.forEach((card, index) => {
-        const price = Number(priceTable[card.id] ?? card.price ?? 0);
-        const offer = makeCardOffer(scene, card, {
+      const offers = [
+        ...(section.key === MARKET_CARD_SECTION.RECOVERY ? ["relief_package"] : []),
+        ...(MARKET_CARDS_BY_SECTION[section.key] || []),
+      ];
+      offers.forEach((offerDef, index) => {
+        const offerId = typeof offerDef === "string" ? offerDef : offerDef.id;
+        const price = Number(priceTable[offerId] ?? offerDef?.price ?? 0);
+        const offer = offerId === "relief_package"
+          ? makeReliefPackageOffer(scene, {
+            x: colX + colW / 2,
+            y: topY + index * (rowH + 10) + rowH / 2,
+            w: colW,
+            h: rowH,
+            price,
+            sold: sold.has(offerId),
+            teamNumber,
+            onSold: (nextOfferId) => {
+              sold.add(nextOfferId);
+              onSoldIdsChanged?.(Array.from(sold));
+              rebuildOffers();
+              applyMode(currentMode);
+            },
+          })
+          : makeCardOffer(scene, offerDef, {
           x: colX + colW / 2,
           y: topY + index * (rowH + 10) + rowH / 2,
           w: colW,
           h: rowH,
           price,
-          sold: sold.has(card.id),
+          sold: sold.has(offerId),
           teamNumber,
-          onSold: (cardId) => {
-            sold.add(cardId);
+          onSold: (nextOfferId) => {
+            sold.add(nextOfferId);
             onSoldIdsChanged?.(Array.from(sold));
             rebuildOffers();
             applyMode(currentMode);
@@ -399,6 +514,11 @@ export function spawnParcelMarketStorefront(scene, {
       if (nextMode !== currentMode) applyMode(nextMode);
     },
   });
+  const reliefPackageChanged = () => {
+    rebuildOffers();
+    applyMode(currentMode);
+  };
+  scene.events.on("relief-package:changed", reliefPackageChanged);
 
   const depart = (onDone) => {
     if (destroyed) {
@@ -433,6 +553,7 @@ export function spawnParcelMarketStorefront(scene, {
     destroy: () => {
       if (destroyed) return;
       destroyed = true;
+      scene.events.off("relief-package:changed", reliefPackageChanged);
       modeTimer?.remove(false);
       scene.tweens.killTweensOf(container);
       container.destroy(true);

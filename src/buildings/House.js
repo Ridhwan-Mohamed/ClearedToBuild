@@ -168,9 +168,18 @@ export class House {
     getSleepAnchorForOccupant(player) {
         if (!this.sprite) return null;
         const idx = Math.max(0, this.occupants?.indexOf(player) ?? 0);
+        const bounds = this.sprite.getBounds?.() || {
+            x: this.sprite.x,
+            y: this.sprite.y,
+            width: this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE),
+            height: this.sprite.displayHeight || (TILE_TYPES.house1.lenY * SQUARESIZE),
+            centerX: this.sprite.x + ((this.sprite.displayWidth || (TILE_TYPES.house1.lenX * SQUARESIZE)) * 0.5),
+            centerY: this.sprite.y + ((this.sprite.displayHeight || (TILE_TYPES.house1.lenY * SQUARESIZE)) * 0.5),
+        };
+        const sideOffset = Math.max(10, Math.round(bounds.width * 0.18));
         return {
-            x: this.sprite.x + 16 + idx * 28,
-            y: this.sprite.y - 20,
+            x: bounds.centerX + (idx <= 0 ? -sideOffset : sideOffset),
+            y: bounds.centerY + Math.min(10, Math.round(bounds.height * 0.16)),
             side: idx <= 0 ? "left" : "right",
             index: idx
         };
@@ -179,10 +188,13 @@ export class House {
     getSleepGlyphAnchorForOccupant(player) {
         const anchor = this.getSleepAnchorForOccupant(player);
         if (!anchor || !this.sprite) return anchor;
-        const spriteHeight = this.sprite.displayHeight || (TILE_TYPES.house1.lenY * SQUARESIZE);
+        const bounds = this.sprite.getBounds?.() || {
+            y: this.sprite.y,
+            centerY: this.sprite.y + ((this.sprite.displayHeight || (TILE_TYPES.house1.lenY * SQUARESIZE)) * 0.5),
+        };
         return {
             ...anchor,
-            y: this.sprite.y + Math.round(spriteHeight * 0.5)
+            y: bounds.centerY - 6
         };
     }
 

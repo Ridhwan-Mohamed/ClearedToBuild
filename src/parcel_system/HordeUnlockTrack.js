@@ -12,14 +12,7 @@ const HORDE_UNLOCKS = Object.freeze([
     accentColor: 0x8b5cf6,
     glowColor: 0xd8b4fe,
     panelColor: 0x1a1230,
-    compositeArt: {
-      textureKey: "horde_unlock_blademaster_composite",
-      width: 96,
-      height: 96,
-      parts: [
-        { key: "blademaster_walk_down", frame: 1, x: 48, y: 56, scale: 2.2, useSprite: true },
-      ],
-    },
+    portraitKey: "portrait_blademaster_healthy",
   },
   {
     hordeIndex: 2,
@@ -32,14 +25,7 @@ const HORDE_UNLOCKS = Object.freeze([
     accentColor: 0x60a5fa,
     glowColor: 0xbfdbfe,
     panelColor: 0x132238,
-    compositeArt: {
-      textureKey: "horde_unlock_gunslinger_composite",
-      width: 96,
-      height: 96,
-      parts: [
-        { key: "gunslinger_walk_down", frame: 1, x: 48, y: 56, scale: 2.15, useSprite: true },
-      ],
-    },
+    portraitKey: "portrait_gunslinger_healthy",
   },
   {
     hordeIndex: 4,

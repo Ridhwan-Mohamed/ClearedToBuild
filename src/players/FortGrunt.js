@@ -133,6 +133,7 @@ export class FortGrunt {
         const scene = troop.scene;
         const silentStageCleanup = !!opts?.silentStageCleanup;
 
+        Player._playDeathAnimation?.(troop);
         Player._destroyMiniBars(troop);
 
         if (!silentStageCleanup) {

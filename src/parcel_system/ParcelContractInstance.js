@@ -5,6 +5,7 @@ import { buildResourceParcelTerrainPlan, paintResourceParcel, paintWaterRect } f
 import { ParcelRevealAnimator } from "./ParcelRevealAnimator.js";
 import { buildPressureSpawnerPlan, createPressureSpawners } from "./PressureSpawner.js";
 import { PARCEL_SIZE, RESOURCE_CONTRACT_MS } from "./ParcelConfig.js";
+import { AudioManager } from "../Manager/AudioManager.js";
 import { Map as GameMap } from "../map.js";
 import { TILE_TYPES, TILE_MAP, SQUARESIZE, colorFor, removeFromArray } from "../constants.js";
 import { spawnParcelMarketStorefront, DEFAULT_MARKET_PRICES } from "../UI/ShipMarket";
@@ -426,10 +427,16 @@ export class ParcelContractInstance {
         waterSourceUpdate: {
           excludeParcelId: this.id,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       });
     } else {
       if (this.scene?.zoomMixer?.mode !== "overview") M.reDraw?.();
       this.scene?.rebuildBothNavMeshes?.();
+      this.scene?.zoomMixer?.buildOverviewTextureFromGrid?.(
+        this.map.grid,
+        SQUARESIZE,
+        (cell) => colorFor(cell)
+      );
     }
   }
 
@@ -762,6 +769,7 @@ export class ParcelContractInstance {
           slotId: this.slotId,
           landParcel: true,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       });
       return true;
     }
@@ -882,6 +890,7 @@ export class ParcelContractInstance {
         waterSourceUpdate: {
           excludeParcelId: this.id,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       });
       return true;
     }
@@ -890,6 +899,11 @@ export class ParcelContractInstance {
       this.map.reDraw?.();
     }
     this.scene?.rebuildBothNavMeshes?.();
+    this.scene?.zoomMixer?.buildOverviewTextureFromGrid?.(
+      this.map.grid,
+      SQUARESIZE,
+      (cell) => colorFor(cell)
+    );
     return true;
   }
 
@@ -939,6 +953,7 @@ export class ParcelContractInstance {
       slotId: this.slotId,
       size: PARCEL_SIZE,
       alpha: 0.5,
+      playThuds: true,
     });
 
     let navDone = false;
@@ -976,6 +991,7 @@ export class ParcelContractInstance {
           slotId: this.slotId,
           landParcel: true,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       };
       const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
         navPolys: navResult.navPolys,
@@ -991,6 +1007,7 @@ export class ParcelContractInstance {
       }
 
       await reveal.complete();
+      AudioManager.playBuildingComplete({ volume: 0.22 });
       this._startResourceLifecycle(this.contractDurationMs ?? settings.ms);
       return { refreshHandled: true };
     } catch (err) {
@@ -1030,6 +1047,7 @@ export class ParcelContractInstance {
       slotId: this.slotId,
       size: PARCEL_SIZE,
       alpha: 0.5,
+      playThuds: true,
     });
 
     let navDone = false;
@@ -1063,6 +1081,7 @@ export class ParcelContractInstance {
           slotId: this.slotId,
           landParcel: true,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       };
       const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
         navPolys: navResult.navPolys,
@@ -1078,6 +1097,7 @@ export class ParcelContractInstance {
       }
 
       await reveal.complete();
+      AudioManager.playBuildingComplete({ volume: 0.22 });
       return { refreshHandled: true };
     } catch (err) {
       reveal?.destroy?.();
@@ -1450,6 +1470,7 @@ export class ParcelContractInstance {
         waterSourceUpdate: {
           excludeParcelId: this.id,
         },
+        forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       };
       const refreshHandled = !!(navResult && this.scene?.applyPreparedNavMeshes?.({
         navPolys: navResult.navPolys,

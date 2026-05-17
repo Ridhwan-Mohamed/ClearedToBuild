@@ -1,6 +1,7 @@
 // players/Raider.js
 import { SQUARESIZE, CONTROL_STATES, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_MAP, TILE_TYPES } from "../constants";
 import { Player } from "./Player";
+import { AudioManager } from "../Manager/AudioManager";
 import { Teams } from "../Teams";
 import { Manager } from "../Manager/Manager";
 import { Map } from "../map";
@@ -178,6 +179,7 @@ export class Raider {
 
             Player.setAnimState(troop, troop.swim || troop.idle);
             troop.body.setVelocity(vx, vy);
+            AudioManager.tryPlayStep(troop);
             updateDirectionalAnimationFromVelocity(troop, vx, vy, true);
 
             if (!shouldUseDirectionalFacing(troop)) {

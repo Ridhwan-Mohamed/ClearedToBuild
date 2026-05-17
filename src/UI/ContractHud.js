@@ -1260,7 +1260,7 @@ export class ContractHud {
           fillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.20 : 0.10,
           hoverFillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.30 : 0.16,
           pressedFillAlpha: slotFavor?.kind === "discount" && !isLockedMilitia ? 0.38 : 0.22,
-          tutorialKey: isLockedMilitia ? null : `contract:${type}`,
+          tutorialKey: isLockedMilitia ? "contract:LOCKED_MILITIA" : `contract:${type}`,
           onClick: () => {
             if (isLockedMilitia) {
               this._showMilitiaLockedMessage();

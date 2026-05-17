@@ -2,6 +2,11 @@ import Phaser from "phaser";
 import { UIDEPTH } from "../constants.js";
 import { AudioManager } from "../Manager/AudioManager.js";
 import { TUTORIAL_SPEAKERS } from "./TutorialAssets.js";
+import {
+  createBodyTextStyle,
+  createDisplayTextStyle,
+  createLabelTextStyle,
+} from "../UI/Typography.js";
 
 const OVERLAY_DEPTH = UIDEPTH + 520;
 const TYPE_DELAY_MS = 27;
@@ -22,6 +27,7 @@ export class TutorialOverlay {
     this._avatarFrameIndex = 0;
     this._spaceHandler = null;
     this._resizeHandler = null;
+    this.stepTitle = null;
   }
 
   destroy() {
@@ -51,24 +57,22 @@ export class TutorialOverlay {
     const height = 250;
     const bg = this.scene.add.graphics();
     this._drawPanel(bg, width, height, 0x123148, 0x9ee7ff, 26);
-    const title = this.scene.add.text(0, -78, "PLAY SHORT TUTORIAL?", {
-      fontFamily: "Bungee",
-      fontSize: "24px",
+    const title = this.scene.add.text(0, -78, "PLAY SHORT TUTORIAL?", createDisplayTextStyle({
+      fontSize: 24,
+      min: 22,
       color: "#f4fbff",
       stroke: "#04111a",
-      strokeThickness: 5,
+      strokeThickness: 4,
       align: "center",
-    }).setOrigin(0.5);
-    const body = this.scene.add.text(0, -24, "A quick guided start explains farming, parcels, building, water and defense.", {
-      fontFamily: "Bungee",
-      fontSize: "13px",
+    })).setOrigin(0.5);
+    const body = this.scene.add.text(0, -24, "A quick guided start explains farming, parcels, building, water and defense.", createBodyTextStyle({
+      fontSize: 16,
+      min: 14,
       color: "#c7e8f5",
-      stroke: "#04111a",
-      strokeThickness: 3,
       align: "center",
       wordWrap: { width: width - 86 },
       lineSpacing: 6,
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
 
     const yes = this._makeButton(-112, 74, 166, "START", "#eafffb", 0x1f7667, onStart);
     const no = this._makeButton(112, 74, 166, "SKIP", "#ffe7ed", 0x682a3a, onSkip);
@@ -94,6 +98,21 @@ export class TutorialOverlay {
     this.avatar.anims?.stop?.();
     this.avatar.setTexture(speaker.textureKey, 0).setFrame(0).setVisible(true);
     this.nameText.setText(speaker.name).setColor(speaker.textColor);
+    const titleText = String(step.titleText || "").trim();
+    this.stepTitle
+      .setText(titleText)
+      .setVisible(!!titleText)
+      .setStyle(createDisplayTextStyle({
+        fontSize: 18,
+        min: 16,
+        color: step.titleColor || "#ffd166",
+        stroke: step.titleStroke || "#082131",
+        strokeThickness: Number.isFinite(Number(step.titleStrokeThickness))
+          ? Number(step.titleStrokeThickness)
+          : 4,
+        align: "left",
+        wordWrap: { width: 480 },
+      }));
     this.fullText = String(step.text || "");
     this.visibleText = "";
     this.bodyText.setText("");
@@ -160,41 +179,44 @@ export class TutorialOverlay {
     this.avatar = this.scene.add.sprite(0, 0, TUTORIAL_SPEAKERS.farmer.textureKey, 0)
       .setOrigin(0.5)
       .setDisplaySize(128, 128);
-    this.nameText = this.scene.add.text(0, 0, "", {
-      fontFamily: "Bungee",
-      fontSize: "13px",
+    this.nameText = this.scene.add.text(0, 0, "", createDisplayTextStyle({
+      fontSize: 14,
+      min: 14,
       color: "#ffffff",
-      stroke: "#04111a",
-      strokeThickness: 4,
-      align: "center",
-    }).setOrigin(0.5);
-    this.bodyText = this.scene.add.text(0, 0, "", {
-      fontFamily: "Bungee",
-      fontSize: "15px",
-      color: "#f4fbff",
-      stroke: "#04111a",
-      strokeThickness: 3,
-      align: "left",
-      lineSpacing: 5,
-      wordWrap: { width: 480 },
-    }).setOrigin(0, 0);
-    this.nextBg = this.scene.add.graphics();
-    this.nextText = this.scene.add.text(0, 0, "NEXT", {
-      fontFamily: "Bungee",
-      fontSize: "13px",
-      color: "#eafffb",
-      stroke: "#04111a",
-      strokeThickness: 3,
-      align: "center",
-    }).setOrigin(0.5);
-    this.nextHint = this.scene.add.text(0, 0, "click or press space", {
-      fontFamily: "Bungee",
-      fontSize: "8px",
-      color: "#bfe9f5",
       stroke: "#04111a",
       strokeThickness: 2,
       align: "center",
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
+    this.stepTitle = this.scene.add.text(0, 0, "", createDisplayTextStyle({
+      fontSize: 18,
+      min: 16,
+      color: "#ffd166",
+      stroke: "#082131",
+      strokeThickness: 4,
+      align: "left",
+    })).setOrigin(0, 0).setVisible(false);
+    this.stepTitle.setShadow(0, 2, "#021018", 2, true, true);
+    this.bodyText = this.scene.add.text(0, 0, "", createBodyTextStyle({
+      fontSize: 16,
+      min: 14,
+      color: "#f4fbff",
+      align: "left",
+      lineSpacing: 5,
+      wordWrap: { width: 480 },
+    })).setOrigin(0, 0);
+    this.nextBg = this.scene.add.graphics();
+    this.nextText = this.scene.add.text(0, 0, "NEXT", createLabelTextStyle({
+      fontSize: 13,
+      min: 13,
+      color: "#eafffb",
+      align: "center",
+    })).setOrigin(0.5);
+    this.nextHint = this.scene.add.text(0, 0, "click or press space", createBodyTextStyle({
+      fontSize: 12,
+      min: 12,
+      color: "#bfe9f5",
+      align: "center",
+    })).setOrigin(0.5);
     this.nextHit = this.scene.add.zone(0, 0, 116, 42)
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
@@ -210,6 +232,7 @@ export class TutorialOverlay {
       this.avatarPlate,
       this.avatar,
       this.nameText,
+      this.stepTitle,
       this.bodyText,
       this.nextBg,
       this.nextText,
@@ -256,18 +279,22 @@ export class TutorialOverlay {
     const width = this.scene.scale.width;
     const height = this.scene.scale.height;
     const compact = width <= 1680 || height <= 1100 || !!this.scene.uiBottomBar?.expanded;
+    const hasTitle = !!(this.currentStep?.titleText && this.stepTitle?.visible);
+    const titleExtra = hasTitle ? (compact ? 24 : 28) : 0;
     const panelW = compact
       ? Phaser.Math.Clamp(Math.round(width * 0.48), 430, 620)
       : Phaser.Math.Clamp(width - 48, 560, 720);
     const avatarSize = compact
       ? Phaser.Math.Clamp(Math.round(height * 0.084), 76, 96)
       : Phaser.Math.Clamp(Math.round(height * 0.108), 98, 128);
-    const panelH = compact
+    const panelH = (compact
       ? Math.max(126, avatarSize + 48)
-      : Math.max(158, avatarSize + 50);
+      : Math.max(158, avatarSize + 50)) + titleExtra;
     const { x, y } = this._chooseSpeechPosition(panelW, panelH);
     const bubbleX = 14 + avatarSize + 18;
     const bubbleW = panelW - avatarSize - 28;
+    const titleY = compact ? 18 : 22;
+    const bodyY = hasTitle ? titleY + (compact ? 24 : 30) : (compact ? 18 : 22);
 
     this.root.setPosition(x, y);
     this.shadow.clear();
@@ -285,10 +312,15 @@ export class TutorialOverlay {
     this.nameText
       .setFontSize(compact ? "10px" : "12px")
       .setPosition(14 + avatarSize / 2, 18 + avatarSize + 11);
+    this.stepTitle
+      .setFontSize(compact ? "15px" : "18px")
+      .setPosition(bubbleX, titleY)
+      .setWordWrapWidth(Math.max(220, bubbleW - 34))
+      .setVisible(hasTitle);
     this.bodyText
       .setFontSize(compact ? "13px" : "15px")
       .setLineSpacing(compact ? 4 : 5)
-      .setPosition(bubbleX, compact ? 18 : 22);
+      .setPosition(bubbleX, bodyY);
     this.bodyText.setWordWrapWidth(Math.max(260, bubbleW - 34));
     this.nextBg.setPosition(bubbleX + bubbleW - 68, panelH - 34);
     this.nextText
@@ -455,13 +487,11 @@ export class TutorialOverlay {
       bg.strokeRoundedRect(x - width / 2, y - 29, width, 58, 18);
     };
     draw(false);
-    const text = this.scene.add.text(x, y, label, {
-      fontFamily: "Bungee",
-      fontSize: "16px",
+    const text = this.scene.add.text(x, y, label, createLabelTextStyle({
+      fontSize: 16,
+      min: 16,
       color,
-      stroke: "#04111a",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
     const hit = this.scene.add.zone(x, y, width, 58).setInteractive({ useHandCursor: true });
     hit.on("pointerover", () => draw(true));
     hit.on("pointerout", () => draw(false));

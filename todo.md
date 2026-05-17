@@ -9,6 +9,12 @@
 ### Status Updates
 - Redesign to make larger and more self-explanatory.
 
+### Rename
+- new game name :( [done]
+- new big logo [done]
+- new mini logo [done]
+- new icon
+
 ### UI
 - Improve fonts for smaller screens.
 
@@ -16,8 +22,8 @@
 - Fix wall preference.
 
 ### tutorial
-- processv2 lol
-- mention rock gives you money and rock
+- processv2 lol [done]
+- mention rock gives you money and rock [done]
 
 ### Bugs
 - Turret and catapults are not properly configurable.
@@ -96,8 +102,8 @@
 - progress bar not filling up, figure out or remove [done]
 
 ### projectile players
-- movement still weird, fix
-- some buildings bullets go through
+- movement still weird, fix [done]
+- some buildings bullets go through [done]
 - delete bullets that miss [done]
 
 ### Players
@@ -112,8 +118,9 @@
 
 ### Workers
 - Fireman should add cooked water to storage whenever made, even if in `idle` mode. [done]
-<!-- - Foragers are not coming back when done foraging.
-- Builders should not be fixing a building simultaneously while it is being hit. -->
+- forager pick up art redo
+- Foragers are not coming back when done foraging.
+- Builders should not be fixing a building simultaneously while it is being hit.
 
 ### Pause Menu [done]
 - Remove useless text. [done]

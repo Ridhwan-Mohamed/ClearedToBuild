@@ -35,6 +35,9 @@ import bloop from 'url:../assets/audio/bloop.ogg';
 import whoosh from 'url:../assets/audio/whoosh.ogg';
 import swipe from 'url:../assets/audio/swipe.ogg';
 import swimming_sfx from 'url:../assets/audio/swimming.ogg';
+import swim1_sfx from 'url:../assets/audio/swim1.ogg';
+import swim2_sfx from 'url:../assets/audio/swim2.ogg';
+import swim3_sfx from 'url:../assets/audio/swim3.ogg';
 import error_sfx from 'url:../assets/audio/error.ogg';
 import type_sfx from 'url:../assets/audio/type.ogg';
 import thud_click from 'url:../assets/audio/thud_click.ogg';
@@ -77,6 +80,7 @@ export class AudioManager {
   static _nextUiHoverAt = 0;
   static LAYOUT_MOVE_COOLDOWN_MS = 55;
   static _nextLayoutMoveAt = 0;
+  static _lastSwimMoveSoundKey = null;
   static FLEE_SCREAM_WINDOW_MS = 850;
   static recentFleeStarts = [];
 
@@ -107,6 +111,9 @@ export class AudioManager {
 
     scene.load.audio("sfx_step",        step_sfx);
     scene.load.audio("sfx_swim",        swimming_sfx);
+    scene.load.audio("sfx_swim_move_1", swim1_sfx);
+    scene.load.audio("sfx_swim_move_2", swim2_sfx);
+    scene.load.audio("sfx_swim_move_3", swim3_sfx);
 
     scene.load.audio("sfx_axe_chop",    axe_chop);
     scene.load.audio("sfx_rock_hit",    rock_hit);
@@ -256,8 +263,8 @@ export class AudioManager {
   static tryPlayStep(sprite) {
     if (!this.scene) return;
     const isSwimming = this._isSpriteSwimming(sprite);
-    const soundKey = isSwimming ? "sfx_swim" : "sfx_step";
-    if (!this.scene.cache.audio.exists(soundKey)) return;
+    const soundKey = isSwimming ? this._pickSwimMoveSoundKey() : "sfx_step";
+    if (!soundKey || !this.scene.cache.audio.exists(soundKey)) return;
 
     const now = this.scene.time.now;
     if (sprite._phxNextMoveSfxAt == null) sprite._phxNextMoveSfxAt = 0;
@@ -909,7 +916,30 @@ export class AudioManager {
   static _isSpriteSwimming(sprite) {
     if (!sprite?.active) return false;
     if (sprite._returnSwimActive === true) return true;
+    if (sprite.isSwimming === true) return true;
     return this._tileTypeAtWorld(sprite.x, sprite.y) === "water";
+  }
+
+  static _pickSwimMoveSoundKey() {
+    if (!this.scene) return null;
+
+    const keys = [
+      "sfx_swim_move_1",
+      "sfx_swim_move_2",
+      "sfx_swim_move_3",
+    ].filter((key) => this.scene.cache.audio.exists(key));
+
+    if (!keys.length) {
+      return this.scene.cache.audio.exists("sfx_swim") ? "sfx_swim" : null;
+    }
+
+    const pool = (keys.length > 1 && this._lastSwimMoveSoundKey)
+      ? keys.filter((key) => key !== this._lastSwimMoveSoundKey)
+      : keys;
+    const options = pool.length ? pool : keys;
+    const chosen = options[Math.floor(Math.random() * options.length)];
+    this._lastSwimMoveSoundKey = chosen;
+    return chosen;
   }
 
   static _tileTypeAtWorld(x, y) {

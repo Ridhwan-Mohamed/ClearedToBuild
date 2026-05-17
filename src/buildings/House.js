@@ -69,6 +69,17 @@ export class House {
                 });
         Map.drawRoadAround(x,y,houseType,team);
         Map.addBlockItem(x,y,houseType);
+        this.collider = Map.addStructureBarrier(
+            x * SQUARESIZE + ((houseType?.lenX ?? 1) * SQUARESIZE) / 2,
+            y * SQUARESIZE + ((houseType?.lenY ?? 1) * SQUARESIZE) / 2,
+            (houseType?.lenX ?? 1) * SQUARESIZE,
+            (houseType?.lenY ?? 1) * SQUARESIZE,
+            {
+                team: this.team,
+                buildingRef: this,
+            }
+        );
+        if (this.collider) this.collider.isBuilding = true;
 
         if(team == 1){
             const cx = x + Math.floor(houseType.lenX/2);
@@ -472,6 +483,8 @@ export class House {
         destroyStructuralHealthBar(this);
         this.sleepFxContainer?.destroy();
         playBuildingCollapseSmoke(this);
+        Map.removeStructureBarrier(this.collider);
+        this.collider = null;
         this.sprite?.destroy();
         this.clearIcons?.();
         this.scene?.events?.emit?.("housing:updated", this.team);

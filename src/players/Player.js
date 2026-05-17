@@ -30,6 +30,7 @@ import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 import { SiegePlanner } from "../lib/navmesh/SiegePlanner";
 import { OrderRunner } from "../orders/OrderRunner";
 import { getMarketMoveMultiplier } from "../Cards/MarketBuffs";
+import { Wall } from "../buildings/Wall";
 import {
     faceDirectionalTowardVector,
     shouldUseDirectionalFacing,
@@ -2302,7 +2303,8 @@ export class Player {
     }
 
     static _planBreachTicketsForTarget(troop, target) {
-        if (!troop?.active || troop.body?.team !== 1 || !this._isFighterUnit(troop)) return false;
+        const troopTeamNumber = Number(troop?.body?.team);
+        if (!troop?.active || !Number.isFinite(troopTeamNumber) || !this._isFighterUnit(troop)) return false;
         const now = troop.scene?.getSimulationNow?.() ?? troop.scene?.simNowMs ?? troop.scene?.time?.now ?? 0;
         if (troop._nextBreachPlanAt && now < troop._nextBreachPlanAt) return false;
         troop._nextBreachPlanAt = now + 500;
@@ -2317,7 +2319,7 @@ export class Player {
         const breachTiles = planner?.planBreach?.(troop.x, troop.y, perimeter);
         if (!breachTiles?.length) return false;
 
-        const team = Teams.teamLists["1"];
+        const team = Teams.getTeam(troopTeamNumber);
         if (!team?.enemyDestroyTileStates) return false;
         if (!team._breachSeen) team._breachSeen = new Set();
 
@@ -2330,6 +2332,8 @@ export class Player {
             const top = Array.isArray(cell) ? cell[1] : cell;
             const typeName = TILE_MAP(top);
             if (typeName !== "wall" && typeName !== "woodWall" && typeName !== "wall_door" && typeName !== "woodWall_door") continue;
+            const wall = Wall.getAt(t.x, t.y);
+            if (wall?.team === troopTeamNumber) continue;
 
             const key = `${t.x},${t.y}`;
             if (team._breachSeen.has(key)) continue;

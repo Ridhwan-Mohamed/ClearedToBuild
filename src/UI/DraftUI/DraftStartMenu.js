@@ -13,6 +13,12 @@ import {
   REQUIRED_STARTER_TYPES,
 } from "./DraftStarterDecks.js";
 import { AudioManager } from "../../Manager/AudioManager.js";
+import {
+  BODY_FONT_FAMILY,
+  createBodyTextStyle,
+  createDisplayTextStyle,
+  createLabelTextStyle,
+} from "../Typography.js";
 
 const RESOURCE_LAYOUT = [
   { key: "money", icon: "monies", label: "Cash" },
@@ -95,8 +101,6 @@ export class DraftStartMenu {
     this.selectedPlacedBuildingGrab = { x: 0, y: 0 };
     this._boundPointerMove = null;
     this._boundPointerDown = null;
-
-    this._installDraftTextTheme();
   }
 
   destroy() {
@@ -113,35 +117,6 @@ export class DraftStartMenu {
 
     this.container?.destroy?.(true);
     this.container = null;
-    this._uninstallDraftTextTheme();
-  }
-
-  _installDraftTextTheme() {
-    if (this._draftTextThemeInstalled) return;
-    const add = this.scene?.add;
-    if (!add?.text) return;
-
-    this._originalAddText = add.text.bind(add);
-    add.text = (x, y, text, style = {}) => {
-      const nextStyle = style && typeof style === "object" ? { ...style } : {};
-      if (!nextStyle.fontFamily) nextStyle.fontFamily = "Bungee";
-      const themedText =
-        nextStyle.fontFamily === "Bungee" && typeof text === "string"
-          ? text.toUpperCase()
-          : text;
-      return this._originalAddText(x, y, themedText, nextStyle);
-    };
-
-    this._draftTextThemeInstalled = true;
-  }
-
-  _uninstallDraftTextTheme() {
-    if (!this._draftTextThemeInstalled) return;
-    if (this.scene?.add && this._originalAddText) {
-      this.scene.add.text = this._originalAddText;
-    }
-    this._originalAddText = null;
-    this._draftTextThemeInstalled = false;
   }
 
   buildUI() {
@@ -243,8 +218,56 @@ export class DraftStartMenu {
     };
   }
 
-  _fontPx(base, min = 8, scale = this.layout?.scale ?? 1) {
-    return `${Math.max(min, Math.round(base * scale))}px`;
+  _fontValue(base, min = 8, scale = this.layout?.scale ?? 1) {
+    return Math.max(min, Math.round(base * scale));
+  }
+
+  _displayStyle(base, {
+    min = 18,
+    scale = this.layout?.scale ?? 1,
+    color = TEXT_LIGHT,
+    stroke = "#07111b",
+    strokeThickness = 0,
+    ...rest
+  } = {}) {
+    return createDisplayTextStyle({
+      fontSize: this._fontValue(base, min, scale),
+      min,
+      color,
+      stroke,
+      strokeThickness,
+      ...rest,
+    });
+  }
+
+  _bodyStyle(base, {
+    min = 12,
+    scale = this.layout?.scale ?? 1,
+    color = TEXT_MUTED,
+    ...rest
+  } = {}) {
+    return createBodyTextStyle({
+      fontSize: this._fontValue(base, min, scale),
+      min,
+      color,
+      ...rest,
+    });
+  }
+
+  _labelStyle(base, {
+    min = 11,
+    scale = this.layout?.scale ?? 1,
+    color = TEXT_SUBTLE,
+    fontStyle = "bold",
+    ...rest
+  } = {}) {
+    return createLabelTextStyle({
+      fontSize: this._fontValue(base, min, scale),
+      min,
+      color,
+      fontStyle,
+      ...rest,
+    });
   }
 
   _getTeamNameInputElement() {
@@ -738,25 +761,43 @@ export class DraftStartMenu {
       0x72f0c0,
       0.16,
     );
-    const title = scene.add.text(-headerWidth / 2 + Math.round(36 * layout.scale), -Math.round(20 * layout.scale), "Founding Draft", {
-      fontSize: this._fontPx(34, 24),
-      color: TEXT_LIGHT,
-      stroke: "#0a1420",
-      strokeThickness: Math.max(3, Math.round(5 * layout.scale)),
-    }).setOrigin(0, 0.5);
+    const title = scene.add.text(
+      -headerWidth / 2 + Math.round(36 * layout.scale),
+      -Math.round(20 * layout.scale),
+      "Founding Draft",
+      this._displayStyle(34, {
+        min: 24,
+        scale: layout.scale,
+        color: TEXT_LIGHT,
+        stroke: "#0a1420",
+        strokeThickness: Math.max(3, Math.round(5 * layout.scale)),
+      }),
+    ).setOrigin(0, 0.5);
 
-    const subtitle = scene.add.text(-headerWidth / 2 + Math.round(36 * layout.scale), Math.round(24 * layout.scale), "Pick one starter deck. Your farmer, fireman, forager, and builder are locked in from the start.", {
-      fontSize: this._fontPx(12, 9),
-      color: TEXT_MUTED,
-      wordWrap: { width: bodyWrapWidth },
-      lineSpacing: Math.round(4 * layout.scale),
-    }).setOrigin(0, 0.5);
+    const subtitle = scene.add.text(
+      -headerWidth / 2 + Math.round(36 * layout.scale),
+      Math.round(24 * layout.scale),
+      "Pick one starter deck. Your farmer, fireman, forager, and builder are locked in from the start.",
+      this._bodyStyle(13, {
+        min: 12,
+        scale: layout.scale,
+        color: TEXT_MUTED,
+        wordWrap: { width: bodyWrapWidth },
+        lineSpacing: Math.round(4 * layout.scale),
+      }),
+    ).setOrigin(0, 0.5);
 
     const teamTagX = headerWidth / 2 - (layout.teamInputWidth + Math.round(74 * layout.scale));
-    const teamTag = scene.add.text(teamTagX, -Math.round(30 * layout.scale), "Team Name", {
-      fontSize: this._fontPx(13, 10),
-      color: TEXT_SUBTLE,
-    }).setOrigin(0, 0.5);
+    const teamTag = scene.add.text(
+      teamTagX,
+      -Math.round(30 * layout.scale),
+      "Team Name",
+      this._labelStyle(13, {
+        min: 11,
+        scale: layout.scale,
+        color: TEXT_SUBTLE,
+      }),
+    ).setOrigin(0, 0.5);
 
     const teamInputShellWidth = layout.teamInputWidth + 44;
     const teamInputShellHeight = Math.round(56 * layout.scale);
@@ -814,8 +855,9 @@ export class DraftStartMenu {
       inputStyle: `
         width:${layout.teamInputWidth}px;
         padding:${Math.round(9 * layout.scale)}px ${Math.round(16 * layout.scale)}px;
-        font-size:${Math.max(11, Math.round(14 * layout.scale))}px;
-        font-family:'Bungee', cursive;
+        font-size:${Math.max(12, Math.round(15 * layout.scale))}px;
+        font-family:${BODY_FONT_FAMILY};
+        font-weight:600;
         border-radius:${Math.round(16 * layout.scale)}px;
         border:1px solid rgba(255,255,255,0.05);
         box-shadow:none;
@@ -915,35 +957,66 @@ export class DraftStartMenu {
     const selectPillY = top + Math.round(38 * contentScale);
     selectPill.y = selectPillY;
 
-    const selectLabel = scene.add.text(0, top + Math.round(38 * contentScale), "Starter Deck", {
-      fontSize: this._fontPx(11, 8, contentScale),
-      color: TEXT_LIGHT,
-    }).setOrigin(0.5);
+    const selectLabel = scene.add.text(
+      0,
+      top + Math.round(38 * contentScale),
+      "Starter Deck",
+      this._labelStyle(11, {
+        min: 11,
+        scale: contentScale,
+        color: TEXT_LIGHT,
+      }),
+    ).setOrigin(0.5);
 
-    const name = scene.add.text(sectionLeft, top + Math.round(86 * contentScale), deck.name, {
-      fontSize: this._fontPx(24, 15, contentScale),
-      color: TEXT_LIGHT,
-      stroke: "#08131d",
-      strokeThickness: Math.max(2, Math.round(4 * contentScale)),
-      wordWrap: { width: innerWidth },
-    }).setOrigin(0, 0.5);
+    const name = scene.add.text(
+      sectionLeft,
+      top + Math.round(86 * contentScale),
+      deck.name,
+      this._displayStyle(24, {
+        min: 18,
+        scale: contentScale,
+        color: TEXT_LIGHT,
+        stroke: "#08131d",
+        strokeThickness: Math.max(2, Math.round(4 * contentScale)),
+        wordWrap: { width: innerWidth },
+      }),
+    ).setOrigin(0, 0.5);
 
-    const subtitle = scene.add.text(sectionLeft, top + Math.round(122 * contentScale), deck.subtitle, {
-      fontSize: this._fontPx(12, 9, contentScale),
-      color: deck.accent,
-    }).setOrigin(0, 0.5);
+    const subtitle = scene.add.text(
+      sectionLeft,
+      top + Math.round(122 * contentScale),
+      deck.subtitle,
+      this._bodyStyle(12, {
+        min: 12,
+        scale: contentScale,
+        color: deck.accent,
+        fontStyle: "bold",
+      }),
+    ).setOrigin(0, 0.5);
 
-    const summary = scene.add.text(sectionLeft, top + Math.round(154 * contentScale), deck.summary, {
-      fontSize: this._fontPx(11, 8, contentScale),
-      color: TEXT_MUTED,
-      wordWrap: { width: innerWidth },
-      lineSpacing: Math.max(2, Math.round(4 * contentScale)),
-    }).setOrigin(0, 0.5);
+    const summary = scene.add.text(
+      sectionLeft,
+      top + Math.round(154 * contentScale),
+      deck.summary,
+      this._bodyStyle(11, {
+        min: 11,
+        scale: contentScale,
+        color: TEXT_MUTED,
+        wordWrap: { width: innerWidth },
+        lineSpacing: Math.max(2, Math.round(4 * contentScale)),
+      }),
+    ).setOrigin(0, 0.5);
 
-    const stockLabel = scene.add.text(sectionLeft, top + Math.round(224 * contentScale), "Starting Stock", {
-      fontSize: this._fontPx(11, 8, contentScale),
-      color: TEXT_SUBTLE,
-    }).setOrigin(0, 0.5);
+    const stockLabel = scene.add.text(
+      sectionLeft,
+      top + Math.round(224 * contentScale),
+      "Starting Stock",
+      this._labelStyle(11, {
+        min: 11,
+        scale: contentScale,
+        color: TEXT_SUBTLE,
+      }),
+    ).setOrigin(0, 0.5);
 
     const stockTrayHeight = Math.round(98 * contentScale);
     const stockTray = this._makeRoundedPanel(width - Math.round(42 * contentScale), stockTrayHeight, {
@@ -957,10 +1030,16 @@ export class DraftStartMenu {
 
     const resourceRefs = this._buildResourceChips(deck, width, stockTray.y, contentScale);
 
-    const cardsLabel = scene.add.text(sectionLeft, top + Math.round(358 * contentScale), "Starter Cards", {
-      fontSize: this._fontPx(11, 8, contentScale),
-      color: TEXT_SUBTLE,
-    }).setOrigin(0, 0.5);
+    const cardsLabel = scene.add.text(
+      sectionLeft,
+      top + Math.round(358 * contentScale),
+      "Starter Cards",
+      this._labelStyle(11, {
+        min: 11,
+        scale: contentScale,
+        color: TEXT_SUBTLE,
+      }),
+    ).setOrigin(0, 0.5);
 
     const cardGap = Math.max(6, Math.round(8 * contentScale));
     const cardWidth = Math.floor((width - Math.round(48 * contentScale) - cardGap * 2) / 3);
@@ -985,10 +1064,16 @@ export class DraftStartMenu {
       cardRefs.push(cardRef);
     });
 
-    const crewLabel = scene.add.text(sectionLeft, top + Math.round(520 * contentScale), "Starting Crew", {
-      fontSize: this._fontPx(11, 8, contentScale),
-      color: TEXT_SUBTLE,
-    }).setOrigin(0, 0.5);
+    const crewLabel = scene.add.text(
+      sectionLeft,
+      top + Math.round(520 * contentScale),
+      "Starting Crew",
+      this._labelStyle(11, {
+        min: 11,
+        scale: contentScale,
+        color: TEXT_SUBTLE,
+      }),
+    ).setOrigin(0, 0.5);
 
     const crewTray = this._makeRoundedPanel(width - Math.round(42 * contentScale), Math.round(102 * contentScale), {
       fillColor: 0x0d2130,
@@ -1111,24 +1196,43 @@ export class DraftStartMenu {
       shadowAlpha: 0.24,
       shadowOffsetY: Math.round(12 * scale),
     });
-    const infoTitle = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(30 * scale), "Town Layout", {
-      fontSize: this._fontPx(24, 16),
-      color: TEXT_LIGHT,
-      stroke: "#09131c",
-      strokeThickness: Math.max(2, Math.round(4 * scale)),
-    }).setOrigin(0, 0.5);
-    const infoBody = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), -infoHeight / 2 + Math.round(72 * scale), "You may move buildings.\nKeep one land tile between buildings and water.", {
-      fontSize: this._fontPx(14, 10),
-      color: TEXT_MUTED,
-      wordWrap: { width: infoWidth - Math.round(54 * scale) },
-      lineSpacing: Math.round(5 * scale),
-    }).setOrigin(0, 0);
-    const infoSelected = scene.add.text(-infoWidth / 2 + Math.round(26 * scale), infoHeight / 2 - Math.round(28 * scale), "Click a building, then click an open tile.", {
-      fontSize: this._fontPx(13, 10),
-      color: TEXT_WARM,
-      wordWrap: { width: infoWidth - Math.round(54 * scale) },
-      lineSpacing: Math.round(4 * scale),
-    }).setOrigin(0, 1);
+    const infoTitle = scene.add.text(
+      -infoWidth / 2 + Math.round(26 * scale),
+      -infoHeight / 2 + Math.round(30 * scale),
+      "Town Layout",
+      this._displayStyle(24, {
+        min: 18,
+        scale,
+        color: TEXT_LIGHT,
+        stroke: "#09131c",
+        strokeThickness: Math.max(2, Math.round(4 * scale)),
+      }),
+    ).setOrigin(0, 0.5);
+    const infoBody = scene.add.text(
+      -infoWidth / 2 + Math.round(26 * scale),
+      -infoHeight / 2 + Math.round(72 * scale),
+      "You may move buildings.\nKeep one land tile between buildings and water.",
+      this._bodyStyle(14, {
+        min: 12,
+        scale,
+        color: TEXT_MUTED,
+        wordWrap: { width: infoWidth - Math.round(54 * scale) },
+        lineSpacing: Math.round(5 * scale),
+      }),
+    ).setOrigin(0, 0);
+    const infoSelected = scene.add.text(
+      -infoWidth / 2 + Math.round(26 * scale),
+      infoHeight / 2 - Math.round(28 * scale),
+      "Click a building, then click an open tile.",
+      this._bodyStyle(13, {
+        min: 11,
+        scale,
+        color: TEXT_WARM,
+        fontStyle: "bold",
+        wordWrap: { width: infoWidth - Math.round(54 * scale) },
+        lineSpacing: Math.round(4 * scale),
+      }),
+    ).setOrigin(0, 1);
     info.add([infoShell, infoTitle, infoBody, infoSelected]);
 
     const legend = scene.add.container(legendX, panelY);
@@ -1142,12 +1246,18 @@ export class DraftStartMenu {
       shadowAlpha: 0.22,
       shadowOffsetY: Math.round(12 * scale),
     });
-    const legendTitle = scene.add.text(-legendWidth / 2 + Math.round(24 * scale), -legendHeight / 2 + Math.round(30 * scale), "Legend", {
-      fontSize: this._fontPx(24, 16),
-      color: TEXT_LIGHT,
-      stroke: "#09131c",
-      strokeThickness: Math.max(2, Math.round(4 * scale)),
-    }).setOrigin(0, 0.5);
+    const legendTitle = scene.add.text(
+      -legendWidth / 2 + Math.round(24 * scale),
+      -legendHeight / 2 + Math.round(30 * scale),
+      "Legend",
+      this._displayStyle(24, {
+        min: 18,
+        scale,
+        color: TEXT_LIGHT,
+        stroke: "#09131c",
+        strokeThickness: Math.max(2, Math.round(4 * scale)),
+      }),
+    ).setOrigin(0, 0.5);
 
     const legendRefs = [];
     [
@@ -1158,14 +1268,27 @@ export class DraftStartMenu {
     ].forEach((entry, index) => {
       const lineY = -legendHeight / 2 + Math.round((78 + index * 50) * scale);
       const marker = scene.add.circle(-legendWidth / 2 + Math.round(30 * scale), lineY, Math.max(4, Math.round(6 * scale)), hexToColorInt(entry.color, 0xffffff), 0.95);
-      const label = scene.add.text(-legendWidth / 2 + Math.round(46 * scale), lineY, `${entry.emoji} ${entry.label}`, {
-        fontSize: this._fontPx(18, 13),
-        color: entry.color,
-      }).setOrigin(0, 0.5);
-      const count = scene.add.text(legendWidth / 2 - Math.round(24 * scale), lineY, "x0", {
-        fontSize: this._fontPx(16, 11),
-        color: entry.color,
-      }).setOrigin(1, 0.5);
+      const label = scene.add.text(
+        -legendWidth / 2 + Math.round(46 * scale),
+        lineY,
+        `${entry.emoji} ${entry.label}`,
+        this._bodyStyle(18, {
+          min: 14,
+          scale,
+          color: entry.color,
+          fontStyle: "bold",
+        }),
+      ).setOrigin(0, 0.5);
+      const count = scene.add.text(
+        legendWidth / 2 - Math.round(24 * scale),
+        lineY,
+        "x0",
+        this._labelStyle(16, {
+          min: 12,
+          scale,
+          color: entry.color,
+        }),
+      ).setOrigin(1, 0.5);
       legendRefs.push({ ...entry, marker, label, count });
       legend.add([marker, label, count]);
     });
@@ -1182,11 +1305,17 @@ export class DraftStartMenu {
       strokeAlpha: 0.14,
       radius: Math.round(18 * scale),
     });
-    const tooltipLabel = scene.add.text(0, 0, "", {
-      fontFamily: "Arial",
-      fontSize: this._fontPx(15, 11),
-      color: TEXT_LIGHT,
-    }).setOrigin(0.5);
+    const tooltipLabel = scene.add.text(
+      0,
+      0,
+      "",
+      this._bodyStyle(15, {
+        min: 12,
+        scale,
+        color: TEXT_LIGHT,
+        fontStyle: "bold",
+      }),
+    ).setOrigin(0.5);
     tooltip.add([tooltipBg, tooltipLabel]);
 
     stage.add([info, legend, tooltip]);
@@ -1250,10 +1379,16 @@ export class DraftStartMenu {
         const valueX = chipX - (chipWidth / 2) + Math.round((entry.key === "money" ? 34 : 28) * contentScale);
         const icon = scene.add.image(iconX, chipY, entry.icon)
           .setScale(entry.key === "money" ? 0.5 * contentScale : 0.68 * contentScale);
-        const value = scene.add.text(valueX, chipY, String(deck.resources[entry.key] ?? 0), {
-          fontSize: this._fontPx(entry.key === "money" ? 9 : 10, 7, contentScale),
-          color: TEXT_LIGHT,
-        }).setOrigin(0, 0.5);
+        const value = scene.add.text(
+          valueX,
+          chipY,
+          String(deck.resources[entry.key] ?? 0),
+          this._labelStyle(entry.key === "money" ? 9 : 10, {
+            min: 10,
+            scale: contentScale,
+            color: TEXT_LIGHT,
+          }),
+        ).setOrigin(0, 0.5);
 
         refs.push({
           key: entry.key,
@@ -1292,14 +1427,19 @@ export class DraftStartMenu {
     shine.y = -height / 2 + Math.round(18 * contentScale);
 
     const icon = scene.add.image(0, -height / 2 + Math.round(34 * contentScale), card.image).setScale(0.72 * contentScale);
-    const name = scene.add.text(0, height / 2 - Math.round(22 * contentScale), card.name, {
-      fontSize: this._fontPx(9, 7, contentScale),
-      color: TEXT_LIGHT,
-      stroke: "#07121b",
-      strokeThickness: Math.max(2, Math.round(3 * contentScale)),
-      align: "center",
-      wordWrap: { width: width - Math.round(16 * contentScale) },
-    }).setOrigin(0.5);
+    const name = scene.add.text(
+      0,
+      height / 2 - Math.round(22 * contentScale),
+      card.name,
+      this._bodyStyle(10, {
+        min: 10,
+        scale: contentScale,
+        color: TEXT_LIGHT,
+        fontStyle: "bold",
+        align: "center",
+        wordWrap: { width: width - Math.round(16 * contentScale) },
+      }),
+    ).setOrigin(0.5);
 
     const hit = scene.add.rectangle(0, 0, width, height, 0xffffff, 0.001)
       .setInteractive({ cursor: "pointer" });
@@ -1376,17 +1516,30 @@ export class DraftStartMenu {
       const portrait = scene.add.sprite(x, y - Math.round(10 * contentScale), portraitKey ?? "");
       applyPortraitKeyToSprite(scene, portrait, portraitKey, Math.round(34 * contentScale));
 
-      const label = scene.add.text(x, y + Math.round(22 * contentScale), typeKey, {
-        fontSize: this._fontPx(8, 6, contentScale),
-        color: TEXT_LIGHT,
-        align: "center",
-        wordWrap: { width: chipWidth - Math.round(18 * contentScale) },
-      }).setOrigin(0.5);
+      const label = scene.add.text(
+        x,
+        y + Math.round(22 * contentScale),
+        typeKey,
+        this._bodyStyle(9, {
+          min: 9,
+          scale: contentScale,
+          color: TEXT_LIGHT,
+          fontStyle: "bold",
+          align: "center",
+          wordWrap: { width: chipWidth - Math.round(18 * contentScale) },
+        }),
+      ).setOrigin(0.5);
 
-      const count = scene.add.text(x, y + Math.round(36 * contentScale), "x1", {
-        fontSize: this._fontPx(8, 6, contentScale),
-        color: TEXT_SUBTLE,
-      }).setOrigin(0.5);
+      const count = scene.add.text(
+        x,
+        y + Math.round(36 * contentScale),
+        "x1",
+        this._bodyStyle(9, {
+          min: 9,
+          scale: contentScale,
+          color: TEXT_SUBTLE,
+        }),
+      ).setOrigin(0.5);
 
       return {
         objects: [chip, portrait, label, count],
@@ -1424,17 +1577,29 @@ export class DraftStartMenu {
     const summaryY = labelY + Math.round(16 * layout.scale);
     const summaryLeft = (width / 2) - (footerWidth / 2) + footerInset;
 
-    const pickLabel = scene.add.text(summaryLeft, labelY, "Opening Summary", {
-      fontSize: this._fontPx(11, 8),
-      color: TEXT_SUBTLE,
-    }).setOrigin(0, 0.5);
+    const pickLabel = scene.add.text(
+      summaryLeft,
+      labelY,
+      "Opening Summary",
+      this._labelStyle(11, {
+        min: 11,
+        scale: layout.scale,
+        color: TEXT_SUBTLE,
+      }),
+    ).setOrigin(0, 0.5);
 
-    const summary = scene.add.text(summaryLeft, summaryY, "", {
-      fontSize: this._fontPx(12, 9),
-      color: TEXT_MUTED,
-      wordWrap: { width: 220 },
-      lineSpacing: Math.max(2, Math.round(4 * layout.scale)),
-    }).setOrigin(0, 0);
+    const summary = scene.add.text(
+      summaryLeft,
+      summaryY,
+      "",
+      this._bodyStyle(12, {
+        min: 12,
+        scale: layout.scale,
+        color: TEXT_MUTED,
+        wordWrap: { width: 220 },
+        lineSpacing: Math.max(2, Math.round(4 * layout.scale)),
+      }),
+    ).setOrigin(0, 0);
 
     const backButton = this._makeRoundedPanel(backWidth, backHeight, {
       fillColor: 0xcc493f,
@@ -1451,12 +1616,18 @@ export class DraftStartMenu {
       Phaser.Geom.Rectangle.Contains,
     );
 
-    const backLabel = scene.add.text(backX, buttonY, "Back", {
-      fontSize: this._fontPx(18, 12),
-      color: TEXT_LIGHT,
-      stroke: "#0a1420",
-      strokeThickness: Math.max(2, Math.round(3 * layout.scale)),
-    }).setOrigin(0.5).setVisible(false).setAlpha(0);
+    const backLabel = scene.add.text(
+      backX,
+      buttonY,
+      "Back",
+      this._displayStyle(18, {
+        min: 18,
+        scale: layout.scale,
+        color: TEXT_LIGHT,
+        stroke: "#0a1420",
+        strokeThickness: Math.max(2, Math.round(3 * layout.scale)),
+      }),
+    ).setOrigin(0.5).setVisible(false).setAlpha(0);
 
     const confirmGlow = this._makeRoundedPanel(layout.confirmGlowWidth, layout.confirmGlowHeight, {
       fillColor: 0x69dfb0,
@@ -1480,12 +1651,18 @@ export class DraftStartMenu {
       Phaser.Geom.Rectangle.Contains,
     );
 
-    const confirmLabel = scene.add.text(confirmX, buttonY, "Town Layout", {
-      fontSize: this._fontPx(20, 13),
-      color: TEXT_LIGHT,
-      stroke: "#0a1420",
-      strokeThickness: Math.max(2, Math.round(4 * layout.scale)),
-    }).setOrigin(0.5);
+    const confirmLabel = scene.add.text(
+      confirmX,
+      buttonY,
+      "Town Layout",
+      this._displayStyle(20, {
+        min: 18,
+        scale: layout.scale,
+        color: TEXT_LIGHT,
+        stroke: "#0a1420",
+        strokeThickness: Math.max(2, Math.round(4 * layout.scale)),
+      }),
+    ).setOrigin(0.5);
 
     confirmButton.on("pointerdown", () => {
       AudioManager.playMenuClick();
@@ -1605,24 +1782,32 @@ export class DraftStartMenu {
     shine.y = -bubbleHeight / 2 + Math.round(24 * this.layout.scale);
 
     const icon = this.scene.add.image(0, -bubbleHeight / 2 + Math.round(48 * this.layout.scale), "icon_house").setScale(0.9 * this.layout.scale);
-    const title = this.scene.add.text(0, -bubbleHeight / 2 + Math.round(84 * this.layout.scale), "", {
-      fontSize: this._fontPx(14, 10),
-      color: TEXT_LIGHT,
-      stroke: "#07121b",
-      strokeThickness: Math.max(2, Math.round(3 * this.layout.scale)),
-      align: "center",
-      wordWrap: { width: bubbleWidth - Math.round(34 * this.layout.scale) },
-    }).setOrigin(0.5);
+    const title = this.scene.add.text(
+      0,
+      -bubbleHeight / 2 + Math.round(84 * this.layout.scale),
+      "",
+      this._labelStyle(14, {
+        min: 12,
+        scale: this.layout.scale,
+        color: TEXT_LIGHT,
+        align: "center",
+        wordWrap: { width: bubbleWidth - Math.round(34 * this.layout.scale) },
+      }),
+    ).setOrigin(0.5);
 
-    const desc = this.scene.add.text(0, Math.round(24 * this.layout.scale), "", {
-      fontSize: this._fontPx(11, 8),
-      color: TEXT_MUTED,
-      stroke: "#07121b",
-      strokeThickness: Math.max(2, Math.round(2 * this.layout.scale)),
-      align: "center",
-      wordWrap: { width: bubbleWidth - Math.round(44 * this.layout.scale) },
-      lineSpacing: Math.max(2, Math.round(4 * this.layout.scale)),
-    }).setOrigin(0.5);
+    const desc = this.scene.add.text(
+      0,
+      Math.round(24 * this.layout.scale),
+      "",
+      this._bodyStyle(11, {
+        min: 11,
+        scale: this.layout.scale,
+        color: TEXT_MUTED,
+        align: "center",
+        wordWrap: { width: bubbleWidth - Math.round(44 * this.layout.scale) },
+        lineSpacing: Math.max(2, Math.round(4 * this.layout.scale)),
+      }),
+    ).setOrigin(0.5);
 
     bubble.add([shadow, bg, shine, icon, title, desc]);
     this.container.add(bubble);

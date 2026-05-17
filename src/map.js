@@ -2245,6 +2245,27 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             itemToPlace.lenY = item.lenY
             itemToPlace.gridX = posX
             itemToPlace.gridY = posY
+            const blockerTeam = Number.isFinite(Number(teamNumber)) ? Number(teamNumber) : null;
+            if (blockerTeam != null) {
+                itemToPlace.team = blockerTeam;
+                itemToPlace.teamNumber = blockerTeam;
+            }
+            if (item?.block) {
+                itemToPlace._structureBarrierCollider = this.addStructureBarrier(
+                    posX * SQUARESIZE + (Math.max(1, Number(item.lenX || 1)) * SQUARESIZE) / 2,
+                    posY * SQUARESIZE + (Math.max(1, Number(item.lenY || 1)) * SQUARESIZE) / 2,
+                    Math.max(1, Number(item.lenX || 1)) * SQUARESIZE,
+                    Math.max(1, Number(item.lenY || 1)) * SQUARESIZE,
+                    {
+                        team: blockerTeam,
+                        structureOwner: itemToPlace,
+                    }
+                );
+                itemToPlace.once?.("destroy", () => {
+                    Map.removeStructureBarrier(itemToPlace._structureBarrierCollider);
+                    itemToPlace._structureBarrierCollider = null;
+                });
+            }
             if(item == TILE_TYPES.spawn) spawnPoints.push([posX, posY, itemToPlace])
             if(index>-1) buildingArray[index][3] = itemToPlace;
             if (item.name === 'pine') {
@@ -2336,6 +2357,30 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
         Map.worldStaticLayer?.remove(obj);
 
         if (destroy && obj.destroy) obj.destroy();
+    }
+
+    static addStructureBarrier(centerX, centerY, width, height, meta = {}) {
+        if (!this.scene?.physics?.add?.staticImage || !this.structureBarrier) return null;
+
+        const collider = this.scene.physics.add.staticImage(centerX, centerY, "barrier");
+        collider.setAlpha?.(0);
+        collider.setSize?.(width, height);
+        collider.body?.setSize?.(width, height, true);
+        collider.refreshBody?.();
+        collider.team = meta.team ?? collider.team ?? null;
+        collider.blocksLineOfFire = meta.blocksLineOfFire !== false;
+        collider.blocksProjectiles = meta.blocksProjectiles !== false;
+        if (meta.wallRef) collider.wallRef = meta.wallRef;
+        if (meta.buildingRef) collider.buildingRef = meta.buildingRef;
+        if (meta.structureOwner) collider.structureOwner = meta.structureOwner;
+        this.structureBarrier.add(collider);
+        return collider;
+    }
+
+    static removeStructureBarrier(collider) {
+        if (!collider) return;
+        this.structureBarrier?.remove?.(collider, true, true);
+        collider.destroy?.();
     }
 
     static _uiIgnoreWorldLayer() {

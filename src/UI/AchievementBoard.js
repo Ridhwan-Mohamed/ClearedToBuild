@@ -1,5 +1,10 @@
 import Phaser from "phaser";
 import { UIDEPTH } from "../constants.js";
+import {
+  createBodyTextStyle,
+  createDisplayTextStyle,
+  createLabelTextStyle,
+} from "./Typography.js";
 
 const BOARD_W = 300;
 const HEADER_H = 30;
@@ -32,36 +37,30 @@ export class AchievementBoard {
     this.headerShadow = scene.add.graphics();
     this.headerBg = scene.add.graphics();
     this.headerShine = scene.add.graphics();
-    this.headerTitle = scene.add.text(-(BOARD_W / 2) + 24, -5, "TOWN GOALS", {
-      fontFamily: "Bungee",
-      fontSize: "14px",
+    this.headerTitle = scene.add.text(-(BOARD_W / 2) + 24, -5, "TOWN GOALS", createDisplayTextStyle({
+      fontSize: 14,
+      min: 14,
       color: "#eef8ff",
       stroke: "#07111b",
-      strokeThickness: 3,
-    }).setOrigin(0, 0.5);
-    this.headerStatus = scene.add.text(-(BOARD_W / 2) + 24, 9, "3 ACTIVE", {
-      fontFamily: "Bungee",
-      fontSize: "9px",
+      strokeThickness: 2,
+    })).setOrigin(0, 0.5);
+    this.headerStatus = scene.add.text(-(BOARD_W / 2) + 24, 9, "3 ACTIVE", createLabelTextStyle({
+      fontSize: 11,
+      min: 11,
       color: "#b9deef",
-      stroke: "#07111b",
-      strokeThickness: 2,
-    }).setOrigin(0, 0.5);
-    this.chevron = scene.add.text(BOARD_W / 2 - 24, 0, "v", {
-      fontFamily: "Bungee",
-      fontSize: "14px",
+    })).setOrigin(0, 0.5);
+    this.chevron = scene.add.text(BOARD_W / 2 - 24, 0, "v", createLabelTextStyle({
+      fontSize: 14,
+      min: 14,
       color: "#d6efff",
-      stroke: "#07111b",
-      strokeThickness: 3,
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
     this.noticeBadgeBg = scene.add.graphics().setVisible(false);
-    this.noticeBadgeText = scene.add.text(BOARD_W / 2 - 72, 0, "", {
-      fontFamily: "Bungee",
-      fontSize: "9px",
+    this.noticeBadgeText = scene.add.text(BOARD_W / 2 - 72, 0, "", createLabelTextStyle({
+      fontSize: 10,
+      min: 10,
       color: "#17330e",
-      stroke: "#fff8d2",
-      strokeThickness: 2,
       align: "center",
-    }).setOrigin(0.5).setVisible(false);
+    })).setOrigin(0.5).setVisible(false);
     this.headerHit = scene.add.zone(0, 0, BOARD_W, HEADER_H).setOrigin(0.5).setInteractive({ useHandCursor: true });
     this.headerHit.on("pointerdown", () => this.toggle());
 
@@ -112,62 +111,50 @@ export class AchievementBoard {
 
     const bg = this.scene.add.graphics();
     const shine = this.scene.add.graphics();
-    const tag = this.scene.add.text(-(BOARD_W / 2) + 26, -17, "", {
-      fontFamily: "Bungee",
-      fontSize: "9px",
+    const tag = this.scene.add.text(-(BOARD_W / 2) + 26, -17, "", createLabelTextStyle({
+      fontSize: 10,
+      min: 10,
       color: "#ffffff",
-      stroke: "#07111b",
-      strokeThickness: 2,
-    }).setOrigin(0, 0.5);
-    const title = this.scene.add.text(-(BOARD_W / 2) + 26, -4, "", {
-      fontFamily: "Bungee",
-      fontSize: "12px",
+    })).setOrigin(0, 0.5);
+    const title = this.scene.add.text(-(BOARD_W / 2) + 26, -4, "", createLabelTextStyle({
+      fontSize: 13,
+      min: 13,
       color: "#eef8ff",
-      stroke: "#07111b",
-      strokeThickness: 3,
       wordWrap: { width: 146 },
-    }).setOrigin(0, 0.5);
-    const desc = this.scene.add.text(-(BOARD_W / 2) + 26, 16, "", {
-      fontFamily: "Bungee",
-      fontSize: "9px",
+    })).setOrigin(0, 0.5);
+    const desc = this.scene.add.text(-(BOARD_W / 2) + 26, 16, "", createBodyTextStyle({
+      fontSize: 11,
+      min: 11,
       color: "#cfe4f2",
-      stroke: "#07111b",
-      strokeThickness: 2,
       wordWrap: { width: 150 },
-    }).setOrigin(0, 0.5);
+    })).setOrigin(0, 0.5);
 
     const rewardBg = this.scene.add.graphics();
-    const rewardText = this.scene.add.text((BOARD_W / 2) - 70, -14, "", {
-      fontFamily: "Bungee",
-      fontSize: "8px",
+    const rewardText = this.scene.add.text((BOARD_W / 2) - 70, -14, "", createBodyTextStyle({
+      fontSize: 10,
+      min: 10,
       color: "#fff4cf",
-      stroke: "#07111b",
-      strokeThickness: 2,
       align: "right",
       wordWrap: { width: 92 },
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
 
     const progressBg = this.scene.add.graphics();
     const progressFill = this.scene.add.graphics();
     const progressShine = this.scene.add.graphics();
-    const progressText = this.scene.add.text((BOARD_W / 2) - 70, 14, "", {
-      fontFamily: "Bungee",
-      fontSize: "10px",
+    const progressText = this.scene.add.text((BOARD_W / 2) - 70, 14, "", createLabelTextStyle({
+      fontSize: 11,
+      min: 11,
       color: "#e6f7ff",
-      stroke: "#07111b",
-      strokeThickness: 2,
-    }).setOrigin(0.5);
+    })).setOrigin(0.5);
 
     const strike = this.scene.add.graphics();
     const completeFlash = this.scene.add.graphics().setVisible(false);
     const completeSweep = this.scene.add.graphics().setVisible(false);
-    const completeText = this.scene.add.text((BOARD_W / 2) - 68, 14, "COMPLETE", {
-      fontFamily: "Bungee",
-      fontSize: "9px",
+    const completeText = this.scene.add.text((BOARD_W / 2) - 68, 14, "COMPLETE", createLabelTextStyle({
+      fontSize: 10,
+      min: 10,
       color: "#123319",
-      stroke: "#eaffd8",
-      strokeThickness: 2,
-    }).setOrigin(0.5).setVisible(false);
+    })).setOrigin(0.5).setVisible(false);
 
     root.add([bg, shine, completeFlash, completeSweep, rewardBg, progressBg, progressFill, progressShine, tag, title, desc, rewardText, progressText, strike, completeText]);
     root.setPosition(0, root.baseY);

@@ -1,3 +1,4 @@
+import { AudioManager } from "../Manager/AudioManager.js";
 import { FLOORDEPTH, SQUARESIZE, TILE_TYPES } from "../constants.js";
 
 function delay(scene, ms) {
@@ -37,12 +38,14 @@ export class ParcelRevealAnimator {
     alpha = 0.5,
     batchSize = 7,
     batchDelayMs = 14,
+    playThuds = false,
   } = {}) {
     this.scene = scene;
     this.cells = sortRevealCells(Array.isArray(cells) ? cells : [], slotId, size);
     this.alpha = alpha;
     this.batchSize = Math.max(1, batchSize | 0);
     this.batchDelayMs = Math.max(0, batchDelayMs | 0);
+    this.playThuds = !!playThuds;
     this.container = scene.add.container(0, 0).setDepth(FLOORDEPTH + 0.35).setScrollFactor(1);
     this.nodes = [];
     this._destroyed = false;
@@ -55,6 +58,12 @@ export class ParcelRevealAnimator {
       const batch = this.cells.slice(index, index + this.batchSize);
       for (const cell of batch) {
         this._addCell(cell);
+      }
+      if (this.playThuds && batch.length) {
+        AudioManager.playLayoutMove({
+          volume: 0.18,
+          cooldownMs: Math.max(40, this.batchDelayMs * 2),
+        });
       }
       await delay(this.scene, this.batchDelayMs);
     }

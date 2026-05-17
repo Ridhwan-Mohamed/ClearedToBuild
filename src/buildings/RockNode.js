@@ -38,6 +38,15 @@ export class RockNode {
       .sprite(cx, cy, this.resourceTileType?.value || "rock3")
       .setDepth(this.resourceTileType?.depth ?? TILE_TYPES.rock.depth)
       .setInteractive({ cursor: "pointer" });
+    this.collider = GameMap.addStructureBarrier(
+      cx,
+      cy,
+      this.footprintW * SQUARESIZE,
+      this.footprintH * SQUARESIZE,
+      {
+        structureOwner: this,
+      }
+    );
 
     this.sprite.ownerNode = this;
     GameMap.addToWorldStatic(this.sprite);
@@ -183,6 +192,8 @@ export class RockNode {
     }
     if (this.task?.value === this) this.task.value = null;
     this.task = null;
+    GameMap.removeStructureBarrier(this.collider);
+    this.collider = null;
     removeFromArray(GameMap.worldStones, this);
     GameMap.removeFromWorldStatic(this.sprite, true);
     this.sprite = null;

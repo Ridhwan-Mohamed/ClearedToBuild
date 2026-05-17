@@ -3572,7 +3572,7 @@ export class mapView extends Phaser.Scene {
             Projectile.handleStructureCollision,
             (projectile, structureHit) =>
                 !projectile?.deferImpactUntilEnd &&
-                !Projectile.isFriendlyStructureHit(projectile, structureHit),
+                Projectile.shouldCollideWithStructure(projectile, structureHit),
             this
         );
 
@@ -6247,17 +6247,17 @@ cancelFarmSelection(exitFarmMode = false) {
 
 }
 
-
-
-
+const GAME_RENDER_RESOLUTION = Math.min(Math.max(window.devicePixelRatio || 1, 1), 2);
 
 const config = {
     type: Phaser.AUTO,
     parent: "game",            // or whatever div id you use
     dom: { createContainer: true },  // <-- THIS fixes the error
+    autoRound: true,
     width: window.innerWidth,
     height: window.innerHeight,
     backgroundColor: 0x156c99,
+    resolution: GAME_RENDER_RESOLUTION,
     scene: [mapView, GameUIScene, itemTab],
     scale: {
         mode: Phaser.Scale.RESIZE,

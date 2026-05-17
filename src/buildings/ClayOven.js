@@ -33,6 +33,17 @@ export class ClayOven {
                 'clayOven'
             ).setDepth(BLOCKDEPTH)
         )
+        this.collider = Map.addStructureBarrier(
+            x * SQUARESIZE + ((item?.lenX ?? 1) * SQUARESIZE) / 2,
+            y * SQUARESIZE + ((item?.lenY ?? 1) * SQUARESIZE) / 2,
+            (item?.lenX ?? 1) * SQUARESIZE,
+            (item?.lenY ?? 1) * SQUARESIZE,
+            {
+                team: this.teamNumber,
+                buildingRef: this,
+            }
+        );
+        if (this.collider) this.collider.isBuilding = true;
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
 
@@ -782,6 +793,8 @@ export class ClayOven {
         ClayOven.scene.events.emit('oven:removed', this);
         destroyStructuralHealthBar(this);
         playBuildingCollapseSmoke(this, { scene: ClayOven.scene });
+        Map.removeStructureBarrier(this.collider);
+        this.collider = null;
         if (this.sprite) this.sprite.destroy();
         if (this.visionId) VisibilitySystem.removeVisionBubble(this.visionId);
         if (this.lightId)  VisibilitySystem.removeLightById(this.lightId);

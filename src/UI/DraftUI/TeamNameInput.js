@@ -2,6 +2,7 @@
 //
 // Mobile + PC friendly team-name entry using Phaser DOM Element.
 // Works in desktop and brings up soft keyboard on mobile.
+import { BODY_FONT_FAMILY } from "../Typography.js";
 
 export class TeamNameInput {
   /**
@@ -19,7 +20,8 @@ export class TeamNameInput {
             width:${width}px;
             padding:6px 10px;
             font-size:14px;
-            font-family:'Bungee', cursive;
+            font-family:${BODY_FONT_FAMILY};
+            font-weight:600;
             border-radius:8px;
             border:none;
             box-shadow:none;

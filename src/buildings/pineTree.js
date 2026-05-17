@@ -34,6 +34,15 @@ export class PineTree {
     const cy = (gridY + this.footprintH / 2) * SQUARESIZE;
     this.container = scene.add.container(cx, cy).setDepth(TILE_TYPES.pine.depth);
     GameMap.addToWorldStatic(this.container);
+    this.collider = GameMap.addStructureBarrier(
+      cx,
+      cy,
+      this.footprintW * SQUARESIZE,
+      this.footprintH * SQUARESIZE,
+      {
+        structureOwner: this,
+      }
+    );
 
     // all layers are 64x64 → exact overlap
     this.base = scene.add.image(0, 0, "fullBasePine").setOrigin(0.5).setDepth(BLOCKDEPTH);
@@ -94,6 +103,8 @@ export class PineTree {
       VisibilitySystem.removeLightById(this.lightId);
       this.lightId = null;
     }
+    GameMap.removeStructureBarrier(this.collider);
+    this.collider = null;
     this.container.destroy(true);
     removeFromArray(GameMap.worldPines, this);
     const i = PineTree.list.indexOf(this);

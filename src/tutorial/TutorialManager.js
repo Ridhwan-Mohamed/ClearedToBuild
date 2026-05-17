@@ -446,6 +446,11 @@ export class TutorialManager {
     if (key === "buildUnitStoreArea") return this._boundsOf(ui.buildTab?._cardsViewportHit);
     if (key === "eastContractHud") return ui.contractHud?.getTutorialTargetBounds?.("slot:E") ?? null;
     if (key === "contractForestButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:FOREST") ?? null;
+    if (key === "contractRockButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:ROCK") ?? null;
+    if (key === "contractFarmButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:FARM") ?? null;
+    if (key === "contractMarketButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:MARKET") ?? null;
+    if (key === "contractPressureButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:PRESSURE") ?? null;
+    if (key === "contractLockedMilitiaButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:LOCKED_MILITIA") ?? null;
     if (key === "contractBuyButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contractBuy:FOREST") ?? null;
     return null;
   }

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { CONTROL_STATES, showGhostText, SQUARESIZE, TILE_MAP, TILE_TYPES } from "./constants";
+import { CONTROL_STATES, showGhostText, SQUARESIZE, TILE_TYPES } from "./constants";
 import { Map } from "./map";
 import { fightManager } from "./Manager/fightManager";
 import { Player } from "./players/Player";
@@ -335,7 +335,7 @@ export class Projectile {
         for (const hit of hits) {
             if (!hit?.active) continue;
 
-            if (this.isFriendlyStructureHit(projectile, hit)) continue;
+            if (!this.shouldCollideWithStructure(projectile, hit)) continue;
 
             const left = Number.isFinite(hit.body?.left) ? hit.body.left : (hit.x - (hit.displayWidth ?? 0) / 2);
             const right = Number.isFinite(hit.body?.right) ? hit.body.right : (hit.x + (hit.displayWidth ?? 0) / 2);
@@ -354,11 +354,88 @@ export class Projectile {
         return nearest;
     }
 
+    static getStructureTeam(hit) {
+        if (!hit) return null;
+        return hit.team
+            ?? hit.body?.team
+            ?? hit.wallRef?.team
+            ?? hit.buildingRef?.team
+            ?? hit.buildingRef?.teamNumber
+            ?? hit.structureOwner?.team
+            ?? hit.structureOwner?.teamNumber
+            ?? null;
+    }
+
+    static getShotTeam(source) {
+        if (!source) return null;
+        return source.team
+            ?? source.body?.team
+            ?? source.player?.body?.team
+            ?? source.player?.team
+            ?? null;
+    }
+
+    static shouldIgnoreStructureForShot(source, hit) {
+        if (!source || !hit) return false;
+        const shotTeam = this.getShotTeam(source);
+        const hitTeam = this.getStructureTeam(hit);
+        return shotTeam === 1 && hitTeam === 1;
+    }
+
+    static shouldCollideWithStructure(source, hit) {
+        if (!hit?.active) return false;
+        if (hit.blocksProjectiles === false) return false;
+        return !this.shouldIgnoreStructureForShot(source, hit);
+    }
+
+    static shouldBlockLineOfSight(source, hit) {
+        if (!hit?.active) return false;
+        if (hit.blocksLineOfFire === false) return false;
+        return !this.shouldIgnoreStructureForShot(source, hit);
+    }
+
     static isFriendlyStructureHit(projectile, hit) {
-        if (!projectile || !hit) return false;
-        const projectileTeam = projectile.team ?? projectile.body?.team;
-        const hitTeam = hit.team ?? hit.body?.team ?? hit.wallRef?.team ?? hit.buildingRef?.team ?? hit.buildingRef?.teamNumber;
-        return projectileTeam != null && hitTeam != null && projectileTeam === hitTeam;
+        return this.shouldIgnoreStructureForShot(projectile, hit);
+    }
+
+    static getStructureIdentitySet(obj) {
+        const refs = new Set();
+        const push = (value) => {
+            if (value) refs.add(value);
+        };
+
+        push(obj);
+        push(obj?.gameObject);
+        push(obj?.wallRef);
+        push(obj?.buildingRef);
+        push(obj?.structureOwner);
+        push(obj?.gameObject?.wallRef);
+        push(obj?.gameObject?.buildingRef);
+        push(obj?.gameObject?.structureOwner);
+        push(obj?.sprite);
+        push(obj?.collider);
+        push(obj?.body?.gameObject);
+        return refs;
+    }
+
+    static isIgnoredStructureHit(hit, ignoredRefs) {
+        if (!hit || !ignoredRefs?.size) return false;
+        return ignoredRefs.has(hit)
+            || ignoredRefs.has(hit.wallRef)
+            || ignoredRefs.has(hit.buildingRef)
+            || ignoredRefs.has(hit.structureOwner)
+            || ignoredRefs.has(hit.body?.gameObject);
+    }
+
+    static getStructureBounds(hit) {
+        if (!hit) return null;
+        const left = Number.isFinite(hit.body?.left) ? hit.body.left : (hit.x - (hit.displayWidth ?? 0) / 2);
+        const right = Number.isFinite(hit.body?.right) ? hit.body.right : (hit.x + (hit.displayWidth ?? 0) / 2);
+        const top = Number.isFinite(hit.body?.top) ? hit.body.top : (hit.y - (hit.displayHeight ?? 0) / 2);
+        const bottom = Number.isFinite(hit.body?.bottom) ? hit.body.bottom : (hit.y + (hit.displayHeight ?? 0) / 2);
+        const width = Math.max(1, right - left);
+        const height = Math.max(1, bottom - top);
+        return new Phaser.Geom.Rectangle(left, top, width, height);
     }
 
     static leadAndAngle(attacker, target, projectileSpeed) {
@@ -376,61 +453,22 @@ export class Projectile {
     }
 
     static hasLineOfSight(shooter, target) {
-        const x0 = Math.floor(shooter.x / SQUARESIZE);
-        const y0 = Math.floor(shooter.y / SQUARESIZE);
-        const x1 = Math.floor(target.x / SQUARESIZE);
-        const y1 = Math.floor(target.y / SQUARESIZE);
+        if (!shooter || !target) return false;
+        const line = new Phaser.Geom.Line(shooter.x, shooter.y, target.x, target.y);
+        const ignoredRefs = new Set([
+            ...this.getStructureIdentitySet(shooter),
+            ...this.getStructureIdentitySet(target),
+        ]);
+        const hits = Map.structureBarrier?.getChildren?.() ?? [];
 
-        const resolveIgnoreRect = (obj) => {
-            const building = obj?.buildingRef || obj?.gameObject?.buildingRef || null;
-            if (!building) return null;
+        for (const hit of hits) {
+            if (!this.shouldBlockLineOfSight(shooter, hit)) continue;
+            if (this.isIgnoredStructureHit(hit, ignoredRefs)) continue;
 
-            const bx = building.x ?? building.gridX ?? building.tilePos?.tileX;
-            const by = building.y ?? building.gridY ?? building.tilePos?.tileY;
-            const tt = building.type || building.tileType || null;
-            const lenX = tt?.lenX ?? 1;
-            const lenY = tt?.lenY ?? 1;
-
-            if (!Number.isFinite(bx) || !Number.isFinite(by)) return null;
-
-            return {
-                minX: bx,
-                minY: by,
-                maxX: bx + lenX - 1,
-                maxY: by + lenY - 1,
-            };
-        };
-
-        const ignoreRects = [resolveIgnoreRect(shooter), resolveIgnoreRect(target)].filter(Boolean);
-
-        const line = new Phaser.Geom.Line(x0, y0, x1, y1);
-        const points = Phaser.Geom.Line.BresenhamPoints(line);
-
-        for (const p of points) {
-            if (ignoreRects.some((rect) =>
-                p.x >= rect.minX &&
-                p.x <= rect.maxX &&
-                p.y >= rect.minY &&
-                p.y <= rect.maxY
-            )) {
-                continue;
-            }
-
-            const cell = Map.grid[p.y]?.[p.x];
-            if (!Array.isArray(cell)) continue;
-
-            const key = TILE_MAP(cell[1]);
-            const type = TILE_TYPES[key];
-
-            // keep your current rule: water doesn't block; walls/doors don't block LOS
-            const isWallish =
-            type === TILE_TYPES.wall ||
-            type === TILE_TYPES.woodWall ||
-            type === TILE_TYPES.wall_door ||
-            type === TILE_TYPES.woodWall_door;
-
-            if (type && type.block && key !== "water" && !isWallish) {
-            return false;
+            const bounds = this.getStructureBounds(hit);
+            if (!bounds) continue;
+            if (Phaser.Geom.Intersects.LineToRectangle(line, bounds)) {
+                return false;
             }
         }
 
@@ -493,7 +531,7 @@ export class Projectile {
     }
 
     static handleStructureCollision(projectile, hit) {
-        if (Projectile.isFriendlyStructureHit(projectile, hit)) {
+        if (!Projectile.shouldCollideWithStructure(projectile, hit)) {
             return;
         }
 

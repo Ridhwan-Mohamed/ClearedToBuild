@@ -2154,22 +2154,31 @@ export class MainMenu {
 
                 if (baseBounds) {
                     const isOverview = this.zoomMixer?.mode === "overview";
+                    Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
+
                     if (!isOverview) {
                         Map.setDetailedWorldPaused?.(false);
                         Map.setDetailedWorldVisible?.(true);
-                        Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
                     } else {
                         Map.setDetailedWorldVisible?.(false);
                         Map.setDetailedWorldPaused?.(true);
                     }
 
-                    this.zoomMixer?.updateOverviewCell?.(
-                        baseBounds.minX,
-                        baseBounds.minY,
-                        Map.grid,
-                        baseBounds.width,
-                        baseBounds.height
-                    );
+                    if (refreshOpts?.forceOverviewRebuild) {
+                        this.zoomMixer?.buildOverviewTextureFromGrid?.(
+                            Map.grid,
+                            SQUARESIZE,
+                            (cell) => colorFor(cell)
+                        );
+                    } else {
+                        this.zoomMixer?.updateOverviewCell?.(
+                            baseBounds.minX,
+                            baseBounds.minY,
+                            Map.grid,
+                            baseBounds.width,
+                            baseBounds.height
+                        );
+                    }
                 }
 
                 Map._uiIgnoreWorldLayer?.();
@@ -2261,22 +2270,31 @@ export class MainMenu {
                     waterSourcesQuadTree?.refreshBounds?.(opts?.waterSourceUpdate ?? {});
                 }
 
+                Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
+
                 if (!isOverview) {
                     Map.setDetailedWorldPaused?.(false);
                     Map.setDetailedWorldVisible?.(true);
-                    Map.redrawRect?.(baseBounds.minX, baseBounds.minY, baseBounds.width, baseBounds.height, 1);
                 } else {
                     Map.setDetailedWorldVisible?.(false);
                     Map.setDetailedWorldPaused?.(true);
                 }
 
-                this.zoomMixer?.updateOverviewCell?.(
-                    baseBounds.minX,
-                    baseBounds.minY,
-                    Map.grid,
-                    baseBounds.width,
-                    baseBounds.height
-                );
+                if (opts?.forceOverviewRebuild) {
+                    this.zoomMixer?.buildOverviewTextureFromGrid?.(
+                        Map.grid,
+                        SQUARESIZE,
+                        (cell) => colorFor(cell)
+                    );
+                } else {
+                    this.zoomMixer?.updateOverviewCell?.(
+                        baseBounds.minX,
+                        baseBounds.minY,
+                        Map.grid,
+                        baseBounds.width,
+                        baseBounds.height
+                    );
+                }
                 Map._uiIgnoreWorldLayer?.();
             };
             if (!isContinue) {

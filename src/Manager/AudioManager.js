@@ -42,6 +42,8 @@ import error_sfx from 'url:../assets/audio/error.ogg';
 import type_sfx from 'url:../assets/audio/type.ogg';
 import thud_click from 'url:../assets/audio/thud_click.ogg';
 import coins_sfx from 'url:../assets/audio/coins.ogg';
+import notification_sfx from 'url:../assets/audio/notification.ogg';
+import notification_good_sfx from 'url:../assets/audio/notification_good.ogg';
 import xp_gain_sfx from 'url:../assets/audio/xp.ogg';
 import level_up_sfx from 'url:../assets/audio/level_up.ogg';
 import scream1 from 'url:../assets/audio/scream1.ogg';
@@ -146,6 +148,8 @@ export class AudioManager {
     scene.load.audio("sfx_ui_type", type_sfx);
     scene.load.audio("sfx_ui_thud_click", thud_click);
     scene.load.audio("sfx_ui_coins_gain", coins_sfx);
+    scene.load.audio("sfx_ui_notification", notification_sfx);
+    scene.load.audio("sfx_ui_notification_good", notification_good_sfx);
     scene.load.audio("sfx_ui_xp_gain", xp_gain_sfx);
     scene.load.audio("sfx_ui_level_up", level_up_sfx);
     scene.load.audio("sfx_flee_scream_1", scream1);
@@ -378,6 +382,14 @@ export class AudioManager {
         });
     }
 
+    static playPurchaseCoins(amount = 0, opts = {}) {
+        const normalized = Math.max(1, Number(amount || 0));
+        this.playSound("sfx_ui_coins_gain", {
+            volume: opts.volume ?? this._clamp(0.2 + Math.min(0.1, normalized / 260), 0.2, 0.3),
+            rate: opts.rate ?? this._clamp(1.04 - Math.min(0.08, normalized / 420), 0.96, 1.04),
+        });
+    }
+
     static playTownXpGain(amount = 0, opts = {}) {
         const normalized = Math.max(1, Number(amount || 0));
         this.playSound("sfx_ui_xp_gain", {
@@ -464,10 +476,7 @@ export class AudioManager {
     }
 
     static playMarketPurchase(opts = {}) {
-        this.playOptionalSound("sfx_market_purchase", "sfx_pickup", {
-            volume: opts.volume ?? 0.34,
-            rate: opts.rate ?? (0.96 + Math.random() * 0.08),
-        });
+        this.playPurchaseCoins(opts.amount ?? 0, opts);
     }
 
     static playCardArm(opts = {}) {
@@ -510,6 +519,13 @@ export class AudioManager {
         });
     }
 
+    static playBuildQueued(opts = {}) {
+        this.playSound("sfx_ui_thud_click", {
+            volume: opts.volume ?? 0.2,
+            rate: opts.rate ?? (0.94 + Math.random() * 0.05),
+        });
+    }
+
     static playBuildingComplete(opts = {}) {
         this.playSound("sfx_building_complete", {
             volume: opts.volume ?? 0.24,
@@ -524,10 +540,31 @@ export class AudioManager {
         });
     }
 
+    static playNotification(opts = {}) {
+        this.playSound("sfx_ui_notification", {
+            volume: opts.volume ?? 0.22,
+            rate: opts.rate ?? (0.97 + Math.random() * 0.06),
+        });
+    }
+
+    static playNotificationGood(opts = {}) {
+        this.playSound("sfx_ui_notification_good", {
+            volume: opts.volume ?? 0.23,
+            rate: opts.rate ?? (0.98 + Math.random() * 0.05),
+        });
+    }
+
     static playUiType(opts = {}) {
         this.playSound("sfx_ui_type", {
             volume: opts.volume ?? 0.25,
             rate: opts.rate ?? (0.96 + Math.random() * 0.12),
+        });
+    }
+
+    static playUiTextThud(opts = {}) {
+        this.playSound("sfx_ui_thud_click", {
+            volume: opts.volume ?? 0.14,
+            rate: opts.rate ?? (0.99 + Math.random() * 0.06),
         });
     }
 

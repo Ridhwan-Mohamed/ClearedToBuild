@@ -242,6 +242,7 @@ export class StorageManager {
         let storage = reserved?.storage ?? null;
         let idx = reserved?.index ?? null;
         let remaining = 1;
+        const sourceDirectOrderId = troop?.carryingDirectOrderId ?? troop?.task?.directOrderId ?? troop?.pendingOvenJob?.directOrderId ?? null;
 
         if (!storage || !team.storageList?.includes(storage)) {
             if (reserved) {
@@ -262,7 +263,9 @@ export class StorageManager {
         }
 
         let task = team.storageDeliveryItems.find(existing =>
-            existing.storage === storage && existing.item?.name === carryEntry.name
+            existing.storage === storage &&
+            existing.item?.name === carryEntry.name &&
+            (existing.directOrderId ?? null) === sourceDirectOrderId
         );
 
         if (task) {
@@ -279,7 +282,8 @@ export class StorageManager {
                 index: idx,
                 assigned: 0,
                 remaining: Math.max(1, Number(remaining || 0)),
-                taskType: 'storageDelivery'
+                taskType: 'storageDelivery',
+                directOrderId: sourceDirectOrderId,
             };
             team.storageDeliveryItems.push(task);
         }
@@ -368,6 +372,9 @@ export class StorageManager {
         }
 
         if (success) {
+            if (task.item?.name === UI_ITEM_TYPES.clean_water.name && task.directOrderId != null) {
+                Teams.recordTownWaterDelivery?.(troop.body.team, task.directOrderId, 1);
+            }
             this.removeCarriedItem(troop);
         }
 
@@ -539,12 +546,14 @@ export class StorageManager {
         return isCarrying;
     }
 
-    static addCarriedItem(troop, item) {
+    static addCarriedItem(troop, item, opts = {}) {
         troop.carrying = item;
+        troop.carryingDirectOrderId = opts?.directOrderId ?? null;
     }
 
     static removeCarriedItem(troop) {
         troop.carrying = null;
+        troop.carryingDirectOrderId = null;
     }
 
 }

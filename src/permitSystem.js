@@ -10,8 +10,26 @@ export function getHousePermitCost(tileOrName) {
   return (name === "house1" || name === "house2") ? 1 : 0;
 }
 
-export function getContractPermitCost(type, difficulty = 1) {
-  switch (type) {
+export function getCompletedPermitBossWeeks(runContext = null) {
+  const day = Math.max(1, Number(runContext?.clock?.day ?? runContext?.day ?? 1) || 1);
+  return Math.max(0, Math.floor((day - 1) / 7));
+}
+
+export function getContractPermitCost(type, difficulty = 1, runContext = null) {
+  if (difficulty && typeof difficulty === "object") {
+    runContext = difficulty;
+    difficulty = 1;
+  }
+
+  const normalizedType = String(type || "").toUpperCase();
+  const completedBossWeeks = getCompletedPermitBossWeeks(runContext);
+
+  if (completedBossWeeks >= 1) {
+    if (normalizedType === "ROCK" || normalizedType === "MARKET") return 2;
+    if (normalizedType === "FOREST" || normalizedType === "FARM") return 1;
+  }
+
+  switch (normalizedType) {
     case "FOREST":
     case "ROCK":
     case "PRESSURE":
@@ -25,9 +43,5 @@ export function getContractPermitCost(type, difficulty = 1) {
 }
 
 export function getStagePermitReward(stageIndex, seasonIndex = 1, stagesPerSeason = 5) {
-  const stage = Math.max(1, Number(stageIndex) || 1);
-  const season = Math.max(1, Number(seasonIndex) || 1);
-  const bossBonus = stage >= stagesPerSeason ? 1 : 0;
-  const seasonGrowth = Math.floor((season - 1) / 2);
-  return 1 + bossBonus + seasonGrowth;
+  return 1;
 }

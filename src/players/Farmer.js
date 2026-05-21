@@ -27,7 +27,7 @@ export class Farmer {
 
     static speed = 85;
     static stamina = 0.005;
-    static maxWaterPailCarry = 3;
+    static maxWaterPailCarry = 2;
 
     static preload(scene) {
         scene.load.image('farmer_plant', farmerPlant);
@@ -264,7 +264,7 @@ export class Farmer {
         }
 
         // Clear references
-        if (farmer.task) {farmer.task.assigned--; farmer.task = null;}
+        Player._releaseTaskAssignment(farmer);
         StorageManager.releaseDeliveryReservation(farmer);
         if (farmer.carrying) farmer.carrying = null;
 

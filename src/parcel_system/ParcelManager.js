@@ -66,12 +66,29 @@ export class ParcelManager {
 
   getContractPurchaseContext(slotId, type, difficulty = 1) {
     const favor = isSlotFavorEligibleContractType(type) ? this.getSlotFavor(slotId) : null;
+    const baseMoneyCost = getEffectiveContractMoneyCost(this.scene, type, difficulty, favor);
+    const discount = Math.max(0, Number(this.scene?.getNextParcelDiscount?.() || 0));
     return {
       favor,
-      moneyCost: getEffectiveContractMoneyCost(this.scene, type, difficulty, favor),
+      moneyCost: Math.max(0, Math.round(baseMoneyCost * Math.max(0, 1 - discount))),
       durationMs: getEffectiveContractDurationMs(type, favor),
       completionBonusMoney: getSlotFavorCompletionBonusMoney(this.scene, type, difficulty, favor),
     };
+  }
+
+  hasActiveContractType(type) {
+    const normalized = String(type || "").toUpperCase();
+    if (!normalized) return false;
+    if (normalized === "PRESSURE") return false;
+    for (const inst of this.contractsById.values()) {
+      if (String(inst?.type || "").toUpperCase() === normalized) return true;
+    }
+    return false;
+  }
+
+  _consumeParcelCouponIfNeeded(type) {
+    if (!String(type || "").trim()) return 0;
+    return Math.max(0, Number(this.scene?.consumeParcelCoupon?.() || 0));
   }
 
   _countActiveSlotFavors() {
@@ -204,7 +221,7 @@ export class ParcelManager {
   }
 
   startMilitia(slotId, opts = {}) {
-    if (this.slotToContractId[slotId]) return null;
+    if (this.slotToContractId[slotId] || this.hasActiveContractType("MILITIA")) return null;
 
     const id = `MILITIA_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
@@ -228,6 +245,7 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
 
     inst.spawn();
+    this._consumeParcelCouponIfNeeded("MILITIA");
     this._refreshAfterParcelPaint(inst.getParcelBounds?.());
 
     const slotPanel = this.scene?.parcelSpawnUI?.slots?.get?.(slotId);
@@ -239,7 +257,7 @@ export class ParcelManager {
   }
 
   startMarket(slotId) {
-    if (this.slotToContractId[slotId]) return null;
+    if (this.slotToContractId[slotId] || this.hasActiveContractType("MARKET")) return null;
 
     const id = `MARKET_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
@@ -265,6 +283,7 @@ export class ParcelManager {
     this.contractsById.set(id, inst);
 
     inst.spawn();
+    this._consumeParcelCouponIfNeeded("MARKET");
     this._refreshAfterParcelPaint(inst.getParcelBounds?.());
     this._notifyExpansionParcelClaimed("MARKET", slotId, id);
     SaveManager.queueAutosave("parcel_market_start");
@@ -279,7 +298,7 @@ export class ParcelManager {
 
 
   _startResource(slotId, type) {
-    if (this.slotToContractId[slotId]) return null;
+    if (this.slotToContractId[slotId] || this.hasActiveContractType(type)) return null;
 
     const id = `${type}_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
@@ -330,6 +349,7 @@ export class ParcelManager {
     };
 
     const spawnResult = inst.spawn({ animateParcelAdd: true });
+    this._consumeParcelCouponIfNeeded(type);
     if (spawnResult && typeof spawnResult.then === "function") {
       spawnResult
         .then(afterSpawn)
@@ -401,6 +421,7 @@ export class ParcelManager {
     };
 
     const spawnResult = inst.spawn({ animateParcelAdd: true });
+    this._consumeParcelCouponIfNeeded("PRESSURE");
     if (spawnResult && typeof spawnResult.then === "function") {
       spawnResult
         .then(afterSpawn)

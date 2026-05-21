@@ -72,16 +72,16 @@ export class RockNode {
   }
 
   setUpHitDetection() {
-    this.sprite.on("pointerover", () => {
-      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, true);
+    this.sprite.on("pointerover", (pointer) => {
+      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, true, pointer);
       const inPlaceMode = RockNode.scene.breakItems && RockNode.scene.breakItems.text === "Place";
       if (inPlaceMode) this.sprite.setTint(0x888888);
       else this.sprite.setTint(0xaaaaaa);
     });
 
-    this.sprite.on("pointerout", () => {
-      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
-      if (!this.flashTween) this.sprite.clearTint();
+    this.sprite.on("pointerout", (pointer) => {
+      RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, false, pointer);
+      if (!this.flashTween) this.sprite?.clearTint?.();
     });
 
     this.sprite.on("pointerdown", () => {
@@ -127,8 +127,8 @@ export class RockNode {
       repeat: -1,
       onUpdate: (tw) => {
         const on = tw.getValue() > 0.5;
-        if (on) this.sprite.setTint(0x636363);
-        else this.sprite.clearTint();
+        if (on) this.sprite?.setTint?.(0x636363);
+        else this.sprite?.clearTint?.();
       },
     });
   }
@@ -139,7 +139,7 @@ export class RockNode {
       this.flashTween.remove();
       this.flashTween = null;
     }
-    this.sprite.clearTint();
+    this.sprite?.clearTint?.();
   }
 
   applyBlockDamage(remaining) {
@@ -185,6 +185,7 @@ export class RockNode {
   destroy() {
     if (!this.sprite) return;
     this.active = false;
+    RockNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
     this.stopFlash();
     if (this.lightId != null) {
       VisibilitySystem.removeLightById(this.lightId);

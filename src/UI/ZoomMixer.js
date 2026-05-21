@@ -167,17 +167,113 @@ export class ZoomMixer {
   }
 
   _unscaledTweenTimeScale() {
-    const scale = Number(ZoomMixer.scene?.tweens?.timeScale);
+    const scale = Number(this._getTweenHostScene()?.tweens?.timeScale);
     return Number.isFinite(scale) && scale > 0 ? 1 / scale : 1;
   }
 
-  _addUnscaledTween(config) {
+  _getTweenHostScene() {
     const scene = ZoomMixer.scene;
-    if (!scene?.tweens) return null;
-    return scene.tweens.add({
+    const uiScene = scene?.uiScene;
+    if (uiScene?.tweens?.add) return uiScene;
+    return scene;
+  }
+
+  _getTweenManagers() {
+    const scene = ZoomMixer.scene;
+    const managers = [];
+    const pushManager = (candidate) => {
+      const tweens = candidate?.tweens;
+      if (!tweens?.add) return;
+      if (managers.includes(tweens)) return;
+      managers.push(tweens);
+    };
+    pushManager(scene);
+    pushManager(scene?.uiScene);
+    return managers;
+  }
+
+  _killManagedTweensOf(target) {
+    if (!target) return;
+    for (const tweens of this._getTweenManagers()) {
+      tweens.killTweensOf?.(target);
+    }
+  }
+
+  _addUnscaledTween(config) {
+    const hostScene = this._getTweenHostScene();
+    if (!hostScene?.tweens?.add) return null;
+    return hostScene.tweens.add({
       ...config,
       timeScale: config.timeScale ?? this._unscaledTweenTimeScale(),
     });
+  }
+
+  _getWorldPixelSize() {
+    const grid = Map.grid;
+    if (!Array.isArray(grid) || !Array.isArray(grid[0])) return null;
+    return {
+      width: Math.max(1, grid[0].length * SQUARESIZE),
+      height: Math.max(1, grid.length * SQUARESIZE),
+    };
+  }
+
+  _getScrollClamp(cam, zoom = cam?.zoom ?? 1) {
+    const safeZoom = Math.max(0.0001, Number(zoom || 1));
+    const worldSize = this._getWorldPixelSize();
+    if (!cam || !worldSize) return null;
+
+    const viewW = cam.width / safeZoom;
+    const viewH = cam.height / safeZoom;
+    const maxScrollX = worldSize.width - viewW;
+    const maxScrollY = worldSize.height - viewH;
+
+    return {
+      minX: maxScrollX >= 0 ? 0 : maxScrollX * 0.5,
+      maxX: maxScrollX >= 0 ? maxScrollX : maxScrollX * 0.5,
+      minY: maxScrollY >= 0 ? 0 : maxScrollY * 0.5,
+      maxY: maxScrollY >= 0 ? maxScrollY : maxScrollY * 0.5,
+    };
+  }
+
+  _clampScrollToWorld(cam, scrollX, scrollY, zoom = cam?.zoom ?? 1) {
+    const clamp = this._getScrollClamp(cam, zoom);
+    if (!clamp) {
+      return {
+        x: Number(scrollX || 0),
+        y: Number(scrollY || 0),
+      };
+    }
+
+    return {
+      x: Phaser.Math.Clamp(Number(scrollX || 0), clamp.minX, clamp.maxX),
+      y: Phaser.Math.Clamp(Number(scrollY || 0), clamp.minY, clamp.maxY),
+    };
+  }
+
+  _syncAnchorToCameraCenter(cam) {
+    if (!cam) return;
+    const centerX = Number(cam.scrollX || 0) + (cam.width * 0.5) / Math.max(0.0001, Number(cam.zoom || 1));
+    const centerY = Number(cam.scrollY || 0) + (cam.height * 0.5) / Math.max(0.0001, Number(cam.zoom || 1));
+    this.anchorWorld = { x: centerX, y: centerY };
+    this.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
+  }
+
+  handleResize() {
+    const scene = ZoomMixer.scene;
+    const cam = scene?.cameras?.main;
+    if (!cam) return;
+
+    this._killManagedTweensOf(cam);
+    this.zoomVel.v = 0;
+    this.scrollVel.x = 0;
+    this.scrollVel.y = 0;
+    this.targetZoom = Math.max(0.0001, Number(cam.zoom || this.targetZoom || 1));
+
+    const clamped = this._clampScrollToWorld(cam, cam.scrollX, cam.scrollY, cam.zoom);
+    cam.setScroll(clamped.x, clamped.y);
+    cam.scrollX = clamped.x;
+    cam.scrollY = clamped.y;
+    this._syncAnchorToCameraCenter(cam);
   }
 
   // Zoom to targetZoom around the camera center (no pointer reference)
@@ -201,18 +297,17 @@ export class ZoomMixer {
     const mid = cam.midPoint;
     const cx  = mid.x;
     const cy  = mid.y;
+    this.anchorWorld = { x: cx, y: cy };
+    this.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
 
     // compute final scroll
     let targetScrollX = cx - (cam.width / (2 * targetZoom));
     let targetScrollY = cy - (cam.height / (2 * targetZoom));
+    const clampedTarget = this._clampScrollToWorld(cam, targetScrollX, targetScrollY, targetZoom);
+    targetScrollX = clampedTarget.x;
+    targetScrollY = clampedTarget.y;
 
-    const bounds = cam.getBounds();
-    const viewW  = cam.width / targetZoom;
-    const viewH  = cam.height / targetZoom;
-    targetScrollX = Phaser.Math.Clamp(targetScrollX, bounds.x, bounds.right  - viewW);
-    targetScrollY = Phaser.Math.Clamp(targetScrollY, bounds.y, bounds.bottom - viewH);
-
-    scene.tweens.killTweensOf(cam);
+    this._killManagedTweensOf(cam);
 
     const self = this;
     const syncModeForZoom = () => {
@@ -533,7 +628,9 @@ export class ZoomMixer {
     if (!scene) return;
 
     const cam = scene.cameras.main;
-    const dt = Math.min(0.05, deltaMs / 1000); // clamp large frame spikes
+    const rawDeltaMs = Number(scene.game?.loop?.delta);
+    const frameDeltaMs = Number.isFinite(rawDeltaMs) && rawDeltaMs > 0 ? rawDeltaMs : deltaMs;
+    const dt = Math.min(0.05, frameDeltaMs / 1000); // clamp large frame spikes using real frame time
 
     // If we don't have an anchor yet, default to camera center
     if (!this.anchorWorld || !this.anchorScreen) {
@@ -559,13 +656,9 @@ export class ZoomMixer {
     let targetScrollX = this.anchorWorld.x - (this.anchorScreen.x / cam.zoom);
     let targetScrollY = this.anchorWorld.y - (this.anchorScreen.y / cam.zoom);
 
-    // Clamp to bounds
-    const bounds = cam.getBounds();
-    const viewW = cam.width / cam.zoom;
-    const viewH = cam.height / cam.zoom;
-
-    targetScrollX = Phaser.Math.Clamp(targetScrollX, bounds.x, bounds.right - viewW);
-    targetScrollY = Phaser.Math.Clamp(targetScrollY, bounds.y, bounds.bottom - viewH);
+    const clampedTarget = this._clampScrollToWorld(cam, targetScrollX, targetScrollY, cam.zoom);
+    targetScrollX = clampedTarget.x;
+    targetScrollY = clampedTarget.y;
 
     // 3) Smooth scroll (accelerate then decelerate)
     cam.scrollX = this._smoothDamp(

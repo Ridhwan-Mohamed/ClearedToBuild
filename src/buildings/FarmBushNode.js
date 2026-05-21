@@ -81,15 +81,15 @@ export class FarmBushNode {
   }
 
   setUpHitDetection() {
-    this.sprite.on("pointerover", () => {
-      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, true);
+    this.sprite.on("pointerover", (pointer) => {
+      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, true, pointer);
       const inPlaceMode = FarmBushNode.scene.breakItems && FarmBushNode.scene.breakItems.text === "Place";
       this.sprite.setTint(inPlaceMode ? 0x888888 : 0xaaaaaa);
     });
 
-    this.sprite.on("pointerout", () => {
-      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
-      if (!this.flashTween) this.sprite.clearTint();
+    this.sprite.on("pointerout", (pointer) => {
+      FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, false, pointer);
+      if (!this.flashTween) this.sprite?.clearTint?.();
     });
 
     this.sprite.on("pointerdown", () => {
@@ -161,6 +161,7 @@ export class FarmBushNode {
   destroy() {
     if (!this.active) return;
     this.active = false;
+    FarmBushNode.scene.setForagerRouteHover?.(this, this.resourceKind, false);
     this.stopFlash();
     if (this.task?.value === this) this.task.value = null;
     this.task = null;

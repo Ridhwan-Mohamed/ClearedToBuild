@@ -136,12 +136,34 @@ function collectSeaEdgeCandidates(edge = null) {
     return candidates;
 }
 
+export function applyEnemyModifierVisual(unit, visual = null) {
+    if (!unit || !visual) return;
+
+    const tint = Number(visual.tint);
+    if (Number.isFinite(tint)) {
+        unit.unitTint = tint;
+        unit.setTint?.(tint);
+    }
+
+    const scale = Number(visual.scale);
+    if (Number.isFinite(scale) && scale > 0) {
+        const baseScaleX = Number(unit._modifierBaseScaleX ?? unit.scaleX ?? 1) || 1;
+        const baseScaleY = Number(unit._modifierBaseScaleY ?? unit.scaleY ?? 1) || 1;
+        unit._modifierBaseScaleX = baseScaleX;
+        unit._modifierBaseScaleY = baseScaleY;
+        unit.setScale?.(baseScaleX * scale, baseScaleY * scale);
+    }
+
+    unit.hordeModifierVisual = { ...visual };
+}
+
 function applySeaRaiderMods(unit, modifier = null, options = {}) {
     if (!unit) return null;
 
     const speedMultiplier = Math.max(0.5, Number(options.speedMultiplier ?? modifier?.speedMultiplier ?? 1) || 1);
     const healthMultiplier = Math.max(0.5, Number(options.healthMultiplier ?? modifier?.healthMultiplier ?? 1) || 1);
     const damageMultiplier = Math.max(0.5, Number(options.damageMultiplier ?? modifier?.damageMultiplier ?? 1) || 1);
+    const visual = options.visual ?? modifier?.visual ?? null;
 
     unit.moveSpeedMultiplier = speedMultiplier;
     unit.hordeModifierKey = options.modifierKey ?? modifier?.key ?? null;
@@ -160,6 +182,8 @@ function applySeaRaiderMods(unit, modifier = null, options = {}) {
             critDmg: Math.max(1, Math.round(Number(unit.weapon.critDmg ?? 0) * damageMultiplier)),
         };
     }
+
+    applyEnemyModifierVisual(unit, visual);
 
     return {
         speedMultiplier,

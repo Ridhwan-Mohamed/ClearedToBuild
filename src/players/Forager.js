@@ -191,7 +191,7 @@ export class Forager {
         }
 
         // Clear tasks
-        if (troop.task) { troop.task.assigned--; troop.task = null; }
+        Player._releaseTaskAssignment(troop);
         troop.carrying = null;
 
         // ❗ Remove from Player.characters group

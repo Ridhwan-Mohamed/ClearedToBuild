@@ -99,12 +99,17 @@ export class PineTree {
   }
 
   destroy() {
+    this.active = false;
+    PineTree.scene?.setForagerRouteHover?.(this, this.resourceKind, false);
+    this.stopFlash?.();
     if (this.lightId != null) {
       VisibilitySystem.removeLightById(this.lightId);
       this.lightId = null;
     }
     GameMap.removeStructureBarrier(this.collider);
     this.collider = null;
+    if (this.task?.value === this) this.task.value = null;
+    this.task = null;
     this.container.destroy(true);
     removeFromArray(GameMap.worldPines, this);
     const i = PineTree.list.indexOf(this);
@@ -185,8 +190,8 @@ export class PineTree {
     this.health = 3;
 
     // hover: darken the 3 layers
-    this.hit.on('pointerover', () => {
-      scene.setForagerRouteHover?.(this, "wood", true);
+    this.hit.on('pointerover', (pointer) => {
+      scene.setForagerRouteHover?.(this, "wood", true, pointer);
       // only show hover when not placing/breaking builds unless you want both
       if (!scene.breakItems || scene.breakItems.text !== "Place") {
         this.base.setTint(0xaaaaaa);
@@ -200,11 +205,11 @@ export class PineTree {
       }
     });
 
-    this.hit.on('pointerout', () => {
-      scene.setForagerRouteHover?.(this, "wood", false);
-      this.base.clearTint();
-      this.mid.clearTint();
-      this.top.clearTint();
+    this.hit.on('pointerout', (pointer) => {
+      scene.setForagerRouteHover?.(this, "wood", false, pointer);
+      this.base?.clearTint?.();
+      this.mid?.clearTint?.();
+      this.top?.clearTint?.();
     });
 
     // click: either queue block-resource job OR create destroy job
@@ -264,7 +269,7 @@ export class PineTree {
         const layers = [this.base, this.mid, this.top];
 
         for (const s of layers) {
-          if (!s) continue;
+          if (!s?.active) continue;
           if (on) s.setTint(0x636363);
           else s.clearTint();
         }
@@ -278,9 +283,9 @@ export class PineTree {
       this.flashTween.remove();
       this.flashTween = null;
     }
-    if (this.base) this.base.clearTint();
-    if (this.mid) this.mid.clearTint();
-    if (this.top) this.top.clearTint();
+    this.base?.clearTint?.();
+    this.mid?.clearTint?.();
+    this.top?.clearTint?.();
   }
 
   applyBlockDamage(remaining) {

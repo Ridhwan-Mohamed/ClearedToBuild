@@ -18,6 +18,7 @@ import {
 } from "../Cards/MarketCards";
 import { getCardOutlineTint } from "./CardPreview";
 import { RELIEF_PACKAGE_PRICE } from "../ReliefPackageConfig";
+import { BODY_FONT_FAMILY } from "./Typography.js";
 
 export const DEFAULT_MARKET_PRICES = Object.freeze(
   Object.fromEntries([
@@ -33,6 +34,14 @@ export function loadParcelMarketAssets(scene) {
 
 function getPriceTable(pricesMaybe) {
   return { ...DEFAULT_MARKET_PRICES, ...(pricesMaybe || {}) };
+}
+
+function getRepeatBuyInflation(card = null) {
+  const explicit = Number(card?.repeatBuyInflation);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  if (card?.marketSection === MARKET_CARD_SECTION.RECOVERY) return 0.2;
+  if (card?.marketSection === MARKET_CARD_SECTION.ATTACK) return 0.3;
+  return 0.25;
 }
 
 function getMoney(scene) {
@@ -157,7 +166,7 @@ function makeCardOffer(scene, card, {
   price,
   sold,
   teamNumber,
-  onSold,
+  onPurchased,
 }) {
   const tint = getCardOutlineTint(card);
   const root = scene.add.container(x, y);
@@ -188,11 +197,10 @@ function makeCardOffer(scene, card, {
   }).setOrigin(0, 0);
 
   const desc = scene.add.text(-w / 2 + 58, -12, card.text, {
-    fontFamily: "Bungee",
-    fontSize: "7px",
+    fontFamily: BODY_FONT_FAMILY,
+    fontSize: "9px",
     color: sold ? "#6f8895" : "#d3edf9",
-    stroke: "#081621",
-    strokeThickness: 2,
+    fontStyle: "600",
     lineSpacing: 1,
     wordWrap: { width: w - 70 },
   }).setOrigin(0, 0);
@@ -227,7 +235,7 @@ function makeCardOffer(scene, card, {
       scene.achievementSystem?.addStat?.("marketPurchases", 1);
       AudioManager.playMarketPurchase?.();
       showAlert(scene, `Bought ${card.name}`, "#aaffaa");
-      onSold?.(card.id);
+      onPurchased?.(card);
     },
   });
 
@@ -278,11 +286,10 @@ function makeReliefPackageOffer(scene, {
   }).setOrigin(0, 0);
 
   const desc = scene.add.text(-w / 2 + 58, -12, "Emergency storage recovery. Auto-deploys when all storages are lost. Limit 1.", {
-    fontFamily: "Bungee",
-    fontSize: "7px",
+    fontFamily: BODY_FONT_FAMILY,
+    fontSize: "9px",
     color: disabled ? "#6f8895" : "#d3edf9",
-    stroke: "#081621",
-    strokeThickness: 2,
+    fontStyle: "600",
     lineSpacing: 1,
     wordWrap: { width: w - 70 },
   }).setOrigin(0, 0);
@@ -334,6 +341,7 @@ export function spawnParcelMarketStorefront(scene, {
   prices = null,
   soldIds = [],
   onSoldIdsChanged = null,
+  onPricesChanged = null,
 } = {}) {
   loadMarketCardPlaceholderAssets(scene);
 
@@ -447,11 +455,14 @@ export function spawnParcelMarketStorefront(scene, {
           w: colW,
           h: rowH,
           price,
-          sold: sold.has(offerId),
+          sold: false,
           teamNumber,
-          onSold: (nextOfferId) => {
-            sold.add(nextOfferId);
-            onSoldIdsChanged?.(Array.from(sold));
+          onPurchased: (purchasedCard) => {
+            const nextPrice = scene.applyRunMarketPriceInflation?.(purchasedCard?.id, getRepeatBuyInflation(purchasedCard));
+            if (Number.isFinite(nextPrice) && nextPrice > 0) {
+              priceTable[purchasedCard.id] = nextPrice;
+              onPricesChanged?.({ ...priceTable });
+            }
             rebuildOffers();
             applyMode(currentMode);
           },
@@ -545,6 +556,9 @@ export function spawnParcelMarketStorefront(scene, {
     slotId,
     get soldIds() {
       return Array.from(sold);
+    },
+    get prices() {
+      return { ...priceTable };
     },
     setMode: applyMode,
     openPanel: () => {},

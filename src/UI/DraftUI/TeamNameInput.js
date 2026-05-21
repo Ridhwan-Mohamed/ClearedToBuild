@@ -16,6 +16,7 @@ export class TeamNameInput {
 
     const width = opts.width ?? 220;
     const wrapperStyle = opts.wrapperStyle ?? "display:flex; flex-direction:column; gap:6px; align-items:stretch;";
+    const inputClassName = String(opts.inputClassName ?? "").trim();
     const inputStyle = opts.inputStyle ?? `
             width:${width}px;
             padding:6px 10px;
@@ -36,6 +37,7 @@ export class TeamNameInput {
     const html = `
       <div style="${wrapperStyle}">
         <input
+          class="${inputClassName.replaceAll('"', '&quot;')}"
           type="text"
           maxlength="24"
           autocapitalize="words"
@@ -53,6 +55,31 @@ export class TeamNameInput {
 
     const input = this.dom.node.querySelector("input");
     this.input = input;
+    if (inputClassName && input) {
+      input.className = inputClassName;
+    }
+    if (input && typeof inputStyle === "string" && inputStyle.trim()) {
+      input.style.cssText = inputStyle;
+    }
+    if (input && typeof opts.extraCss === "string" && opts.extraCss.trim()) {
+      TeamNameInput._ensureStyleTag(
+        opts.styleTagId ?? "draft-start-team-name-input-style",
+        opts.extraCss,
+      );
+    }
+    if (input) {
+      const enforceRuntimeTextStyle = () => {
+        input.style.fontFamily = '"Bungee", cursive';
+        input.style.fontWeight = "400";
+        input.style.setProperty("-webkit-text-fill-color", input.style.color || "#050b10");
+      };
+      enforceRuntimeTextStyle();
+      if (typeof document !== "undefined" && document.fonts?.load) {
+        document.fonts.load(`${Math.max(14, Number(opts.fontLoadSizePx) || 16)}px Bungee`).then(() => {
+          enforceRuntimeTextStyle();
+        }).catch(() => {});
+      }
+    }
     this._lastValue = String(input?.value ?? opts.initialValue ?? "");
     input.addEventListener("input", () => {
       const v = input.value ?? "";
@@ -117,6 +144,17 @@ export class TeamNameInput {
 
   focus() {
     this.getInputElement()?.focus?.();
+  }
+
+  static _ensureStyleTag(id, cssText) {
+    if (typeof document === "undefined" || !id || !cssText) return;
+    let styleTag = document.getElementById(id);
+    if (!styleTag) {
+      styleTag = document.createElement("style");
+      styleTag.id = id;
+      document.head?.appendChild(styleTag);
+    }
+    styleTag.textContent = cssText;
   }
 
   destroy() {

@@ -36,16 +36,19 @@ export class TowerBuilding {
     return this.getLivingTownTowers(teamNumber).length > 0;
   }
 
-  static grantDawnIncome(scene, teamNumber = 1) {
+  static grantDawnIncome(scene, teamNumber = 1, opts = {}) {
     const towers = this.getLivingTownTowers(teamNumber);
     if (!towers.length) return null;
 
     const money = towers.length * 150;
-    const permits = towers.reduce((sum, tower) => sum + (tower.isStarterTownTower ? 2 : 1), 0);
+    const skippedStarterPermits = opts.skipStarterPermits
+      ? towers.filter((tower) => tower.isStarterTownTower).length
+      : 0;
+    const permits = Math.max(0, towers.length - skippedStarterPermits);
     scene?.updateMoney?.(money);
-    scene?.updatePermits?.(permits);
+    if (permits > 0) scene?.updatePermits?.(permits);
 
-    return { towers, money, permits };
+    return { towers, money, permits, skippedStarterPermits };
   }
 
   constructor(x, y, team = 0, opts = {}) {
@@ -370,9 +373,8 @@ export class TowerBuilding {
 
     const hp = `HP: ${Math.max(0, this.health)}/${this.maxHealth}`;
     if (this.isTownTower) {
-      const permitText = this.isStarterTownTower ? "+2 permits" : "+1 permit";
       this.panelText1.setText(`Town Tower ${hp}`);
-      this.panelText2.setText(`Dawn: +$150 ${permitText}`);
+      this.panelText2.setText("Dawn: +$150 +1 permit");
       return;
     }
 

@@ -26,6 +26,8 @@ import {
 } from "../Cards/MarketCards";
 import {
   clearExpiredMarketAdrenalineBuff,
+  clearExpiredSceneMarketBuffs,
+  setSceneMarketBuff,
   setMarketAdrenalineBuff,
 } from "../Cards/MarketBuffs";
 import { playSmokeClearing } from "../FX/SmokeClearing";
@@ -33,10 +35,20 @@ import { playSmokeClearing } from "../FX/SmokeClearing";
 const CONTEXT_SOURCE = "market-card-use";
 const PLAYER_TEAM = "1";
 const ADRENALINE_MS = 45_000;
+const MELEE_CRIT_MS = 32_000;
+const PROJECTILE_CRIT_MS = 32_000;
+const SECOND_WIND_STAMINA_FRACTION = 0.68;
 const FORTIFY_MS = 120_000;
 const HEAL_PARTICLE_DEPTH = (UIDEPTH ?? 10) + 125;
 const TARGETED_MARKET_ACTIVATIONS = new Set([
   "auto_wall",
+  "chain_zapper",
+  "meteor_drop",
+  "decoy_beacon",
+  "fortify_patch",
+  "shock_mine",
+]);
+const INSTANT_TARGET_ACTIVATIONS = new Set([
   "chain_zapper",
   "meteor_drop",
   "decoy_beacon",
@@ -152,6 +164,21 @@ function healTroops(scene, troops, fraction, label, particleColor = 0x7cffb2, te
   return healed;
 }
 
+function restoreTroopStamina(scene, troops, fraction, label = "+ST", particleColor = 0x8fe7ff, textColor = "#8fe7ff") {
+  let restored = 0;
+  for (const troop of troops) {
+    const max = Math.max(1, Number(troop.maxStamina ?? troop.stamina ?? 1));
+    const before = Number(troop.stamina ?? max);
+    const next = Math.min(max, before + (max * fraction));
+    if (next <= before) continue;
+    troop.stamina = next;
+    emitHealParticles(scene, troop, particleColor, 8);
+    showGhostText(scene, troop.x, troop.y - 12, label, 1, false, false, textColor);
+    restored++;
+  }
+  return restored;
+}
+
 function damageTroop(scene, troop, amount, {
   sourceTeam = 1,
   slowMultiplier = null,
@@ -256,6 +283,44 @@ function getTeamTownFootprint(teamNumber = PLAYER_TEAM) {
   return cells;
 }
 
+function canAutoWallBuildAt(bounds, x, y) {
+  if (!isCellInBounds(bounds, x, y) || !inWorldBounds(x, y)) return false;
+  if (isWaterCell(x, y)) return false;
+  if (Wall.getAt?.(x, y)?.active) return false;
+  return GameMap.navGrid?.[y]?.[x] === 1;
+}
+
+function pickAutoWallDoorCell(seg, buildableCells) {
+  if (!Array.isArray(seg) || seg.length < 3 || !Array.isArray(buildableCells) || !buildableCells.length) {
+    return null;
+  }
+
+  const buildableKeys = new Set(buildableCells.map((cell) => gridKey(cell.x, cell.y)));
+  const centerIndex = (seg.length - 1) / 2;
+  let best = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestIndex = Number.POSITIVE_INFINITY;
+
+  for (let i = 1; i < seg.length - 1; i++) {
+    const cell = seg[i];
+    if (!buildableKeys.has(gridKey(cell.x, cell.y))) continue;
+    const prev = seg[i - 1];
+    const next = seg[i + 1];
+    const straightThrough =
+      (prev?.x === cell.x && next?.x === cell.x) ||
+      (prev?.y === cell.y && next?.y === cell.y);
+    if (!straightThrough) continue;
+    const distance = Math.abs(i - centerIndex);
+    if (distance < bestDistance || (distance === bestDistance && i < bestIndex)) {
+      best = cell;
+      bestDistance = distance;
+      bestIndex = i;
+    }
+  }
+
+  return best;
+}
+
 function computeAutoWallCells(scene) {
   const cells = getTeamTownFootprint(PLAYER_TEAM).filter((cell) => inWorldBounds(cell.x, cell.y));
   if (!cells.length) return [];
@@ -271,40 +336,57 @@ function computeAutoWallCells(scene) {
   minY = Math.max(bounds.minY, minY - 2);
   maxY = Math.min(bounds.maxY, maxY + 2);
 
+  const segments = [
+    Array.from({ length: maxX - minX + 1 }, (_, index) => ({ x: minX + index, y: minY })),
+    Array.from({ length: maxY - minY - 1 }, (_, index) => ({ x: maxX, y: minY + index + 1 })),
+    Array.from({ length: maxX - minX + 1 }, (_, index) => ({ x: minX + index, y: maxY })),
+    Array.from({ length: maxY - minY - 1 }, (_, index) => ({ x: minX, y: minY + index + 1 })),
+  ];
+
   const out = [];
-  const seen = new Set();
-  const tryAdd = (x, y) => {
-    if (!isCellInBounds(bounds, x, y) || !inWorldBounds(x, y)) return;
-    if (seen.has(gridKey(x, y))) return;
-    seen.add(gridKey(x, y));
-    if (isWaterCell(x, y)) return;
-    if (Wall.getAt?.(x, y)?.active) return;
-    if (GameMap.navGrid?.[y]?.[x] !== 1) return;
-    out.push({ x, y });
-  };
-
-  for (let x = minX; x <= maxX; x++) {
-    tryAdd(x, minY);
-    tryAdd(x, maxY);
+  for (const seg of segments) {
+    const buildableCells = seg.filter((cell) => canAutoWallBuildAt(bounds, cell.x, cell.y));
+    if (!buildableCells.length) continue;
+    const door = pickAutoWallDoorCell(seg, buildableCells);
+    const doorKey = door ? gridKey(door.x, door.y) : null;
+    for (const cell of buildableCells) {
+      out.push({
+        x: cell.x,
+        y: cell.y,
+        tileType: gridKey(cell.x, cell.y) === doorKey ? "wall_door" : "wall",
+      });
+    }
   }
-  for (let y = minY + 1; y <= maxY - 1; y++) {
-    tryAdd(minX, y);
-    tryAdd(maxX, y);
-  }
-
   return out;
 }
 
 function placeWallCells(scene, cells) {
-  if (!cells.length) return 0;
+  if (!cells.length) return { total: 0, walls: 0, doors: 0 };
+  let walls = 0;
+  let doors = 0;
+  const refreshKeys = new Set();
   for (const cell of cells) {
-    GameMap.navGrid[cell.y][cell.x] = 0;
-    GameMap.enemyNavGrid[cell.y][cell.x] = 0;
-    GameMap.placeTile(cell.x, cell.y, "wall");
+    const tileType = cell.tileType === "wall_door" ? "wall_door" : "wall";
+    const isDoor = tileType === "wall_door";
+    if (GameMap.navGrid?.[cell.y]) GameMap.navGrid[cell.y][cell.x] = isDoor ? 1 : 0;
+    if (GameMap.enemyNavGrid?.[cell.y]) GameMap.enemyNavGrid[cell.y][cell.x] = 0;
+    GameMap.placeTile(cell.x, cell.y, tileType);
     Wall.ensureAt(scene, cell.x, cell.y, 1);
+    if (isDoor) doors += 1;
+    else walls += 1;
+    for (let yy = cell.y - 1; yy <= cell.y + 1; yy++) {
+      for (let xx = cell.x - 1; xx <= cell.x + 1; xx++) {
+        if (!inWorldBounds(xx, yy)) continue;
+        refreshKeys.add(gridKey(xx, yy));
+      }
+    }
   }
   for (const cell of cells) {
     GameMap.refreshWallShapesAround?.(cell.x, cell.y);
+  }
+  for (const key of refreshKeys) {
+    const [x, y] = key.split(",").map(Number);
+    Wall.ensureAt(scene, x, y, 1);
   }
   scene.refreshParcelArea?.({
     x: Math.min(...cells.map((cell) => cell.x)),
@@ -317,7 +399,7 @@ function placeWallCells(scene, cells) {
     scene.rebuildBothNavMeshes?.();
     scene.zoomMixer?.buildOverviewTextureFromGrid?.(GameMap.grid, SQUARESIZE, (cell) => colorFor(cell));
   }
-  return cells.length;
+  return { total: cells.length, walls, doors };
 }
 
 function findBuildingAtGrid(gx, gy) {
@@ -337,9 +419,14 @@ function findBuildingAtGrid(gx, gy) {
   return null;
 }
 
-function findFortifyTargetAtGrid(gx, gy) {
-  const wall = Wall.getAt?.(gx, gy);
-  if (wall?.active) {
+function describeFortifyTarget(target) {
+  if (!target) return null;
+  if (target.wallRef) target = target.wallRef;
+  if (target.buildingRef) target = target.buildingRef;
+
+  if (target instanceof Wall || target.isWall || target.sprite?.isWall) {
+    const wall = target.wallRef || target;
+    if (!wall?.active || Number(wall.team ?? PLAYER_TEAM) !== Number(PLAYER_TEAM)) return null;
     return {
       kind: "wall",
       label: "Wall",
@@ -351,18 +438,36 @@ function findFortifyTargetAtGrid(gx, gy) {
     };
   }
 
-  const building = findBuildingAtGrid(gx, gy);
-  if (!building) return null;
-  const type = building.tileType || building.type || {};
+  const type = target.tileType || target.type || {};
+  const teamNumber = Number(target.teamNumber ?? target.team ?? PLAYER_TEAM);
+  if (teamNumber !== Number(PLAYER_TEAM)) return null;
   return {
     kind: "building",
-    label: building.tileType?.label || building.tileType?.name || "Building",
-    value: building,
-    x: Number(building.x ?? building.gridX ?? 0),
-    y: Number(building.y ?? building.gridY ?? 0),
+    label: target.tileType?.label || target.tileType?.name || "Building",
+    value: target,
+    x: Number(target.x ?? target.gridX ?? 0),
+    y: Number(target.y ?? target.gridY ?? 0),
     w: Math.max(1, Number(type.lenX ?? 1)),
     h: Math.max(1, Number(type.lenY ?? 1)),
   };
+}
+
+function findFortifyTargetAtGrid(gx, gy) {
+  const wall = Wall.getAt?.(gx, gy);
+  const wallTarget = describeFortifyTarget(wall);
+  if (wallTarget) return wallTarget;
+
+  return describeFortifyTarget(findBuildingAtGrid(gx, gy));
+}
+
+function findFortifyTargetFromPointer(scene, pointer) {
+  const cam = scene?.cameras?.main;
+  const hits = scene?.input?.manager?.hitTest?.(pointer, scene?.children?.list || [], cam) || [];
+  for (const hit of hits) {
+    const target = describeFortifyTarget(hit?.wallRef || hit?.buildingRef || hit);
+    if (target) return target;
+  }
+  return null;
 }
 
 function isValidPlacementCell(gx, gy) {
@@ -775,6 +880,18 @@ export function useConsumableCard(scene, cardOrId) {
     return { ok: healed > 0, message: healed > 0 ? `Healed ${healed} workers` : "No workers needed healing" };
   }
 
+  if (card.activation === "second_wind_bell") {
+    const restored = restoreTroopStamina(
+      scene,
+      getLiveTeamTroops(PLAYER_TEAM),
+      SECOND_WIND_STAMINA_FRACTION,
+      "+ST",
+      0x8fe7ff,
+      "#8fe7ff"
+    );
+    return { ok: restored > 0, message: restored > 0 ? "Second Wind Bell rang out" : "No team members needed stamina" };
+  }
+
   if (card.activation === "adrenaline_draft") {
     let buffed = 0;
     const now = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
@@ -796,6 +913,50 @@ export function useConsumableCard(scene, cardOrId) {
     return { ok: buffed > 0, message: buffed > 0 ? "Adrenaline Draft active" : "No team members to buff" };
   }
 
+  if (card.activation === "melee_crit_buff") {
+    const targets = getLiveTeamTroops(PLAYER_TEAM).filter((entry) => entry?.isBrawler || entry?.isBlademaster);
+    if (!targets.length) {
+      return { ok: false, message: "No melee fighters are ready for Killer Instinct" };
+    }
+    const now = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
+    const until = setSceneMarketBuff(scene, "meleeCrit", now + MELEE_CRIT_MS);
+    clearExpiredSceneMarketBuffs(scene, now);
+    scene.events?.emit?.("market:timed-buff-changed", { key: "meleeCrit", until, duration: MELEE_CRIT_MS });
+    scene.time.delayedCall(MELEE_CRIT_MS, () => {
+      const checkNow = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
+      if (clearExpiredSceneMarketBuffs(scene, checkNow)) {
+        scene.events?.emit?.("market:timed-buff-changed", { key: "meleeCrit", until: 0, duration: 0 });
+      }
+    });
+    for (const troop of targets) {
+      emitHealParticles(scene, troop, 0xff8a6b, 6);
+      showGhostText(scene, troop.x, troop.y - 12, "CRIT", 1, false, false, "#ffb18f");
+    }
+    return { ok: true, message: "Killer Instinct active" };
+  }
+
+  if (card.activation === "projectile_crit_buff") {
+    const targets = getLiveTeamTroops(PLAYER_TEAM).filter((entry) => entry?.weapon?.projectile);
+    if (!targets.length) {
+      return { ok: false, message: "No projectile fighters are ready for Deadeye Volley" };
+    }
+    const now = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
+    const until = setSceneMarketBuff(scene, "projectileCrit", now + PROJECTILE_CRIT_MS);
+    clearExpiredSceneMarketBuffs(scene, now);
+    scene.events?.emit?.("market:timed-buff-changed", { key: "projectileCrit", until, duration: PROJECTILE_CRIT_MS });
+    scene.time.delayedCall(PROJECTILE_CRIT_MS, () => {
+      const checkNow = scene.getSimulationNow?.() ?? scene.simNowMs ?? scene.time?.now ?? 0;
+      if (clearExpiredSceneMarketBuffs(scene, checkNow)) {
+        scene.events?.emit?.("market:timed-buff-changed", { key: "projectileCrit", until: 0, duration: 0 });
+      }
+    });
+    for (const troop of targets) {
+      emitHealParticles(scene, troop, 0xffd166, 6);
+      showGhostText(scene, troop.x, troop.y - 12, "DEADEYE", 1, false, false, "#ffe29b");
+    }
+    return { ok: true, message: "Deadeye Volley active" };
+  }
+
   return { ok: false, message: "That consumable has no effect yet" };
 }
 
@@ -810,6 +971,7 @@ export class MarketCardUseController {
     this.selected = null;
     this.autoWallCells = [];
     this.graphics = null;
+    this._cursorGuard = null;
   }
 
   begin(cardOrId, options = {}) {
@@ -834,7 +996,8 @@ export class MarketCardUseController {
     this.autoWallCells = this.activation === "auto_wall" ? computeAutoWallCells(this.scene) : [];
     this.graphics = this.scene.add.graphics().setDepth((UIDEPTH ?? 10) + 140);
 
-    this.scene.input.setDefaultCursor(this._cursorForActivation());
+    this._attachCursorGuard();
+    this._enforceCursor();
     this._setCommandContext();
     this._updateFromPointer(this.scene.input.activePointer);
     this._drawPreview();
@@ -856,6 +1019,7 @@ export class MarketCardUseController {
   onPointerMove(pointer) {
     if (!this.active) return false;
     this._updateFromPointer(pointer);
+    this._enforceCursor();
     this._drawPreview();
     return true;
   }
@@ -864,7 +1028,11 @@ export class MarketCardUseController {
     if (!this.active || pointer?.button !== 0) return false;
     this._updateFromPointer(pointer);
     if (this.activation !== "auto_wall") this.selected = this.hover;
+    this._enforceCursor();
     this._drawPreview();
+    if (INSTANT_TARGET_ACTIVATIONS.has(this.activation) && this.canConfirm()) {
+      this.confirm();
+    }
     return true;
   }
 
@@ -887,7 +1055,8 @@ export class MarketCardUseController {
     let result = { ok: false, message: "Card failed" };
     if (this.activation === "auto_wall") {
       const placed = placeWallCells(this.scene, this.autoWallCells);
-      result = { ok: placed > 0, message: placed > 0 ? `Placed ${placed} wall segments` : "No valid wall cells" };
+      const doorSuffix = placed.doors > 0 ? ` with ${placed.doors} doors` : "";
+      result = { ok: placed.total > 0, message: placed.total > 0 ? `Placed ${placed.total} wall segments${doorSuffix}` : "No valid wall cells" };
     } else if (this.activation === "chain_zapper") {
       const hits = applyChainZapper(this.scene, this.selected.enemy);
       result = { ok: hits > 0, message: hits > 0 ? `Zapped ${hits} enemies` : "No valid enemy chain" };
@@ -926,49 +1095,80 @@ export class MarketCardUseController {
     return "copy";
   }
 
+  _needsManualConfirm() {
+    return this.activation === "auto_wall";
+  }
+
+  _attachCursorGuard() {
+    this._detachCursorGuard();
+    this._cursorGuard = () => this._enforceCursor();
+    this.scene.input?.on?.("gameobjectover", this._cursorGuard);
+    this.scene.input?.on?.("gameobjectout", this._cursorGuard);
+  }
+
+  _detachCursorGuard() {
+    if (!this._cursorGuard) return;
+    this.scene.input?.off?.("gameobjectover", this._cursorGuard);
+    this.scene.input?.off?.("gameobjectout", this._cursorGuard);
+    this._cursorGuard = null;
+  }
+
+  _enforceCursor(cursor = null) {
+    const nextCursor = cursor || this._cursorForActivation();
+    this.scene.input.setDefaultCursor(nextCursor);
+    const canvas = this.scene?.input?.manager?.canvas || this.scene?.game?.canvas;
+    if (canvas?.style) canvas.style.cursor = nextCursor;
+  }
+
   _setCommandContext() {
     this.scene.uiScene?.selectionCommandBar?.setContext?.(CONTEXT_SOURCE, {
       helperText: () => this._helperText(),
-      buttons: () => [
-        {
-          id: "cancel-card",
-          label: "CANCEL",
-          styleKey: "cancel",
-          onClick: () => this.cancel(),
-        },
-        {
-          id: "confirm-card",
-          label: "CONFIRM USE",
-          styleKey: "confirm",
-          disabled: () => !this.canConfirm(),
-          active: () => this.canConfirm(),
-          onClick: () => this.confirm(),
-        },
-      ],
+      buttons: () => {
+        const buttons = [
+          {
+            id: "cancel-card",
+            label: "CANCEL",
+            styleKey: "cancel",
+            onClick: () => this.cancel(),
+          },
+        ];
+        if (this._needsManualConfirm()) {
+          buttons.push({
+            id: "confirm-card",
+            label: "CONFIRM USE",
+            styleKey: "confirm",
+            disabled: () => !this.canConfirm(),
+            active: () => this.canConfirm(),
+            onClick: () => this.confirm(),
+          });
+        }
+        return buttons;
+      },
     });
   }
 
   _helperText() {
     if (!this.card) return "";
     if (this.activation === "auto_wall") {
+      const doorCount = this.autoWallCells.filter((cell) => cell.tileType === "wall_door").length;
       return this.autoWallCells.length
-        ? `AUTO WALL | Previewing ${this.autoWallCells.length} valid wall cells`
+        ? `AUTO WALL | Previewing ${this.autoWallCells.length} valid wall cells${doorCount ? ` with ${doorCount} doors` : ""}`
         : "AUTO WALL | No valid perimeter cells found";
     }
     if (this.activation === "chain_zapper") {
-      return this.selected?.enemy ? "CHAIN ZAPPER | Enemy selected" : "CHAIN ZAPPER | Click a raider, then confirm";
+      return this.hover?.enemy ? "CHAIN ZAPPER | Click a raider to fire the chain" : "CHAIN ZAPPER | Hover a raider and click to fire";
     }
     if (this.activation === "meteor_drop") {
-      return this.selected?.x ? "METEOR DROP | Blast area selected" : "METEOR DROP | Click an area, then confirm";
+      return Number.isFinite(this.hover?.x) ? "METEOR DROP | Click a point to drop the strike" : "METEOR DROP | Move over a target area";
     }
     if (this.activation === "fortify_patch") {
-      return this.selected?.target ? `FORTIFY PATCH | ${this.selected.target.label} selected` : "FORTIFY PATCH | Click a building or wall";
+      return this.hover?.target ? `FORTIFY PATCH | Hovering ${this.hover.target.label} | Click to fortify` : "FORTIFY PATCH | Hover a building or wall";
     }
     if (this.activation === "decoy_beacon") {
-      return this.selected?.valid ? "DECOY BEACON | Placement selected" : "DECOY BEACON | Click a valid empty tile";
+      return this.hover?.valid ? "DECOY BEACON | Click to place the beacon" : "DECOY BEACON | Hover a valid empty tile";
     }
     if (this.activation === "shock_mine") {
-      return this.selected?.valid ? "SHOCK MINE | Placement selected" : "SHOCK MINE | Click a valid empty tile";
+      return this.hover?.valid ? "SHOCK MINE | Click to arm the mine" : "SHOCK MINE | Hover a valid empty tile";
     }
     return `${this.card.name} | Select target`;
   }
@@ -992,7 +1192,8 @@ export class MarketCardUseController {
     }
 
     if (this.activation === "fortify_patch") {
-      this.hover = { gx: grid.x, gy: grid.y, target: findFortifyTargetAtGrid(grid.x, grid.y) };
+      const target = findFortifyTargetFromPointer(this.scene, pointer) || findFortifyTargetAtGrid(grid.x, grid.y);
+      this.hover = { gx: grid.x, gy: grid.y, target };
       return;
     }
 
@@ -1008,9 +1209,10 @@ export class MarketCardUseController {
     g.clear();
 
     if (this.activation === "auto_wall") {
-      g.fillStyle(0x7bd9ff, 0.18);
-      g.lineStyle(2, 0x7bd9ff, 0.8);
       for (const cell of this.autoWallCells) {
+        const isDoor = cell.tileType === "wall_door";
+        g.fillStyle(isDoor ? 0xffd978 : 0x7bd9ff, isDoor ? 0.24 : 0.18);
+        g.lineStyle(2, isDoor ? 0xfff2b3 : 0x7bd9ff, 0.84);
         g.fillRect(cell.x * SQUARESIZE + 2, cell.y * SQUARESIZE + 2, SQUARESIZE - 4, SQUARESIZE - 4);
         g.strokeRect(cell.x * SQUARESIZE + 2, cell.y * SQUARESIZE + 2, SQUARESIZE - 4, SQUARESIZE - 4);
       }
@@ -1069,7 +1271,8 @@ export class MarketCardUseController {
 
   _cleanup() {
     this.scene.uiScene?.selectionCommandBar?.clearContext?.(CONTEXT_SOURCE);
-    this.scene.input.setDefaultCursor("default");
+    this._detachCursorGuard();
+    this._enforceCursor("default");
     this.graphics?.destroy();
     this.graphics = null;
     this.active = false;

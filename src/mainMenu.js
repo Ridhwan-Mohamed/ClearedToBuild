@@ -21,6 +21,7 @@ import continueAsset from 'url:./assets/continue.png'
 import playButton from 'url:./assets/playButton.png'
 import yesButton from 'url:./assets/yes.png'
 import noButton from 'url:./assets/no.png'
+import itchIcon from 'url:./assets/icons/favicon-32x32.png'
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
 import { PathRegistry } from './lib/navmesh/PathRegistry.js';
 import { PathRepair } from './lib/navmesh/PathRepair.js';
@@ -266,12 +267,211 @@ export class MainMenu {
         root.buttonHit = hit;
         root.buttonArt = art;
         root.buttonGlow = null;
+        root._layoutLift = lift;
+        root._widthFactor = widthFactor;
+        root._maxWidth = maxWidth;
+        root._minWidth = minWidth;
+        root._hoverScaleFactor = Number(opts.hoverScaleFactor ?? 1.24);
+        root._hoverAngleRange = Number(opts.hoverAngleRange ?? 1.4);
         root._artBaseScale = baseScale;
         root._hoverTween = null;
         root._hoverLift = Number(opts.hoverLift ?? 8);
         root._baseY = y;
+        root._baseX = x;
+        root._isHovered = false;
         root._neighborPush = Number(opts.neighborPush ?? 18);
         return root;
+    }
+
+    static _layoutMainMenuImageButton(button, overlayScene) {
+        if (!button?.buttonArt || !button?.buttonHit || !overlayScene) return;
+
+        const targetWidth = Phaser.Math.Clamp(
+            Math.round(overlayScene.scale.width * Number(button._widthFactor ?? 0.18)),
+            Number(button._minWidth ?? 220),
+            Number(button._maxWidth ?? 320)
+        );
+        const baseScale = targetWidth / Math.max(button.buttonArt.width || 1, 1);
+        const hoverScale = baseScale * Number(button._hoverScaleFactor ?? 1.24);
+        const currentScale = button._isHovered ? hoverScale : baseScale;
+        const hitWidth = Math.max(targetWidth * 0.96, 180);
+        const hitHeight = Math.max((button.buttonArt.height || 48) * baseScale * 0.92, 60);
+
+        button._artBaseScale = baseScale;
+        button.buttonArt.setScale(currentScale);
+        button.buttonHit.setPosition(0, Number(button._layoutLift ?? 0));
+        button.buttonHit.setSize(hitWidth, hitHeight);
+    }
+
+    static _createMainMenuIconButton(overlayScene, x, y, opts = {}) {
+        const root = overlayScene.add.container(x, y);
+        const glow = overlayScene.add.circle(0, 0, 30, opts.glowColor ?? 0x7cd4ff, 0.18);
+        const plate = overlayScene.add.circle(0, 0, 24, opts.plateColor ?? 0x0b1b29, 0.92)
+            .setStrokeStyle(2, 0xf4fbff, 0.24);
+        const shine = overlayScene.add.circle(-7, -8, 8, 0xffffff, 0.1);
+        const art = overlayScene.add.image(0, 0, opts.artKey ?? 'itchLinkIcon').setOrigin(0.5);
+        const hit = overlayScene.add
+            .rectangle(0, 0, 56, 56, 0xffffff, 0.001)
+            .setInteractive({ useHandCursor: true });
+
+        root.add([glow, plate, shine, art, hit]);
+        root.buttonGlow = glow;
+        root.buttonPlate = plate;
+        root.buttonArt = art;
+        root.buttonHit = hit;
+        root._iconSizeFactor = Number(opts.sizeFactor ?? 0.03);
+        root._iconMinSize = Number(opts.minSize ?? 34);
+        root._iconMaxSize = Number(opts.maxSize ?? 48);
+        root._hoverLift = Number(opts.hoverLift ?? 5);
+        root._hoverScaleFactor = Number(opts.hoverScaleFactor ?? 1.16);
+        root._hoverAngleRange = Number(opts.hoverAngleRange ?? 5);
+        root._glowBaseAlpha = Number(opts.glowBaseAlpha ?? 0.18);
+        root._glowHoverAlpha = Number(opts.glowHoverAlpha ?? 0.34);
+        root._artBaseScale = 1;
+        root._hoverTween = null;
+        root._baseX = x;
+        root._baseY = y;
+        root._isHovered = false;
+        return root;
+    }
+
+    static _layoutMainMenuIconButton(button, overlayScene) {
+        if (!button?.buttonArt || !overlayScene) return;
+
+        const iconSize = Phaser.Math.Clamp(
+            Math.round(Math.min(overlayScene.scale.width, overlayScene.scale.height) * Number(button._iconSizeFactor ?? 0.03)),
+            Number(button._iconMinSize ?? 34),
+            Number(button._iconMaxSize ?? 48)
+        );
+        const plateRadius = Math.round(iconSize * 0.78);
+        const glowRadius = Math.round(iconSize * 0.96);
+        const hitSize = Math.round(iconSize * 2.25);
+        const baseScale = iconSize / Math.max(button.buttonArt.width || 1, 1);
+        const hoverScale = baseScale * Number(button._hoverScaleFactor ?? 1.16);
+
+        button._artBaseScale = baseScale;
+        button.buttonArt.setScale(button._isHovered ? hoverScale : baseScale);
+        button.buttonPlate?.setRadius?.(plateRadius);
+        button.buttonGlow?.setRadius?.(glowRadius);
+        button.buttonGlow?.setAlpha?.(button._isHovered ? Number(button._glowHoverAlpha ?? 0.34) : Number(button._glowBaseAlpha ?? 0.18));
+        button.buttonHit?.setSize?.(hitSize, hitSize);
+    }
+
+    static _createMenuHoverCaption(overlayScene, x, y) {
+        const root = overlayScene.add.container(x, y).setDepth(10012).setScrollFactor(0);
+        const glow = overlayScene.add.ellipse(0, 0, 520, 84, 0x6fbfff, 0.12).setOrigin(0.5);
+        const text = overlayScene.add.text(0, 0, '', {
+            fontSize: '30px',
+            color: '#63b7ff',
+            fontFamily: 'Bungee',
+            stroke: '#ffffff',
+            strokeThickness: 7,
+            align: 'center',
+            wordWrap: { width: 760, useAdvancedWrap: true },
+        }).setOrigin(0.5);
+
+        root.add([glow, text]);
+        root.bg = glow;
+        root.label = text;
+        root._typingEvent = null;
+        root._activeKey = null;
+        root._fullText = '';
+        root.setAlpha(0);
+        return root;
+    }
+
+    static _layoutMenuHoverCaption(caption, overlayScene) {
+        if (!caption?.label || !overlayScene) return;
+        const width = overlayScene.scale.width;
+        const height = overlayScene.scale.height;
+        const fontSize = Phaser.Math.Clamp(Math.round(Math.min(width * 0.026, height * 0.042)), 18, 34);
+        const wrapWidth = Math.min(width * 0.74, 820);
+
+        caption.setPosition(width / 2, Phaser.Math.Clamp(Math.round(height * 0.11), 54, 104));
+        caption.label
+            .setFontSize(`${fontSize}px`)
+            .setWordWrapWidth(wrapWidth, true)
+            .setStroke('#ffffff', Math.max(5, Math.round(fontSize * 0.24)));
+        caption.bg?.setDisplaySize?.(Math.min(width * 0.82, 920), Math.max(74, Math.round(fontSize * 2.45)));
+    }
+
+    static _showMenuHoverCaption(caption, key, text) {
+        if (!caption || !text) return;
+        if (caption._activeKey === key && caption._fullText === text) return;
+
+        caption._typingEvent?.remove?.(false);
+        caption._typingEvent = null;
+        caption._activeKey = key;
+        caption._fullText = text;
+        caption.label.setText('');
+        caption.scene?.tweens?.killTweensOf?.(caption);
+        caption.scene?.tweens?.killTweensOf?.(caption.bg);
+        caption.setAlpha(0);
+        caption.bg?.setAlpha?.(0.02);
+
+        caption.scene?.tweens?.add?.({
+            targets: caption,
+            alpha: 1,
+            duration: 120,
+            ease: 'Quad.easeOut',
+        });
+        caption.scene?.tweens?.add?.({
+            targets: caption.bg,
+            alpha: 0.14,
+            duration: 180,
+            ease: 'Quad.easeOut',
+        });
+
+        const chars = Array.from(String(text));
+        let index = 0;
+        const revealNext = () => {
+            index += 1;
+            const nextChar = chars[index - 1] ?? '';
+            caption.label.setText(chars.slice(0, index).join(''));
+            if (/\S/.test(nextChar)) {
+                AudioManager.playUiTextThud({
+                    volume: 0.12,
+                    rate: 1.01 + Math.random() * 0.04,
+                });
+            }
+        };
+        revealNext();
+        if (chars.length <= 1) return;
+
+        caption._typingEvent = caption.scene?.time?.addEvent?.({
+            delay: 22,
+            repeat: Math.max(chars.length - 2, 0),
+            callback: revealNext,
+        }) ?? null;
+    }
+
+    static _hideMenuHoverCaption(caption, key = null) {
+        if (!caption) return;
+        if (key && caption._activeKey && caption._activeKey !== key) return;
+
+        caption._activeKey = null;
+        caption._fullText = '';
+        caption._typingEvent?.remove?.(false);
+        caption._typingEvent = null;
+        caption.scene?.tweens?.killTweensOf?.(caption);
+        caption.scene?.tweens?.killTweensOf?.(caption.bg);
+        caption.scene?.tweens?.add?.({
+            targets: caption,
+            alpha: 0,
+            duration: 110,
+            ease: 'Quad.easeOut',
+            onComplete: () => {
+                if (!caption._activeKey) {
+                    caption.label.setText('');
+                }
+            },
+        });
+        caption.scene?.tweens?.add?.({
+            targets: caption.bg,
+            alpha: 0,
+            duration: 110,
+            ease: 'Quad.easeOut',
+        });
     }
 
     static _getViewportSize(overlayScene = null) {
@@ -741,6 +941,7 @@ export class MainMenu {
         scene.load.image('playBtn', playButton);
         scene.load.image('yesBtn', yesButton);
         scene.load.image('noBtn', noButton);
+        scene.load.image('itchLinkIcon', itchIcon);
     }
 
     /** Build the preview/selection UI in screen space (on UI camera) */
@@ -757,20 +958,39 @@ export class MainMenu {
         }
         scene._pendingMenuPhase = false;
 
-        const centerX = overlayScene.scale.width / 2;
-        const centerY = overlayScene.scale.height / 2;
+        let centerX = overlayScene.scale.width / 2;
+        let centerY = overlayScene.scale.height / 2;
         const cam = scene.cameras.main;
         const draftPose = MainMenu._getDraftCameraPose(scene, overlayScene);
         const reveal = MainMenu._consumeRestartReveal();
-        const logoScale = Phaser.Math.Clamp(Math.min(overlayScene.scale.width / 1600, overlayScene.scale.height / 900), 0.94, 1.18);
+        let logoScale = Phaser.Math.Clamp(Math.min(overlayScene.scale.width / 1600, overlayScene.scale.height / 900), 0.94, 1.18);
+        let logoY = Phaser.Math.Clamp(Math.round(overlayScene.scale.height * 0.28), 156, 252);
+        let startButtonY = 0;
+        let continueButtonY = 0;
 
         scene.menu?.destroy?.();
         scene.menu = null;
         scene.logo = null;
         scene.startButton = null;
+        scene.continueButton = null;
+        scene.itchButton = null;
         scene.versionText = null;
+        scene._mainMenuHoverCaption?._typingEvent?.remove?.(false);
+        scene._mainMenuHoverCaption = null;
+        scene._mainMenuResizeOverlayScene?.scale?.off?.('resize', scene._mainMenuResizeHandler);
+        scene._mainMenuResizeHandler = null;
+        scene._mainMenuResizeOverlayScene = null;
+        scene._mainMenuParallaxInputScene?.input?.off?.('pointermove', scene._mainMenuParallaxPointerHandler);
+        scene._mainMenuParallaxInputScene?.input?.off?.('gameout', scene._mainMenuParallaxOutHandler);
+        scene._mainMenuParallaxUpdateScene?.events?.off?.('update', scene._mainMenuParallaxUpdateHandler);
+        scene._mainMenuParallaxInputScene = null;
+        scene._mainMenuParallaxUpdateScene = null;
+        scene._mainMenuParallaxPointerHandler = null;
+        scene._mainMenuParallaxOutHandler = null;
+        scene._mainMenuParallaxUpdateHandler = null;
         scene._menuRevealFx?.destroy?.(true);
         scene._menuRevealFx = null;
+        scene._menuRevealFxNodes = null;
 
         overlayScene.cameras?.main?.setScroll?.(0, 0);
         overlayScene.cameras?.main?.setZoom?.(1);
@@ -796,21 +1016,22 @@ export class MainMenu {
 
         // Logo + version (your existing assets/keys)
         const menu = overlayScene.add.container(0,0).setDepth(9998).setScrollFactor(0);
-        const logoY = centerY - 30;
+        const parallaxFarLayer = overlayScene.add.container(0, 0);
+        const parallaxMidLayer = overlayScene.add.container(0, 0);
+        const parallaxNearLayer = overlayScene.add.container(0, 0);
+        const parallaxEdgeLayer = overlayScene.add.container(0, 0);
         const logo = overlayScene.add.image(centerX, logoY, 'logo').setOrigin(0.5).setScale(logoScale);
         const versionText = overlayScene.add.text(overlayScene.scale.width - 75, overlayScene.scale.height - 20, 'v0.9.9', {
-            fontSize: '18px', fill: '#ffffff', fontStyle: 'bold'
-        }).setOrigin(0,1);
-        menu.add([logo, versionText]);
-        // Keep refs on world scene for existing handoff/fade code.
-        scene.menu = menu;
-        scene.logo = logo;
-        scene.versionText = versionText;
+            fontSize: '18px',
+            fill: '#ffffff',
+            fontStyle: 'bold',
+            fontFamily: 'Bungee',
+            stroke: '#071320',
+            strokeThickness: 4,
+        }).setOrigin(1,1);
 
         const continueMeta = SaveManager.getRunSaveMeta();
         const hasContinue = !!continueMeta?.hasContinue;
-        const startButtonY = hasContinue ? centerY + 224 : centerY + 252;
-        const continueButtonY = centerY + 302;
         const startButton = MainMenu._createMainMenuImageButton(overlayScene, centerX, startButtonY, {
             artKey: 'startBtn',
             widthFactor: hasContinue ? 0.112 : 0.122,
@@ -819,8 +1040,6 @@ export class MainMenu {
             hoverLift: 6,
             neighborPush: 20,
         });
-        menu.add(startButton);
-        scene.startButton = startButton;
         const continueButton = hasContinue
             ? MainMenu._createMainMenuImageButton(overlayScene, centerX, continueButtonY, {
                 artKey: 'continueBtn',
@@ -831,12 +1050,239 @@ export class MainMenu {
                 neighborPush: 20,
             })
             : null;
-        if (continueButton) {
-            menu.add(continueButton);
-            scene.continueButton = continueButton;
-        }
+        const itchButton = MainMenu._createMainMenuIconButton(overlayScene, 0, 0, {
+            artKey: 'itchLinkIcon',
+            sizeFactor: 0.03,
+            minSize: 34,
+            maxSize: 46,
+            hoverLift: 4,
+            hoverScaleFactor: 1.18,
+            hoverAngleRange: 6,
+        });
+        const hoverCaption = MainMenu._createMenuHoverCaption(overlayScene, centerX, 0);
+
+        startButton._menuHoverKey = 'start';
+        startButton._menuHoverText = hasContinue
+            ? 'Start new game - deletes old run'
+            : 'Start new game';
         startButton._otherButton = continueButton || null;
-        if (continueButton) continueButton._otherButton = startButton;
+        if (continueButton) {
+            continueButton._otherButton = startButton;
+            continueButton._menuHoverKey = 'continue';
+            continueButton._menuHoverText = 'Continue old run from last save point';
+        }
+        itchButton._menuHoverKey = 'itch';
+        itchButton._menuHoverText = 'A game by badbaado';
+        let newRunPrompt = null;
+        let restartLogoIdleTweens = (_opts = {}) => {};
+        const parallaxState = {
+            currentX: 0,
+            currentY: 0,
+            targetX: 0,
+            targetY: 0,
+        };
+        const parallaxLayers = [
+            { node: parallaxFarLayer, xStrength: 10, yStrength: 7 },
+            { node: parallaxMidLayer, xStrength: 16, yStrength: 10 },
+            { node: parallaxNearLayer, xStrength: 24, yStrength: 16 },
+            { node: parallaxEdgeLayer, xStrength: 12, yStrength: 8 },
+        ];
+
+        const applyMainMenuParallax = (nx = 0, ny = 0, { immediate = false } = {}) => {
+            const clampedX = Phaser.Math.Clamp(Number(nx) || 0, -1, 1);
+            const clampedY = Phaser.Math.Clamp(Number(ny) || 0, -1, 1);
+            for (const layer of parallaxLayers) {
+                const offsetX = clampedX * layer.xStrength;
+                const offsetY = clampedY * layer.yStrength;
+                if (immediate) {
+                    layer.node.setPosition(offsetX, offsetY);
+                    continue;
+                }
+                layer.node.x = Phaser.Math.Linear(layer.node.x, offsetX, 0.14);
+                layer.node.y = Phaser.Math.Linear(layer.node.y, offsetY, 0.14);
+            }
+        };
+
+        const updateParallaxFromPointer = (pointer = null, { immediate = false } = {}) => {
+            const width = Math.max(1, overlayScene.scale.width || 1);
+            const height = Math.max(1, overlayScene.scale.height || 1);
+            if (!pointer || !Number.isFinite(pointer.x) || !Number.isFinite(pointer.y)) {
+                parallaxState.targetX = 0;
+                parallaxState.targetY = 0;
+                if (immediate) {
+                    parallaxState.currentX = 0;
+                    parallaxState.currentY = 0;
+                    applyMainMenuParallax(0, 0, { immediate: true });
+                }
+                return;
+            }
+
+            const nx = Phaser.Math.Clamp((pointer.x / width) * 2 - 1, -1, 1);
+            const ny = Phaser.Math.Clamp((pointer.y / height) * 2 - 1, -1, 1);
+            parallaxState.targetX = nx;
+            parallaxState.targetY = ny;
+            if (immediate) {
+                parallaxState.currentX = nx;
+                parallaxState.currentY = ny;
+                applyMainMenuParallax(nx, ny, { immediate: true });
+            }
+        };
+
+        const updateMainMenuParallax = () => {
+            parallaxState.currentX = Phaser.Math.Linear(parallaxState.currentX, parallaxState.targetX, 0.12);
+            parallaxState.currentY = Phaser.Math.Linear(parallaxState.currentY, parallaxState.targetY, 0.12);
+            if (Math.abs(parallaxState.currentX) < 0.0005) parallaxState.currentX = 0;
+            if (Math.abs(parallaxState.currentY) < 0.0005) parallaxState.currentY = 0;
+            applyMainMenuParallax(parallaxState.currentX, parallaxState.currentY, { immediate: false });
+        };
+
+        const applyButtonHoverPositions = (immediate = false) => {
+            const buttons = [startButton, continueButton].filter(Boolean);
+            for (const button of buttons) {
+                const other = button._otherButton;
+                let targetY = button._baseY ?? button.y;
+                if (button._isHovered) {
+                    targetY -= Number(button._hoverLift ?? 8);
+                } else if (other?._isHovered) {
+                    const push = Number(other._neighborPush ?? button._neighborPush ?? 18);
+                    const dir = (button._baseY ?? button.y) > (other._baseY ?? other.y) ? 1 : -1;
+                    targetY += push * dir;
+                }
+
+                if (immediate) {
+                    button.setPosition(button._baseX ?? button.x, targetY);
+                    if (!button._isHovered) button.setAngle(0);
+                    continue;
+                }
+
+                overlayScene.tweens.killTweensOf(button);
+                overlayScene.tweens.add({
+                    targets: button,
+                    x: button._baseX ?? button.x,
+                    y: targetY,
+                    angle: button._isHovered ? button.angle : 0,
+                    duration: 180,
+                    ease: 'Quad.easeOut',
+                });
+            }
+        };
+
+        const syncMainMenuLayout = ({ immediate = false, keepCameraCentered = false } = {}) => {
+            const width = overlayScene.scale.width;
+            const height = overlayScene.scale.height;
+            const logoOffsetY = 50;
+            const startOffsetY = 30;
+            const continueOffsetY = 20;
+            centerX = width / 2;
+            centerY = height / 2;
+            logoScale = Phaser.Math.Clamp(Math.min(width / 1600, height / 900), 0.94, 1.18);
+            const baseLogoY = Phaser.Math.Clamp(Math.round(height * 0.28), 156, 252) + 40;
+            const baseStartButtonY = hasContinue
+                ? Phaser.Math.Clamp(Math.round(height * 0.69), baseLogoY + 210, height - 128)
+                : Phaser.Math.Clamp(Math.round(height * 0.74), baseLogoY + 228, height - 106);
+            const baseContinueButtonY = baseStartButtonY + Phaser.Math.Clamp(Math.round(height * 0.11), 74, 96);
+            logoY = baseLogoY + logoOffsetY;
+            startButtonY = baseStartButtonY + startOffsetY;
+            continueButtonY = baseContinueButtonY + continueOffsetY;
+
+            const versionPadX = Phaser.Math.Clamp(Math.round(width * 0.018), 14, 26);
+            const versionPadY = Phaser.Math.Clamp(Math.round(height * 0.02), 12, 20);
+            const topPad = Phaser.Math.Clamp(Math.round(Math.min(width, height) * 0.055), 30, 44);
+
+            logo.setPosition(centerX, logoY).setScale(logoScale);
+            versionText
+                .setPosition(width - versionPadX, height - versionPadY)
+                .setFontSize(`${Phaser.Math.Clamp(Math.round(Math.min(width, height) * 0.0175), 14, 18)}px`);
+
+            startButton._baseX = centerX;
+            startButton._baseY = startButtonY;
+            continueButton && (continueButton._baseX = centerX);
+            continueButton && (continueButton._baseY = continueButtonY);
+            itchButton._baseX = topPad;
+            itchButton._baseY = topPad;
+
+            MainMenu._layoutMainMenuImageButton(startButton, overlayScene);
+            MainMenu._layoutMainMenuImageButton(continueButton, overlayScene);
+            MainMenu._layoutMainMenuIconButton(itchButton, overlayScene);
+            MainMenu._layoutMenuHoverCaption(hoverCaption, overlayScene);
+
+            if (immediate) {
+                applyButtonHoverPositions(true);
+                itchButton.setPosition(itchButton._baseX, itchButton._baseY - (itchButton._isHovered ? Number(itchButton._hoverLift ?? 4) : 0));
+            } else {
+                applyButtonHoverPositions(false);
+                overlayScene.tweens.killTweensOf(itchButton);
+                overlayScene.tweens.add({
+                    targets: itchButton,
+                    x: itchButton._baseX,
+                    y: itchButton._baseY - (itchButton._isHovered ? Number(itchButton._hoverLift ?? 4) : 0),
+                    duration: 180,
+                    ease: 'Quad.easeOut',
+                });
+            }
+
+            if (scene._menuRevealFxNodes) {
+                scene._menuRevealFxNodes.blueCover
+                    ?.setPosition?.(0, 0)
+                    ?.setSize?.(width, height);
+                scene._menuRevealFxNodes.glowA?.setPosition?.(width * 0.24, height * 0.28);
+                scene._menuRevealFxNodes.glowB?.setPosition?.(width * 0.74, height * 0.62);
+            }
+
+            if (keepCameraCentered) {
+                const nextDraftPose = MainMenu._getDraftCameraPose(scene, overlayScene);
+                if (nextDraftPose) {
+                    MainMenu._applyCameraPose(cam, nextDraftPose);
+                    MainMenu._lockStartupCameraCenter(scene, { x: nextDraftPose.centerX, y: nextDraftPose.centerY });
+                    if (zoomMixer) {
+                        zoomMixer.mode = "overview";
+                        zoomMixer.targetZoom = cam.zoom;
+                        zoomMixer.anchorWorld = MainMenu._getCameraScrollCenter(cam);
+                        zoomMixer.anchorScreen = { x: cam.width * 0.5, y: cam.height * 0.5 };
+                    }
+                }
+                overlayScene.cameras?.main?.setScroll?.(0, 0);
+                overlayScene.cameras?.main?.setZoom?.(1);
+                scene.overviewOceanWaves?.resize?.();
+            }
+
+            newRunPrompt?.layout?.();
+            if (immediate) {
+                applyMainMenuParallax(parallaxState.currentX, parallaxState.currentY, { immediate: true });
+            }
+        };
+
+        parallaxFarLayer.add([logo]);
+        parallaxMidLayer.add([hoverCaption]);
+        parallaxNearLayer.add([startButton, ...(continueButton ? [continueButton] : [])]);
+        parallaxEdgeLayer.add([itchButton, versionText]);
+        menu.add([parallaxFarLayer, parallaxMidLayer, parallaxNearLayer, parallaxEdgeLayer]);
+        syncMainMenuLayout({ immediate: true });
+
+        // Keep refs on world scene for existing handoff/fade code.
+        scene.menu = menu;
+        scene.logo = logo;
+        scene.startButton = startButton;
+        scene.continueButton = continueButton;
+        scene.itchButton = itchButton;
+        scene.versionText = versionText;
+        scene._mainMenuHoverCaption = hoverCaption;
+        scene._mainMenuResizeOverlayScene = overlayScene;
+        scene._mainMenuResizeHandler = () => {
+            syncMainMenuLayout({ immediate: true, keepCameraCentered: true });
+            updateParallaxFromPointer(overlayScene.input?.activePointer, { immediate: true });
+            restartLogoIdleTweens({ resetTweens: true });
+        };
+        overlayScene.scale.on('resize', scene._mainMenuResizeHandler);
+        scene._mainMenuParallaxInputScene = overlayScene;
+        scene._mainMenuParallaxUpdateScene = overlayScene;
+        scene._mainMenuParallaxPointerHandler = (pointer) => updateParallaxFromPointer(pointer);
+        scene._mainMenuParallaxOutHandler = () => updateParallaxFromPointer(null);
+        scene._mainMenuParallaxUpdateHandler = () => updateMainMenuParallax();
+        overlayScene.input.on('pointermove', scene._mainMenuParallaxPointerHandler);
+        overlayScene.input.on('gameout', scene._mainMenuParallaxOutHandler);
+        overlayScene.events.on('update', scene._mainMenuParallaxUpdateHandler);
+        updateParallaxFromPointer(overlayScene.input?.activePointer, { immediate: true });
 
         if (reveal) {
             const revealFx = overlayScene.add.container(0, 0).setDepth(10040).setScrollFactor(0);
@@ -852,6 +1298,7 @@ export class MainMenu {
             const glowB = overlayScene.add.circle(overlayScene.scale.width * 0.74, overlayScene.scale.height * 0.62, 220, 0xdbeafe, 0.07);
             revealFx.add([blueCover, glowA, glowB]);
             scene._menuRevealFx = revealFx;
+            scene._menuRevealFxNodes = { blueCover, glowA, glowB };
 
             menu.setAlpha(0);
             logo.setY(logoY + 16).setScale(logoScale * 0.92);
@@ -922,6 +1369,7 @@ export class MainMenu {
                     if (scene._menuRevealFx === revealFx) {
                         scene._menuRevealFx = null;
                     }
+                    scene._menuRevealFxNodes = null;
                     revealFx.destroy(true);
                 }
             });
@@ -931,44 +1379,74 @@ export class MainMenu {
             if (!button?.buttonHit) return;
             button.buttonHit.on('pointerover', () => {
                 AudioManager.playUiHover({ volume: 0.18 });
+                button._isHovered = true;
+                if (button === startButton || button === continueButton) {
+                    applyButtonHoverPositions(false);
+                } else {
+                    overlayScene.tweens.killTweensOf(button);
+                }
                 button._hoverTween?.remove?.();
                 button._hoverTween = overlayScene.tweens.add({
                     targets: button,
-                    angle: { from: -1.4, to: 1.4 },
+                    angle: {
+                        from: -Number(button._hoverAngleRange ?? 1.4),
+                        to: Number(button._hoverAngleRange ?? 1.4)
+                    },
                     duration: 520,
                     yoyo: true,
                     repeat: -1,
                     ease: 'Sine.easeInOut',
                 });
+                overlayScene.tweens.killTweensOf(button.buttonArt);
                 overlayScene.tweens.add({
                     targets: button.buttonArt,
-                    scaleX: (button._artBaseScale || 1) * 1.24,
-                    scaleY: (button._artBaseScale || 1) * 1.24,
+                    scaleX: (button._artBaseScale || 1) * Number(button._hoverScaleFactor ?? 1.24),
+                    scaleY: (button._artBaseScale || 1) * Number(button._hoverScaleFactor ?? 1.24),
                     duration: 180,
                     ease: 'Quad.easeOut',
                 });
-                overlayScene.tweens.add({
-                    targets: button,
-                    y: (button._baseY ?? button.y) - (button._hoverLift ?? 8),
-                    duration: 180,
-                    ease: 'Quad.easeOut',
-                });
-                const other = button._otherButton;
-                if (other) {
-                    const push = button._neighborPush ?? 18;
-                    const dir = other._baseY > (button._baseY ?? button.y) ? 1 : -1;
+                if (button.buttonGlow) overlayScene.tweens.killTweensOf(button.buttonGlow);
+                if (button.buttonGlow) {
                     overlayScene.tweens.add({
-                        targets: other,
-                        y: (other._baseY ?? other.y) + (push * dir),
+                        targets: button.buttonGlow,
+                        alpha: Number(button._glowHoverAlpha ?? 0.34),
+                        scaleX: 1.12,
+                        scaleY: 1.12,
                         duration: 180,
                         ease: 'Quad.easeOut',
                     });
                 }
+                if (button.buttonPlate) overlayScene.tweens.killTweensOf(button.buttonPlate);
+                if (button.buttonPlate) {
+                    overlayScene.tweens.add({
+                        targets: button.buttonPlate,
+                        scaleX: 1.08,
+                        scaleY: 1.08,
+                        duration: 180,
+                        ease: 'Quad.easeOut',
+                    });
+                }
+                if (button !== startButton && button !== continueButton) {
+                    overlayScene.tweens.add({
+                        targets: button,
+                        x: button._baseX ?? button.x,
+                        y: (button._baseY ?? button.y) - Number(button._hoverLift ?? 4),
+                        duration: 180,
+                        ease: 'Quad.easeOut',
+                    });
+                }
+                MainMenu._showMenuHoverCaption(hoverCaption, button._menuHoverKey, button._menuHoverText);
             });
 
             button.buttonHit.on('pointerout', () => {
+                button._isHovered = false;
                 button._hoverTween?.remove?.();
                 button._hoverTween = null;
+                MainMenu._hideMenuHoverCaption(hoverCaption, button._menuHoverKey);
+                if (button === startButton || button === continueButton) {
+                    applyButtonHoverPositions(false);
+                }
+                overlayScene.tweens.killTweensOf(button.buttonArt);
                 overlayScene.tweens.add({
                     targets: button.buttonArt,
                     scaleX: button._artBaseScale || 1,
@@ -976,22 +1454,45 @@ export class MainMenu {
                     duration: 180,
                     ease: 'Quad.easeOut',
                 });
-                overlayScene.tweens.add({
-                    targets: button,
-                    y: button._baseY ?? button.y,
-                    angle: 0,
-                    duration: 180,
-                    ease: 'Quad.easeOut',
-                });
-                const other = button._otherButton;
-                if (other) {
+                if (button.buttonGlow) overlayScene.tweens.killTweensOf(button.buttonGlow);
+                if (button.buttonGlow) {
                     overlayScene.tweens.add({
-                        targets: other,
-                        y: other._baseY ?? other.y,
+                        targets: button.buttonGlow,
+                        alpha: Number(button._glowBaseAlpha ?? 0.18),
+                        scaleX: 1,
+                        scaleY: 1,
                         duration: 180,
                         ease: 'Quad.easeOut',
                     });
                 }
+                if (button.buttonPlate) overlayScene.tweens.killTweensOf(button.buttonPlate);
+                if (button.buttonPlate) {
+                    overlayScene.tweens.add({
+                        targets: button.buttonPlate,
+                        scaleX: 1,
+                        scaleY: 1,
+                        duration: 180,
+                        ease: 'Quad.easeOut',
+                    });
+                }
+                if (button !== startButton && button !== continueButton) {
+                    overlayScene.tweens.killTweensOf(button);
+                    overlayScene.tweens.add({
+                        targets: button,
+                        x: button._baseX ?? button.x,
+                        y: button._baseY ?? button.y,
+                        angle: 0,
+                        duration: 180,
+                        ease: 'Quad.easeOut',
+                    });
+                    return;
+                }
+                overlayScene.tweens.add({
+                    targets: button,
+                    angle: 0,
+                    duration: 180,
+                    ease: 'Quad.easeOut',
+                });
             });
         };
 
@@ -999,13 +1500,30 @@ export class MainMenu {
             if (enabled) {
                 startButton?.buttonHit?.setInteractive?.({ useHandCursor: true });
                 continueButton?.buttonHit?.setInteractive?.({ useHandCursor: true });
+                itchButton?.buttonHit?.setInteractive?.({ useHandCursor: true });
                 return;
             }
+            MainMenu._hideMenuHoverCaption(hoverCaption);
+            for (const button of [startButton, continueButton, itchButton].filter(Boolean)) {
+                button._isHovered = false;
+                button._hoverTween?.remove?.();
+                button._hoverTween = null;
+                overlayScene.tweens.killTweensOf(button);
+                overlayScene.tweens.killTweensOf(button.buttonArt);
+                if (button.buttonGlow) overlayScene.tweens.killTweensOf(button.buttonGlow);
+                if (button.buttonPlate) overlayScene.tweens.killTweensOf(button.buttonPlate);
+                button.buttonArt?.setScale?.(button._artBaseScale || 1);
+                button.buttonGlow?.setAlpha?.(Number(button._glowBaseAlpha ?? 0.18));
+                button.buttonGlow?.setScale?.(1);
+                button.buttonPlate?.setScale?.(1);
+            }
+            applyButtonHoverPositions(true);
+            itchButton.setPosition(itchButton._baseX ?? itchButton.x, itchButton._baseY ?? itchButton.y).setAngle(0);
             startButton?.buttonHit?.disableInteractive?.();
             continueButton?.buttonHit?.disableInteractive?.();
+            itchButton?.buttonHit?.disableInteractive?.();
         };
 
-        let newRunPrompt = null;
         const destroyNewRunPrompt = ({ restoreButtons = true } = {}) => {
             if (!newRunPrompt) return;
             newRunPrompt.confirm?.destroy?.();
@@ -1103,6 +1621,17 @@ export class MainMenu {
         const fadeOutMenuForLaunch = (onDone) => {
             destroyNewRunPrompt({ restoreButtons: false });
             setMenuButtonsEnabled(false);
+            overlayScene.scale.off('resize', scene._mainMenuResizeHandler);
+            scene._mainMenuResizeHandler = null;
+            scene._mainMenuResizeOverlayScene = null;
+            overlayScene.input.off('pointermove', scene._mainMenuParallaxPointerHandler);
+            overlayScene.input.off('gameout', scene._mainMenuParallaxOutHandler);
+            overlayScene.events.off('update', scene._mainMenuParallaxUpdateHandler);
+            scene._mainMenuParallaxInputScene = null;
+            scene._mainMenuParallaxUpdateScene = null;
+            scene._mainMenuParallaxPointerHandler = null;
+            scene._mainMenuParallaxOutHandler = null;
+            scene._mainMenuParallaxUpdateHandler = null;
             overlayScene.tweens.killTweensOf(logo);
             overlayScene.tweens.killTweensOf(startButton);
             startButton._hoverTween?.remove?.();
@@ -1112,6 +1641,12 @@ export class MainMenu {
                 continueButton._hoverTween?.remove?.();
                 overlayScene.tweens.killTweensOf(continueButton.buttonArt);
             }
+            itchButton._hoverTween?.remove?.();
+            overlayScene.tweens.killTweensOf(itchButton);
+            overlayScene.tweens.killTweensOf(itchButton.buttonArt);
+            if (itchButton.buttonGlow) overlayScene.tweens.killTweensOf(itchButton.buttonGlow);
+            overlayScene.tweens.killTweensOf(hoverCaption);
+            overlayScene.tweens.killTweensOf(hoverCaption.bg);
             overlayScene.tweens.killTweensOf(versionText);
             overlayScene.tweens.add({
                 targets: versionText,
@@ -1132,7 +1667,7 @@ export class MainMenu {
                 }
             });
             overlayScene.tweens.add({
-                targets: [startButton, continueButton].filter(Boolean),
+                targets: [startButton, continueButton, itchButton, hoverCaption].filter(Boolean),
                 alpha: 0,
                 scaleX: 0.9,
                 scaleY: 0.9,
@@ -1140,43 +1675,52 @@ export class MainMenu {
                 onComplete: () => {
                     startButton.destroy();
                     continueButton?.destroy?.();
+                    itchButton.destroy();
+                    hoverCaption.destroy();
                 }
             });
         };
 
-        // Float
-        overlayScene.tweens.add({
-        targets: logo,
-        y: logoY - 8,
-        duration: 1200,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-        });
-
-        // Wiggle
-        overlayScene.tweens.add({
-        targets: logo,
-        angle: { from: -2, to: 2 },
-        duration: 1500,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-        });
-
-        // Pulse
-        overlayScene.tweens.add({
-        targets: logo,
-        scaleX: { from: logoScale, to: logoScale * 1.05 },
-        scaleY: { from: logoScale, to: logoScale * 1.05 },
-        duration: 1200,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Quad.easeInOut'
-        });
+        restartLogoIdleTweens = ({ resetTweens = true } = {}) => {
+            if (resetTweens) overlayScene.tweens.killTweensOf(logo);
+            overlayScene.tweens.add({
+                targets: logo,
+                y: logoY - 8,
+                duration: 1200,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            overlayScene.tweens.add({
+                targets: logo,
+                angle: { from: -2, to: 2 },
+                duration: 1500,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
+            overlayScene.tweens.add({
+                targets: logo,
+                scaleX: { from: logoScale, to: logoScale * 1.05 },
+                scaleY: { from: logoScale, to: logoScale * 1.05 },
+                duration: 1200,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Quad.easeInOut'
+            });
+        };
+        restartLogoIdleTweens({ resetTweens: !reveal });
 
         attachButtonHover(startButton);
         attachButtonHover(continueButton);
+        attachButtonHover(itchButton);
+
+        itchButton.buttonHit.on('pointerdown', () => {
+            AudioManager.playMenuClick();
+            if (typeof window !== 'undefined') {
+                window.open('https://badbaado.itch.io/', '_blank', 'noopener,noreferrer');
+            }
+        });
 
         startButton.buttonHit.on('pointerdown', () => {
             if (hasContinue) {
@@ -1419,6 +1963,7 @@ export class MainMenu {
 
 
         scene.isMainMenuPreview = true; // if you want the optional sprite-suppression in map.js
+        MainMenu._setTroopPresentationVisible(scene, false);
         // --- repaint helper (keep yours if already defined)
         const repaintBounds = (b) => {
         const ctx = scene._menuCtx;
@@ -1598,6 +2143,7 @@ export class MainMenu {
         // - a function that can repaint the preview (see snippet below)
 
         this.isMainMenuPreview = true; // used by optional map.js patch (see below)
+        MainMenu._setTroopPresentationVisible(this, false);
 
         this.draftMenu?.destroy?.();
 
@@ -1692,7 +2238,7 @@ export class MainMenu {
             // buildings are already written into gridData + buildingArray during the draft preview
         }
 
-        if (!isContinue) scene.permits = 0;
+        if (!isContinue) scene.permits = 3;
 
         if (starterSupplies && !isContinue) {
             scene.seeds = 0;
@@ -2318,6 +2864,9 @@ export class MainMenu {
             } else {
                 SaveManager.attachScene(scene);
                 SaveManager.restoreIntoScene(scene, continueSnapshot);
+                Map.reDraw?.();
+                Map.setDetailedWorldVisible?.(false);
+                Map.setDetailedWorldPaused?.(true);
                 scene._pendingContinueSnapshot = null;
             }
             scene._skipStarterResourceSeed = false;

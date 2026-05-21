@@ -197,8 +197,8 @@ export class TutorialOverlay {
     })).setOrigin(0, 0).setVisible(false);
     this.stepTitle.setShadow(0, 2, "#021018", 2, true, true);
     this.bodyText = this.scene.add.text(0, 0, "", createBodyTextStyle({
-      fontSize: 16,
-      min: 14,
+      fontSize: 18,
+      min: 16,
       color: "#f4fbff",
       align: "left",
       lineSpacing: 5,
@@ -206,14 +206,14 @@ export class TutorialOverlay {
     })).setOrigin(0, 0);
     this.nextBg = this.scene.add.graphics();
     this.nextText = this.scene.add.text(0, 0, "NEXT", createLabelTextStyle({
-      fontSize: 13,
-      min: 13,
+      fontSize: 14,
+      min: 14,
       color: "#eafffb",
       align: "center",
     })).setOrigin(0.5);
     this.nextHint = this.scene.add.text(0, 0, "click or press space", createBodyTextStyle({
-      fontSize: 12,
-      min: 12,
+      fontSize: 13,
+      min: 13,
       color: "#bfe9f5",
       align: "center",
     })).setOrigin(0.5);
@@ -318,16 +318,16 @@ export class TutorialOverlay {
       .setWordWrapWidth(Math.max(220, bubbleW - 34))
       .setVisible(hasTitle);
     this.bodyText
-      .setFontSize(compact ? "13px" : "15px")
-      .setLineSpacing(compact ? 4 : 5)
+      .setFontSize(compact ? "15px" : "17px")
+      .setLineSpacing(compact ? 5 : 6)
       .setPosition(bubbleX, bodyY);
     this.bodyText.setWordWrapWidth(Math.max(260, bubbleW - 34));
     this.nextBg.setPosition(bubbleX + bubbleW - 68, panelH - 34);
     this.nextText
-      .setFontSize(compact ? "11px" : "13px")
+      .setFontSize(compact ? "12px" : "14px")
       .setPosition(bubbleX + bubbleW - 68, panelH - 40);
     this.nextHint
-      .setFontSize("8px")
+      .setFontSize(compact ? "10px" : "11px")
       .setPosition(bubbleX + bubbleW - 68, panelH - 22);
     this.nextHit.setPosition(bubbleX + bubbleW - 68, panelH - 32).setSize(108, 38);
     this._drawNextButton();

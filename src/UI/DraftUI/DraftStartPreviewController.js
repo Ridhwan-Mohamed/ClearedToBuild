@@ -46,6 +46,7 @@ export class DraftStartPreviewController {
     this.spawnIconContainer?.destroy?.();
     this.spawnIconContainer = this.worldScene.add.container(0, 0).setDepth(UIDEPTH - 1);
     this._spawnIcons = []; // Phaser Images
+    this._spawnPreviewVisible = true;
     this.repaintBounds = menuRefs.repaintBounds;
     this.fullRepaint = menuRefs.fullRepaintPreview;
     this.srcW = menuRefs.srcW;
@@ -610,6 +611,19 @@ export class DraftStartPreviewController {
         icon.setPosition(worldX, worldY);
         this._applyDraftPortrait(icon, portraitKey, zoom);
       }
+      icon.setVisible(this._spawnPreviewVisible !== false);
+    }
+
+    this.spawnIconContainer?.setVisible?.(this._spawnPreviewVisible !== false);
+    this.spawnIconContainer?.setAlpha?.(this._spawnPreviewVisible === false ? 0 : 1);
+  }
+
+  setSpawnPreviewVisible(visible = true) {
+    this._spawnPreviewVisible = visible !== false;
+    this.spawnIconContainer?.setVisible?.(this._spawnPreviewVisible);
+    this.spawnIconContainer?.setAlpha?.(this._spawnPreviewVisible ? 1 : 0);
+    for (const icon of this._spawnIcons ?? []) {
+      icon?.setVisible?.(this._spawnPreviewVisible);
     }
   }
 

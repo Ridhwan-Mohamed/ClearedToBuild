@@ -34,8 +34,22 @@ function getBottomBarWidth(scene) {
   return Math.max(0, scene.scale.width - (BOTTOM_BAR_SIDE_INSET * 2));
 }
 
+function destroyBottomBarRoot(root) {
+  if (!root) return;
+  try {
+    root.setVisible?.(false);
+    root.removeAll?.(true);
+    root.destroy?.(true);
+  } catch {}
+}
+
 export function CreateBottomBar(scene) {
+  const staleRoots = Array.isArray(scene._bottomBarRoots)
+    ? [...scene._bottomBarRoots]
+    : [];
   scene.uiBottomBar?.destroy?.();
+  staleRoots.forEach((root) => destroyBottomBarRoot(root));
+  scene._bottomBarRoots = [];
   const tabPage = CreateTabPage(scene);
   const collapsedOffset = EXPANDED - COLLAPSED + 155;
   const barWidth = getBottomBarWidth(scene);
@@ -86,13 +100,32 @@ export function CreateBottomBar(scene) {
     scene.uiBottomBar.collapsedY = collapsedY;
   };
   syncBottomBarLayout();
+  scene._bottomBarRoots.push(ui);
 
   // ensure setBottomBar updates scene.uiBottomBar.expanded too
-  function setBottomBar(open) {
+  function setBottomBar(open, { immediate = false, playAudio = !immediate } = {}) {
     const nextOpen = !!open;
-    if (nextOpen === expanded && !tween) return;
+    if (nextOpen === expanded && !tween && !immediate) return;
     if (tween) tween.stop();
-    AudioManager.playSwipe({ volume: 0.28 });
+    if (playAudio) AudioManager.playSwipe({ volume: 0.28 });
+
+    if (immediate) {
+      expanded = nextOpen;
+      scene.uiBottomBar.expanded = nextOpen;
+      scene.uiBottomBar.openProgress = nextOpen ? 1 : 0;
+      ui.y = nextOpen ? scene.uiBottomBar.expandedY : scene.uiBottomBar.collapsedY;
+      tween = null;
+
+      if (scene.uiBottomBar.currentPage === 'players') {
+        if (nextOpen) scene.playerTab?.onShow?.();
+        else scene.playerTab?.onHide?.();
+      }
+
+      const t = toggleBtn.getElement?.('text') || toggleBtn.text;
+      if (t) t.setText(expanded ? '▼' : '▲');
+      return;
+    }
+
     tween = scene.tweens.add({
       targets: ui,
       y: nextOpen ? scene.uiBottomBar.expandedY : scene.uiBottomBar.collapsedY,
@@ -142,6 +175,83 @@ export function CreateBottomBar(scene) {
     }
     toggleBottomBar();
   };
+  const getTabInstance = (key) =>
+    (key === 'functions') ? scene.functionTab :
+    (key === 'ovens') ? scene.clayTab :
+    (key === 'storage') ? scene.storageTab :
+    (key === 'players') ? scene.playerTab :
+    (key === 'houses') ? scene.housesTab :
+    (key === 'build') ? scene.buildTab :
+    (key === 'cards') ? scene.cardsTab :
+    null;
+  const hideInactiveTabs = (key) => {
+    if (key !== 'players') {
+      scene.playerTab?.hidePortrait?.();
+      scene.playerTab?.onHide?.();
+    }
+    if (key !== 'functions') scene.functionTab?.hide?.();
+    if (key !== 'ovens') scene.clayTab?.hide?.();
+    if (key !== 'storage') scene.storageTab?.hide?.();
+    if (key !== 'houses') scene.housesTab?.hide?.();
+    if (key !== 'build') scene.buildTab?.hide?.();
+    if (key !== 'cards') scene.cardsTab?.hide?.();
+  };
+  const showActiveTab = (key) => {
+    const tab = getTabInstance(key);
+    tab?.onShow?.();
+    return tab;
+  };
+  const activatePage = (key, { playAudio = false, expandBar = true } = {}) => {
+    if (!key) return null;
+    if (playAudio) AudioManager.playBottomBarClick();
+    scene.cameras.main?.setScroll?.(0, 0);
+
+    pages.swapPage(key);
+    scene.uiBottomBar.currentPage = key;
+    tabs.setValue?.(key);
+    updateTabButtonStyles(tabs, key);
+
+    if (expandBar && !expanded) setBottomBar(true);
+
+    hideInactiveTabs(key);
+    return showActiveTab(key);
+  };
+  const rebuildBottomBarForResize = () => {
+    const liveBar = scene.uiBottomBar;
+    if (!liveBar || liveBar._destroying || liveBar.ui !== ui) return;
+
+    const restoreState = {
+      currentPage: liveBar.currentPage || 'functions',
+      expanded: Number(liveBar.openProgress ?? (liveBar.expanded ? 1 : 0)) >= 0.5,
+    };
+
+    scene._bottomBarResizeRebuildTimer?.remove?.(false);
+    scene._bottomBarResizeRebuildTimer = null;
+
+    CreateBottomBar(scene);
+
+    const rebuiltBar = scene.uiBottomBar;
+    if (!rebuiltBar) return;
+
+    if (restoreState.currentPage && restoreState.currentPage !== 'functions') {
+      rebuiltBar.activatePage?.(restoreState.currentPage, {
+        playAudio: false,
+        expandBar: false,
+      });
+    }
+    rebuiltBar.setOpenState?.(restoreState.expanded, {
+      immediate: true,
+      playAudio: false,
+    });
+  };
+  const onScaleResize = () => {
+    syncBottomBarLayout();
+    scene._bottomBarResizeRebuildTimer?.remove?.(false);
+    scene._bottomBarResizeRebuildTimer = scene.time?.delayedCall?.(50, () => {
+      scene._bottomBarResizeRebuildTimer = null;
+      rebuildBottomBarForResize();
+    }) || null;
+  };
   const onTabButtonClick = (btn) => {
     const key = btn?.name;
     if (!key) return;
@@ -153,33 +263,7 @@ export function CreateBottomBar(scene) {
       updateTabButtonStyles(tabs, scene.uiBottomBar.currentPage);
       return;
     }
-    AudioManager.playBottomBarClick();
-    scene.cameras.main?.setScroll?.(0, 0);
-
-    pages.swapPage(key);
-    scene.uiBottomBar.currentPage = key;
-
-    if (!expanded) setBottomBar(true);
-
-    if (key !== 'players') {
-      scene.playerTab?.hidePortrait?.();
-      scene.playerTab?.onHide?.();
-    }
-    if (key !== 'functions') scene.functionTab?.hide?.();
-    if (key !== 'ovens')   scene.clayTab?.hide?.();
-    if (key !== 'storage') scene.storageTab?.hide?.();
-    if (key !== 'houses')  scene.housesTab?.hide?.();
-    if (key !== 'build') scene.buildTab?.hide?.();
-    if (key !== 'cards') scene.cardsTab?.hide?.();
-
-    if (key === 'functions') scene.functionTab?.onShow?.();
-    if (key === 'ovens')   scene.clayTab?.onShow?.();
-    if (key === 'storage') scene.storageTab?.onShow?.();
-    if (key === 'players') scene.playerTab?.onShow?.();
-    if (key === 'houses')  scene.housesTab?.onShow?.();
-    if (key === 'build') scene.buildTab?.onShow?.();
-    if (key === 'cards') scene.cardsTab?.onShow?.();
-    updateTabButtonStyles(tabs, key);
+    activatePage(key, { playAudio: true, expandBar: true });
   };
   const onSpaceToggle = () => {
     if (getTutorialManager()?.isActive?.()) return;
@@ -187,39 +271,14 @@ export function CreateBottomBar(scene) {
   };
 
   scene.setBottomBar = setBottomBar;
+  scene.uiBottomBar.setOpenState = setBottomBar;
+  scene.uiBottomBar.activatePage = activatePage;
+  scene.uiBottomBar.syncLayout = syncBottomBarLayout;
 
   scene.openDetailPage = function(pageKey, callback) {
     const bar = scene.uiBottomBar;
     if (!bar) return;
-    scene.cameras.main?.setScroll?.(0, 0);
-
-    // 1) swap page
-    bar.pages.swapPage(pageKey);
-    bar.currentPage = pageKey;
-
-    // 2) sync the radio tab selection so UI matches
-    bar.tabs?.setValue?.(pageKey);
-
-    // 3) expand if needed
-    if (!bar.expanded) scene.setBottomBar(true);
-
-    // 4) map to the real tab object instances
-    const tab =
-      (pageKey === 'ovens')   ? scene.clayTab :
-      (pageKey === 'storage') ? scene.storageTab :
-      (pageKey === 'players') ? scene.playerTab :
-      (pageKey === 'houses')  ? scene.housesTab :
-      (pageKey === 'cards')   ? scene.cardsTab :
-      null;
-
-    if (pageKey !== 'players') {
-      scene.playerTab?.onHide?.();
-    }
-
-    // 5) show hook
-    tab?.onShow?.();
-
-    // 6) run selection callback
+    const tab = activatePage(pageKey, { playAudio: false, expandBar: true });
     if (callback && tab) callback(tab);
   };
 
@@ -239,7 +298,7 @@ export function CreateBottomBar(scene) {
 
   // (optional) spacebar toggle
   scene.input.keyboard.on('keydown-SPACE', onSpaceToggle);
-  scene.scale.on('resize', syncBottomBarLayout);
+  scene.scale.on('resize', onScaleResize);
 
   scene.uiBottomBar.destroy = () => {
     const bar = scene.uiBottomBar;
@@ -254,7 +313,9 @@ export function CreateBottomBar(scene) {
     toggleBtn?.off?.('pointerup', onTogglePointerUp);
     tabs?.off?.('button.click', onTabButtonClick);
     scene.input?.keyboard?.off?.('keydown-SPACE', onSpaceToggle);
-    scene.scale?.off?.('resize', syncBottomBarLayout);
+    scene.scale?.off?.('resize', onScaleResize);
+    scene._bottomBarResizeRebuildTimer?.remove?.(false);
+    scene._bottomBarResizeRebuildTimer = null;
 
     scene.functionTab?.destroy?.();
     scene.playerTab?.destroy?.();
@@ -274,7 +335,11 @@ export function CreateBottomBar(scene) {
     scene.setBottomBar = null;
     scene.openDetailPage = null;
 
-    bar.ui?.destroy?.(true);
+    scene._bottomBarRoots = (scene._bottomBarRoots || []).filter((root) => root !== bar.ui);
+    destroyBottomBarRoot(bar.tabs);
+    destroyBottomBarRoot(bar.pages);
+    destroyBottomBarRoot(toggleBtn);
+    destroyBottomBarRoot(bar.ui);
     if (scene.uiBottomBar === bar) {
       scene.uiBottomBar = null;
     }
@@ -380,7 +445,7 @@ var CreateLabel = function (scene, text, color, width) {
       color: BOTTOM_BAR_THEME.text,
       fontStyle: 'bold',
       stroke: '#08202d',
-      strokeThickness: 2,
+      strokeThickness: 3,
     }),
 
     space: { left: 12, right: 12, top: 6, bottom: 6 }

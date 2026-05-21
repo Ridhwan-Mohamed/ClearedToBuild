@@ -6,6 +6,7 @@ import { UIDEPTH, SQUARESIZE, showAlert, TILE_TYPES } from "../../constants";
 import { Map as GameMap } from "../../map";
 import { Teams } from "../../Teams";
 import { buildingManager } from "../../Manager/buildingManager";
+import { StorageManager } from "../../Manager/StorageManager";
 import { AudioManager } from "../../Manager/AudioManager.js";
 import { House } from "../../buildings/House";
 import { Turret } from "../../buildings/Turret";
@@ -26,6 +27,7 @@ import {
   makeGlassRoundRect,
   mixColor,
 } from "./BottomBarTheme";
+import { BODY_FONT_FAMILY } from "../Typography.js";
 
 const RARITY = {
   common: { border: 0x2ecc71, label: "#2ecc71" }, // green
@@ -37,6 +39,19 @@ const SPECIAL_BUILD_PLACERS = {
   turret: Turret,
   catapult: Catapult,
 };
+
+const QUICK_SELL_PERMIT_PRICE = 25;
+const QUICK_SELL_PRIORITY = Object.freeze({
+  wood: 10,
+  stone: 11,
+  clean_water: 20,
+  food: 21,
+  rawFood: 22,
+  crop: 23,
+  seedCrop: 30,
+  seedBerry: 31,
+  unclean_water: 40,
+});
 
 const UNIT_STORE = [
   {
@@ -194,11 +209,17 @@ function spendResources(scene, cost) {
 
 function fmtCost(cost) {
   if (!cost) return "";
-  if (Object.keys(cost).length === 1 && cost.money) return `$${cost.money}`;
-  if (Object.keys(cost).length === 1 && cost.permits) return formatPermitCostText(cost.permits);
+  const entries = Object.entries(cost).filter(([, value]) => Number(value) > 0);
+  if (!entries.length) return "FREE";
+  if (entries.length === 1) {
+    const [key, value] = entries[0];
+    if (key === "money") return `$${value}`;
+    if (key === "permits") return formatPermitCostText(value);
+    if (key === "clean_water") return `water:${value}`;
+    return `${key}:${value}`;
+  }
   const parts = [];
-  for (const [k, v] of Object.entries(cost)) {
-    if (!v) continue;
+  for (const [k, v] of entries) {
     if (k === "permits") parts.push(formatPermitCostText(v));
     else
     if (k === "money") parts.push(`$${v}`);
@@ -255,11 +276,13 @@ function normalizeTileCost(tile) {
 }
 
 function getDefCost(def, scene = null) {
+  const world = scene?.worldScene ?? scene;
   if (def?.isUnit) {
-    return { money: getRecruitCost(def.recruitType || def.key, scene) };
+    if (world?.hasRecruitVoucher?.()) return { money: 0 };
+    return { money: getRecruitCost(def.recruitType || def.key, world) };
   }
   if (def?.key === "house") {
-    return Teams.getHouseBuildCost?.(scene?.teamNumber ?? "1") ?? { wood: 4, stone: 4, permits: 1 };
+    return Teams.getHouseBuildCost?.(world?.teamNumber ?? "1") ?? { wood: 4, stone: 4, permits: 1 };
   }
   if (def?.cost) return def.cost;
   // walls: use wallTypeName; buildings: tileTypeName
@@ -290,6 +313,7 @@ export default class BuildTab {
     this.pendingDef = null;
     this._placeClickBound = false;
     this.mode = "buildings";
+    this._quickSellState = null;
     this._cardsScrollHooksBound = false;
     this._placementInputScene = null;
     this._onCardsPointerUp = null;
@@ -320,9 +344,12 @@ export default class BuildTab {
       this.refreshAvailableDefs();
     };
     scene.events.on("phase:changed", this._onPhaseChanged);
+    this._onRewardStateChanged = () => this.refreshAvailableDefs();
+    scene.events.on("reward-state:changed", this._onRewardStateChanged);
     scene.events.once("shutdown", () => {
       scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
       scene.events.off("housing:updated", this._onHousingChanged);
+      scene.events.off("reward-state:changed", this._onRewardStateChanged);
     });
 
     this._makeUI();
@@ -335,6 +362,7 @@ export default class BuildTab {
     this.scene.events.off("store:unlock-changed", this._onStoreUnlockChanged);
     this.scene.events.off("housing:updated", this._onHousingChanged);
     this.scene.events.off("phase:changed", this._onPhaseChanged);
+    this.scene.events.off("reward-state:changed", this._onRewardStateChanged);
     if (this._onCardsPointerUp) {
       this.scene.input.off("pointerup", this._onCardsPointerUp);
       this._onCardsPointerUp = null;
@@ -432,6 +460,245 @@ export default class BuildTab {
 
   _getTutorialManager() {
     return this.scene.worldScene?.tutorialManager || this.scene.tutorialManager || null;
+  }
+
+  _getWorldScene() {
+    return this.scene.worldScene ?? this.scene;
+  }
+
+  _getQuickSellReserves(teamNumber = "1") {
+    const housing = Teams.getHousingStatus?.(teamNumber) ?? {};
+    const playerCount = Math.max(0, Number(housing.playerCount || 0));
+    const foodReserve = Math.max(4, Math.min(8, playerCount + 1));
+    return {
+      wood: 4,
+      stone: 4,
+      clean_water: foodReserve,
+      food: foodReserve,
+      rawFood: 2,
+      crop: 2,
+      seedCrop: 4,
+      seedBerry: 4,
+      unclean_water: 2,
+      permits: 1,
+    };
+  }
+
+  _buildQuickSellPlan(def) {
+    const world = this._getWorldScene();
+    const targetMoney = Math.max(0, Number(getDefCost(def, this.scene)?.money || 0));
+    const currentMoney = Math.max(0, Number(world?.money || 0));
+    const shortfall = Math.max(0, targetMoney - currentMoney);
+    if (!(shortfall > 0)) return null;
+
+    const teamNumber = "1";
+    const team = Teams.getTeam?.(teamNumber);
+    const reserves = this._getQuickSellReserves(teamNumber);
+    const totalsByItem = {};
+    const slotCandidates = [];
+
+    for (const storage of team?.storageList || []) {
+      const slots = Array.isArray(storage?.storageItems) ? storage.storageItems : [];
+      slots.forEach((slot, slotIndex) => {
+        const item = slot?.item;
+        const amount = Math.max(0, Number(slot?.amount || 0));
+        if (!item?.name || !(amount > 0)) return;
+        const unitPrice = Math.max(0, Number(StorageManager.getStorageSellPrice(item) || 0));
+        if (!(unitPrice > 0)) return;
+
+        const itemName = item.name;
+        totalsByItem[itemName] = Math.max(0, Number(totalsByItem[itemName] || 0)) + amount;
+        slotCandidates.push({
+          source: "storage",
+          storage,
+          slotIndex,
+          itemName,
+          label: item.label || item.name,
+          count: amount,
+          unitPrice,
+          priority: QUICK_SELL_PRIORITY[itemName] ?? 999,
+        });
+      });
+    }
+
+    slotCandidates.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      if (a.unitPrice !== b.unitPrice) return b.unitPrice - a.unitPrice;
+      if (a.count !== b.count) return b.count - a.count;
+      return a.slotIndex - b.slotIndex;
+    });
+
+    const soldByItem = {};
+    const actions = [];
+    let remainingShortfall = shortfall;
+
+    for (const candidate of slotCandidates) {
+      if (!(remainingShortfall > 0)) break;
+      const reserve = Math.max(0, Number(reserves[candidate.itemName] || 0));
+      const total = Math.max(0, Number(totalsByItem[candidate.itemName] || 0));
+      const alreadyPlanned = Math.max(0, Number(soldByItem[candidate.itemName] || 0));
+      const sellable = Math.max(0, total - reserve - alreadyPlanned);
+      if (!(sellable > 0)) continue;
+
+      const neededAmount = Math.ceil(remainingShortfall / candidate.unitPrice);
+      const amount = Math.min(candidate.count, sellable, neededAmount);
+      if (!(amount > 0)) continue;
+
+      const revenue = amount * candidate.unitPrice;
+      actions.push({
+        ...candidate,
+        amount,
+        revenue,
+      });
+      soldByItem[candidate.itemName] = alreadyPlanned + amount;
+      remainingShortfall -= revenue;
+    }
+
+    const permitCount = Math.max(0, Number(world?.permits || 0));
+    const sellablePermits = Math.max(0, permitCount - Math.max(0, Number(reserves.permits || 0)));
+    if (remainingShortfall > 0 && sellablePermits > 0) {
+      const amount = Math.min(sellablePermits, Math.ceil(remainingShortfall / QUICK_SELL_PERMIT_PRICE));
+      if (amount > 0) {
+        const revenue = amount * QUICK_SELL_PERMIT_PRICE;
+        actions.push({
+          source: "permits",
+          itemName: "permits",
+          label: amount === 1 ? "Permit" : "Permits",
+          amount,
+          unitPrice: QUICK_SELL_PERMIT_PRICE,
+          revenue,
+          priority: 1000,
+        });
+        remainingShortfall -= revenue;
+      }
+    }
+
+    if (remainingShortfall > 0 || !actions.length) {
+      return null;
+    }
+
+    const totalRevenue = actions.reduce((sum, action) => sum + Math.max(0, Number(action.revenue || 0)), 0);
+    return {
+      defKey: def.key,
+      targetMoney,
+      currentMoney,
+      shortfall,
+      totalRevenue,
+      actions,
+    };
+  }
+
+  _summarizeQuickSellActions(actions = []) {
+    const merged = new Map();
+    actions.forEach((action) => {
+      const key = `${action.source}:${action.itemName}`;
+      const existing = merged.get(key) || {
+        label: action.label,
+        amount: 0,
+        revenue: 0,
+      };
+      existing.amount += Math.max(0, Number(action.amount || 0));
+      existing.revenue += Math.max(0, Number(action.revenue || 0));
+      merged.set(key, existing);
+    });
+    return [...merged.values()];
+  }
+
+  _formatQuickSellPlanText(plan) {
+    if (!plan?.actions?.length) return "";
+    const entries = this._summarizeQuickSellActions(plan.actions);
+    const lines = entries.slice(0, 3).map((entry) => (
+      `${entry.amount} ${entry.label}  $${entry.revenue}`
+    ));
+    if (entries.length > 3) {
+      lines[lines.length - 1] = `+${entries.length - 2} more stock lines`;
+    }
+    return lines.join("\n");
+  }
+
+  _closeQuickSell() {
+    if (!this._quickSellState) return;
+    this._quickSellState = null;
+    this._refreshQuickSellOverlay();
+  }
+
+  _openQuickSell(def, plan) {
+    this._quickSellState = { key: def.key, plan };
+    this._refreshQuickSellOverlay();
+  }
+
+  _refreshQuickSellOverlay() {
+    this._cardRefs.forEach((ref) => {
+      const overlay = ref?.quickSellOverlay;
+      if (!overlay) return;
+      const activePlan = this._quickSellState?.key === ref.def?.key ? this._quickSellState.plan : null;
+      overlay.setVisible(!!activePlan);
+      if (!activePlan) return;
+
+      ref.quickSellNeed?.setText(`Need $${Math.max(0, Number(activePlan.shortfall || 0))} more`);
+      ref.quickSellItems?.setText(this._formatQuickSellPlanText(activePlan));
+      ref.quickSellTotal?.setText(`Raises $${Math.max(0, Number(activePlan.totalRevenue || 0))}`);
+    });
+  }
+
+  _runQuickSellPlan(plan, sourceUiTarget = null) {
+    if (!plan?.actions?.length) return { totalRevenue: 0, soldAnything: false };
+
+    const storageActions = plan.actions
+      .filter((action) => action.source === "storage")
+      .slice()
+      .sort((a, b) => {
+        if (a.storage === b.storage) return b.slotIndex - a.slotIndex;
+        return 0;
+      });
+
+    let totalRevenue = 0;
+    let soldAnything = false;
+
+    for (const action of storageActions) {
+      const result = StorageManager.sellFromStorage(
+        action.storage,
+        action.slotIndex,
+        action.amount,
+        this.scene,
+        { sourceUiTarget }
+      );
+      if ((result?.sold || 0) > 0) {
+        totalRevenue += Math.max(0, Number(result.revenue || 0));
+        soldAnything = true;
+      }
+    }
+
+    const permitActions = plan.actions.filter((action) => action.source === "permits");
+    if (permitActions.length) {
+      const world = this._getWorldScene();
+      for (const action of permitActions) {
+        const available = Math.max(0, Number(world?.permits || 0));
+        const amount = Math.min(available, Math.max(0, Number(action.amount || 0)));
+        if (!(amount > 0)) continue;
+        world?.updatePermits?.(-amount);
+        const revenue = amount * QUICK_SELL_PERMIT_PRICE;
+        world?.updateMoney?.(revenue, { sourceUiTarget });
+        totalRevenue += revenue;
+        soldAnything = true;
+      }
+    }
+
+    return { totalRevenue, soldAnything };
+  }
+
+  _confirmQuickSell(def, ref) {
+    const plan = this._quickSellState?.key === def.key ? this._quickSellState.plan : null;
+    if (!plan) return;
+
+    const { soldAnything } = this._runQuickSellPlan(plan, ref?.quickSellConfirmHit ?? null);
+    this._closeQuickSell();
+    if (!soldAnything) {
+      showAlert(this.scene, "No spare stock to sell", "#ff5555");
+      return;
+    }
+
+    this._recruitUnit(def, { allowQuickSell: false });
   }
 
   _makeUI() {
@@ -633,6 +900,136 @@ export default class BuildTab {
         hovered: false,
       };
 
+      if (def.isUnit) {
+        const overlayShade = makeGlassRoundRect(scene, CARD_W - 10, CARD_H - 10, 20, {
+          fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0x020812, 0.6),
+          alpha: 0.96,
+          stroke: 0xffd38a,
+          strokeAlpha: 0.22,
+          strokeWidth: 1.5,
+        });
+        const overlayBlocker = scene.add.zone(0, 0, CARD_W, CARD_H).setInteractive();
+        const overlayTitle = scene.add.text(0, -44, "QUICK SELL", {
+          fontSize: "12px",
+          fontFamily: "Bungee",
+          color: "#ffe8bf",
+          stroke: "#081621",
+          strokeThickness: 3,
+          align: "center",
+        }).setOrigin(0.5);
+        const overlayNeed = scene.add.text(0, -24, "", {
+          fontSize: "10px",
+          fontFamily: "Bungee",
+          color: "#ffffff",
+          stroke: "#081621",
+          strokeThickness: 3,
+          align: "center",
+        }).setOrigin(0.5);
+        const overlayItems = scene.add.text(0, 4, "", {
+          fontSize: "12px",
+          fontFamily: BODY_FONT_FAMILY,
+          color: "#d7e8f4",
+          stroke: "#081621",
+          strokeThickness: 1,
+          align: "center",
+          lineSpacing: 1,
+          wordWrap: { width: CARD_W - 34 },
+        }).setOrigin(0.5);
+        const overlayTotal = scene.add.text(0, 26, "", {
+          fontSize: "10px",
+          fontFamily: "Bungee",
+          color: "#9ef2c8",
+          stroke: "#081621",
+          strokeThickness: 3,
+          align: "center",
+        }).setOrigin(0.5);
+
+        const confirmBg = makeGlassRoundRect(scene, 132, 24, 12, {
+          fill: 0x1f6a4b,
+          alpha: 0.96,
+          stroke: 0x8ef2bf,
+          strokeAlpha: 0.34,
+          strokeWidth: 1.5,
+        }).setPosition(-40, 50);
+        const confirmText = scene.add.text(-40, 50, "Sell + Recruit", {
+          fontSize: "10px",
+          fontFamily: "Bungee",
+          color: "#f5fff8",
+          stroke: "#081621",
+          strokeThickness: 3,
+        }).setOrigin(0.5);
+        const confirmHit = scene.add.zone(-40, 50, 132, 24).setInteractive({ useHandCursor: true });
+
+        const cancelBg = makeGlassRoundRect(scene, 72, 24, 12, {
+          fill: 0x5a2431,
+          alpha: 0.94,
+          stroke: 0xff9eb0,
+          strokeAlpha: 0.28,
+          strokeWidth: 1.5,
+        }).setPosition(76, 50);
+        const cancelText = scene.add.text(76, 50, "Cancel", {
+          fontSize: "10px",
+          fontFamily: "Bungee",
+          color: "#fff5f7",
+          stroke: "#081621",
+          strokeThickness: 3,
+        }).setOrigin(0.5);
+        const cancelHit = scene.add.zone(76, 50, 72, 24).setInteractive({ useHandCursor: true });
+
+        overlayBlocker.on("pointerdown", (_pointer, _lx, _ly, event) => {
+          event?.stopPropagation?.();
+        });
+        overlayBlocker.on("pointerup", (_pointer, _lx, _ly, event) => {
+          event?.stopPropagation?.();
+        });
+
+        const bindOverlayButton = (hitNode, bgNode, onClick) => {
+          hitNode.on("pointerover", (_pointer, _lx, _ly, event) => {
+            event?.stopPropagation?.();
+            bgNode.setAlpha(1);
+          });
+          hitNode.on("pointerout", (_pointer, event) => {
+            event?.stopPropagation?.();
+            bgNode.setAlpha(0.94);
+          });
+          hitNode.on("pointerdown", (_pointer, _lx, _ly, event) => {
+            event?.stopPropagation?.();
+            bgNode.setScale(0.98);
+          });
+          hitNode.on("pointerup", (_pointer, _lx, _ly, event) => {
+            event?.stopPropagation?.();
+            bgNode.setScale(1);
+            AudioManager.playBottomBarClick();
+            onClick?.();
+          });
+        };
+
+        bindOverlayButton(confirmHit, confirmBg, () => this._confirmQuickSell(def, cardRef));
+        bindOverlayButton(cancelHit, cancelBg, () => this._closeQuickSell());
+
+        const overlay = scene.add.container(0, 0, [
+          overlayShade,
+          overlayBlocker,
+          overlayTitle,
+          overlayNeed,
+          overlayItems,
+          overlayTotal,
+          confirmBg,
+          confirmText,
+          confirmHit,
+          cancelBg,
+          cancelText,
+          cancelHit,
+        ]).setVisible(false);
+
+        card.add(overlay);
+        cardRef.quickSellOverlay = overlay;
+        cardRef.quickSellNeed = overlayNeed;
+        cardRef.quickSellItems = overlayItems;
+        cardRef.quickSellTotal = overlayTotal;
+        cardRef.quickSellConfirmHit = confirmHit;
+      }
+
       hit.on("pointerover", () => {
         cardRef.hovered = true;
         this._applyCardVisual(cardRef, this.activeKey === def.key);
@@ -655,6 +1052,7 @@ export default class BuildTab {
     // Clamp and enable scrolling
     this._clampCardsScroll();
     this._enableCardScrolling(viewportHit);
+    this._refreshQuickSellOverlay();
   }
 
   _clampCardsScroll() {
@@ -732,6 +1130,7 @@ export default class BuildTab {
 
   _setMode(mode) {
     if (this.mode === mode) return;
+    this._closeQuickSell();
     this._clearSelection(true);
     this.mode = mode;
     this._makeUI();
@@ -747,34 +1146,48 @@ export default class BuildTab {
   }
 
   refreshAvailableDefs() {
+    this._closeQuickSell();
     this._clearSelection(true);
     this._buildDefs = this._makeBuildDefs();
     this._unitDefs = this._makeUnitDefs();
     this._makeUI();
   }
 
-  _recruitUnit(def) {
+  _recruitUnit(def, opts = {}) {
     const team = "1";
-    const costObj = def.cost ?? {};
+    const costObj = getDefCost(def, this.scene);
     const housing = Teams.getHousingStatus?.(team);
     const tutorial = this._getTutorialManager();
+    const allowQuickSell = opts?.allowQuickSell !== false;
 
     if (tutorial && !tutorial.canPerformAction?.("build.recruit", { key: def.key })) {
       return;
     }
 
-    if (!hasResources(this.scene, costObj)) {
-      showAlert(this.scene, "Not enough money", "#ff5555");
-      return;
-    }
-
     if (!Teams.canRecruitPlayer?.(team)) {
+      this._closeQuickSell();
       const message = housing?.homelessCount > 0
         ? "House your homeless players first"
         : "Not enough housing";
       showAlert(this.scene, message, "#ff5555");
       return;
     }
+
+    if (!hasResources(this.scene, costObj)) {
+      const shortfall = Math.max(0, Number(costObj?.money || 0) - Math.max(0, Number(this._getWorldScene()?.money || 0)));
+      if (allowQuickSell && shortfall > 0) {
+        const plan = this._buildQuickSellPlan(def);
+        if (plan) {
+          this._openQuickSell(def, plan);
+          return;
+        }
+      }
+      this._closeQuickSell();
+      showAlert(this.scene, "Not enough money", "#ff5555");
+      return;
+    }
+
+    this._closeQuickSell();
 
     const spawnTile = Teams.getTownSpawnTile?.(team);
     if (!spawnTile) {
@@ -785,6 +1198,10 @@ export default class BuildTab {
     const player = new def.unitClass(spawnTile.x, spawnTile.y, 1);
     House.assignPlayerToHouse(player, team);
     spendResources(this.scene, costObj);
+    if ((costObj.money || 0) <= 0) {
+      (this.scene.worldScene ?? this.scene).consumeRecruitVoucher?.();
+    }
+    AudioManager.playPurchaseCoins?.(costObj.money ?? 0);
     showAlert(this.scene, `${def.name} recruited!`, "#ffb4dd");
     tutorial?.notifyAction?.("build.recruit", {
       key: def.key,
@@ -796,6 +1213,8 @@ export default class BuildTab {
     const scene = this.scene;
     const def = this._getCurrentDefs().find(d => d.key === key);
     if (!def) return;
+
+    if (!def.isUnit) this._closeQuickSell();
 
     if (def.isUnit) {
       this._recruitUnit(def);
@@ -851,6 +1270,7 @@ export default class BuildTab {
   }
 
   _clearSelection(silent = false) {
+    this._closeQuickSell();
     this.activeKey = null;
     this.pendingDef = null;
 

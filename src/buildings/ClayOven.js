@@ -19,8 +19,17 @@ import { playBuildingCollapseSmoke } from "../FX/SmokeClearing";
 export class ClayOven {
 
     static scene;
-    static cookDuration = 500;
+    static cookDuration = 675;
     static slotCount = 1;
+    static itemCapacityPerSlot = 1;
+
+    static getItemCapacityPerSlot() {
+        return Math.max(1, Number(ClayOven.itemCapacityPerSlot || 1));
+    }
+
+    static isSlotOpenForInput(oven, slotIndex) {
+        return !oven?.outputSlots?.[slotIndex];
+    }
 
     constructor(x, y, teamNumber) {
         this.teamNumber = teamNumber;
@@ -89,12 +98,12 @@ export class ClayOven {
         this.sprite.on('pointerover', () => {
             this.isHovered = true;
             this.updateHealthBar?.();
-            ClayOvenUI.showMinor(this)
+            ClayOvenUI.showMinor(this);
         });
         this.sprite.on('pointerout', () => {
             this.isHovered = false;
             this.updateHealthBar?.();
-            ClayOvenUI.hideMinor(this)
+            ClayOvenUI.hideMinor(this);
         });
         this.sprite.on('pointerdown', () => {
             if (this.scene?.destroyWallMode) return;
@@ -165,10 +174,11 @@ export class ClayOven {
     hasFreeSlotForItem(itemType, amount) {
         for (let i = 0; i < this.cookingSlots.length; i++) {
             const slot = this.cookingSlots[i];
+            if (!ClayOven.isSlotOpenForInput(this, i)) continue;
             if (!slot) {
-                return { idx: i, remaining: itemType.stacks };
+                return { idx: i, remaining: ClayOven.getItemCapacityPerSlot() };
             } else if (slot.item === itemType) {
-                const spotsLeft = itemType.stacks - slot.amount;
+                const spotsLeft = ClayOven.getItemCapacityPerSlot() - slot.amount;
                 if (spotsLeft > 0) {
                     return { idx: i, remaining: Math.min(spotsLeft, amount) };
                 }
@@ -254,7 +264,8 @@ export class ClayOven {
         for (const oven of ovens) {
             for (let i = 0; i < oven.cookingSlots.length; i++) {
                 const slot = oven.cookingSlots[i];
-                if (!slot || (slot.item && slot.amount < UI_ITEM_TYPES[slot.item.name].stacks)) {
+                if (!ClayOven.isSlotOpenForInput(oven, i)) continue;
+                if (!slot || (slot.item && slot.amount < ClayOven.getItemCapacityPerSlot())) {
                     return { oven, idx: i };
                 }
             }
@@ -269,6 +280,7 @@ export class ClayOven {
             let emptyCandidate = null;
             for (let i = 0; i < oven.cookingSlots.length; i++) {
                 const slot = oven.cookingSlots[i];
+                if (!ClayOven.isSlotOpenForInput(oven, i)) continue;
                 const existingTask = ovenDeliveryItems.find(task =>
                     task.oven === oven && task.inputidx === i
                 );
@@ -278,7 +290,7 @@ export class ClayOven {
                         existingTask.remaining <= existingTask.assigned)) {
                         continue;
                     }
-                    const spotsLeft = itemType.stacks - slot.amount;
+                    const spotsLeft = ClayOven.getItemCapacityPerSlot() - slot.amount;
                     if (spotsLeft > 0) {
                         return { oven, idx: i, remaining: spotsLeft };
                     }
@@ -289,7 +301,7 @@ export class ClayOven {
                         existingTask.remaining <= existingTask.assigned)) {
                         continue;
                     }
-                    emptyCandidate = { oven, idx: i, remaining: itemType.stacks };
+                    emptyCandidate = { oven, idx: i, remaining: ClayOven.getItemCapacityPerSlot() };
                 }
             }
             if (emptyCandidate) return emptyCandidate;
@@ -301,11 +313,12 @@ export class ClayOven {
         const cooksTo = itemType.cooksTo;
         if (!cooksTo || count <= 0) return false;   // allow queuing with 0 fuel
 
-        const maxPerSlot = itemType.stacks || 1;
+        const maxPerSlot = ClayOven.getItemCapacityPerSlot();
         let inserted = 0;
 
         for (let i = 0; i < this.cookingSlots.length && count > 0; i++) {
             const slot = this.cookingSlots[i];
+            if (!ClayOven.isSlotOpenForInput(this, i)) continue;
 
             // Empty slot
             if (!slot) {
@@ -327,6 +340,8 @@ export class ClayOven {
             }
         }
 
+        if (inserted <= 0) return false;
+
         const icon = GHOST_ITEM_ICONS[itemType.name] || itemType.name;
         const text = `+${inserted} ${icon}`;
         showGhostText(
@@ -337,10 +352,8 @@ export class ClayOven {
             0,0,0,'#00ff00'
         );
 
-        if (inserted > 0) {
-            ClayOven.scene.events.emit('oven:updated', this);
-        }
-        return inserted > 0 ? inserted : false;
+        ClayOven.scene.events.emit('oven:updated', this);
+        return inserted;
     }
 
     addItemToCookAtSlot(itemType, count, slotIndex) {
@@ -348,9 +361,10 @@ export class ClayOven {
         if (!cooksTo || count <= 0) return false;
         if (slotIndex < 0 || slotIndex >= this.cookingSlots.length) return false;
 
-        const maxPerSlot = itemType.stacks || 1;
+        const maxPerSlot = ClayOven.getItemCapacityPerSlot();
         let inserted = 0;
         const slot = this.cookingSlots[slotIndex];
+        if (!ClayOven.isSlotOpenForInput(this, slotIndex)) return false;
 
         // Empty slot
         if (!slot) {
@@ -372,6 +386,8 @@ export class ClayOven {
             return false;
         }
 
+        if (inserted <= 0) return false;
+
         const icon = GHOST_ITEM_ICONS[itemType.name] || itemType.name;
         const text = `+${inserted} ${icon}`;
         showGhostText(
@@ -382,10 +398,8 @@ export class ClayOven {
             0,0,0,'#00ff00'
         );
 
-        if (inserted > 0) {
-            ClayOven.scene.events.emit('oven:updated', this);
-        }
-        return inserted > 0 ? inserted : false;
+        ClayOven.scene.events.emit('oven:updated', this);
+        return inserted;
     }
 
     removeItemFromSlot(index, fromOutput = true) {
@@ -545,6 +559,13 @@ export class ClayOven {
             const dur = this.cookDurations[i] || 0;
             if (dur <= 0) continue;
 
+            const cookedName = UI_ITEM_TYPES[slot.item.name].cooksTo;
+            const cookedItem = UI_ITEM_TYPES[cookedName];
+            const outputCapacity = ClayOven.getItemCapacityPerSlot();
+            const outSlot = this.outputSlots[i];
+            const outputHasRoom = !outSlot || (outSlot.item.name === cookedItem.name && outSlot.amount < outputCapacity);
+            if (!outputHasRoom) continue;
+
             // If this cook cycle is just starting (timer==0), consume 1 fuel.
             if (this.cookTimers[i] === 0) {
                 if (this.fuel > 0) {
@@ -564,14 +585,10 @@ export class ClayOven {
 
             if (this.cookTimers[i] >= this.cookDurations[i]) {
                 changed = true;
-                const cookedName = UI_ITEM_TYPES[slot.item.name].cooksTo;
-                const cookedItem = UI_ITEM_TYPES[cookedName];
-
-                const outSlot = this.outputSlots[i];
                 if (!outSlot) {
                     this.outputSlots[i] = { item: cookedItem, amount: 1 };
-                } else if (outSlot.item.name === cookedItem.name) {
-                    outSlot.amount += 1;
+                } else {
+                    outSlot.amount = Math.min(outputCapacity, outSlot.amount + 1);
                 }
 
                 slot.amount -= 1;
@@ -620,6 +637,17 @@ export class ClayOven {
         const team = Teams.teamLists?.[this.teamNumber];
         if (!team) return;
 
+        const releasedWaterByOrder = new globalThis.Map();
+        const queueWaterRelease = (orderId, amount) => {
+            if (orderId == null) return;
+            const units = Math.max(0, Number(amount || 0) || 0);
+            if (units <= 0) return;
+            releasedWaterByOrder.set(
+                orderId,
+                Math.max(0, Number(releasedWaterByOrder.get(orderId) || 0)) + units
+            );
+        };
+
         const listKeys = [
             "ovenJobs",
             "ovenPickupJobs",
@@ -633,9 +661,26 @@ export class ClayOven {
             team[key] = team[key].filter((task) => {
                 if (task?.oven !== this) return true;
                 task.canceled = true;
+                if (
+                    key === "ovenJobs" &&
+                    task?.item?.name === UI_ITEM_TYPES.unclean_water.name
+                ) {
+                    queueWaterRelease(task.directOrderId, task.remaining ?? task.target ?? 0);
+                }
+                if (
+                    key === "ovenPickupJobs" &&
+                    Number(task?.outputidx) === 0 &&
+                    this.outputSlots?.[task.outputidx]?.item?.name === UI_ITEM_TYPES.clean_water.name
+                ) {
+                    queueWaterRelease(task.directOrderId, task.amount ?? 0);
+                }
                 return false;
             });
         }
+
+        releasedWaterByOrder.forEach((amount, orderId) => {
+            Teams.uncommitTownWaterUnits?.(this.teamNumber, orderId, amount);
+        });
 
         const players = Array.isArray(team.playerList) ? team.playerList : [];
         for (const troop of players) {

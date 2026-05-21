@@ -10,7 +10,7 @@
 // You already have a TILE_TYPES.spawn entry; this file focuses on behaviour.
 import { Map } from "../map.js";
 import { TILE_TYPES, SQUARESIZE, BLOCKDEPTH } from "../constants.js";
-import { spawnRaiderAtWorld } from "../Manager/spawnManager.js";
+import { applyEnemyModifierVisual, spawnRaiderAtWorld } from "../Manager/spawnManager.js";
 import { Teams } from "../Teams.js";
 import { VisibilitySystem } from "../UI/VisibilitySystem.js";
 import { FortGrunt } from "../players/FortGrunt.js";
@@ -196,6 +196,7 @@ export class SpawnerBuilding {
     const speedMultiplier = Math.max(0.5, Number(this.enemyMods.speedMultiplier ?? 1) || 1);
     const healthMultiplier = Math.max(0.5, Number(this.enemyMods.healthMultiplier ?? 1) || 1);
     const damageMultiplier = Math.max(0.5, Number(this.enemyMods.damageMultiplier ?? 1) || 1);
+    const visual = this.enemyMods.visual || null;
 
     unit.moveSpeedMultiplier = speedMultiplier;
     unit.hordeModifierKey = this.modifierKey;
@@ -214,6 +215,8 @@ export class SpawnerBuilding {
         critDmg: Math.max(1, Math.round(Number(unit.weapon.critDmg ?? 0) * damageMultiplier)),
       };
     }
+
+    applyEnemyModifierVisual(unit, visual);
   }
 
   _spawnEnemy() {

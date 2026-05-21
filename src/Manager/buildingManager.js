@@ -36,6 +36,7 @@ export class buildingManager{
     static scene;
     static blockBuildingDuration = 250;
     static tileBuildingDuration = 1000;
+    static repairTickDuration = 1000;
     static playerWallDemolitionDamage = 45;
     static playerBuildingDemolitionDamage = 45;
     static _selectedWallJobId = null;
@@ -1890,6 +1891,7 @@ export class buildingManager{
         normalized.refundCost = normalized.refundCost ?? normalized.type?.cost ?? normalized.buildType?.cost ?? null;
 
         team.blockBuildingStates.push(normalized);
+        AudioManager.playBuildQueued?.();
         this.ensureQueuedBlockBuildGhost(normalized, teamNumber);
         this.assignTroopToBuildBlock(teamNumber);
         return normalized;
@@ -2780,7 +2782,7 @@ export class buildingManager{
                 let damage;
                 if (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger)) {
                     // Raiders / enemies: use their weapon to damage buildings
-                    damage = sprite.weapon?.baseDmg || 5;
+                    damage = fightManager.getModifiedWeaponDamage(sprite, sprite.weapon?.baseDmg || 5);
                 } else {
                     // Player-side "demolition" – slow chip damage
                     damage = this.playerBuildingDemolitionDamage;
@@ -2877,7 +2879,7 @@ export class buildingManager{
         else{
             // Damage amount (raiders use weapon, players use chip)
             const damage = (!sprite.body.team || (sprite.type == Brawler || sprite.type == Blademaster || sprite.type == Gunslinger))
-            ? (sprite.weapon?.baseDmg || 5)
+            ? fightManager.getModifiedWeaponDamage(sprite, sprite.weapon?.baseDmg || 5)
             : this.playerWallDemolitionDamage;
 
             fightManager.playAttackPresentation(sprite, wall.sprite);
@@ -3121,7 +3123,6 @@ export class buildingManager{
 
     static beginFixingBuilding(sprite) {
         const task = sprite.task;
-        const repairTickDuration = 1000;
 
         if (!task || !task.value) {
             this.clearFixTaskVisual(task);
@@ -3165,7 +3166,7 @@ export class buildingManager{
         }
 
         if (!sprite.timer) {
-            const adjustedRepairDuration = getMarketWorkDuration(sprite, repairTickDuration);
+            const adjustedRepairDuration = getMarketWorkDuration(sprite, this.repairTickDuration);
             AudioManager.setConstructionActive(sprite, true);
             this._startBuilderBuildPresentation(sprite, task, adjustedRepairDuration);
 

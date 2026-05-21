@@ -214,7 +214,6 @@ export class blockResourceManager{
             task._ephemeralDirect = false;
         }
 
-        node.startFlash?.();
         return task;
     }
 
@@ -341,6 +340,9 @@ export class blockResourceManager{
         troop.body?.setVelocity?.(0, 0);
         Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         troop.play?.(troop.idle);
+        if (activeTask && this._isResourceTask(activeTask) && troop?.body?.team != null) {
+            this.syncNodeFlash(troop.body.team, activeTask.value || activeTask);
+        }
     }
 
     static _postBlockTaskCleanup(troop) {
@@ -407,14 +409,6 @@ export class blockResourceManager{
         const node = this._nodeForTaskOrValue(taskOrValue);
         if (!node) return false;
 
-        if (node.task && this._isResourceTask(node.task) && !node.task.manualClick) {
-            return true;
-        }
-
-        if (this._queuedBlockTasks(teamNumber).some(task => this._taskMatchesNode(task, node))) {
-            return true;
-        }
-
         const foragers = Teams.teamLists?.[`${teamNumber}`]?.foragerList || [];
         return foragers.some(troop => troop?.active && this._taskMatchesNode(troop.task, node));
     }
@@ -452,7 +446,6 @@ export class blockResourceManager{
         };
 
         Teams.teamLists?.[`${teamNumber}`]?.foragerQueue?.push(task);
-        node.startFlash?.();
         return task;
     }
 

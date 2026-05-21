@@ -48,7 +48,7 @@ export const weapons = {
     critDmg: 175,
     critProb: 40,
     accuracy: 85,
-    duration: 1000,
+    duration: 1300,
     range: 200,
     projectile: true,
     speed: 300,

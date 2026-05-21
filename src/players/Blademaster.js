@@ -55,8 +55,8 @@ export class Blademaster {
 
         sprite.id = Player.count++;
         sprite.body.team = teamNumber;
-        sprite.maxHealth = 120;
-        sprite.health = 120; // medium tank
+        sprite.maxHealth = 95;
+        sprite.health = 95;
         sprite.stamina = 100;
         sprite.maxStamina = 100;
         sprite.body.pushable = false;

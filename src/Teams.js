@@ -2,13 +2,14 @@ import { CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, WORLD_DI
 import { townBounds, townRoads } from "./town";
 import { Map } from "./map";
 import { Player } from "./players/Player";
-import { POWERUP_CARDS } from "./Cards/PowerupCards";
 
 export class Teams {
     static teamLists = {};
     static houseCapacityPerBuilding = 2;
     static _townSpawnReservations = new globalThis.Map();
     static TOWN_SPAWN_RESERVATION_MS = 2000;
+    static cropReseedChance = 0;
+    static DEFAULT_WATER_BATCH_COUNT = 5;
 
     static resetAll() {
       this.teamLists = {};
@@ -18,6 +19,10 @@ export class Teams {
     static createTownAutomationState() {
       return {
         waterEnabled: false,
+        waterDraftCount: this.DEFAULT_WATER_BATCH_COUNT,
+        waterRemainingCount: 0,
+        waterDeliveredCount: 0,
+        waterCommittedCount: 0,
         gatherEnabled: false,
         gatherTargets: {
           wood: 0,
@@ -35,13 +40,144 @@ export class Teams {
       };
     }
 
+    static _normalizeTownAutomationState(state = null) {
+      const normalized = state && typeof state === "object"
+        ? state
+        : this.createTownAutomationState();
+
+      normalized.waterEnabled = !!normalized.waterEnabled;
+      normalized.waterDraftCount = Math.max(1, Number(normalized.waterDraftCount || this.DEFAULT_WATER_BATCH_COUNT) || this.DEFAULT_WATER_BATCH_COUNT);
+      normalized.waterRemainingCount = Math.max(0, Number(normalized.waterRemainingCount || 0) || 0);
+      normalized.waterDeliveredCount = Math.max(0, Number(normalized.waterDeliveredCount || 0) || 0);
+      normalized.waterCommittedCount = Math.max(0, Number(normalized.waterCommittedCount || 0) || 0);
+      normalized.waterOrderId = normalized.waterOrderId ?? null;
+
+      normalized.gatherEnabled = !!normalized.gatherEnabled;
+      normalized.gatherTargets = {
+        wood: Math.max(0, Number(normalized.gatherTargets?.wood || 0) || 0),
+        stone: Math.max(0, Number(normalized.gatherTargets?.stone || 0) || 0),
+        seed: Math.max(0, Number(normalized.gatherTargets?.seed || 0) || 0),
+        berry: Math.max(0, Number(normalized.gatherTargets?.berry || 0) || 0),
+      };
+      normalized.gatherOrderIds = {
+        wood: normalized.gatherOrderIds?.wood ?? null,
+        stone: normalized.gatherOrderIds?.stone ?? null,
+        seed: normalized.gatherOrderIds?.seed ?? null,
+        berry: normalized.gatherOrderIds?.berry ?? null,
+      };
+
+      const waterBatchActive = !!normalized.waterOrderId && (
+        normalized.waterEnabled
+        || normalized.waterRemainingCount > 0
+        || normalized.waterCommittedCount > 0
+      );
+
+      if (waterBatchActive) {
+        normalized.waterEnabled = true;
+      } else {
+        normalized.waterEnabled = false;
+        normalized.waterOrderId = null;
+        normalized.waterRemainingCount = 0;
+        normalized.waterDeliveredCount = 0;
+        normalized.waterCommittedCount = 0;
+      }
+
+      return normalized;
+    }
+
+    static _refreshFunctionTabUi() {
+      const scene = Player.scene;
+      const candidates = new Set([
+        scene,
+        scene?.uiScene,
+        scene?.scene?.get?.("GameUIScene"),
+        scene?.worldScene,
+        scene?.worldScene?.uiScene,
+      ]);
+
+      candidates.forEach((candidate) => {
+        candidate?.functionTab?.updateVisuals?.();
+      });
+    }
+
+    static _finishTownWaterBatch(automation) {
+      if (!automation) return;
+      automation.waterEnabled = false;
+      automation.waterOrderId = null;
+      automation.waterRemainingCount = 0;
+      automation.waterDeliveredCount = 0;
+      automation.waterCommittedCount = 0;
+    }
+
     static ensureTownAutomation(teamNumber) {
       const team = this.getTeam(teamNumber);
       if (!team) return null;
       if (!team.townAutomation) {
         team.townAutomation = this.createTownAutomationState();
       }
-      return team.townAutomation;
+      return this._normalizeTownAutomationState(team.townAutomation);
+    }
+
+    static startTownWaterBatch(teamNumber, count, orderId) {
+      const automation = this.ensureTownAutomation(teamNumber);
+      if (!automation || !orderId) return null;
+      automation.waterDraftCount = Math.max(1, Number(count || 0) || this.DEFAULT_WATER_BATCH_COUNT);
+      automation.waterEnabled = true;
+      automation.waterOrderId = orderId;
+      automation.waterRemainingCount = Math.max(0, Number(count || 0) || 0);
+      automation.waterDeliveredCount = 0;
+      automation.waterCommittedCount = 0;
+      this._refreshFunctionTabUi();
+      return automation;
+    }
+
+    static clearTownWaterBatch(teamNumber, orderId = null) {
+      const automation = this.ensureTownAutomation(teamNumber);
+      if (!automation) return false;
+      if (orderId != null && automation.waterOrderId !== orderId) return false;
+      this._finishTownWaterBatch(automation);
+      this._refreshFunctionTabUi();
+      return true;
+    }
+
+    static commitTownWaterUnits(teamNumber, orderId, amount = 1) {
+      const automation = this.ensureTownAutomation(teamNumber);
+      if (!automation || !orderId || automation.waterOrderId !== orderId) return false;
+      automation.waterEnabled = true;
+      automation.waterCommittedCount = Math.max(0, Number(automation.waterCommittedCount || 0)) + Math.max(0, Number(amount || 0) || 0);
+      this._refreshFunctionTabUi();
+      return true;
+    }
+
+    static uncommitTownWaterUnits(teamNumber, orderId, amount = 1) {
+      const automation = this.ensureTownAutomation(teamNumber);
+      if (!automation || !orderId || automation.waterOrderId !== orderId) return false;
+      automation.waterCommittedCount = Math.max(0, Number(automation.waterCommittedCount || 0) - Math.max(0, Number(amount || 0) || 0));
+      if (automation.waterRemainingCount <= 0 && automation.waterCommittedCount <= 0) {
+        this._finishTownWaterBatch(automation);
+      }
+      this._refreshFunctionTabUi();
+      return true;
+    }
+
+    static recordTownWaterDelivery(teamNumber, orderId, amount = 1) {
+      const automation = this.ensureTownAutomation(teamNumber);
+      if (!automation || !orderId || automation.waterOrderId !== orderId) return false;
+
+      const deliveredAmount = Math.max(0, Number(amount || 0) || 0);
+      const appliedAmount = Math.min(deliveredAmount, Math.max(0, Number(automation.waterRemainingCount || 0)));
+      automation.waterCommittedCount = Math.max(0, Number(automation.waterCommittedCount || 0) - deliveredAmount);
+      automation.waterRemainingCount = Math.max(0, Number(automation.waterRemainingCount || 0) - appliedAmount);
+      automation.waterDeliveredCount = Math.max(0, Number(automation.waterDeliveredCount || 0)) + appliedAmount;
+
+      if (automation.waterRemainingCount <= 0 && automation.waterCommittedCount <= 0) {
+        this._finishTownWaterBatch(automation);
+      } else {
+        automation.waterEnabled = true;
+      }
+
+      this._refreshFunctionTabUi();
+      return true;
     }
 
     static _cropNeedsWater(crop) {
@@ -501,7 +637,8 @@ export class Teams {
     }
   
     static movePlayerState(player, newState) {
-        let teamNumber = player.body.team;
+        const teamNumber = player?.body?.team ?? player?._teamNumber ?? null;
+        if (teamNumber == null || !player) return;
         Teams.addPlayerToState(teamNumber, player, newState);
     }
   
@@ -780,8 +917,8 @@ export class Teams {
 
       crop.dailyWatered = false;
 
-      // 40% chance to auto-reseed
-      if (Math.random() < 0.4) {
+      const reseedChance = Math.max(0, Number(this.cropReseedChance) || 0);
+      if (Math.random() < reseedChance) {
         crop.hasSeed = true;
         crop.growthStage = 0;
         crop.sprite.setFrame(1); // show seeded soil

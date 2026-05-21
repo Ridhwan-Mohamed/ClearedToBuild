@@ -14,7 +14,6 @@ import {
 } from "./DraftStarterDecks.js";
 import { AudioManager } from "../../Manager/AudioManager.js";
 import {
-  BODY_FONT_FAMILY,
   createBodyTextStyle,
   createDisplayTextStyle,
   createLabelTextStyle,
@@ -101,9 +100,21 @@ export class DraftStartMenu {
     this.selectedPlacedBuildingGrab = { x: 0, y: 0 };
     this._boundPointerMove = null;
     this._boundPointerDown = null;
+    this._boundResizeHandler = null;
+    this._resizeRebuildTimer = null;
+    this._stateChangeUnsub = null;
+    this._previewInitialized = false;
   }
 
   destroy() {
+    this._resizeRebuildTimer?.remove?.(false);
+    this._resizeRebuildTimer = null;
+    if (this._boundResizeHandler) {
+      this.scene?.scale?.off?.("resize", this._boundResizeHandler);
+      this._boundResizeHandler = null;
+    }
+    this._stateChangeUnsub?.();
+    this._stateChangeUnsub = null;
     this.teamNameInput?.destroy?.();
     this.teamNameInput = null;
 
@@ -119,10 +130,40 @@ export class DraftStartMenu {
     this.container = null;
   }
 
-  buildUI() {
+  _bindResizeHandling() {
+    if (this._boundResizeHandler) return;
+    this._boundResizeHandler = () => {
+      this._resizeRebuildTimer?.remove?.(false);
+      this._resizeRebuildTimer = this.scene?.time?.delayedCall?.(40, () => {
+        this._resizeRebuildTimer = null;
+        this._rebuildUiForResize();
+      });
+    };
+    this.scene?.scale?.on?.("resize", this._boundResizeHandler);
+  }
+
+  _rebuildUiForResize() {
+    if (!this.container?.active || !this.scene?.scale) return;
+    this._hideCardHoverBubble();
+    this._hideLayoutTooltip();
+    this._unbindLayoutMapInput();
+    this.worldScene?.overviewOceanWaves?.resize?.();
+    this.teamNameInput?.destroy?.();
+    this.teamNameInput = null;
+    this.container.removeAll(true);
+    this.container.setAlpha(1).setVisible(true);
+    this.buildUI({ animateIntro: false, initializePreview: false });
+  }
+
+  buildUI({ animateIntro = true, initializePreview = !this._previewInitialized } = {}) {
     const scene = this.scene;
     const width = scene.scale.width;
     const height = scene.scale.height;
+    this.ui = {
+      deckRefs: [],
+      cardHoverPreviews: [],
+      mapInteractionRects: [],
+    };
     this.layout = this._createLayout(width, height);
 
     this._buildBackdrop(width, height);
@@ -132,28 +173,39 @@ export class DraftStartMenu {
     this._buildFooter(width, height);
     this._buildCardHoverBubble(width, height);
 
-    this.preview.initBaseTown(this.state);
-    this.preview._updatePlacedBuildingsIntoState?.(this.state);
+    if (initializePreview) {
+      this.preview.initBaseTown(this.state);
+      this.preview._updatePlacedBuildingsIntoState?.(this.state);
+      this.state.setWallEstimate(this.preview.estimateWallTiles(), true);
+      this._previewInitialized = true;
+    }
     this.preview.updateCrewSpawnPreview(this.state.crew);
-    this.state.setWallEstimate(this.preview.estimateWallTiles(), true);
     this.scene.fullRepaintPreview?.();
 
-    this.state.onChange(() => {
-      this._refreshUI();
-    });
+    if (!this._stateChangeUnsub) {
+      this._stateChangeUnsub = this.state.onChange(() => {
+        this._refreshUI();
+      });
+    }
+    this._bindResizeHandling();
 
     this._bindLayoutMapInput();
-    this._setPhase("deck", { immediate: true, emit: true });
+    this._setPhase(this.phase, { immediate: true, emit: true });
     this._refreshUI();
 
-    this.container.setAlpha(0);
-    this.teamNameInput?.dom?.setAlpha?.(0);
-    scene.tweens.add({
-      targets: [this.container, this.teamNameInput?.dom].filter(Boolean),
-      alpha: 1,
-      duration: 360,
-      ease: "Cubic.easeOut",
-    });
+    if (animateIntro) {
+      this.container.setAlpha(0);
+      this.teamNameInput?.dom?.setAlpha?.(0);
+      scene.tweens.add({
+        targets: [this.container, this.teamNameInput?.dom].filter(Boolean),
+        alpha: 1,
+        duration: 360,
+        ease: "Cubic.easeOut",
+      });
+    } else {
+      this.container.setAlpha(1);
+      this.teamNameInput?.dom?.setAlpha?.(1);
+    }
   }
 
   _createLayout(width, height) {
@@ -164,19 +216,28 @@ export class DraftStartMenu {
     const headerHeight = Math.round((compact ? 110 : 126) * scale);
     const headerTopGap = 5;
     const headerY = headerTopGap + Math.round(headerHeight / 2);
-    const footerHeight = clamp(Math.round(62 * scale), 50, 64);
+    const footerHeight = clamp(Math.round(76 * scale), 58, 82);
     const footerY = height - pagePad - Math.round(footerHeight / 2);
     const topDeckStart = headerY + (headerHeight / 2) + Math.round(14 * scale);
-    const bottomDeckEnd = footerY - (footerHeight / 2) - Math.round(24 * scale);
+    const bottomDeckEnd = footerY - (footerHeight / 2) - Math.round(18 * scale);
+    const availableDeckHeight = bottomDeckEnd - topDeckStart;
     const deckWidth = Math.min(
       Math.floor((width - pagePad * 2 - gap * 2) / 3),
       Math.round(392 * scale),
     );
-    const deckHeight = Math.max(
-      Math.round(438 * scale),
-      bottomDeckEnd - topDeckStart,
-    );
-    const rowCenterY = topDeckStart + (deckHeight / 2);
+    const preferredDeckHeight = Math.round(438 * scale);
+    const minimumDeckHeight = Math.max(320, Math.round(344 * scale));
+    const deckHeightTarget = availableDeckHeight - Math.round(12 * scale);
+    const deckHeight = availableDeckHeight <= preferredDeckHeight
+      ? Math.max(
+        Math.min(availableDeckHeight, preferredDeckHeight),
+        Math.min(minimumDeckHeight, availableDeckHeight),
+      )
+      : Math.max(
+        Math.min(deckHeightTarget, availableDeckHeight),
+        Math.min(preferredDeckHeight, availableDeckHeight),
+      );
+    const rowCenterY = topDeckStart + Math.round(availableDeckHeight / 2);
     const teamInputWidth = compact ? 228 : 262;
     const confirmButtonWidth = clamp(Math.round(228 * scale), 184, 248);
     const confirmButtonHeight = clamp(Math.round(60 * scale), 48, 62);
@@ -311,7 +372,7 @@ export class DraftStartMenu {
     }
 
     if (label) {
-      label.setColor(isInvalid ? "#ffb2bc" : TEXT_SUBTLE);
+      label.setColor(isInvalid ? "#ffd3d8" : TEXT_LIGHT);
     }
 
     const input = this._getTeamNameInputElement();
@@ -620,6 +681,7 @@ export class DraftStartMenu {
       this._hideLayoutTooltip();
     }
 
+    this.preview?.setSpawnPreviewVisible?.(isLayout);
     this._setDeckSelectionEnabled(!isLayout);
 
     for (const target of [...targetsToShow, ...targetsToHide]) {
@@ -777,11 +839,13 @@ export class DraftStartMenu {
     const subtitle = scene.add.text(
       -headerWidth / 2 + Math.round(36 * layout.scale),
       Math.round(24 * layout.scale),
-      "Pick one starter deck. Your farmer, fireman, forager, and builder are locked in from the start.",
-      this._bodyStyle(13, {
-        min: 12,
+      "Pick one starter deck.",
+      this._displayStyle(15, {
+        min: 13,
         scale: layout.scale,
-        color: TEXT_MUTED,
+        color: "#d9eef8",
+        stroke: "#08131d",
+        strokeThickness: Math.max(2, Math.round(3 * layout.scale)),
         wordWrap: { width: bodyWrapWidth },
         lineSpacing: Math.round(4 * layout.scale),
       }),
@@ -791,11 +855,13 @@ export class DraftStartMenu {
     const teamTag = scene.add.text(
       teamTagX,
       -Math.round(30 * layout.scale),
-      "Team Name",
-      this._labelStyle(13, {
-        min: 11,
+      "Town Name",
+      this._displayStyle(18, {
+        min: 14,
         scale: layout.scale,
-        color: TEXT_SUBTLE,
+        color: TEXT_LIGHT,
+        stroke: "#000000",
+        strokeThickness: Math.max(3, Math.round(4 * layout.scale)),
       }),
     ).setOrigin(0, 0.5);
 
@@ -841,6 +907,9 @@ export class DraftStartMenu {
       x: width / 2 + teamInputShell.x,
       y: layout.headerY + teamInputShell.y,
       width: layout.teamInputWidth,
+      inputClassName: "draft-town-name-input",
+      styleTagId: "draft-town-name-input-style",
+      fontLoadSizePx: Math.max(14, Math.round(16 * layout.scale)),
       placeholder: "Name your town",
       initialValue: this.state.teamName,
       onChange: (value) => this.state.setTeamName(value),
@@ -848,25 +917,60 @@ export class DraftStartMenu {
         const fallbackCount = (Number(addedCount) || 0) + (Number(removedCount) || 0);
         const playCount = Math.min(6, Math.max(0, Number(changedCount) || fallbackCount));
         for (let index = 0; index < playCount; index++) {
-          AudioManager.playUiType();
+          AudioManager.playUiTextThud({
+            volume: 0.15,
+            rate: 1.01 + Math.random() * 0.04,
+          });
         }
       },
       wrapperStyle: "display:flex; align-items:stretch;",
+      extraCss: `
+        .draft-town-name-input,
+        .draft-town-name-input::placeholder {
+          font-family:"Bungee", cursive !important;
+          font-weight:400 !important;
+          letter-spacing:0.02em !important;
+        }
+        .draft-town-name-input::placeholder {
+          color:#050b10 !important;
+          opacity:0.92 !important;
+          -webkit-text-stroke:1px #ffffff;
+          text-shadow:
+            0 1px 0 #ffffff,
+            1px 0 0 #ffffff,
+            -1px 0 0 #ffffff,
+            0 -1px 0 #ffffff,
+            1px 1px 0 #ffffff,
+            -1px 1px 0 #ffffff,
+            1px -1px 0 #ffffff,
+            -1px -1px 0 #ffffff !important;
+        }
+      `,
       inputStyle: `
         width:${layout.teamInputWidth}px;
         padding:${Math.round(9 * layout.scale)}px ${Math.round(16 * layout.scale)}px;
-        font-size:${Math.max(12, Math.round(15 * layout.scale))}px;
-        font-family:${BODY_FONT_FAMILY};
-        font-weight:600;
+        font-size:${Math.max(13, Math.round(16 * layout.scale))}px;
+        font-family:"Bungee", cursive;
+        font-weight:400;
         border-radius:${Math.round(16 * layout.scale)}px;
-        border:1px solid rgba(255,255,255,0.05);
+        border:1px solid rgba(13,33,48,0.98);
         box-shadow:none;
         -webkit-appearance:none;
         appearance:none;
-        background:rgba(255,255,255,0.02);
-        color:white;
+        background:rgba(13,33,48,0.98);
+        color:#050b10;
+        -webkit-text-stroke:1px #ffffff;
+        text-shadow:
+          0 1px 0 #ffffff,
+          1px 0 0 #ffffff,
+          -1px 0 0 #ffffff,
+          0 -1px 0 #ffffff,
+          1px 1px 0 #ffffff,
+          -1px 1px 0 #ffffff,
+          1px -1px 0 #ffffff,
+          -1px -1px 0 #ffffff;
         outline:none;
-        caret-color:white;
+        caret-color:#ffffff;
         letter-spacing:0.02em;
       `,
     });
@@ -919,6 +1023,8 @@ export class DraftStartMenu {
     const bottom = height / 2;
     const sectionLeft = -width / 2 + Math.round(28 * contentScale);
     const innerWidth = width - Math.round(56 * contentScale);
+    const posY = (baseY) => top + Math.round(height * (baseY / 610));
+    const sizeY = (baseHeight) => Math.round(height * (baseHeight / 610));
 
     const glow = this._makeRoundedPanel(width + 10, height + 10, {
       fillColor: accent,
@@ -945,32 +1051,34 @@ export class DraftStartMenu {
       fillAlpha: 0.05,
       radius: Math.round(24 * contentScale),
     });
-    topShine.y = top + Math.round(38 * contentScale);
+    topShine.y = posY(38);
 
-    const orb = scene.add.ellipse(-width / 2 + Math.round(54 * contentScale), top + Math.round(48 * contentScale), Math.round(88 * contentScale), Math.round(88 * contentScale), accent, 0.18);
-    const selectPill = this._makeRoundedPanel(Math.round(122 * contentScale), Math.round(34 * contentScale), {
+    const orb = scene.add.ellipse(-width / 2 + Math.round(54 * contentScale), posY(48), Math.round(88 * contentScale), Math.round(88 * contentScale), accent, 0.18);
+    const selectPill = this._makeRoundedPanel(Math.round(138 * contentScale), Math.round(36 * contentScale), {
       fillColor: deck.accentDark ? hexToColorInt(deck.accentDark, accent) : accent,
       fillAlpha: 0.8,
-      radius: Math.round(17 * contentScale),
+      radius: Math.round(18 * contentScale),
     });
     selectPill.x = 0;
-    const selectPillY = top + Math.round(38 * contentScale);
+    const selectPillY = posY(38);
     selectPill.y = selectPillY;
 
     const selectLabel = scene.add.text(
       0,
-      top + Math.round(38 * contentScale),
+      posY(38),
       "Starter Deck",
-      this._labelStyle(11, {
-        min: 11,
+      this._displayStyle(10, {
+        min: 10,
         scale: contentScale,
         color: TEXT_LIGHT,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
       }),
     ).setOrigin(0.5);
 
     const name = scene.add.text(
       sectionLeft,
-      top + Math.round(86 * contentScale),
+      posY(86),
       deck.name,
       this._displayStyle(24, {
         min: 18,
@@ -984,24 +1092,28 @@ export class DraftStartMenu {
 
     const subtitle = scene.add.text(
       sectionLeft,
-      top + Math.round(122 * contentScale),
+      posY(122),
       deck.subtitle,
-      this._bodyStyle(12, {
+      this._displayStyle(13, {
         min: 12,
         scale: contentScale,
         color: deck.accent,
-        fontStyle: "bold",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
+        wordWrap: { width: innerWidth },
       }),
     ).setOrigin(0, 0.5);
 
     const summary = scene.add.text(
       sectionLeft,
-      top + Math.round(154 * contentScale),
+      posY(154),
       deck.summary,
-      this._bodyStyle(11, {
-        min: 11,
+      this._displayStyle(10, {
+        min: 10,
         scale: contentScale,
         color: TEXT_MUTED,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
         wordWrap: { width: innerWidth },
         lineSpacing: Math.max(2, Math.round(4 * contentScale)),
       }),
@@ -1009,16 +1121,18 @@ export class DraftStartMenu {
 
     const stockLabel = scene.add.text(
       sectionLeft,
-      top + Math.round(224 * contentScale),
+      posY(216),
       "Starting Stock",
-      this._labelStyle(11, {
+      this._displayStyle(12, {
         min: 11,
         scale: contentScale,
-        color: TEXT_SUBTLE,
+        color: "#ddeff8",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
       }),
     ).setOrigin(0, 0.5);
 
-    const stockTrayHeight = Math.round(98 * contentScale);
+    const stockTrayHeight = Math.max(Math.round(98 * contentScale), sizeY(104));
     const stockTray = this._makeRoundedPanel(width - Math.round(42 * contentScale), stockTrayHeight, {
       fillColor: 0x0d2130,
       fillAlpha: 0.86,
@@ -1026,26 +1140,32 @@ export class DraftStartMenu {
       strokeAlpha: 0.08,
       radius: Math.round(26 * contentScale),
     });
-    stockTray.y = top + Math.round(286 * contentScale);
+    stockTray.y = posY(278);
 
     const resourceRefs = this._buildResourceChips(deck, width, stockTray.y, contentScale);
 
     const cardsLabel = scene.add.text(
       sectionLeft,
-      top + Math.round(358 * contentScale),
+      posY(348),
       "Starter Cards",
-      this._labelStyle(11, {
+      this._displayStyle(12, {
         min: 11,
         scale: contentScale,
-        color: TEXT_SUBTLE,
+        color: "#ddeff8",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
       }),
     ).setOrigin(0, 0.5);
 
     const cardGap = Math.max(6, Math.round(8 * contentScale));
     const cardWidth = Math.floor((width - Math.round(48 * contentScale) - cardGap * 2) / 3);
-    const cardHeight = Math.max(80, Math.round((layout.compact ? 92 : 104) * contentScale));
+    const cardHeight = Math.max(
+      80,
+      Math.round((layout.compact ? 92 : 104) * contentScale),
+      sizeY(layout.compact ? 100 : 116),
+    );
     const cardStartX = -width / 2 + Math.round(24 * contentScale) + cardWidth / 2;
-    const cardY = top + Math.round(432 * contentScale);
+    const cardY = posY(422);
     const cardRefs = [];
 
     deck.cards.forEach((card, cardIndex) => {
@@ -1065,26 +1185,29 @@ export class DraftStartMenu {
     });
 
     const crewLabel = scene.add.text(
-      sectionLeft,
-      top + Math.round(520 * contentScale),
+      sectionLeft + Math.round(6 * contentScale),
+      posY(496),
       "Starting Crew",
-      this._labelStyle(11, {
+      this._displayStyle(12, {
         min: 11,
         scale: contentScale,
-        color: TEXT_SUBTLE,
+        color: TEXT_LIGHT,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
       }),
     ).setOrigin(0, 0.5);
 
-    const crewTray = this._makeRoundedPanel(width - Math.round(42 * contentScale), Math.round(102 * contentScale), {
+    const crewTrayHeight = Math.max(Math.round(94 * contentScale), sizeY(102));
+    const crewTray = this._makeRoundedPanel(width - Math.round(42 * contentScale), crewTrayHeight, {
       fillColor: 0x0d2130,
       fillAlpha: 0.86,
       strokeColor: 0xffffff,
       strokeAlpha: 0.08,
       radius: Math.round(26 * contentScale),
     });
-    crewTray.y = top + Math.round(560 * contentScale);
+    crewTray.y = posY(540);
 
-    const portraitRefs = this._buildPortraitStrip(width, height, contentScale);
+    const portraitRefs = this._buildPortraitStrip(width, crewTray.y, contentScale);
 
     const hitArea = scene.add.rectangle(0, 0, width, height, 0xffffff, 0.001)
       .setInteractive({ cursor: "pointer" });
@@ -1125,8 +1248,8 @@ export class DraftStartMenu {
       accent,
       baseY: y,
       contentScale,
-      selectPillWidth: Math.round(122 * contentScale),
-      selectPillHeight: Math.round(34 * contentScale),
+      selectPillWidth: Math.round(138 * contentScale),
+      selectPillHeight: Math.round(36 * contentScale),
       selectPillY,
       isHovered: false,
     };
@@ -1212,10 +1335,12 @@ export class DraftStartMenu {
       -infoWidth / 2 + Math.round(26 * scale),
       -infoHeight / 2 + Math.round(72 * scale),
       "You may move buildings.\nKeep one land tile between buildings and water.",
-      this._bodyStyle(14, {
+      this._displayStyle(13, {
         min: 12,
         scale,
         color: TEXT_MUTED,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * scale)),
         wordWrap: { width: infoWidth - Math.round(54 * scale) },
         lineSpacing: Math.round(5 * scale),
       }),
@@ -1224,11 +1349,12 @@ export class DraftStartMenu {
       -infoWidth / 2 + Math.round(26 * scale),
       infoHeight / 2 - Math.round(28 * scale),
       "Click a building, then click an open tile.",
-      this._bodyStyle(13, {
+      this._displayStyle(12, {
         min: 11,
         scale,
         color: TEXT_WARM,
-        fontStyle: "bold",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * scale)),
         wordWrap: { width: infoWidth - Math.round(54 * scale) },
         lineSpacing: Math.round(4 * scale),
       }),
@@ -1272,21 +1398,24 @@ export class DraftStartMenu {
         -legendWidth / 2 + Math.round(46 * scale),
         lineY,
         `${entry.emoji} ${entry.label}`,
-        this._bodyStyle(18, {
+        this._displayStyle(16, {
           min: 14,
           scale,
           color: entry.color,
-          fontStyle: "bold",
+          stroke: "#08131d",
+          strokeThickness: Math.max(1, Math.round(2 * scale)),
         }),
       ).setOrigin(0, 0.5);
       const count = scene.add.text(
         legendWidth / 2 - Math.round(24 * scale),
         lineY,
         "x0",
-        this._labelStyle(16, {
+        this._displayStyle(14, {
           min: 12,
           scale,
           color: entry.color,
+          stroke: "#08131d",
+          strokeThickness: Math.max(1, Math.round(2 * scale)),
         }),
       ).setOrigin(1, 0.5);
       legendRefs.push({ ...entry, marker, label, count });
@@ -1309,11 +1438,12 @@ export class DraftStartMenu {
       0,
       0,
       "",
-      this._bodyStyle(15, {
+      this._displayStyle(13, {
         min: 12,
         scale,
         color: TEXT_LIGHT,
-        fontStyle: "bold",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * scale)),
       }),
     ).setOrigin(0.5);
     tooltip.add([tooltipBg, tooltipLabel]);
@@ -1431,11 +1561,12 @@ export class DraftStartMenu {
       0,
       height / 2 - Math.round(22 * contentScale),
       card.name,
-      this._bodyStyle(10, {
+      this._displayStyle(10, {
         min: 10,
         scale: contentScale,
         color: TEXT_LIGHT,
-        fontStyle: "bold",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * contentScale)),
         align: "center",
         wordWrap: { width: width - Math.round(16 * contentScale) },
       }),
@@ -1491,12 +1622,11 @@ export class DraftStartMenu {
     };
   }
 
-  _buildPortraitStrip(deckWidth, deckHeight, contentScale = 1) {
+  _buildPortraitStrip(deckWidth, centerY, contentScale = 1) {
     const scene = this.scene;
     const chipWidth = Math.floor((deckWidth - Math.round(62 * contentScale)) / REQUIRED_STARTER_TYPES.length);
-    const chipHeight = Math.round(86 * contentScale);
+    const chipHeight = Math.round(72 * contentScale);
     const startX = -((REQUIRED_STARTER_TYPES.length - 1) * chipWidth) / 2;
-    const y = (deckHeight / 2) - Math.round(62 * contentScale);
 
     return REQUIRED_STARTER_TYPES.map((typeKey, index) => {
       const unit = createStarterPortraitUnit(typeKey);
@@ -1511,38 +1641,28 @@ export class DraftStartMenu {
           radius: Math.round(18 * contentScale),
         });
       chip.x = x;
-      chip.y = y;
+      chip.y = centerY;
 
-      const portrait = scene.add.sprite(x, y - Math.round(10 * contentScale), portraitKey ?? "");
+      const portrait = scene.add.sprite(x, centerY - Math.round(10 * contentScale), portraitKey ?? "");
       applyPortraitKeyToSprite(scene, portrait, portraitKey, Math.round(34 * contentScale));
 
       const label = scene.add.text(
         x,
-        y + Math.round(22 * contentScale),
+        centerY + Math.round(19 * contentScale),
         typeKey,
-        this._bodyStyle(9, {
-          min: 9,
+        this._displayStyle(8, {
+          min: 8,
           scale: contentScale,
           color: TEXT_LIGHT,
-          fontStyle: "bold",
+          stroke: "#08131d",
+          strokeThickness: Math.max(1, Math.round(2 * contentScale)),
           align: "center",
           wordWrap: { width: chipWidth - Math.round(18 * contentScale) },
         }),
       ).setOrigin(0.5);
 
-      const count = scene.add.text(
-        x,
-        y + Math.round(36 * contentScale),
-        "x1",
-        this._bodyStyle(9, {
-          min: 9,
-          scale: contentScale,
-          color: TEXT_SUBTLE,
-        }),
-      ).setOrigin(0.5);
-
       return {
-        objects: [chip, portrait, label, count],
+        objects: [chip, portrait, label],
       };
     });
   }
@@ -1573,18 +1693,20 @@ export class DraftStartMenu {
     shell.x = width / 2;
     shell.y = buttonY;
 
-    const labelY = buttonY - (footerHeight / 2) + Math.round(18 * layout.scale) - 5;
-    const summaryY = labelY + Math.round(16 * layout.scale);
+    const labelY = buttonY - (footerHeight / 2) + Math.round(20 * layout.scale) - 1;
+    const summaryY = labelY + Math.round(20 * layout.scale);
     const summaryLeft = (width / 2) - (footerWidth / 2) + footerInset;
 
     const pickLabel = scene.add.text(
       summaryLeft,
       labelY,
       "Opening Summary",
-      this._labelStyle(11, {
-        min: 11,
+      this._displayStyle(13, {
+        min: 12,
         scale: layout.scale,
-        color: TEXT_SUBTLE,
+        color: "#ddeff8",
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * layout.scale)),
       }),
     ).setOrigin(0, 0.5);
 
@@ -1592,11 +1714,13 @@ export class DraftStartMenu {
       summaryLeft,
       summaryY,
       "",
-      this._bodyStyle(12, {
-        min: 12,
+      this._displayStyle(12, {
+        min: 11,
         scale: layout.scale,
         color: TEXT_MUTED,
-        wordWrap: { width: 220 },
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * layout.scale)),
+        wordWrap: { width: 260 },
         lineSpacing: Math.max(2, Math.round(4 * layout.scale)),
       }),
     ).setOrigin(0, 0);
@@ -1751,7 +1875,7 @@ export class DraftStartMenu {
 
   _buildCardHoverBubble(width, height) {
     const bubbleWidth = clamp(Math.round(320 * this.layout.scale), 240, 340);
-    const bubbleHeight = clamp(Math.round(178 * this.layout.scale), 144, 190);
+    const bubbleHeight = clamp(Math.round(190 * this.layout.scale), 152, 202);
     const bubble = this.scene.add.container(width / 2, height / 2)
       .setDepth(UIDEPTH + 280)
       .setVisible(false)
@@ -1786,10 +1910,12 @@ export class DraftStartMenu {
       0,
       -bubbleHeight / 2 + Math.round(84 * this.layout.scale),
       "",
-      this._labelStyle(14, {
+      this._displayStyle(14, {
         min: 12,
         scale: this.layout.scale,
         color: TEXT_LIGHT,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * this.layout.scale)),
         align: "center",
         wordWrap: { width: bubbleWidth - Math.round(34 * this.layout.scale) },
       }),
@@ -1797,12 +1923,14 @@ export class DraftStartMenu {
 
     const desc = this.scene.add.text(
       0,
-      Math.round(24 * this.layout.scale),
+      Math.round(30 * this.layout.scale),
       "",
-      this._bodyStyle(11, {
-        min: 11,
+      this._displayStyle(10, {
+        min: 10,
         scale: this.layout.scale,
         color: TEXT_MUTED,
+        stroke: "#08131d",
+        strokeThickness: Math.max(1, Math.round(2 * this.layout.scale)),
         align: "center",
         wordWrap: { width: bubbleWidth - Math.round(44 * this.layout.scale) },
         lineSpacing: Math.max(2, Math.round(4 * this.layout.scale)),
@@ -1925,7 +2053,7 @@ export class DraftStartMenu {
       this.ui.headerSubtitle.setText(
         isLayout
           ? ""
-          : "Pick one starter deck. Your farmer, fireman, forager, and builder are locked in from the start.",
+          : "Pick one starter deck.",
       );
     }
     if (this.ui.headerTitle) {

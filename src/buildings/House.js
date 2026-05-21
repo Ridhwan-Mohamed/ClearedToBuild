@@ -95,12 +95,12 @@ export class House {
         this.sprite.on('pointerover', () => {
             this.isHovered = true;
             this.updateHealthBar?.();
-            this.updateIcons()
+            this.updateIcons();
         });
         this.sprite.on('pointerout', () => {
             this.isHovered = false;
             this.updateHealthBar?.();
-            this.clearIcons()
+            this.clearIcons();
         });
 
         this.uiIcons = [null, null];

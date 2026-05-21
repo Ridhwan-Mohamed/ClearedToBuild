@@ -9,10 +9,14 @@ import { Map } from "../map";
 import { AudioManager } from "./AudioManager";
 import { InterruptController } from "../ai/scheduler/InterruptController";
 import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
+import { getMarketCritProfile } from "../Cards/MarketBuffs";
 
 export class fightManager{
 
     static scene; 
+    static lastStandEnabled = false;
+    static lastStandThreshold = 0.35;
+    static lastStandDamageMultiplier = 1.2;
 
     static hasAttackRecovery(sprite) {
         return !!sprite?._attackRecoveryTimer;
@@ -324,6 +328,24 @@ export class fightManager{
         });
     }
 
+    static getAttackerDamageMultiplier(attacker) {
+        if (!attacker?.active) return 1;
+        if (!this.lastStandEnabled) return 1;
+
+        const maxHealth = Math.max(1, Number(attacker.maxHealth ?? attacker.health ?? 1) || 1);
+        const currentHealth = Math.max(0, Number(attacker.health ?? maxHealth) || 0);
+        const threshold = Math.max(0, Number(this.lastStandThreshold ?? 0.35) || 0.35);
+        if ((currentHealth / maxHealth) > threshold) return 1;
+
+        return Math.max(1, Number(this.lastStandDamageMultiplier ?? 1.2) || 1.2);
+    }
+
+    static getModifiedWeaponDamage(attacker, damage) {
+        const baseDamage = Math.max(0, Number(damage) || 0);
+        if (!(baseDamage > 0)) return 0;
+        return Math.max(1, Math.round(baseDamage * this.getAttackerDamageMultiplier(attacker)));
+    }
+
     static attack(sprite) {
         if (this.hasAttackRecovery(sprite)) return;
 
@@ -374,7 +396,7 @@ export class fightManager{
         let color = '#ffffff';
 
         if (isHit) {
-            damage = isCrit ? weapon.critDmg : weapon.baseDmg;
+            damage = this.getModifiedWeaponDamage(sprite, isCrit ? weapon.critDmg : weapon.baseDmg);
 
             fightManager.applyHitReaction(target, sprite, weapon);
             target.health = Math.max(0, target.health - damage);
@@ -416,7 +438,7 @@ export class fightManager{
         }
     }
 
-    static calculateHitResultFromWeapon(weapon) {
+    static calculateHitResultFromWeapon(weapon, attacker = null) {
         if (!weapon) {
             return {
                 hit: false,
@@ -438,8 +460,14 @@ export class fightManager{
             };
         }
 
-        const isCrit = Phaser.Math.Between(0, 100) < weapon.critProb;
-        const damage = isCrit ? weapon.critDmg : weapon.baseDmg;
+        const critProfile = getMarketCritProfile(attacker, weapon);
+        const critChance = Math.max(0, Number(weapon.critProb || 0) + Number(critProfile.critChanceBonus || 0));
+        const isCrit = Phaser.Math.Between(0, 100) < critChance;
+        const critDamage = Math.max(
+            1,
+            Math.round(Number(weapon.critDmg || weapon.baseDmg || 1) * Math.max(1, Number(critProfile.critDamageMultiplier || 1)))
+        );
+        const damage = this.getModifiedWeaponDamage(attacker, isCrit ? critDamage : weapon.baseDmg);
 
         return {
             hit: true,

@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
-import { POWERUP_CARDS } from "../Cards/PowerupCards";
+import { pickRandomPowerupCards } from "../Cards/PowerupCards";
 import { House } from "../buildings/House";
 import { SQUARESIZE, UIDEPTH, showAlert } from "../constants";
 import { addCardToHand, getCardHand } from "../UI/Powerups";
-import { createWorldCardPreview, getCardOutlineTint } from "../UI/CardPreview";
+import { createWorldCardPreview, getCardOutlineTint, getCardVisualStyle } from "../UI/CardPreview";
 import { Builder } from "../players/Builder";
 import { Farmer } from "../players/Farmer";
 import { Fireman } from "../players/Fireman";
@@ -38,24 +38,24 @@ const CHEST_REWARDS = [
   {
     key: "money",
     name: "Money Chest",
-    contents: [{ key: "monies", label: "Money", amount: 250 }],
+    contents: [{ key: "monies", label: "Money", amount: 225, resourceKey: "money" }],
     grant: (scene) => {
-      scene.updateMoney?.(250);
-      showAlert(scene, "+$250", "#aaffaa");
+      scene.updateMoney?.(225);
+      showAlert(scene, "+$225", "#aaffaa");
     }
   },
   {
     key: "resource",
     name: "Resource Chest",
     contents: [
-      { key: "woodIcon", label: "Wood", amount: 6 },
-      { key: "stoneIcon", label: "Stone", amount: 6 },
-      { key: "seeds", label: "Seeds", amount: 4 },
+      { key: "woodIcon", label: "Wood", amount: 3, resourceKey: "wood", parcelType: "FOREST" },
+      { key: "stoneIcon", label: "Stone", amount: 3, resourceKey: "stone", parcelType: "ROCK" },
+      { key: "seeds", label: "Seeds", amount: 2, resourceKey: "seeds", parcelType: "FARM" },
     ],
     grant: (scene) => {
-      addResource(scene, "wood", 6);
-      addResource(scene, "stone", 6);
-      addResource(scene, "seeds", 4);
+      addResource(scene, "wood", 3);
+      addResource(scene, "stone", 3);
+      addResource(scene, "seeds", 2);
       showAlert(scene, "+Resources", "#aaffaa");
     }
   },
@@ -63,14 +63,14 @@ const CHEST_REWARDS = [
     key: "survival",
     name: "Food + Water Chest",
     contents: [
-      { key: "foodIcon", label: "Food", amount: 8 },
-      { key: "waterIcon", label: "Water", amount: 8 },
-      { key: "berry", label: "Berry", amount: 3 },
+      { key: "foodIcon", label: "Food", amount: 2, resourceKey: "food", parcelType: "FARM" },
+      { key: "waterIcon", label: "Water", amount: 3, resourceKey: "clean_water" },
+      { key: "berry", label: "Berry", amount: 2, resourceKey: "berry", parcelType: "FARM" },
     ],
     grant: (scene) => {
-      addResource(scene, "food", 8);
-      addResource(scene, "clean_water", 8);
-      addResource(scene, "berry", 3);
+      addResource(scene, "food", 2);
+      addResource(scene, "clean_water", 3);
+      addResource(scene, "berry", 2);
       showAlert(scene, "+Food + Water", "#aaffaa");
     }
   },
@@ -100,6 +100,35 @@ function addResource(scene, key, amount) {
 
   if (!itemType) return;
   StorageManager.grantItemToTeam(TEAM_ID, itemType, amount, scene);
+}
+
+function buildResolvedChestReward(scene, chestDef) {
+  const contents = (chestDef?.contents || []).filter((entry) => {
+    const parcelType = String(entry?.parcelType || "").toUpperCase();
+    return !parcelType || !scene?._hasClaimedRunParcelType?.(parcelType);
+  });
+  if (!contents.length) return null;
+
+  return {
+    ...chestDef,
+    contents,
+    grant: (targetScene) => {
+      for (const entry of contents) {
+        addResource(targetScene, entry.resourceKey, entry.amount);
+      }
+      const label = chestDef.key === "money"
+        ? "+$225"
+        : `+${contents.map((entry) => entry.label).join(" + ")}`;
+      showAlert(targetScene, label, "#aaffaa");
+    },
+  };
+}
+
+function getAvailableChestRewards(scene) {
+  const resolved = CHEST_REWARDS
+    .map((chestDef) => buildResolvedChestReward(scene, chestDef))
+    .filter(Boolean);
+  return resolved.length ? resolved : CHEST_REWARDS.slice(0, 1);
 }
 
 function safeDestroy(go) {
@@ -138,9 +167,7 @@ function rowPositions(cx, y, spacing = 165) {
 }
 
 function randomCards(count = 3) {
-  const pool = POWERUP_CARDS.slice();
-  Phaser.Utils.Array.Shuffle(pool);
-  return pool.slice(0, Math.min(count, pool.length));
+  return pickRandomPowerupCards(count, { teamNumber: TEAM_ID });
 }
 
 function getAvailablePlayerRewards() {
@@ -312,9 +339,11 @@ function grantCardReward(scene, card, onDone) {
 
 function buildChestReward(scene, meta, ctx, completeReward) {
   const center = getFortCenter(meta);
-  const positions = rowPositions(center.x, center.y, 170);
-
-  CHEST_REWARDS.forEach((chestDef, i) => {
+  const chestRewards = getAvailableChestRewards(scene).slice(0, 3);
+  const spacing = 170;
+  const startX = center.x - ((chestRewards.length - 1) * spacing) / 2;
+  const positions = chestRewards.map((_, index) => ({ x: startX + index * spacing, y: center.y }));
+  chestRewards.forEach((chestDef, i) => {
     const pos = positions[i];
     const chest = worldify(scene, scene.add.sprite(pos.x, pos.y, "reward_treasure_chest", 0)
       .setDepth(10010)
@@ -353,6 +382,22 @@ function buildCardReward(scene, meta, ctx, completeReward) {
   cards.forEach((card, i) => {
     const pos = positions[i];
     const tint = getCardOutlineTint(card);
+    const visualStyle = getCardVisualStyle(card);
+
+    const halo = worldify(scene, scene.add.ellipse(pos.x, pos.y, 96, 110, visualStyle.haloTint, visualStyle.isGold ? 0.18 : 0.05)
+      .setDepth(10009));
+    if (visualStyle.isGold) {
+      scene.tweens.add({
+        targets: halo,
+        alpha: { from: 0.13, to: 0.22 },
+        scaleX: 1.06,
+        scaleY: 1.06,
+        duration: 940,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
 
     const mini = worldify(scene, scene.add.image(pos.x, pos.y, "reward_mini_card")
       .setDepth(10010)
@@ -372,6 +417,7 @@ function buildCardReward(scene, meta, ctx, completeReward) {
     });
 
     ctx.destroyers.push(() => {
+      safeDestroy(halo);
       preview.destroy();
       safeDestroy(mini);
     });

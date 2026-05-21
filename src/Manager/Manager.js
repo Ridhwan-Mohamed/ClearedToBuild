@@ -7,6 +7,15 @@ import { CombatSpacingCoordinator } from "../ai/CombatSpacingCoordinator";
 export class Manager {
     static scene;
 
+    static _isResourceGatherTask(task) {
+        return !!(task && (task.forageType === "block" || task.forageType === "seed"));
+    }
+
+    static _showAssignedGatherTarget(task) {
+        if (!this._isResourceGatherTask(task)) return;
+        task.value?.startFlash?.();
+    }
+
     static _taskCenterWorld(task) {
         if (!task) return null;
         const width = Math.max(1, Number(task?.type?.lenX ?? task?.w ?? 1));
@@ -186,6 +195,7 @@ export class Manager {
                         if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type
                         troop.task = task;
                         troop.task.assigned += 1;
+                        this._showAssignedGatherTarget(task);
                         troop.destX = approachTile.tx;
                         troop.destY = approachTile.ty;
                         this._setTaskMeta(troop, task, state, arrayKey);
@@ -207,6 +217,7 @@ export class Manager {
                     troop.roam = false;
                     task.assigned += 1;
                     troop.task = task
+                    this._showAssignedGatherTarget(task);
                     this._setTaskMeta(troop, task, state, arrayKey);
                     Player.moveTo(troop, path);
                     break;
@@ -240,6 +251,7 @@ export class Manager {
                     if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                     troop.task = task;
                     troop.task.assigned += 1;
+                    this._showAssignedGatherTarget(task);
                     troop.destX = approachTile.tx;
                     troop.destY = approachTile.ty;
                     this._setTaskMeta(troop, task, state, arrayKey);
@@ -257,6 +269,7 @@ export class Manager {
                 troop.roam = false;
                 task.assigned += 1;
                 troop.task = task
+                this._showAssignedGatherTarget(task);
                 this._setTaskMeta(troop, task, state, arrayKey);
                 Player.moveTo(troop, path);
                 return true;
@@ -290,6 +303,7 @@ export class Manager {
                 if(state == CONTROL_STATES.BUILD_MODE_T) troop.buildType = task.type;
                 troop.task = task;
                 troop.task.assigned += 1;
+                this._showAssignedGatherTarget(task);
                 troop.destX = approachTile.tx;
                 troop.destY = approachTile.ty;
                 this._setTaskMeta(troop, task, state, null);
@@ -307,6 +321,7 @@ export class Manager {
             troop.roam = false;
             task.assigned += 1;
             troop.task = task
+            this._showAssignedGatherTarget(task);
             this._setTaskMeta(troop, task, state, null);
             Player.moveTo(troop, path);
             return true;

@@ -79,6 +79,7 @@ export class ParcelContractInstance {
     this.timerEvent = null;
     this.uiTickEvent = null;
     this.expireAt = null;
+    this.uiLifecycle = "starting";
 
     this.spawned = 0;
     this.killed = 0;
@@ -108,6 +109,14 @@ export class ParcelContractInstance {
 
   _getSimulationNowMs() {
     return Number(this.scene?.getSimulationNow?.() ?? this.scene?.simNowMs ?? 0);
+  }
+
+  _setHudLifecycle(next = "active") {
+    const normalized = next === "starting" || next === "leaving" ? next : "active";
+    if (this.uiLifecycle === normalized) return;
+    this.uiLifecycle = normalized;
+    this.pm?.onContractProgressChanged?.(this);
+    this.scene?.uiScene?.contractHud?.refreshForParcelStateChange?.();
   }
 
   _updateTimerText() {
@@ -424,9 +433,6 @@ export class ParcelContractInstance {
 
     if (this.scene?.refreshParcelArea) {
       this.scene.refreshParcelArea(this.getParcelBounds?.(), {
-        waterSourceUpdate: {
-          excludeParcelId: this.id,
-        },
         forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
       });
     } else {
@@ -760,6 +766,7 @@ export class ParcelContractInstance {
     this.expireAt = this._getSimulationNowMs() + durationMs;
     this._startUITick();
     this.timerEvent = this.scene.time.delayedCall(durationMs, () => this.complete("timeout"), null, this);
+    this._setHudLifecycle("active");
   }
 
   _fallbackRefreshResourceArea() {
@@ -886,12 +893,15 @@ export class ParcelContractInstance {
 
   _fallbackRefreshRemovalArea() {
     if (this.scene?.refreshParcelArea) {
-      this.scene.refreshParcelArea(this.getParcelBounds?.(), {
-        waterSourceUpdate: {
-          excludeParcelId: this.id,
-        },
+      const refreshOptions = {
         forceOverviewRebuild: this.scene?.zoomMixer?.mode === "overview",
-      });
+      };
+      if (this.type !== "MARKET") {
+        refreshOptions.waterSourceUpdate = {
+          excludeParcelId: this.id,
+        };
+      }
+      this.scene.refreshParcelArea(this.getParcelBounds?.(), refreshOptions);
       return true;
     }
 
@@ -955,6 +965,7 @@ export class ParcelContractInstance {
       alpha: 0.5,
       playThuds: true,
     });
+    this._setHudLifecycle("starting");
 
     let navDone = false;
     const navPromise = this.scene?.prepareParcelNavMeshesAsync
@@ -1028,6 +1039,7 @@ export class ParcelContractInstance {
 
     this._applyTerrainPlan(terrainPlan, { waterWalkable: false });
     this._applyPressureSpawnerPlan(pressurePlan);
+    this._setHudLifecycle("active");
     return { refreshHandled: false };
   }
 
@@ -1049,6 +1061,7 @@ export class ParcelContractInstance {
       alpha: 0.5,
       playThuds: true,
     });
+    this._setHudLifecycle("starting");
 
     let navDone = false;
     const navPromise = this.scene?.prepareParcelNavMeshesAsync
@@ -1098,6 +1111,7 @@ export class ParcelContractInstance {
 
       await reveal.complete();
       AudioManager.playBuildingComplete({ volume: 0.22 });
+      this._setHudLifecycle("active");
       return { refreshHandled: true };
     } catch (err) {
       reveal?.destroy?.();
@@ -1129,6 +1143,7 @@ export class ParcelContractInstance {
 
       this._startUITick();
       this.timerEvent = this.scene.time.delayedCall(ms, () => this.complete("timeout"), null, this);
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1142,7 +1157,8 @@ export class ParcelContractInstance {
 
       const cx = (this.origin.x + PARCEL_SIZE / 2) * SQUARESIZE;
       const cy = (this.origin.y + PARCEL_SIZE / 2) * SQUARESIZE;
-      const prices = buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES);
+      const prices = this.scene?.getRunMarketPriceTable?.(DEFAULT_MARKET_PRICES)
+        || buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES);
       this._marketPrices = { ...prices };
       this._marketSoldIds = new Set();
 
@@ -1157,6 +1173,9 @@ export class ParcelContractInstance {
         onSoldIdsChanged: (nextSoldIds = []) => {
           this._marketSoldIds = new Set(nextSoldIds);
         },
+        onPricesChanged: (nextPrices = {}) => {
+          this._marketPrices = { ...nextPrices };
+        },
       });
 
       this.timerEvent = this.scene.time.delayedCall(ms, () => {
@@ -1164,6 +1183,7 @@ export class ParcelContractInstance {
         if (handle?.depart) handle.depart(() => this.complete("timeout"));
         else this.complete("timeout");
       }, null, this);
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1271,6 +1291,7 @@ export class ParcelContractInstance {
         this.placedObjects.push(spawner);
       }
       this._startUITick();
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1299,6 +1320,7 @@ export class ParcelContractInstance {
       this._startUITick();
       const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
       this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1317,6 +1339,7 @@ export class ParcelContractInstance {
       this._startUITick();
       const remaining = Math.max(0, Number(this.expireAt || 0) - this._getSimulationNowMs());
       this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1325,6 +1348,7 @@ export class ParcelContractInstance {
       this._startUITick();
       const remaining = Math.max(0, Number(this.expireAt || 0) - Date.now());
       this.timerEvent = this.scene.time.delayedCall(remaining, () => this.complete("timeout"), null, this);
+      this._setHudLifecycle("active");
       return;
     }
 
@@ -1340,10 +1364,13 @@ export class ParcelContractInstance {
         slotId: this.slotId,
         teamNumber: 1,
         durationMs: remaining,
-        prices: this._marketPrices || buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES),
+        prices: this._marketPrices || this.scene?.getRunMarketPriceTable?.(DEFAULT_MARKET_PRICES) || buildMarketPriceTable(this.scene, DEFAULT_MARKET_PRICES),
         soldIds: this._marketSoldIds,
         onSoldIdsChanged: (nextSoldIds = []) => {
           this._marketSoldIds = new Set(nextSoldIds);
+        },
+        onPricesChanged: (nextPrices = {}) => {
+          this._marketPrices = { ...nextPrices };
         },
       });
       this.timerEvent = this.scene.time.delayedCall(remaining, () => {
@@ -1351,6 +1378,7 @@ export class ParcelContractInstance {
         if (handle?.depart) handle.depart(() => this.complete("timeout"));
         else this.complete("timeout");
       }, null, this);
+      this._setHudLifecycle("active");
     }
   }
 
@@ -1396,6 +1424,7 @@ export class ParcelContractInstance {
     if (this._completionPromise) return this._completionPromise;
     if (this._completed) return this._completionPromise;
     this._completed = true;
+    this._setHudLifecycle("leaving");
 
     if (this.timerEvent) {
       this.timerEvent.remove(false);

@@ -66,6 +66,32 @@ export class Map{
     static worldBerryBushes = [];
     static worldSpawners = [];
 
+    static _bindCropHover(block, x, y, teamNumber = "1") {
+        if (!block) return;
+
+        block.cropGridX = Number(x);
+        block.cropGridY = Number(y);
+        block.cropTeamNumber = String(teamNumber ?? "1");
+        block.isHoverOnlyWorldObject = true;
+
+        if (block._cropHoverBound) return;
+        block._cropHoverBound = true;
+
+        if (!block.input) {
+            block.setInteractive();
+        }
+
+        block.on("pointerover", (pointer) => {
+            block.scene?.showCropHoverCard?.(block, pointer);
+        });
+        block.on("pointerout", () => {
+            block.scene?.hideCropHoverCard?.(block);
+        });
+        block.once?.("destroy", () => {
+            block.scene?.hideCropHoverCard?.(block, { immediate: true });
+        });
+    }
+
 
     static initMap(){
         this._detailedWorldDrawn = false;
@@ -1508,6 +1534,7 @@ export class Map{
                 const block = this.scene.add.sprite(cx, cy, 'crops').setDepth(def.depth);
                 this.addToWorldStatic(block); 
                 block.setFrame(1);
+                this._bindCropHover(block, x, y, "1");
                 WallPlacementController.bindStructureLightAndVision(block, cx, cy, {
                     r: 6,
                     boost: 0.12,
@@ -1821,6 +1848,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
                 growthStage: 0,
                 hasSeed: true
             };
+            Map._bindCropHover(block, x, y, cropState.teamNumber);
             Teams.teamLists['1'].crops.push(cropState);
             Teams.teamLists['1'].wateringList.push({
                 x: x,
@@ -2388,6 +2416,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
     }
 
     static hasDetailedWorldElements() {
+        if (!this._detailedWorldDrawn) return false;
         const isLiveNode = (node) => {
             if (!node) return false;
             if (Array.isArray(node)) return node.some(isLiveNode);

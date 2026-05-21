@@ -9,6 +9,9 @@ import teamHealIcon from "url:../assets/market/team_heal.png";
 import fighterHealIcon from "url:../assets/market/fighter_heal.png";
 import workerHealIcon from "url:../assets/market/worker_heal.png";
 import adrenalineDraftIcon from "url:../assets/market/adrenaline_draft.png";
+import secondWindBellIcon from "url:../assets/market/second_wind_bell.png";
+import meleeCritBuffIcon from "url:../assets/market/melee_crit_buff.png";
+import projectileCritBuffIcon from "url:../assets/market/projectile_crit_buff.png";
 import decoyBeaconImg from "url:../assets/market/decoy_beacon_img.png";
 import shockMineImg from "url:../assets/market/shock_mine_img.png";
 import chainZapperImg from "url:../assets/market/chain_zapper_img.png";
@@ -59,6 +62,9 @@ export const MARKET_PLACEHOLDER_ASSETS = Object.freeze({
     fighterHeal: "card_icon_fighter_heal_placeholder",
     workerHeal: "card_icon_worker_heal_placeholder",
     adrenalineDraft: "card_icon_adrenaline_draft_placeholder",
+    secondWindBell: "card_icon_second_wind_bell_placeholder",
+    meleeCritBuff: "card_icon_melee_crit_buff_placeholder",
+    projectileCritBuff: "card_icon_projectile_crit_buff_placeholder",
   },
 });
 
@@ -74,6 +80,9 @@ export const MARKET_REAL_ASSETS = Object.freeze({
     fighterHeal: "market_icon_fighter_heal",
     workerHeal: "market_icon_worker_heal",
     adrenalineDraft: "market_icon_adrenaline_draft",
+    secondWindBell: "market_icon_second_wind_bell",
+    meleeCritBuff: "market_icon_melee_crit_buff",
+    projectileCritBuff: "market_icon_projectile_crit_buff",
   },
   world: {
     decoyBeacon: "market_decoy_beacon_img",
@@ -107,6 +116,32 @@ export const MARKET_CARDS = Object.freeze([
     price: 480,
     OUTLINE: "#a7f0ff",
     balanceNote: "Single burst against clustered enemies.",
+  },
+  {
+    id: "melee_crit_buff",
+    image: MARKET_REAL_ASSETS.cardIcons.meleeCritBuff,
+    name: "Killer Instinct",
+    text: "Confirm for a short melee crit surge for Brawlers and Blademasters.",
+    kind: MARKET_CARD_KIND.CONSUMABLE,
+    marketSection: MARKET_CARD_SECTION.ATTACK,
+    activation: "melee_crit_buff",
+    price: 430,
+    OUTLINE: "#ff8a6b",
+    repeatBuyInflation: 0.3,
+    balanceNote: "Short close-range burst item for pressure swings.",
+  },
+  {
+    id: "projectile_crit_buff",
+    image: MARKET_REAL_ASSETS.cardIcons.projectileCritBuff,
+    name: "Deadeye Volley",
+    text: "Confirm for a short crit surge for projectile fighters.",
+    kind: MARKET_CARD_KIND.CONSUMABLE,
+    marketSection: MARKET_CARD_SECTION.ATTACK,
+    activation: "projectile_crit_buff",
+    price: 470,
+    OUTLINE: "#ffd166",
+    repeatBuyInflation: 0.3,
+    balanceNote: "Short ranged-damage spike for dense raider pushes.",
   },
   {
     id: "meteor_drop",
@@ -167,6 +202,19 @@ export const MARKET_CARDS = Object.freeze([
     price: 300,
     OUTLINE: "#7cffb2",
     balanceNote: "Emergency recovery only.",
+  },
+  {
+    id: "second_wind_bell",
+    image: MARKET_REAL_ASSETS.cardIcons.secondWindBell,
+    name: "Second Wind Bell",
+    text: "Confirm to restore a heavy burst of stamina to the whole town.",
+    kind: MARKET_CARD_KIND.CONSUMABLE,
+    marketSection: MARKET_CARD_SECTION.RECOVERY,
+    activation: "second_wind_bell",
+    price: 520,
+    OUTLINE: "#8fe7ff",
+    repeatBuyInflation: 0.2,
+    balanceNote: "Expensive stamina recovery for a gassed-out town.",
   },
   {
     id: "fighter_heal",
@@ -323,6 +371,9 @@ export function loadMarketCardAssets(scene) {
   loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.fighterHeal, fighterHealIcon);
   loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.workerHeal, workerHealIcon);
   loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.adrenalineDraft, adrenalineDraftIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.secondWindBell, secondWindBellIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.meleeCritBuff, meleeCritBuffIcon);
+  loadImageIfNeeded(scene, MARKET_REAL_ASSETS.cardIcons.projectileCritBuff, projectileCritBuffIcon);
   loadImageIfNeeded(scene, MARKET_REAL_ASSETS.world.decoyBeacon, decoyBeaconImg);
   loadImageIfNeeded(scene, MARKET_REAL_ASSETS.world.shockMine, shockMineImg);
   loadSpritesheetIfNeeded(scene, MARKET_REAL_ASSETS.world.chainZapper, chainZapperImg, 32, 32);
@@ -399,6 +450,9 @@ export function loadMarketCardPlaceholderAssets(scene) {
   makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.fighterHeal, { accent: 0xff8ba8, icon: "cross" });
   makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.workerHeal, { accent: 0x8fe7ff, icon: "cross" });
   makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.adrenalineDraft, { accent: 0xfff17a, icon: "bolt" });
+  makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.secondWindBell, { accent: 0x8fe7ff, icon: "cross" });
+  makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.meleeCritBuff, { accent: 0xff8a6b, icon: "target" });
+  makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.cardIcons.projectileCritBuff, { accent: 0xffd166, icon: "bolt" });
 
   makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.targetCursors.chainZapper, { accent: 0xa7f0ff, icon: "bolt" });
   makePlaceholderTexture(scene, MARKET_PLACEHOLDER_ASSETS.targetCursors.meteorDrop, { accent: 0xffad73, icon: "target" });

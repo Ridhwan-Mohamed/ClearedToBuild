@@ -8,7 +8,7 @@ import {
   MARKET_PLACEHOLDER_ASSETS,
   loadMarketCardPlaceholderAssets,
 } from "../../Cards/MarketCards";
-import { getCardOutlineTint } from "../CardPreview";
+import { getCardOutlineTint, getCardVisualStyle } from "../CardPreview";
 import { getCardHand } from "../Powerups";
 import {
   getMarketCardUseController,
@@ -41,6 +41,7 @@ const MODES = Object.freeze({
   deck: {
     key: "deck",
     label: "Deck Cards",
+    emoji: "🃏",
     accent: 0x7bd9ff,
     asset: MARKET_PLACEHOLDER_ASSETS.deckTab,
     emptyTitle: "NO DECK CARDS",
@@ -48,6 +49,7 @@ const MODES = Object.freeze({
   consumables: {
     key: "consumables",
     label: "Consumables",
+    emoji: "🧪",
     accent: 0x7cffb2,
     asset: MARKET_PLACEHOLDER_ASSETS.consumablesTab,
     emptyTitle: "NO CONSUMABLES",
@@ -206,6 +208,7 @@ export default class CardsTab {
     }).setPosition(-width / 2 + 86, topY + 18);
     const title = makeText(scene, -width / 2 + 86, topY + 18, "CARD INVENTORY", {
       fontSize: "12px",
+      strokeThickness: 3,
       originX: 0.5,
       originY: 0.5,
     });
@@ -218,12 +221,15 @@ export default class CardsTab {
         stroke: 0x98e7ff,
         strokeAlpha: 0.18,
       }).setPosition(toggleX, topY + 18);
-      const icon = scene.textures.exists(mode.asset)
-        ? scene.add.image(toggleX - 48, topY + 18, mode.asset).setDisplaySize(16, 16)
-        : null;
-      const text = makeText(scene, toggleX + (icon ? 8 : 0), topY + 18, mode.label, {
+      const emoji = scene.add.text(toggleX - 46, topY + 18, mode.emoji || "", {
+        fontFamily: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif",
+        fontSize: "14px",
+        color: "#ffffff",
+      }).setOrigin(0.5, 0.5);
+      const text = makeText(scene, toggleX + 8, topY + 18, mode.label, {
         fontSize: "9px",
         color: BOTTOM_BAR_THEME.textSoft,
+        strokeThickness: 3,
         originX: 0.5,
         originY: 0.5,
       });
@@ -243,26 +249,24 @@ export default class CardsTab {
       });
       this._toggles[mode.key] = { bg, text, mode, hovered: false };
       this.view.add([bg]);
-      if (icon) this.view.add(icon);
-      this.view.add([text, hit]);
+      this.view.add([emoji, text, hit]);
       toggleX += 142;
     });
 
-    this.countBg = makeGlassRoundRect(scene, 96, 24, 10, {
+    this.countBg = makeGlassRoundRect(scene, 108, 26, 10, {
       fill: mixColor(0xffd47c, 0xffffff, 0.14),
       alpha: 0.92,
       stroke: 0xfff1b3,
       strokeAlpha: 0.26,
     }).setPosition(width / 2 - 62, topY + 18);
     this.countText = makeText(scene, width / 2 - 62, topY + 18, "0 CARDS", {
-      fontSize: "10px",
-      color: "#000000",
+      fontSize: "12px",
+      color: "#10263b",
       stroke: "#ffffff",
-      strokeThickness: 1,
+      strokeThickness: 3,
       originX: 0.5,
       originY: 0.5,
     });
-    this.countText.setTint(0x000000);
 
     const viewportFrame = makeGlassRoundRect(scene, viewportW, VIEWPORT_H, 18, {
       fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffffff, 0.08),
@@ -312,7 +316,6 @@ export default class CardsTab {
     this._cardsContainer.removeAll(true);
     this._cardRefs = [];
     this.countText?.setText(`${total} ${total === 1 ? "CARD" : "CARDS"}`);
-    this.countText?.setTint(0x000000);
     this._applyToggleVisuals();
 
     if (!entries.length) {
@@ -397,10 +400,25 @@ export default class CardsTab {
     const scene = this.scene;
     const card = entry.card;
     const tint = getCardOutlineTint(card);
+    const visualStyle = getCardVisualStyle(card);
     const isPending = this.pendingUseId === card.id;
     const isArmed = this.armedCardId === card.id;
     const isPassiveDeckCard = entry.source === "hand";
     const root = scene.add.container(x, y);
+
+    const glow = scene.add.ellipse(
+      0,
+      0,
+      CARD_W + (visualStyle.isGold ? 22 : 12),
+      CARD_H + (visualStyle.isGold ? 28 : 16),
+      visualStyle.haloTint,
+      visualStyle.isGold ? 0.14 : 0.05
+    ).setOrigin(0.5);
+    const glowFrame = visualStyle.isGold
+      ? scene.add.rectangle(0, 0, CARD_W + 12, CARD_H + 12, visualStyle.auraTint, 0.08)
+        .setStrokeStyle(2, visualStyle.auraTint, 0.46)
+        .setOrigin(0.5)
+      : null;
 
     const bg = makeGlassRoundRect(scene, CARD_W, CARD_H, 16, {
       fill: mixColor(BOTTOM_BAR_THEME.cardFill, tint, isPending || isArmed ? 0.22 : 0.12),
@@ -424,6 +442,7 @@ export default class CardsTab {
     });
     const name = makeText(scene, -CARD_W / 2 + 102, -CARD_H / 2 + 22, card.name, {
       fontSize: "16px",
+      strokeThickness: 3,
       wordWrap: { width: CARD_W - 124 },
       originY: 0,
     });
@@ -465,21 +484,52 @@ export default class CardsTab {
       else this.armTargetCard(entry);
     });
 
+    root.add([glow]);
+    if (glowFrame) root.add(glowFrame);
     root.add([bg, shine, iconPlate, icon, qty, name, body, status, cardHit]);
 
+    if (visualStyle.isGold) {
+      scene.tweens.add({
+        targets: glow,
+        alpha: { from: 0.11, to: 0.18 },
+        scaleX: 1.03,
+        scaleY: 1.03,
+        duration: 980,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
+
     if (this.mode === "consumables" && isPending) {
-      const veil = scene.add.rectangle(0, 0, CARD_W - 8, CARD_H - 8, 0x000000, 0.14).setOrigin(0.5);
-      const confirm = makePillButton(scene, CARD_W / 2 - 94, CARD_H / 2 - 26, 74, 24, "CONFIRM", {
+      const veil = scene.add.rectangle(0, 0, CARD_W - 8, CARD_H - 8, 0x02060d, 0.58).setOrigin(0.5);
+      const prompt = makeText(scene, 0, -22, "USE THIS CARD?", {
+        fontSize: "14px",
+        color: "#fff5cc",
+        stroke: "#02060d",
+        strokeThickness: 3,
+        originX: 0.5,
+        originY: 0.5,
+      });
+      const sub = makeText(scene, 0, -2, "Confirm or cancel", {
+        fontSize: "9px",
+        color: "#d7e9f4",
+        stroke: "#02060d",
+        strokeThickness: 2,
+        originX: 0.5,
+        originY: 0.5,
+      });
+      const confirm = makePillButton(scene, -56, 28, 98, 32, "CONFIRM", {
         accent: 0x9dffa5,
         fill: 0x1f5c42,
         onClick: () => this.confirmConsumable(entry),
       });
-      const cancel = makePillButton(scene, CARD_W / 2 - 26, CARD_H / 2 - 26, 54, 24, "CANCEL", {
+      const cancel = makePillButton(scene, 58, 28, 82, 32, "CANCEL", {
         accent: 0xff9fb5,
         fill: 0x5a2230,
         onClick: () => this.cancelPending(),
       });
-      root.add([veil, confirm, cancel]);
+      root.add([veil, prompt, sub, confirm, cancel]);
     }
 
     return root;

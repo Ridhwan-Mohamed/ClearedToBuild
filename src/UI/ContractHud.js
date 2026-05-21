@@ -104,6 +104,30 @@ function formatBonusDurationShort(ms = 0) {
   return `${seconds}s`;
 }
 
+function makeTimerBadge({
+  text = "",
+  textColor = "#ffffff",
+  fillColor = 0x0b1320,
+  fillAlpha = 0.92,
+  strokeColor = 0xb8ecff,
+  strokeAlpha = 0.26,
+  fontSize = 12,
+  pulse = null,
+  minWidth = 36,
+} = {}) {
+  return {
+    timerText: text,
+    timerColor: textColor,
+    timerBgFillColor: fillColor,
+    timerBgFillAlpha: fillAlpha,
+    timerBgStrokeColor: strokeColor,
+    timerBgStrokeAlpha: strokeAlpha,
+    timerFontSize: fontSize,
+    timerPulse: pulse,
+    timerBadgeMinWidth: minWidth,
+  };
+}
+
 export class ContractHud {
   constructor(scene) {
     this.scene = scene;
@@ -134,7 +158,10 @@ export class ContractHud {
   destroy() {
     this._stopPopupTween();
     this._stopClusterTween();
-    this.squares.forEach((_, slotId) => this._stopSquareTween(slotId));
+    this.squares.forEach((_, slotId) => {
+      this._stopSquareTween(slotId);
+      this._stopSquareTimerPulse(slotId);
+    });
     this.scene.scale.off("resize", this._onResize);
     this.root?.destroy(true);
   }
@@ -387,6 +414,57 @@ export class ContractHud {
     this.scene.tweens.killTweensOf(slot.group);
   }
 
+  _stopSquareTimerPulse(slotId) {
+    const slot = this.squares.get(slotId);
+    if (!slot) return;
+    if (slot.timer) {
+      this.scene.tweens.killTweensOf(slot.timer);
+      slot.timer.setAlpha(1);
+      slot.timer.setScale(1);
+    }
+    if (slot.timerBg) {
+      this.scene.tweens.killTweensOf(slot.timerBg);
+      slot.timerBg.setAlpha(1);
+      slot.timerBg.setScale(1);
+    }
+    slot.timerPulseMode = null;
+  }
+
+  _setSquareTimerPulse(slotId, mode = null) {
+    const slot = this.squares.get(slotId);
+    if (!slot?.timer || !slot?.timerBg) return;
+    const nextMode = mode || null;
+    if (slot.timerPulseMode === nextMode) return;
+
+    this._stopSquareTimerPulse(slotId);
+    if (!nextMode) return;
+    slot.timerPulseMode = nextMode;
+
+    if (nextMode === "danger") {
+      this.scene.tweens.add({
+        targets: [slot.timerBg, slot.timer],
+        alpha: 0.38,
+        duration: 220,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      return;
+    }
+
+    if (nextMode === "favor") {
+      this.scene.tweens.add({
+        targets: [slot.timerBg, slot.timer],
+        scaleX: 1.06,
+        scaleY: 1.06,
+        duration: 720,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    }
+  }
+
   _stopClusterTween() {
     const groups = SLOT_ORDER.map((slotId) => this.squares.get(slotId)?.group).filter(Boolean);
     if (groups.length) this.scene.tweens.killTweensOf(groups);
@@ -529,6 +607,8 @@ export class ContractHud {
         align: "center",
       }).setOrigin(0.5);
 
+      const timerBg = this.scene.add.graphics().setVisible(false);
+
       const timer = this.scene.add.text(0, 66, "BUY", {
         fontFamily: "Bungee",
         fontSize: "12px",
@@ -568,18 +648,20 @@ export class ContractHud {
         this._onSquareClicked(slotId);
       });
 
-      group.add([frame, label, icon, timer, zone]);
+      group.add([frame, label, icon, timerBg, timer, zone]);
       this.root.add(group);
       this.squares.set(slotId, {
         group,
         label,
         frame,
         icon,
+        timerBg,
         timer,
         zone,
         hovered: false,
         pressed: false,
         externalHovered: false,
+        timerPulseMode: null,
       });
       icon.setText(defaultIconText);
       timer.setText(defaultTimerText);
@@ -705,13 +787,17 @@ export class ContractHud {
     const slot = this.squares.get(slotId);
     if (!slot || !status) return;
 
-      const fillAlpha = status.fillAlpha ?? 0.94;
-      const isHovered = !!slot.hovered || !!slot.externalHovered;
-      const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
-      const iconColor = status.iconColor ?? "#ffffff";
-      const hasFavorTag = status.kind === "empty" && !!status.favor;
+    const fillAlpha = status.fillAlpha ?? 0.94;
+    const isHovered = !!slot.hovered || !!slot.externalHovered;
+    const strokeAlpha = slot.pressed ? 0.95 : isHovered ? 0.72 : status.kind === "empty" ? 0.34 : 0.55;
+    const iconColor = status.iconColor ?? "#ffffff";
+    const hasFavorTag = status.kind === "empty" && !!status.favor;
+    const timerText = status.timerText ?? "";
+    const timerVisible = !!timerText;
+    const timerY = Number(status.timerY ?? (hasFavorTag ? 62 : 66));
+    const timerFontSize = Number(status.timerFontSize ?? 12);
 
-      slot.frame.clear();
+    slot.frame.clear();
     if (fillAlpha > 0) {
       const boostedFill = isHovered ? Math.min(fillAlpha + 0.08, 1) : fillAlpha;
       slot.frame.fillStyle(status.fillColor ?? 0x111827, boostedFill);
@@ -723,66 +809,152 @@ export class ContractHud {
     slot.icon.setText(status.iconText);
     slot.icon.setColor(iconColor);
     slot.icon.setFontSize(status.iconSize ?? 24);
-      slot.timer.setText(status.timerText ?? "");
-      slot.timer.setVisible(!!status.timerText);
-      slot.timer.setColor(status.timerColor ?? "#ffffff");
-      slot.timer.setY(hasFavorTag ? 62 : 66);
-      this.scene.tweens.killTweensOf(slot.timer);
-      slot.timer.setScale(1);
-      if (hasFavorTag) {
-        this.scene.tweens.add({
-          targets: slot.timer,
-          scaleX: 1.08,
-          scaleY: 1.08,
-          duration: 720,
-          yoyo: true,
-          repeat: -1,
-          ease: "Sine.easeInOut",
-        });
-      }
+
+    slot.timer.setText(timerText);
+    slot.timer.setVisible(timerVisible);
+    slot.timer.setColor(status.timerColor ?? "#ffffff");
+    slot.timer.setFontSize(timerFontSize);
+    slot.timer.setY(timerY);
+
+    slot.timerBg.clear();
+    slot.timerBg.setVisible(timerVisible);
+    if (!timerVisible) {
+      this._stopSquareTimerPulse(slotId);
+      return;
+    }
+
+    const badgePadX = Number(status.timerBadgePadX ?? 8);
+    const badgePadY = Number(status.timerBadgePadY ?? 3);
+    const badgeWidth = Math.max(
+      Number(status.timerBadgeMinWidth ?? 36),
+      Math.round(Number(slot.timer.width || 0) + badgePadX * 2)
+    );
+    const badgeHeight = Math.max(16, Math.round(Number(slot.timer.height || 10) + badgePadY * 2));
+    const badgeY = Math.round(timerY - 1);
+    const badgeRadius = Math.max(8, Math.round(badgeHeight / 2));
+
+    slot.timerBg.fillStyle(status.timerBgFillColor ?? 0x0b1320, status.timerBgFillAlpha ?? 0.92);
+    slot.timerBg.fillRoundedRect(-badgeWidth / 2, badgeY, badgeWidth, badgeHeight, badgeRadius);
+    slot.timerBg.lineStyle(1.5, status.timerBgStrokeColor ?? 0xb8ecff, status.timerBgStrokeAlpha ?? 0.26);
+    slot.timerBg.strokeRoundedRect(-badgeWidth / 2, badgeY, badgeWidth, badgeHeight, badgeRadius);
+
+    this._setSquareTimerPulse(slotId, status.timerPulse ?? (hasFavorTag ? "favor" : null));
   }
 
   _getSlotStatus(slotId) {
     const active = this._getActiveContract(slotId);
     if (active) {
+      const lifecycle = active.uiLifecycle || "active";
       if (active.type === "PRESSURE") {
+        const timerStyle = lifecycle === "starting"
+          ? makeTimerBadge({
+            text: "STARTING",
+            textColor: "#e0f2fe",
+            fillColor: 0x113248,
+            strokeColor: 0x7dd3fc,
+            fontSize: 10,
+            minWidth: 64,
+          })
+          : lifecycle === "leaving"
+            ? makeTimerBadge({
+              text: "LEAVING",
+              textColor: "#fff1f2",
+              fillColor: 0x5a1823,
+              strokeColor: 0xfb7185,
+              fontSize: 10,
+              pulse: "danger",
+              minWidth: 58,
+            })
+            : makeTimerBadge({
+              text: "LIVE",
+              textColor: "#ffe4e6",
+              fillColor: 0x4b1419,
+              strokeColor: 0xf87171,
+              fontSize: 11,
+              minWidth: 40,
+            });
         return {
           kind: "pressure-live",
           iconText: "💀".repeat(Math.max(1, active.difficulty || 1)),
-          timerText: "LIVE",
           fillColor: 0x351013,
           strokeColor: 0xf87171,
           iconSize: 18,
           fillAlpha: 0.94,
           contract: active,
+          ...timerStyle,
         };
       }
 
       const def = CONTRACT_DEFS[active.type] || CONTRACT_DEFS.FOREST;
-      const remainingMs = Math.max(0, Number(active.expireAt || 0) - this._getWorldNowMs());
+      const remainingMs = active.type === "MILITIA"
+        ? Math.max(0, Number(active.expireAt || 0) - Date.now())
+        : Math.max(0, Number(active.expireAt || 0) - this._getWorldNowMs());
+      const timerStyle = lifecycle === "starting"
+        ? makeTimerBadge({
+          text: "STARTING",
+          textColor: "#e0f2fe",
+          fillColor: 0x113248,
+          strokeColor: 0x7dd3fc,
+          fontSize: 10,
+          minWidth: 64,
+        })
+        : lifecycle === "leaving"
+          ? makeTimerBadge({
+            text: "LEAVING",
+            textColor: "#fff1f2",
+            fillColor: 0x5a1823,
+            strokeColor: 0xfb7185,
+            fontSize: 10,
+            pulse: "danger",
+            minWidth: 58,
+          })
+          : remainingMs <= 10_000
+            ? makeTimerBadge({
+              text: fmtMMSS(remainingMs),
+              textColor: "#fff1f2",
+              fillColor: 0x5a1823,
+              strokeColor: 0xfb7185,
+              pulse: "danger",
+              minWidth: 42,
+            })
+            : makeTimerBadge({
+              text: fmtMMSS(remainingMs),
+              textColor: "#ffffff",
+              fillColor: 0x0b1320,
+              strokeColor: 0xb8ecff,
+              minWidth: 42,
+            });
       return {
         kind: "active",
         iconText: def.emoji,
-        timerText: fmtMMSS(remainingMs),
         fillColor: 0x101827,
         strokeColor: 0xffffff,
         iconSize: 24,
         fillAlpha: 0.94,
         contract: active,
+        ...timerStyle,
       };
     }
 
     const incoming = this._getIncomingPressure(slotId);
     if (incoming) {
+      const isCountdown = incoming.phase === "countdown";
       return {
         kind: "pressure-incoming",
         iconText: "💀".repeat(Math.max(1, incoming.difficulty || 1)),
-        timerText: incoming.phase === "countdown" ? incoming.remainingText : "LOCK",
         fillColor: 0x2a1318,
         strokeColor: 0xfca5a5,
         iconSize: 18,
         fillAlpha: 0.93,
         incoming,
+        ...makeTimerBadge({
+          text: isCountdown ? incoming.remainingText : "LOCK",
+          textColor: isCountdown ? "#ffe4e6" : "#fef3c7",
+          fillColor: isCountdown ? 0x4b1419 : 0x3c2a08,
+          strokeColor: isCountdown ? 0xf87171 : 0xfbbf24,
+          fontSize: 11,
+          minWidth: 42,
+        }),
       };
     }
 
@@ -790,11 +962,18 @@ export class ContractHud {
         return {
           kind: "locked-empty",
           iconText: "🔒",
-          timerText: "LOCK",
           fillColor: 0x111827,
           strokeColor: 0xfbbf24,
           iconSize: 24,
           fillAlpha: 0.88,
+          ...makeTimerBadge({
+            text: "LOCK",
+            textColor: "#fef3c7",
+            fillColor: 0x3c2a08,
+            strokeColor: 0xfbbf24,
+            fontSize: 11,
+            minWidth: 42,
+          }),
         };
       }
 
@@ -804,13 +983,20 @@ export class ContractHud {
       return {
         kind: "empty",
         iconText: getSlotFavorIconText(favor),
-        timerText: getSlotFavorShortLabel(favor),
         fillColor: tone.fillColor,
         strokeColor: tone.strokeColor,
         iconSize: 24,
         fillAlpha: 0.88,
-        timerColor: tone.timerColor,
         favor,
+        ...makeTimerBadge({
+          text: getSlotFavorShortLabel(favor),
+          textColor: tone.timerColor,
+          fillColor: tone.fillColor,
+          strokeColor: tone.strokeColor,
+          fontSize: 10,
+          pulse: "favor",
+          minWidth: 44,
+        }),
       };
     }
 
@@ -823,7 +1009,7 @@ export class ContractHud {
       iconSize: 34,
       fillAlpha: 0,
     };
-    }
+  }
 
   _getActiveContract(slotId) {
     const pm = this.world?.parcelManager;
@@ -1242,7 +1428,7 @@ export class ContractHud {
         const y = 102 + row * 46;
 
         const isLockedMilitia = type === "LOCKED_MILITIA";
-        const cost = isLockedMilitia ? 0 : getContractPermitCost(type, 1);
+        const cost = isLockedMilitia ? 0 : getContractPermitCost(type, 1, this.world ?? this.scene);
         const purchase = isLockedMilitia ? null : this._getPurchaseContext(slotId, type, 1);
         const moneyCost = isLockedMilitia ? 0 : Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, 1)));
 
@@ -1326,7 +1512,7 @@ export class ContractHud {
         this._setPopupSubtitle("", "#ffd4d4");
         this.popupBody.setPosition(18, 64);
         this.popupBody.setText([
-          `${formatPermitCostText(getContractPermitCost("PRESSURE", diff))} + $${getContractMoneyCost(this.world ?? this.scene, "PRESSURE", diff)}`,
+          `${formatPermitCostText(getContractPermitCost("PRESSURE", diff, this.world ?? this.scene))} + $${getContractMoneyCost(this.world ?? this.scene, "PRESSURE", diff)}`,
           "Bigger raid contracts send more enemies and pay more if you clear the parcel.",
         ].join("\n"));
 
@@ -1440,7 +1626,7 @@ export class ContractHud {
         "",
         ...(def.lines?.(this.world ?? this.scene) ?? []),
         "",
-        `Permit Cost: ${formatPermitCostText(getContractPermitCost(type, 1))}`,
+        `Permit Cost: ${formatPermitCostText(getContractPermitCost(type, 1, this.world ?? this.scene))}`,
         `Cash Cost: $${Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, 1)))}`,
       ].join("\n"));
       this._addPopupButtons([
@@ -1615,9 +1801,14 @@ export class ContractHud {
       this._showMilitiaLockedMessage();
       return;
     }
+    if (pm.hasActiveContractType?.(type)) {
+      const label = String(type || "parcel").toLowerCase().replace(/_/g, " ");
+      showAlert(this.scene, `Only one ${label} parcel can be active at once.`, "#ffcc66");
+      return;
+    }
     const cost = payload.cost != null
       ? payload.cost
-      : getContractPermitCost(type, difficulty);
+      : getContractPermitCost(type, difficulty, this.world ?? this.scene);
     const purchase = this._getPurchaseContext(slotId, type, difficulty);
     const moneyCost = Math.max(0, Number(payload.moneyCost ?? purchase.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, type, difficulty)));
 

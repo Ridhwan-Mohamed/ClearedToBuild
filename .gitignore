@@ -9,6 +9,20 @@ yarn-error.log*
 dist/
 .cache
 
+# Itch.io export/page artifacts
+dist-itch/
+ProcessV2-itch.zip
+itch-page-copy.md
+itch-page-html.html
+public/Screenshot*.png
+public/farmingAndBuilding.gif
+public/fighting.gif
+public/foraging.gif
+public/parcel-buy*.gif
+public/ingame.png
+public/ingamelogo.png
+public/itch.png
+
 # Editor and IDE settings
 .vscode/
 *.code-workspace

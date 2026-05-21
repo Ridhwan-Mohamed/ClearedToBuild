@@ -303,11 +303,11 @@ export class SlotPanel {
 
   _getOverviewDefs() {
     const defs = [
-      { type: "FOREST", emoji: "🌲", cost: () => getContractPermitCost("FOREST") },
-      { type: "ROCK", emoji: "🪨", cost: () => getContractPermitCost("ROCK") },
-      { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => getContractPermitCost("PRESSURE", 1) },
-      { type: "MARKET", emoji: "🏪", cost: () => getContractPermitCost("MARKET") },
-      { type: "FARM", emoji: "🌾", cost: () => getContractPermitCost("FARM") },
+      { type: "FOREST", emoji: "🌲", cost: () => getContractPermitCost("FOREST", 1, this.scene) },
+      { type: "ROCK", emoji: "🪨", cost: () => getContractPermitCost("ROCK", 1, this.scene) },
+      { type: "PRESSURE", emoji: "⚔️", difficulty: 1, cost: () => getContractPermitCost("PRESSURE", 1, this.scene) },
+      { type: "MARKET", emoji: "🏪", cost: () => getContractPermitCost("MARKET", 1, this.scene) },
+      { type: "FARM", emoji: "🌾", cost: () => getContractPermitCost("FARM", 1, this.scene) },
     ];
 
     if (this._canAccessMilitia()) {
@@ -579,7 +579,7 @@ export class SlotPanel {
         card.costText.setText("LOCK");
         continue;
       }
-      const permitCost = Number(getContractPermitCost("PRESSURE", card.def.difficulty) ?? 0);
+      const permitCost = Number(getContractPermitCost("PRESSURE", card.def.difficulty, this.scene) ?? 0);
       const moneyCost = getContractMoneyCost(this.scene, "PRESSURE", card.def.difficulty);
       card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
     }
@@ -868,10 +868,16 @@ export class SlotPanel {
       return;
     }
 
+    if (pm.hasActiveContractType?.(type)) {
+      const label = String(type || "parcel").toLowerCase().replace(/_/g, " ");
+      showAlert(this.scene, `Only one ${label} parcel can be active at once.`, "#ffcc66");
+      return;
+    }
+
     const purchase = this._getPurchaseContext(type, difficulty);
     const moneyCost = Math.max(0, Number(payload.moneyCost ?? purchase.moneyCost ?? getContractMoneyCost(this.scene, type, difficulty)));
     // ✅ compute cost (allow payload.cost override if you really want)
-    const cost = (payload.cost != null) ? payload.cost : getContractPermitCost(type, difficulty);
+    const cost = (payload.cost != null) ? payload.cost : getContractPermitCost(type, difficulty, this.scene);
 
     // ✅ enforce permits
     if (cost > 0) {

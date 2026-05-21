@@ -11,7 +11,7 @@ import zoomOutWaterTxt2 from 'url:./assets/zoomOutWaterTxt2.png'
 import { Map as GameMap } from './map.js';
 import { Turret } from './buildings/Turret.js';
 import { Catapult } from './buildings/Catapult.js';
-import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, PARCEL, PRESSURE_CONTRACT, showAlert, colorFor } from './constants';
+import { UIDEPTH, SQUARESIZE, WORLD_DIMENSIONX, WORLD_DIMENSIONY, TILE_TYPES, CONTROL_STATES, TILE_MAP, FLOORDEPTH, PARCEL, PRESSURE_CONTRACT, showAlert, colorFor, MAX_CROP_GROWTH_STAGE } from './constants';
 import {itemTab} from './itemTab.js';
 import { Player } from './players/Player.js';
 import { Farmer } from './players/Farmer.js';
@@ -74,7 +74,7 @@ import mediumTopPine from 'url:./assets/trees/mediumTopPine.png';
 import { PineTree } from './buildings/pineTree.js';
 import { RockNode } from './buildings/RockNode.js';
 import { VisibilitySystem } from './UI/VisibilitySystem.js';
-import { loadCardData, POWERUP_CARDS } from './Cards/PowerupCards.js';
+import { getEligiblePowerupCards, loadCardData } from './Cards/PowerupCards.js';
 import { AudioManager } from './Manager/AudioManager.js';
 import { WallPlacementController } from './Controllers/WallPlacementController.js';
 import { WallDestroyController } from './Controllers/WallDestroyController.js';
@@ -84,6 +84,7 @@ import { Prison } from './buildings/Prison.js';
 import { TowerPressureController } from './parcel_system/TowerPressureController.js';
 import { StageState } from './parcelController/StageState.js';
 import { loadParcelMarketAssets } from './UI/ShipMarket.js';
+import { getMarketCardDefinition } from './Cards/MarketCards.js';
 import { clearNorthFort, spawnNorthFort } from './parcel_system/FortRaidParcel.js';
 import { GameUIScene } from './UI/GameUIScene.js';
 import { OverviewCloudLayer } from './UI/OverviewCloudLayer.js';
@@ -96,19 +97,22 @@ import { hasStoreUnlock, STORE_UNLOCK_KEYS, unlockStoreItem } from './parcel_sys
 import { createPlayerPortraitAnimations, getPlayerPortraitKey, preloadPlayerPortraits } from './players/playerPortraits.js';
 import { getHordeModifierForIndex } from './parcel_system/HordeModifiers.js';
 import { addCardToHand, getCardHand } from './UI/Powerups.js';
-import { ensureCardInventory } from './Cards/CardInventory.js';
+import { addCardToInventory, ensureCardInventory } from './Cards/CardInventory.js';
 import { UI_ITEM_TYPES } from './UI/UIConstants.js';
 import { SaveManager } from './save/SaveManager.js';
 import { AchievementSystem } from './achievements/AchievementSystem.js';
 import { TutorialManager } from './tutorial/TutorialManager.js';
 import { createTutorialAnimations, preloadTutorialAssets } from './tutorial/TutorialAssets.js';
 import {
+    buildMarketPriceTable,
     buildEnemyTypeLabel,
     distributeAcrossLanes,
     getNightHordeSettings,
     pickScaledEnemyType,
 } from './balance/GameBalance.js';
 import reliefPackageImg from 'url:./assets/market/relief_package.png'
+import parcelCouponImg from 'url:./assets/cardIcons/parcel_coupon.png'
+import recruitVoucherImg from 'url:./assets/cardIcons/recruit_voucher.png'
 import {
     RELIEF_PACKAGE_CRITICAL_ROLES,
     RELIEF_PACKAGE_ECONOMY_ROLE_COSTS,
@@ -139,12 +143,49 @@ const TOWN_XP_SOURCE_VALUES = Object.freeze({
     hordeSurvived: 55,
     fortCleared: 95,
 });
+const TOWN_XP_SUPPLY_CAPS = Object.freeze({
+    permits: 1,
+    wood: 3,
+    stone: 3,
+    seeds: 3,
+    food: 3,
+    cleanWater: 3,
+    berries: 2,
+});
+const TOWN_XP_MARKET_REWARD_IDS = Object.freeze([
+    "second_wind_bell",
+    "melee_crit_buff",
+    "projectile_crit_buff",
+]);
+const TOWN_XP_SPECIAL_REWARD_DEFS = Object.freeze({
+    parcel_coupon: {
+        title: "Parcel Coupon",
+        subtitle: "Your next parcel contract costs 25% less.",
+        hint: "A one-use economy perk that cheapens the next parcel buy.",
+        imageKey: "reward_parcel_coupon",
+        accentColor: 0xffd7a5,
+        panelColor: 0x2a3441,
+        alertColor: "#ffd7a5",
+    },
+    recruit_voucher: {
+        title: "Recruit Voucher",
+        subtitle: "Your next recruit is free.",
+        hint: "Shows FREE in the crew store until one recruit is taken.",
+        imageKey: "reward_recruit_voucher",
+        accentColor: 0xfff0c9,
+        panelColor: 0x253548,
+        alertColor: "#fff0c9",
+    },
+});
 const DEBUG_BOMBER_START_HORDE_INDEX = 1;
 const NIGHT_HORDE_BOMBER_RATIO = 0.2;
 const SHOCKER_BOSS_DAY = 7;
+const SHOCKER_BOSS_WEEK_INTERVAL = 7;
+const SHOCKER_BOSS_HP_SCALE_PER_APPEARANCE = 0.12;
+const SHOCKER_BOSS_HP_SCALE_CAP = 0.48;
 const SHOCKER_BOSS_NAME = "The Shocker";
 const SHOCKER_BOSS_REWARD_MONEY = 1200;
-const SHOCKER_BOSS_REWARD_PERMITS = 10;
+const SHOCKER_BOSS_REWARD_PERMITS = 2;
 const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
     wood: {
         action: "Cut down",
@@ -152,6 +193,8 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0x34d399,
         textColor: "#86efac",
         alert: "Routed forager to trees",
+        cardLabel: "Tree",
+        cardIcon: "woodIcon",
     },
     stone: {
         action: "Mine",
@@ -159,6 +202,8 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0x93c5fd,
         textColor: "#bfdbfe",
         alert: "Routed forager to rocks",
+        cardLabel: "Rock",
+        cardIcon: "stoneIcon",
     },
     gold: {
         action: "Mine",
@@ -166,6 +211,8 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0xfacc15,
         textColor: "#fde68a",
         alert: "Routed forager to gold ore",
+        cardLabel: "Gold Ore",
+        cardIcon: "monies",
     },
     seed: {
         action: "Gather",
@@ -173,6 +220,8 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0xfacc15,
         textColor: "#fde68a",
         alert: "Routed forager to seed bushes",
+        cardLabel: "Seed Bush",
+        cardIcon: "seeds",
     },
     berry: {
         action: "Gather",
@@ -180,6 +229,8 @@ const FORAGER_ROUTE_RESOURCE_UI = Object.freeze({
         color: 0xc084fc,
         textColor: "#e9d5ff",
         alert: "Routed forager to berry bushes",
+        cardLabel: "Berry Bush",
+        cardIcon: "berry",
     },
 });
 const DEBUG_SHOW_MILITIA_LEVEL3_UNLOCK_ON_START = false;
@@ -232,13 +283,23 @@ export class mapView extends Phaser.Scene {
             troopUnlockLabels: [],
             claimedContractIds: new Set(),
             defeatedEnemyIds: new Set(),
+            claimedParcelTypes: {},
+            marketPriceInflation: {},
+            rewardEconomy: {
+                nextParcelDiscount: 0,
+                nextFreeRecruit: false,
+            },
         };
     }
 
     _getTownXpRequirement(level = 1) {
         const normalized = Math.max(1, Number(level || 1));
         const priorLevels = Math.max(0, normalized - 1);
-        return 70 + (priorLevels * 26) + (Math.max(0, priorLevels - 1) * priorLevels * 4);
+        if (normalized <= 3) {
+            return 70 + (priorLevels * 30) + (Math.max(0, priorLevels - 1) * 10);
+        }
+        const lateLevels = normalized - 3;
+        return 140 + (lateLevels * 56) + (lateLevels * lateLevels * 18);
     }
 
     _createTownXpState() {
@@ -257,10 +318,13 @@ export class mapView extends Phaser.Scene {
 
     getTownXpSnapshot() {
         const state = this._townXp || (this._townXp = this._createTownXpState());
+        const level = Math.max(1, Number(state.level || 1));
+        const required = this._getTownXpRequirement(level);
+        state.xpForNextLevel = required;
         return {
-            level: Math.max(1, Number(state.level || 1)),
+            level,
             xpIntoLevel: Math.max(0, Number(state.xpIntoLevel || 0)),
-            xpForNextLevel: Math.max(1, Number(state.xpForNextLevel || this._getTownXpRequirement(state.level || 1))),
+            xpForNextLevel: Math.max(1, required),
             totalEarned: Math.max(0, Number(state.totalEarned || 0)),
             pendingLevelRewards: Math.max(0, Number(state.pendingLevelRewards || 0)),
             gainSerial: Math.max(0, Number(state.gainSerial || 0)),
@@ -412,6 +476,18 @@ export class mapView extends Phaser.Scene {
         this.foragerRouteInstructionRight = null;
         this.foragerRouteHoverNode = null;
         this.foragerRouteHoverType = null;
+        this.foragerRouteHoverCard = null;
+        this.foragerRouteHoverCardBg = null;
+        this.foragerRouteHoverCardIcon = null;
+        this.foragerRouteHoverCardLabel = null;
+        this.foragerRouteHoverCardNode = null;
+        this.foragerRouteHoverCardSize = { width: 0, height: 0 };
+        this.cropHoverCard = null;
+        this.cropHoverCardBg = null;
+        this.cropHoverCardIcon = null;
+        this.cropHoverCardLabel = null;
+        this.cropHoverCardTarget = null;
+        this.cropHoverCardSize = { width: 0, height: 0 };
         this._foragerRouteAssistSignature = "";
         this._foragerRouteLastDrawAt = 0;
         this.harvestMode = false;
@@ -422,7 +498,7 @@ export class mapView extends Phaser.Scene {
         this.woodAmnt = 4;
         this.stoneAmnt = 4;
         this.berries = 0;
-        this.permits = 2;
+        this.permits = 3;
         this.berryMode = false;
         this.seedGridMode = false;
         this.selectingEnemies = false;
@@ -480,6 +556,8 @@ export class mapView extends Phaser.Scene {
             nightLocked: false,
             bossId: null,
             startedOnDay: null,
+            defeatedOnDay: null,
+            appearanceIndex: 0,
         };
         this._cachedNightHordePlan = null;
         this._hordeRewardInProgress = false;
@@ -590,8 +668,114 @@ export class mapView extends Phaser.Scene {
         if (stats.claimedContractIds.has(key)) return;
         stats.claimedContractIds.add(key);
         stats.parcelsClaimed += 1;
+        stats.claimedParcelTypes = {
+            ...(stats.claimedParcelTypes || {}),
+            [normalized]: true,
+        };
         this.addTownXp(TOWN_XP_SOURCE_VALUES.parcelClaim, "Parcel Claimed");
         SaveManager.queueAutosave("parcel_claim");
+    }
+
+    _getRewardEconomyState() {
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        if (!stats.rewardEconomy || typeof stats.rewardEconomy !== "object") {
+            stats.rewardEconomy = {
+                nextParcelDiscount: 0,
+                nextFreeRecruit: false,
+            };
+        }
+        if (!stats.marketPriceInflation || typeof stats.marketPriceInflation !== "object") {
+            stats.marketPriceInflation = {};
+        }
+        if (!stats.claimedParcelTypes || typeof stats.claimedParcelTypes !== "object") {
+            stats.claimedParcelTypes = {};
+        }
+        return stats.rewardEconomy;
+    }
+
+    _emitRewardStateChanged() {
+        this.events.emit("reward-state:changed", {
+            nextParcelDiscount: this.getNextParcelDiscount(),
+            nextFreeRecruit: this.hasRecruitVoucher(),
+        });
+    }
+
+    _hasClaimedRunParcelType(type) {
+        const normalized = String(type || "").toUpperCase();
+        if (!normalized) return false;
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        return !!stats.claimedParcelTypes?.[normalized];
+    }
+
+    getNextParcelDiscount() {
+        const state = this._getRewardEconomyState();
+        return Math.max(0, Number(state.nextParcelDiscount || 0));
+    }
+
+    grantParcelCoupon(discount = 0.25) {
+        const state = this._getRewardEconomyState();
+        state.nextParcelDiscount = Math.max(Number(state.nextParcelDiscount || 0), Number(discount || 0));
+        this._emitRewardStateChanged();
+        SaveManager.queueAutosave("reward_parcel_coupon");
+        return state.nextParcelDiscount;
+    }
+
+    consumeParcelCoupon() {
+        const state = this._getRewardEconomyState();
+        const discount = Math.max(0, Number(state.nextParcelDiscount || 0));
+        if (!(discount > 0)) return 0;
+        state.nextParcelDiscount = 0;
+        this._emitRewardStateChanged();
+        SaveManager.queueAutosave("reward_parcel_coupon_used");
+        return discount;
+    }
+
+    hasRecruitVoucher() {
+        return !!this._getRewardEconomyState().nextFreeRecruit;
+    }
+
+    grantRecruitVoucher() {
+        const state = this._getRewardEconomyState();
+        state.nextFreeRecruit = true;
+        this._emitRewardStateChanged();
+        SaveManager.queueAutosave("reward_recruit_voucher");
+        return true;
+    }
+
+    consumeRecruitVoucher() {
+        const state = this._getRewardEconomyState();
+        if (!state.nextFreeRecruit) return false;
+        state.nextFreeRecruit = false;
+        this._emitRewardStateChanged();
+        SaveManager.queueAutosave("reward_recruit_voucher_used");
+        return true;
+    }
+
+    getRunMarketPriceInflation() {
+        const stats = this._runStats || (this._runStats = this._createRunStats());
+        if (!stats.marketPriceInflation || typeof stats.marketPriceInflation !== "object") {
+            stats.marketPriceInflation = {};
+        }
+        return stats.marketPriceInflation;
+    }
+
+    getRunMarketPriceTable(basePrices = {}) {
+        return buildMarketPriceTable(this, basePrices, this.getRunMarketPriceInflation());
+    }
+
+    applyRunMarketPriceInflation(cardId, inflationStep = 0.25) {
+        const normalizedId = String(cardId || "").trim();
+        if (!normalizedId) return 0;
+        const basePrice = normalizedId === "relief_package"
+            ? RELIEF_PACKAGE_PRICE
+            : Number(getMarketCardDefinition(normalizedId)?.price || 0);
+        if (!(basePrice > 0)) return 0;
+
+        const inflation = this.getRunMarketPriceInflation();
+        const currentFactor = Math.max(1, Number(inflation[normalizedId] || 1));
+        inflation[normalizedId] = currentFactor * (1 + Math.max(0, Number(inflationStep || 0)));
+        SaveManager.queueAutosave("market_price_inflation");
+        return this.getRunMarketPriceTable({ [normalizedId]: basePrice })[normalizedId] || 0;
     }
 
     registerRunEnemyDefeat(troop, opts = {}) {
@@ -1319,9 +1503,9 @@ export class mapView extends Phaser.Scene {
 
     _getAvailableTownXpCardPool() {
         const ownedCardIds = this._getOwnedTownXpCardIds(TOWN_XP_TEAM_ID);
-        return POWERUP_CARDS.filter((card) => {
+        return getEligiblePowerupCards({ scene: this, teamNumber: TOWN_XP_TEAM_ID }).filter((card) => {
             const cardId = String(card?.id || "").trim();
-            return this._isTownXpCardEligible(card) && (!cardId || !ownedCardIds.has(cardId));
+            return !cardId || !ownedCardIds.has(cardId);
         });
     }
 
@@ -1343,6 +1527,89 @@ export class mapView extends Phaser.Scene {
         }
 
         return owned;
+    }
+
+    _getEligibleTownXpSupplyKinds() {
+        const kinds = ["money", "permits", "wood", "stone", "seeds", "food", "water", "berries"];
+        const filtered = kinds.filter((kind) => {
+            if (kind === "wood" && this._hasClaimedRunParcelType("FOREST")) return false;
+            if (kind === "stone" && this._hasClaimedRunParcelType("ROCK")) return false;
+            if ((kind === "seeds" || kind === "berries" || kind === "food") && this._hasClaimedRunParcelType("FARM")) return false;
+            return true;
+        });
+        return filtered.length ? filtered : ["money", "permits", "water"];
+    }
+
+    _getAvailableTownXpMarketRewardCards() {
+        return TOWN_XP_MARKET_REWARD_IDS
+            .map((cardId) => getMarketCardDefinition(cardId))
+            .filter(Boolean);
+    }
+
+    _getAvailableTownXpEconomyRewardKeys() {
+        const keys = [];
+        if (!this.getNextParcelDiscount?.()) keys.push("parcel_coupon");
+        if (!this.hasRecruitVoucher?.()) keys.push("recruit_voucher");
+        return keys;
+    }
+
+    _createTownXpMarketItemOption(level = 1) {
+        const pool = this._getAvailableTownXpMarketRewardCards().slice();
+        if (!pool.length) return null;
+        Phaser.Utils.Array.Shuffle(pool);
+        const card = pool[0];
+        const outline = String(card.OUTLINE || "").replace("#", "");
+        const accentColor = Number.parseInt(outline, 16);
+
+        return {
+            id: `market-item:${card.id}:${level}`,
+            badgeLabel: "STORE ITEM",
+            title: card.name,
+            subtitle: card.text || "A free market item for your pouch.",
+            hint: "Drops straight into your consumables pouch for later.",
+            presentationType: "card",
+            cardImageKey: card.image,
+            cardText: card.text || "",
+            accentColor: Number.isFinite(accentColor) ? accentColor : TOWN_XP_COLORS.cyan,
+            panelColor: 0x17324c,
+            grant: () => {
+                addCardToInventory(card, TOWN_XP_TEAM_ID, 1);
+                this.events.emit("cards:updated");
+                showAlert(this, `Town reward: ${card.name}`, "#8fe7ff");
+                SaveManager.queueAutosave("town_xp_market_item");
+            },
+        };
+    }
+
+    _createTownXpEconomyRewardOption(kind, level = 1) {
+        const def = TOWN_XP_SPECIAL_REWARD_DEFS[kind];
+        if (!def) return null;
+
+        const applyReward = () => {
+            if (kind === "parcel_coupon") {
+                this.grantParcelCoupon?.(0.25);
+            } else if (kind === "recruit_voucher") {
+                this.grantRecruitVoucher?.();
+            }
+        };
+
+        return {
+            id: `economy:${kind}:${level}`,
+            badgeLabel: kind === "parcel_coupon" ? "DEAL" : "CREW PASS",
+            title: def.title,
+            subtitle: def.subtitle,
+            hint: def.hint,
+            presentationType: "card",
+            cardImageKey: def.imageKey,
+            cardText: def.subtitle,
+            accentColor: def.accentColor,
+            panelColor: def.panelColor,
+            grant: () => {
+                applyReward();
+                showAlert(this, `Town reward: ${def.title}`, def.alertColor);
+                SaveManager.queueAutosave(`town_xp_${kind}`);
+            },
+        };
     }
 
     _getTownXpOverflowUnitValue(itemKey) {
@@ -1577,7 +1844,7 @@ export class mapView extends Phaser.Scene {
             permits: {
                 badgeLabel: "PERMITS",
                 title: "Permit Parade",
-                reward: { permits: 2 + Math.floor((bonusScale + 1) / 3) },
+                reward: { permits: TOWN_XP_SUPPLY_CAPS.permits },
                 subtitle: (reward) => `+${reward.permits} permit${reward.permits === 1 ? "" : "s"}`,
                 hint: "A juicy expansion nudge for grabbing the next parcel ring.",
                 chestContents: (reward) => [{ emoji: "📜", label: "Permits", amount: reward.permits }],
@@ -1589,7 +1856,7 @@ export class mapView extends Phaser.Scene {
             wood: {
                 badgeLabel: "SUPPLIES",
                 title: "Builder Cache",
-                reward: { wood: 8 + Math.floor(bonusScale * 1.5) },
+                reward: { wood: TOWN_XP_SUPPLY_CAPS.wood },
                 subtitle: (reward) => `+${reward.wood} wood`,
                 hint: "Quick lumber for walls, roads, and emergency patch jobs.",
                 chestContents: (reward) => [{ key: "woodIcon", label: "Wood", amount: reward.wood }],
@@ -1601,7 +1868,7 @@ export class mapView extends Phaser.Scene {
             stone: {
                 badgeLabel: "SUPPLIES",
                 title: "Stone Reserve",
-                reward: { stone: 8 + Math.floor(bonusScale * 1.5) },
+                reward: { stone: TOWN_XP_SUPPLY_CAPS.stone },
                 subtitle: (reward) => `+${reward.stone} stone`,
                 hint: "Solid masonry stock for heavier defenses and upgrades.",
                 chestContents: (reward) => [{ key: "stoneIcon", label: "Stone", amount: reward.stone }],
@@ -1613,7 +1880,7 @@ export class mapView extends Phaser.Scene {
             seeds: {
                 badgeLabel: "SEEDS",
                 title: "Seed Crate",
-                reward: { seeds: 5 + Math.floor(bonusScale / 2) },
+                reward: { seeds: TOWN_XP_SUPPLY_CAPS.seeds },
                 subtitle: (reward) => `+${reward.seeds} seeds`,
                 hint: "Fresh crop starters for a wider farm footprint.",
                 chestContents: (reward) => [{ key: "seeds", label: "Seeds", amount: reward.seeds }],
@@ -1625,7 +1892,7 @@ export class mapView extends Phaser.Scene {
             food: {
                 badgeLabel: "SUPPER",
                 title: "Camp Chow",
-                reward: { food: 10 + Math.floor(bonusScale * 1.5) },
+                reward: { food: TOWN_XP_SUPPLY_CAPS.food },
                 subtitle: (reward) => `+${reward.food} food`,
                 hint: "A clean pantry bump that keeps morale stable.",
                 chestContents: (reward) => [{ key: "foodIcon", label: "Food", amount: reward.food }],
@@ -1637,7 +1904,7 @@ export class mapView extends Phaser.Scene {
             water: {
                 badgeLabel: "WATER",
                 title: "Water Wagon",
-                reward: { cleanWater: 10 + Math.floor(bonusScale * 1.5) },
+                reward: { cleanWater: TOWN_XP_SUPPLY_CAPS.cleanWater },
                 subtitle: (reward) => `+${reward.cleanWater} water`,
                 hint: "A tidy clean-water refill before the next scramble.",
                 chestContents: (reward) => [{ key: "waterIcon", label: "Water", amount: reward.cleanWater }],
@@ -1649,7 +1916,7 @@ export class mapView extends Phaser.Scene {
             berries: {
                 badgeLabel: "SEEDS",
                 title: "Berry Pouch",
-                reward: { berries: 4 + Math.floor(bonusScale / 2) },
+                reward: { berries: TOWN_XP_SUPPLY_CAPS.berries },
                 subtitle: (reward) => `+${reward.berries} berry seeds`,
                 hint: "A niche growable boost for longer food recovery.",
                 chestContents: (reward) => [{ key: "berry", label: "Berry Seeds", amount: reward.berries }],
@@ -1756,12 +2023,26 @@ export class mapView extends Phaser.Scene {
             options.push(entry);
         };
 
-        const supplyKinds = ["money", "permits", "wood", "stone", "seeds", "food", "water", "berries"];
+        const supplyKinds = this._getEligibleTownXpSupplyKinds().slice();
         Phaser.Utils.Array.Shuffle(supplyKinds);
 
         addOption(this._createTownXpCardOption(level));
+
+        const specialOptions = [];
+        const economyRewardKeys = this._getAvailableTownXpEconomyRewardKeys().slice();
+        Phaser.Utils.Array.Shuffle(economyRewardKeys);
+        if (economyRewardKeys.length && Phaser.Math.Between(0, 99) < 60) {
+            specialOptions.push(this._createTownXpEconomyRewardOption(economyRewardKeys[0], level));
+        }
+        if (Phaser.Math.Between(0, 99) < 38) {
+            specialOptions.push(this._createTownXpMarketItemOption(level));
+        }
         if (Teams.canRecruitPlayer?.(TOWN_XP_TEAM_ID)) {
-            addOption(this._createTownXpRecruitOption(level));
+            specialOptions.push(this._createTownXpRecruitOption(level));
+        }
+        Phaser.Utils.Array.Shuffle(specialOptions);
+        while (options.length < 3 && specialOptions.length) {
+            addOption(specialOptions.shift());
         }
 
         while (options.length < 3 && supplyKinds.length) {
@@ -1886,6 +2167,7 @@ export class mapView extends Phaser.Scene {
                         this.applySimulationSpeed(true);
                     }
                     this._queueTownXpChanged({ immediate: true });
+                    SaveManager.queueAutosave("town_xp_reward_claimed");
                 }
             },
             onCancel: () => {
@@ -2079,6 +2361,7 @@ export class mapView extends Phaser.Scene {
             speedMultiplier: Math.max(0.5, Number(modifier?.speedMultiplier ?? 1) || 1),
             healthMultiplier: Math.max(0.5, Number(modifier?.healthMultiplier ?? 1) || 1),
             damageMultiplier: Math.max(0.5, Number(modifier?.damageMultiplier ?? 1) || 1),
+            visual: modifier?.visual ? { ...modifier.visual } : null,
         };
     }
 
@@ -2122,7 +2405,24 @@ export class mapView extends Phaser.Scene {
     }
 
     _isShockerBossDay(day = this.clock?.day ?? 1) {
-        return !this._shockerBossState?.defeated && Math.max(1, Number(day || 1)) === SHOCKER_BOSS_DAY;
+        const normalizedDay = Math.max(1, Number(day || 1));
+        if (normalizedDay < SHOCKER_BOSS_DAY) return false;
+        if (normalizedDay % SHOCKER_BOSS_WEEK_INTERVAL !== 0) return false;
+        if (Number(this._shockerBossState?.defeatedOnDay || 0) === normalizedDay) return false;
+        return true;
+    }
+
+    _getShockerBossAppearanceIndex(day = this.clock?.day ?? SHOCKER_BOSS_DAY) {
+        const normalizedDay = Math.max(SHOCKER_BOSS_DAY, Number(day || SHOCKER_BOSS_DAY));
+        return Math.max(0, Math.floor((normalizedDay - SHOCKER_BOSS_DAY) / SHOCKER_BOSS_WEEK_INTERVAL));
+    }
+
+    _getShockerBossHpMultiplier(day = this.clock?.day ?? SHOCKER_BOSS_DAY) {
+        const appearanceIndex = this._getShockerBossAppearanceIndex(day);
+        return 1 + Math.min(
+            SHOCKER_BOSS_HP_SCALE_CAP,
+            appearanceIndex * SHOCKER_BOSS_HP_SCALE_PER_APPEARANCE
+        );
     }
 
     _isShockerBossActive() {
@@ -2181,22 +2481,25 @@ export class mapView extends Phaser.Scene {
     }
 
     shouldHoldNightAtPeakDarkness() {
-        return !!(this._shockerBossState?.nightLocked && !this._shockerBossState?.defeated);
+        return !!this._shockerBossState?.nightLocked;
     }
 
     startShockerBossNight() {
-        if (this._isShockerBossActive() || this._shockerBossState?.defeated) return;
+        const bossDay = Math.max(1, Number(this.clock?.day || SHOCKER_BOSS_DAY));
+        if (this._isShockerBossActive() || !this._isShockerBossDay(bossDay)) return;
 
         const targetPoint = this._getMainIslandCenterWorld?.() ?? {
             x: (WORLD_DIMENSIONX * SQUARESIZE) / 2,
             y: (WORLD_DIMENSIONY * SQUARESIZE) / 2,
         };
+        const appearanceIndex = this._getShockerBossAppearanceIndex(bossDay);
+        const hpMultiplier = this._getShockerBossHpMultiplier(bossDay);
         const boss = spawnSeaRaider(this, {
             EnemyClass: Shocker,
             teamNumber: 0,
             targetPoint,
             enemyTypeLabel: SHOCKER_BOSS_NAME,
-            modifierLabel: "Boss Night",
+            modifierLabel: appearanceIndex > 0 ? `Boss Night +${Math.round((hpMultiplier - 1) * 100)}% HP` : "Boss Night",
             nightHordeId: "shocker_boss_night",
             hordeIndex: this.getCurrentHordeIndex(),
             swimSpeed: 210,
@@ -2205,7 +2508,12 @@ export class mapView extends Phaser.Scene {
 
         boss.nightHordeId = "shocker_boss_night";
         boss.hordeIndex = this.getCurrentHordeIndex();
-        boss._bossSpawnDay = Math.max(1, Number(this.clock?.day || SHOCKER_BOSS_DAY));
+        boss._bossSpawnDay = bossDay;
+        boss._shockerAppearanceIndex = appearanceIndex;
+        if (hpMultiplier > 1 && Number.isFinite(boss.maxHealth)) {
+            boss.maxHealth = Math.max(1, Math.round(boss.maxHealth * hpMultiplier));
+            boss.health = boss.maxHealth;
+        }
 
         this._activeShockerBoss = boss;
         this._shockerBossState = {
@@ -2213,6 +2521,8 @@ export class mapView extends Phaser.Scene {
             nightLocked: true,
             bossId: boss.id ?? null,
             startedOnDay: boss._bossSpawnDay,
+            defeatedOnDay: null,
+            appearanceIndex,
         };
         SaveManager.queueAutosave("shocker_boss_night");
         this._syncShockerBossUi();
@@ -2220,15 +2530,20 @@ export class mapView extends Phaser.Scene {
         this.uiScene?.showBossIncomingPresentation?.({
             title: SHOCKER_BOSS_NAME.toUpperCase(),
             subtitle: "SUNDAY NIGHT BOSS",
-            caption: "Night will not end until it is destroyed",
+            caption: appearanceIndex > 0
+                ? `Night will not end until it is destroyed. HP +${Math.round((hpMultiplier - 1) * 100)}%.`
+                : "Night will not end until it is destroyed",
             portraitKey: getPlayerPortraitKey(boss),
         });
     }
 
     handleShockerBossDefeated(troop) {
-        if (!troop || this._shockerBossState?.defeated) return;
+        if (!troop) return;
+        const defeatedDay = Math.max(1, Number(troop._bossSpawnDay || this.clock?.day || SHOCKER_BOSS_DAY));
+        if (Number(this._shockerBossState?.defeatedOnDay || 0) === defeatedDay && !this._shockerBossState?.nightLocked) return;
         this._shockerBossState.defeated = true;
         this._shockerBossState.nightLocked = false;
+        this._shockerBossState.defeatedOnDay = defeatedDay;
         this._activeShockerBoss = null;
         this._syncShockerBossUi();
 
@@ -2278,11 +2593,14 @@ export class mapView extends Phaser.Scene {
     }
 
     restoreShockerBossState(snapshot = null) {
+        const startedOnDay = snapshot?.startedOnDay ?? null;
         this._shockerBossState = {
             defeated: !!snapshot?.defeated,
             nightLocked: !!snapshot?.nightLocked,
             bossId: snapshot?.bossId ?? null,
-            startedOnDay: snapshot?.startedOnDay ?? null,
+            startedOnDay,
+            defeatedOnDay: snapshot?.defeatedOnDay ?? (snapshot?.defeated ? startedOnDay : null),
+            appearanceIndex: Math.max(0, Number(snapshot?.appearanceIndex || 0)),
         };
         this._activeShockerBoss = (Player.troops || []).find((troop) =>
             troop?.active
@@ -2586,7 +2904,6 @@ export class mapView extends Phaser.Scene {
         if (!StageState.endlessMode || this._hordeRewardInProgress) return;
         SaveManager.queueAutosave("phase_night");
         if (this._activeNightHorde?.startedOnDay === this.clock?.day) return;
-        if (this._shockerBossState?.defeated && Math.max(1, Number(this.clock?.day || 1)) === SHOCKER_BOSS_DAY) return;
         if (Number(this.clock?.day || 1) < 2) {
             showAlert(this, "Free day: the first horde arrives tomorrow night", "#a7f3d0");
             return;
@@ -2626,12 +2943,18 @@ export class mapView extends Phaser.Scene {
     }
 
     grantTownTowerDawnIncome() {
-        const payout = TowerBuilding.grantDawnIncome(this, 1);
+        const currentDay = Math.max(1, Number(this.clock?.day || 1));
+        const payout = TowerBuilding.grantDawnIncome(this, 1, {
+            skipStarterPermits: currentDay === 1,
+        });
         if (!payout) return null;
 
+        const permitText = payout.permits > 0
+            ? ` and +${payout.permits} permit${payout.permits === 1 ? "" : "s"}`
+            : "";
         showAlert(
             this,
-            `Town Towers: +$${payout.money} and +${payout.permits} permit${payout.permits === 1 ? "" : "s"}`,
+            `Town Towers: +$${payout.money}${permitText}`,
             "#a7f3d0"
         );
         return payout;
@@ -3368,6 +3691,8 @@ export class mapView extends Phaser.Scene {
         this.load.image('playerIcon', playerIcon);
         this.load.image('uncleanWaterIcon', uncleanWaterIcon);
         this.load.image('relief_package', reliefPackageImg);
+        this.load.image('reward_parcel_coupon', parcelCouponImg);
+        this.load.image('reward_recruit_voucher', recruitVoucherImg);
         this.load.image('sparkle', waterParticle);
         this.load.image('zoomOutWaterTxt1', zoomOutWaterTxt1);
         this.load.image('zoomOutWaterTxt2', zoomOutWaterTxt2);
@@ -3549,6 +3874,12 @@ export class mapView extends Phaser.Scene {
                 this._applyStartupCameraPose();
             }
         });
+        this._trackScaleResize(() => {
+            if (this._menuModeActive || this.isMainMenuPreview || this._pendingMenuPhase || this._continueCameraLockActive) {
+                return;
+            }
+            this.zoomMixer?.handleResize?.();
+        });
         if (this.uiScene?.sys?.isActive?.() && !this.menu?.active) {
             MainMenu.startMenuPhase();
         }
@@ -3680,6 +4011,8 @@ export class mapView extends Phaser.Scene {
 
         // pointer move
         this.input.on("pointermove", (pointer) => {
+            this._updateForagerRouteHoverCardPosition(pointer);
+            this._updateCropHoverCardPosition(pointer);
             if (this.marketCardUseController?.active) this.marketCardUseController.onPointerMove(pointer);
             if (this.wallPlacer?.active) this.wallPlacer.onPointerMove(pointer);
             if (this.wallDestroyer?.active) this.wallDestroyer.onPointerMove(pointer);
@@ -3709,7 +4042,7 @@ export class mapView extends Phaser.Scene {
             const clickedOnPlayer = this.input.manager.hitTest(pointer, Player.characters.getChildren(), cam);
             const clickedInteractiveWorldObject = this.input.manager
                 .hitTest(pointer, this.children.list, cam)
-                .some((obj) => obj?.input?.enabled && obj !== this._selectionDragZone);
+                .some((obj) => obj?.input?.enabled && obj !== this._selectionDragZone && !obj?.isHoverOnlyWorldObject);
             if (this.isSimulationPaused()) return;
             if (this._trackpadTapDragActive && pointer.button === 0) {
                 if (this._trackpadTapDragMoved) {
@@ -4596,21 +4929,35 @@ export class mapView extends Phaser.Scene {
         this._drawForagerRouteAssist(force);
     }
 
-    setForagerRouteHover(node, resourceType = null, hovering = true) {
+    setForagerRouteHover(node, resourceType = null, hovering = true, pointer = null) {
+        const hoverPointer = pointer || this.input?.activePointer || null;
         if (!hovering) {
             if (this.foragerRouteHoverNode === node) {
                 this.foragerRouteHoverNode = null;
                 this.foragerRouteHoverType = null;
                 this.updateForagerRouteAssist(true);
             }
+            this._hideForagerRouteHoverCard(node);
             return;
         }
 
-        const profile = this._getForagerRouteSelectionProfile();
-        if (!profile) return;
-
         const type = resourceType || this._getForagerRouteNodeResourceType(node);
-        if (!FORAGER_ROUTE_RESOURCE_UI[type]) return;
+        if (!FORAGER_ROUTE_RESOURCE_UI[type]) {
+            this._hideForagerRouteHoverCard(node);
+            return;
+        }
+
+        this._showForagerRouteHoverCard(node, type, hoverPointer);
+
+        const profile = this._getForagerRouteSelectionProfile();
+        if (!profile) {
+            if (this.foragerRouteHoverNode) {
+                this.foragerRouteHoverNode = null;
+                this.foragerRouteHoverType = null;
+                this.updateForagerRouteAssist(true);
+            }
+            return;
+        }
 
         this.foragerRouteHoverNode = node;
         this.foragerRouteHoverType = type;
@@ -4644,6 +4991,7 @@ export class mapView extends Phaser.Scene {
 
         this.foragerRouteHoverNode = null;
         this.foragerRouteHoverType = null;
+        this._hideForagerRouteHoverCard();
         Player.clearSelection();
         this.updateForagerRouteAssist(true);
         this.functionTab?.updateVisuals?.();
@@ -4778,6 +5126,355 @@ export class mapView extends Phaser.Scene {
                 ease: "Quad.easeOut",
             });
         }
+    }
+
+    _ensureForagerRouteHoverCard() {
+        if (
+            this.foragerRouteHoverCard?.active &&
+            this.foragerRouteHoverCardBg?.scene &&
+            this.foragerRouteHoverCardIcon?.scene &&
+            this.foragerRouteHoverCardLabel?.scene
+        ) {
+            return;
+        }
+
+        this.foragerRouteHoverCard?.destroy?.(true);
+        this.foragerRouteHoverCard = this.add.container(0, 0)
+            .setDepth(UIDEPTH + 910)
+            .setScrollFactor(0)
+            .setVisible(false)
+            .setAlpha(0);
+        this.foragerRouteHoverCardBg = this.add.graphics().setScrollFactor(0);
+        this.foragerRouteHoverCardIcon = this.add.image(0, 0, "woodIcon")
+            .setOrigin(0.5)
+            .setScrollFactor(0);
+        this.foragerRouteHoverCardLabel = this.add.text(0, 0, "", {
+            fontFamily: "Barlow Semi Condensed",
+            fontSize: "16px",
+            fontStyle: "bold",
+            color: "#f4fbff",
+            stroke: "#06111a",
+            strokeThickness: 3,
+        }).setOrigin(0, 0.5).setScrollFactor(0);
+
+        this.foragerRouteHoverCard.add([
+            this.foragerRouteHoverCardBg,
+            this.foragerRouteHoverCardIcon,
+            this.foragerRouteHoverCardLabel,
+        ]);
+    }
+
+    _showForagerRouteHoverCard(node, resourceType, pointer = null) {
+        const cfg = FORAGER_ROUTE_RESOURCE_UI[resourceType];
+        if (!cfg) return;
+
+        this._ensureForagerRouteHoverCard();
+        const card = this.foragerRouteHoverCard;
+        const bg = this.foragerRouteHoverCardBg;
+        const icon = this.foragerRouteHoverCardIcon;
+        const label = this.foragerRouteHoverCardLabel;
+        if (!card || !bg || !icon || !label) return;
+
+        const labelText = String(cfg.cardLabel || cfg.target || resourceType).trim();
+        const iconKey = String(cfg.cardIcon || "woodIcon");
+        const iconSize = 22;
+        const gap = 10;
+        const padX = 12;
+        const padY = 9;
+
+        label.setText(labelText).setColor(cfg.textColor || "#f4fbff");
+        if (this.textures.exists(iconKey)) {
+            icon.setTexture(iconKey).setVisible(true).setDisplaySize(iconSize, iconSize);
+        } else {
+            icon.setVisible(false);
+        }
+
+        const contentWidth = (icon.visible ? iconSize + gap : 0) + label.width;
+        const width = Math.max(118, Math.round(contentWidth + padX * 2));
+        const height = Math.max(40, Math.round(Math.max(iconSize, label.height) + padY * 2));
+        const radius = 14;
+
+        bg.clear();
+        bg.fillStyle(0x102f43, 0.96);
+        bg.fillRoundedRect(0, 0, width, height, radius);
+        bg.fillStyle(0xffffff, 0.08);
+        bg.fillRoundedRect(3, 3, width - 6, Math.max(12, Math.round(height * 0.34)), Math.max(8, radius - 6));
+        bg.lineStyle(2, cfg.color ?? 0x9ee7ff, 0.92);
+        bg.strokeRoundedRect(0, 0, width, height, radius);
+        bg.lineStyle(1, 0xffffff, 0.18);
+        bg.strokeRoundedRect(3, 3, width - 6, height - 6, Math.max(8, radius - 4));
+
+        const iconX = padX + (icon.visible ? iconSize / 2 : 0);
+        if (icon.visible) {
+            icon.setPosition(iconX, height / 2);
+        }
+        label.setPosition(padX + (icon.visible ? iconSize + gap : 0), height / 2);
+
+        this.foragerRouteHoverCardNode = node;
+        this.foragerRouteHoverCardSize = { width, height };
+        card.setVisible(true).setAlpha(1);
+        this._updateForagerRouteHoverCardPosition(pointer);
+    }
+
+    _hideForagerRouteHoverCard(node = null) {
+        if (node && this.foragerRouteHoverCardNode !== node) return;
+        this.foragerRouteHoverCardNode = null;
+        this.foragerRouteHoverCard?.setVisible(false)?.setAlpha(0);
+    }
+
+    _updateForagerRouteHoverCardPosition(pointer = null) {
+        const card = this.foragerRouteHoverCard;
+        if (!card?.visible) return;
+
+        const node = this.foragerRouteHoverCardNode;
+        const nodeAlive = !!node && node.active !== false && node.sprite?.active !== false && node.container?.active !== false;
+        if (!nodeAlive) {
+            this._hideForagerRouteHoverCard();
+            return;
+        }
+
+        const p = pointer || this.input?.activePointer || null;
+        if (!p) return;
+
+        const width = Math.max(0, Number(this.foragerRouteHoverCardSize?.width || 0));
+        const height = Math.max(0, Number(this.foragerRouteHoverCardSize?.height || 0));
+        const margin = 10;
+        let x = Number(p.x || 0) + 18;
+        let y = Number(p.y || 0) - height - 14;
+
+        if (x + width > this.scale.width - margin) {
+            x = Math.max(margin, Number(p.x || 0) - width - 16);
+        }
+        if (y < margin) {
+            y = Math.min(this.scale.height - height - margin, Number(p.y || 0) + 18);
+        }
+
+        card.setPosition(
+            Phaser.Math.Clamp(x, margin, Math.max(margin, this.scale.width - width - margin)),
+            Phaser.Math.Clamp(y, margin, Math.max(margin, this.scale.height - height - margin)),
+        );
+    }
+
+    _ensureCropHoverCard() {
+        if (
+            this.cropHoverCard?.active &&
+            this.cropHoverCardBg?.scene &&
+            this.cropHoverCardIcon?.scene &&
+            this.cropHoverCardLabel?.scene
+        ) {
+            return;
+        }
+
+        this.cropHoverCard?.destroy?.(true);
+        this.cropHoverCard = this.add.container(0, 0)
+            .setDepth(UIDEPTH + 912)
+            .setScrollFactor(0)
+            .setVisible(false)
+            .setAlpha(0)
+            .setScale(0.94);
+        this.cropHoverCardBg = this.add.graphics().setScrollFactor(0);
+        this.cropHoverCardIcon = this.add.sprite(0, 0, "crops", 1)
+            .setOrigin(0.5)
+            .setScrollFactor(0);
+        this.cropHoverCardLabel = this.add.text(0, 0, "", {
+            fontFamily: "Barlow Semi Condensed",
+            fontSize: "15px",
+            fontStyle: "bold",
+            color: "#f7fbff",
+            stroke: "#06111a",
+            strokeThickness: 3,
+            align: "left",
+            lineSpacing: 2,
+        }).setOrigin(0, 0.5).setScrollFactor(0);
+
+        this.cropHoverCard.add([
+            this.cropHoverCardBg,
+            this.cropHoverCardIcon,
+            this.cropHoverCardLabel,
+        ]);
+    }
+
+    _resolveCropHoverTarget(target = null) {
+        const sprite = target?.sprite || target || null;
+        if (!sprite?.scene || sprite.active === false) return null;
+        return sprite;
+    }
+
+    _resolveCropHoverState(target = null) {
+        const sprite = this._resolveCropHoverTarget(target);
+        if (!sprite) return null;
+
+        const gx = Number(sprite.cropGridX);
+        const gy = Number(sprite.cropGridY);
+        const teamNumber = String(sprite.cropTeamNumber ?? "1");
+        const liveCrop = Number.isFinite(gx) && Number.isFinite(gy)
+            ? Teams.getCropAt(gx, gy, teamNumber)
+            : null;
+
+        if (liveCrop) {
+            if (liveCrop.sprite !== sprite) liveCrop.sprite = sprite;
+            return liveCrop;
+        }
+
+        const rawFrame = Number(sprite.frame?.name ?? sprite.frame?.index ?? 0);
+        const frame = Number.isFinite(rawFrame) ? rawFrame : 0;
+        return {
+            sprite,
+            x: gx,
+            y: gy,
+            teamNumber,
+            hasSeed: frame > 0,
+            growthStage: Math.max(0, frame - 1),
+            dailyWatered: false,
+        };
+    }
+
+    _describeCropHover(crop = null) {
+        const seeded = crop?.hasSeed !== false;
+        const watered = !!crop?.dailyWatered;
+        const maxStage = Math.max(0, Number(MAX_CROP_GROWTH_STAGE || 0));
+        const safeStage = Math.max(0, Math.min(maxStage, Number(crop?.growthStage || 0)));
+        const totalStages = maxStage + 1;
+
+        if (!seeded) {
+            return {
+                frame: 0,
+                accentColor: 0xa7b7c9,
+                text: "Crop Plot\nUnseeded • needs seeds\nWatered today: No",
+            };
+        }
+
+        const ready = safeStage >= maxStage;
+        return {
+            frame: 1 + safeStage,
+            accentColor: ready ? 0xfacc15 : (watered ? 0x86efac : 0x93c5fd),
+            text: ready
+                ? `Crop Plot\nStage ${safeStage + 1}/${totalStages} • Ready\nWatered today: ${watered ? "Yes" : "No"}`
+                : `Crop Plot\nStage ${safeStage + 1}/${totalStages}\nWatered today: ${watered ? "Yes" : "No"}`,
+        };
+    }
+
+    showCropHoverCard(target, pointer = null) {
+        const crop = this._resolveCropHoverState(target);
+        if (!crop) return;
+
+        this._ensureCropHoverCard();
+        const card = this.cropHoverCard;
+        const bg = this.cropHoverCardBg;
+        const icon = this.cropHoverCardIcon;
+        const label = this.cropHoverCardLabel;
+        if (!card || !bg || !icon || !label) return;
+
+        const summary = this._describeCropHover(crop);
+        const iconSize = 24;
+        const gap = 11;
+        const padX = 13;
+        const padY = 10;
+
+        label.setText(summary.text).setColor("#f7fbff");
+        icon.setTexture("crops", summary.frame).setVisible(true).setDisplaySize(iconSize, iconSize);
+
+        const contentWidth = iconSize + gap + label.width;
+        const width = Math.max(170, Math.round(contentWidth + padX * 2));
+        const height = Math.max(58, Math.round(Math.max(iconSize, label.height) + padY * 2));
+        const radius = 15;
+
+        bg.clear();
+        bg.fillStyle(0x0d2534, 0.96);
+        bg.fillRoundedRect(0, 0, width, height, radius);
+        bg.fillStyle(0xffffff, 0.08);
+        bg.fillRoundedRect(3, 3, width - 6, Math.max(12, Math.round(height * 0.34)), Math.max(8, radius - 6));
+        bg.lineStyle(2, summary.accentColor, 0.9);
+        bg.strokeRoundedRect(0, 0, width, height, radius);
+        bg.lineStyle(1, 0xffffff, 0.18);
+        bg.strokeRoundedRect(3, 3, width - 6, height - 6, Math.max(8, radius - 4));
+
+        icon.setPosition(padX + (iconSize / 2), height / 2);
+        label.setPosition(padX + iconSize + gap, height / 2);
+
+        const targetSprite = crop.sprite || this._resolveCropHoverTarget(target);
+        const sameTarget = this.cropHoverCardTarget === targetSprite;
+        this.cropHoverCardTarget = targetSprite;
+        this.cropHoverCardSize = { width, height };
+
+        this.tweens.killTweensOf(card);
+        if (!card.visible || !sameTarget) {
+            card.setVisible(true).setAlpha(0).setScale(0.94);
+            this.tweens.add({
+                targets: card,
+                alpha: 1,
+                scaleX: 1,
+                scaleY: 1,
+                duration: 120,
+                ease: "Quad.easeOut",
+            });
+        } else {
+            card.setVisible(true).setAlpha(1).setScale(1);
+        }
+
+        this._updateCropHoverCardPosition(pointer);
+    }
+
+    hideCropHoverCard(target = null, { immediate = false } = {}) {
+        const targetSprite = this._resolveCropHoverTarget(target);
+        if (targetSprite && this.cropHoverCardTarget !== targetSprite) return;
+
+        const card = this.cropHoverCard;
+        if (!card) return;
+
+        this.cropHoverCardTarget = null;
+        this.tweens.killTweensOf(card);
+
+        if (immediate || !card.visible) {
+            card.setVisible(false).setAlpha(0).setScale(0.94);
+            return;
+        }
+
+        this.tweens.add({
+            targets: card,
+            alpha: 0,
+            scaleX: 0.95,
+            scaleY: 0.95,
+            duration: 100,
+            ease: "Quad.easeIn",
+            onComplete: () => {
+                if (!this.cropHoverCardTarget) {
+                    card.setVisible(false).setScale(0.94);
+                }
+            },
+        });
+    }
+
+    _updateCropHoverCardPosition(pointer = null) {
+        const card = this.cropHoverCard;
+        if (!card?.visible) return;
+
+        const target = this.cropHoverCardTarget;
+        if (!target?.scene || target.active === false) {
+            this.hideCropHoverCard(target, { immediate: true });
+            return;
+        }
+
+        const p = pointer || this.input?.activePointer || null;
+        if (!p) return;
+
+        const width = Math.max(0, Number(this.cropHoverCardSize?.width || 0));
+        const height = Math.max(0, Number(this.cropHoverCardSize?.height || 0));
+        const margin = 10;
+        let x = Number(p.x || 0) + 18;
+        let y = Number(p.y || 0) - height - 16;
+
+        if (x + width > this.scale.width - margin) {
+            x = Math.max(margin, Number(p.x || 0) - width - 16);
+        }
+        if (y < margin) {
+            y = Math.min(this.scale.height - height - margin, Number(p.y || 0) + 18);
+        }
+
+        card.setPosition(
+            Phaser.Math.Clamp(x, margin, Math.max(margin, this.scale.width - width - margin)),
+            Phaser.Math.Clamp(y, margin, Math.max(margin, this.scale.height - height - margin)),
+        );
     }
 
     hideForagerRouteInstruction() {
@@ -5635,6 +6332,7 @@ cancelFarmSelection(exitFarmMode = false) {
         if (this.uiScene && (this._shockerBossState?.nightLocked || this._activeShockerBoss)) {
             this._syncShockerBossUi();
         }
+        this._updateCropHoverCardPosition();
         this.updateForagerRouteAssist();
         ClayOvenUI.updateAllOvens(effectiveSimSpeed);
         this._refreshNorthFortArrivalMarker();

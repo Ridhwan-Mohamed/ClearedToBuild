@@ -476,7 +476,7 @@ export class Projectile {
     }
 
     static handleCollision(target, projectile) {
-        const result = fightManager.calculateHitResultFromWeapon(projectile.weapon);
+        const result = fightManager.calculateHitResultFromWeapon(projectile.weapon, projectile.player || null);
         if (result.hit) {
         
             // 🔴 Apply on-hit effects to the victim (flash, timer cancel, knockback team 0)
@@ -494,7 +494,7 @@ export class Projectile {
                 Player._cleanupCombatTicketForTarget?.(projectile.team, target);
                 Player.destroyPlayer(target);
 
-                if (projectile.player) {
+                if (projectile.player?.active && projectile.player?.body) {
                     CombatSpacingCoordinator.clearTroopFocus(projectile.player);
                     Player.resetRoamState?.(projectile.player);
                     Teams.movePlayerState(projectile.player, CONTROL_STATES.TRACK_MODE);
@@ -536,7 +536,8 @@ export class Projectile {
         }
 
         const weapon = projectile.weapon;
-        const result = fightManager.calculateHitResultFromWeapon(weapon);
+        const shooter = projectile.player || null;
+        const result = fightManager.calculateHitResultFromWeapon(weapon, shooter);
 
         // MISS -> text + kill bullet
         if (!result.hit) {
@@ -559,7 +560,6 @@ export class Projectile {
         }
 
         const dmg = result.damage;
-        const shooter = projectile.player || null;
         const teamNumber = projectile.team;
 
         // -----------------------

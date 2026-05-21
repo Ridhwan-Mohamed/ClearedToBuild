@@ -1,5 +1,5 @@
 import { House } from "../buildings/House";
-import { POWERUP_CARDS } from "../Cards/PowerupCards.js";
+import { pickRandomPowerupCards } from "../Cards/PowerupCards.js";
 import { showAlert, UIDEPTH } from "../constants";
 import { buildingManager } from "../Manager/buildingManager";
 import { Builder } from "../players/Builder";
@@ -11,6 +11,7 @@ import { Blademaster } from "../players/Blademaster";
 import { Brawler } from "../players/Brawler";
 import { Teams } from "../Teams";
 import { townRoads } from "../town";
+import { getCardVisualStyle } from "./CardPreview";
 import { DailyNeedsTracker } from "./DailyNeedsTracker";
 import { UI_ITEM_TYPES } from "./UIConstants";
 
@@ -180,6 +181,22 @@ export function openPowerupScreen(scene) {
 
     powerups.forEach((pu, i) => {
         const cardX = cardStartX + i * cardSpacing;
+        const visualStyle = getCardVisualStyle(pu);
+
+        const halo = scene.add.ellipse(cardX, cardYOffset, 192, 202, visualStyle.haloTint, visualStyle.isGold ? 0.16 : 0.05)
+            .setDepth(UIDEPTH - 1);
+        if (visualStyle.isGold) {
+            scene.tweens.add({
+                targets: halo,
+                alpha: { from: 0.12, to: 0.2 },
+                scaleX: 1.04,
+                scaleY: 1.04,
+                duration: 900,
+                yoyo: true,
+                repeat: -1,
+                ease: "Sine.easeInOut",
+            });
+        }
 
         const card = scene.add.rectangle(cardX, cardYOffset, 170, 180, 0x222222)
             .setStrokeStyle(3, Phaser.Display.Color.HexStringToColor(pu.OUTLINE).color)
@@ -198,7 +215,7 @@ export function openPowerupScreen(scene) {
             wordWrap: { width: 120 }
         }).setOrigin(0.5).setDepth(1);
 
-        [card, icon, name, desc].forEach(el => el.setScrollFactor(0));
+        [halo, card, icon, name, desc].forEach(el => el.setScrollFactor(0));
 
         card.on("pointerdown", () => {
             const teamId = "1";
@@ -207,7 +224,7 @@ export function openPowerupScreen(scene) {
             closePowerupScreen(scene, uiContainer);
         });
 
-        uiContainer.add([card, icon, name, desc]);
+        uiContainer.add([halo, card, icon, name, desc]);
     });
 
     const spawnCardYOffset = storeYOffset + 360;
@@ -323,6 +340,7 @@ function closePowerupScreen(scene, container) {
 }
 
 function getRandomPowerups(count = 3) {
+    return pickRandomPowerupCards(count, { teamNumber: "1" });
     const candidates = POWERUPS.slice();
 
     if (candidates.length === 0) return [];
@@ -514,7 +532,7 @@ const PLAYER_COSTS = {
     brawler: 75
 };
 
-const POWERUPS = POWERUP_CARDS;
+const POWERUPS = [];
 
 const STORE = [
     {

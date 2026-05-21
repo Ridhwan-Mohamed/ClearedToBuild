@@ -789,7 +789,17 @@ export function handleGridXY(x,y,itemX,itemY){
     return [finalX,finalY]
 }
 
-function maybePlayErrorAlertSound(targetScene, message, color) {
+function parseAlertColor(color = "#ffffff") {
+    const hex = String(color || "").trim().replace(/^#/, "");
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+    };
+}
+
+function isErrorAlert(message = "", color = "#ffffff") {
     const upper = String(message || "").toUpperCase();
     const isErrorMessage =
         upper.includes("ERROR")
@@ -800,20 +810,69 @@ function maybePlayErrorAlertSound(targetScene, message, color) {
         || upper.includes("REQUIRED")
         || upper.includes("CANNOT");
 
-    let isErrorColor = false;
-    const hex = String(color || "").trim().replace(/^#/, "");
-    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
-        isErrorColor = r >= 180 && r > (g * 1.14) && r > (b * 1.14);
+    const parsed = parseAlertColor(color);
+    const isErrorColor = !!parsed
+        && parsed.r >= 180
+        && parsed.r > (parsed.g * 1.14)
+        && parsed.r > (parsed.b * 1.14);
+
+    return isErrorMessage || isErrorColor;
+}
+
+function isGoodAlert(message = "", color = "#ffffff") {
+    const upper = String(message || "").toUpperCase();
+    if (
+        upper.startsWith("+")
+        || upper.includes("BOUGHT")
+        || upper.includes("STOCKED")
+        || upper.includes("STARTED")
+        || upper.includes("BUILT")
+        || upper.includes("RECRUITED")
+        || upper.includes("REWARD")
+        || upper.includes("GAIN")
+        || upper.includes("LEVEL UP")
+        || upper.includes("SAVED")
+        || upper.includes("DEPLOYED")
+        || upper.includes("SURVIVED")
+        || upper.includes("PICKED")
+        || upper.includes("UNLOCK")
+        || upper.includes("COMPLETE")
+        || upper.includes("COMPLETED")
+        || upper.includes("RECOVERED")
+    ) {
+        return true;
     }
 
-    if (!isErrorMessage && !isErrorColor) return;
-    if (!targetScene?.cache?.audio?.exists?.("sfx_ui_error")) return;
-    targetScene.sound?.play?.("sfx_ui_error", {
-        volume: 0.24,
-        rate: 0.94 + Math.random() * 0.09,
+    const parsed = parseAlertColor(color);
+    if (!parsed || upper.includes("BEGIN PLACING")) return false;
+    return parsed.g >= 170 && parsed.g > (parsed.r * 1.03) && parsed.g >= (parsed.b * 0.9);
+}
+
+export function getAlertTone(message = "", color = "#ffffff") {
+    if (isErrorAlert(message, color)) return "bad";
+    if (isGoodAlert(message, color)) return "good";
+    return "neutral";
+}
+
+function maybePlayAlertSound(targetScene, message, color) {
+    const tone = getAlertTone(message, color);
+    const soundKey = tone === "bad"
+        ? "sfx_ui_error"
+        : tone === "good"
+            ? "sfx_ui_notification_good"
+            : "sfx_ui_notification";
+    if (!targetScene?.cache?.audio?.exists?.(soundKey)) return;
+
+    const volume = tone === "bad" ? 0.24 : tone === "good" ? 0.23 : 0.22;
+    const rate = tone === "bad"
+        ? 0.94 + Math.random() * 0.09
+        : tone === "good"
+            ? 0.98 + Math.random() * 0.05
+            : 0.97 + Math.random() * 0.06;
+
+    targetScene.sound?.play?.(soundKey, {
+        volume,
+        rate,
     });
 }
 
@@ -830,7 +889,7 @@ export function showAlert(scene, message, color = '#ffffff', duration = 1400) {
         return uiScene.showAlertMessage(message, color, duration);
     }
 
-    maybePlayErrorAlertSound(uiScene, message, color);
+    maybePlayAlertSound(uiScene, message, color);
 
     const alert = uiScene.add.text(
         uiScene.cameras.main.width / 2, 0, message,
@@ -840,11 +899,15 @@ export function showAlert(scene, message, color = '#ffffff', duration = 1400) {
     .setScrollFactor(0)
     .setDepth(UIDEPTH);
 
+    const tweenScale = Number(uiScene?.tweens?.timeScale);
+    const unscaledTweenTimeScale = Number.isFinite(tweenScale) && tweenScale > 0 ? 1 / tweenScale : 1;
+
     uiScene.tweens.add({
         targets: alert,
         y: 50,
         alpha: 0,
         duration: duration,
+        timeScale: unscaledTweenTimeScale,
         ease: 'Cubic.easeOut',
         onComplete: () => alert.destroy()
     });

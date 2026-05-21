@@ -202,10 +202,14 @@ export class Player {
     static _releaseTaskAssignment(troop) {
         if (!troop) return;
         const task = troop.task;
+        const teamNumber = troop?.body?.team;
         if (task && typeof task === "object" && typeof task.assigned === "number" && task.assigned > 0) {
             task.assigned -= 1;
         }
         troop.task = null;
+        if ((task?.forageType === "block" || task?.forageType === "seed") && teamNumber != null) {
+            blockResourceManager.syncNodeFlash(teamNumber, task.value || task);
+        }
     }
 
     static _finalizeDestroyedPlayer(player, teamNum, state) {
@@ -700,8 +704,7 @@ export class Player {
 
             console.log("No path found or path is empty.");
             if (troop.task) {
-                troop.task.assigned -= 1;
-                troop.task = null;
+                this._releaseTaskAssignment(troop);
                 Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
                 PathRegistry.unregisterUnit(navMesh, troop);
             }

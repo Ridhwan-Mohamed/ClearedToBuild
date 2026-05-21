@@ -203,7 +203,7 @@ export class TutorialManager {
       cleanWaterAmnt: 8,
       woodAmnt: 12,
       stoneAmnt: 8,
-      permits: 2,
+      permits: 3,
     };
     const applyDelta = (field, updater) => {
       const current = Number(this.scene[field] ?? 0);
@@ -352,6 +352,9 @@ export class TutorialManager {
   _setParcelHover(slotId, hovered = true) {
     if (!slotId) return;
     const slot = this.scene.parcelSpawnUI?.slots?.get?.(slotId);
+    if (hovered && slot?.container) {
+      this._focusParcel(slotId);
+    }
     slot?._setDetailedProxyHovered?.(!!hovered);
     this.scene.uiScene?.contractHud?.setExternalHover?.(slotId, !!hovered);
     this.hoveredParcelSlotId = hovered ? slotId : null;

@@ -5,7 +5,7 @@ export const UI_ITEM_TYPES = {
         description: "Water from a unclean source, for farming",
         cooksTo: "clean_water",
         label: "Unclean Water",
-        stacks: 15,
+        stacks: 12,
         moneyValue: 1
     },
     clean_water: {
@@ -13,7 +13,7 @@ export const UI_ITEM_TYPES = {
         icon: "waterIcon",
         label: "Clean Water",
         description: "Safe drinking water",
-        stacks: 15,
+        stacks: 12,
         moneyValue: 2
     },
     food: {
@@ -21,7 +21,7 @@ export const UI_ITEM_TYPES = {
         icon: "foodIcon",
         description: "Cooked rations",
         label: "Food",
-        stacks: 15,
+        stacks: 12,
         moneyValue: 3
     },
     rawFood: {
@@ -30,7 +30,7 @@ export const UI_ITEM_TYPES = {
         description: "Uncooked rations",
         label: "Raw Food",
         cooksTo: "food",
-        stacks: 15,
+        stacks: 12,
         moneyValue: 2
     },
     wood: {
@@ -61,7 +61,7 @@ export const UI_ITEM_TYPES = {
     },
     seedCrop: {
         name: "seedCrop",
-        stacks: 10,
+        stacks: 8,
         label: "Crop Seed",
         icon: "seeds",
         food: false,
@@ -71,7 +71,7 @@ export const UI_ITEM_TYPES = {
     seedBerry: {
         name: "seedBerry",
         label: "Berry Seed",
-        stacks: 10,
+        stacks: 8,
         icon: "berry",
         food: false,
         seed: true,

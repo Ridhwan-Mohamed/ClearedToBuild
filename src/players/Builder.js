@@ -220,7 +220,7 @@ export class Builder {
         }
 
         // Clear references
-        if (troop.task) {troop.task.assigned--; troop.task = null;}
+        Player._releaseTaskAssignment(troop);
         if (troop.carrying) troop.carrying = null;
 
         if (troop.visionId != null) {

@@ -13,6 +13,12 @@ import { Raider } from "../players/Raider.js";
 import { FortGrunt } from "../players/FortGrunt.js";
 import { Shocker } from "../players/Shocker.js";
 import { ClayOven } from "../buildings/ClayOven.js";
+import { blockResourceManager } from "../Manager/BlockResourceManager.js";
+import { buildingManager } from "../Manager/buildingManager.js";
+import { fightManager } from "../Manager/fightManager.js";
+import { StaminaManager } from "../Manager/staminaManager.js";
+import { Teams } from "../Teams.js";
+import { weapons } from "../weapons.js";
 
 export const TROOP_TYPE_REGISTRY = Object.freeze({
   get farmer() { return Farmer; },
@@ -43,10 +49,36 @@ function getCardDefaults() {
       Blademaster: { speed: Blademaster.speed, stamina: Blademaster.stamina },
       Gunslinger: { speed: Gunslinger.speed, stamina: Gunslinger.stamina },
       ClayOven: { cookDuration: ClayOven.cookDuration },
+      BlockResources: {
+        woodBreakDuration: blockResourceManager.woodBreakDuration,
+        rockBreakDuration: blockResourceManager.rockBreakDuration,
+      },
+      BuildingManager: {
+        blockBuildingDuration: buildingManager.blockBuildingDuration,
+        tileBuildingDuration: buildingManager.tileBuildingDuration,
+        repairTickDuration: buildingManager.repairTickDuration,
+      },
+      StaminaManager: { staminaIncreaseAmnt: StaminaManager.staminaIncreaseAmnt },
+      Teams: { cropReseedChance: Teams.cropReseedChance },
+      Weapons: {
+        pistolAccuracy: weapons.pistol.accuracy,
+        pistolDuration: weapons.pistol.duration,
+        boxingGlovesBaseDmg: weapons.boxingGloves.baseDmg,
+        boxingGlovesCritDmg: weapons.boxingGloves.critDmg,
+        swordBaseDmg: weapons.sword.baseDmg,
+        swordCritDmg: weapons.sword.critDmg,
+      },
+      FightManager: {
+        lastStandEnabled: fightManager.lastStandEnabled,
+        lastStandThreshold: fightManager.lastStandThreshold,
+        lastStandDamageMultiplier: fightManager.lastStandDamageMultiplier,
+      },
     });
   }
   return cardDefaults;
 }
+
+getCardDefaults();
 
 export function resetCardModifiedDefaults() {
   const defaults = getCardDefaults();
@@ -66,6 +98,22 @@ export function resetCardModifiedDefaults() {
   Gunslinger.speed = defaults.Gunslinger.speed;
   Gunslinger.stamina = defaults.Gunslinger.stamina;
   ClayOven.cookDuration = defaults.ClayOven.cookDuration;
+  blockResourceManager.woodBreakDuration = defaults.BlockResources.woodBreakDuration;
+  blockResourceManager.rockBreakDuration = defaults.BlockResources.rockBreakDuration;
+  buildingManager.blockBuildingDuration = defaults.BuildingManager.blockBuildingDuration;
+  buildingManager.tileBuildingDuration = defaults.BuildingManager.tileBuildingDuration;
+  buildingManager.repairTickDuration = defaults.BuildingManager.repairTickDuration;
+  StaminaManager.staminaIncreaseAmnt = defaults.StaminaManager.staminaIncreaseAmnt;
+  Teams.cropReseedChance = defaults.Teams.cropReseedChance;
+  weapons.pistol.accuracy = defaults.Weapons.pistolAccuracy;
+  weapons.pistol.duration = defaults.Weapons.pistolDuration;
+  weapons.boxingGloves.baseDmg = defaults.Weapons.boxingGlovesBaseDmg;
+  weapons.boxingGloves.critDmg = defaults.Weapons.boxingGlovesCritDmg;
+  weapons.sword.baseDmg = defaults.Weapons.swordBaseDmg;
+  weapons.sword.critDmg = defaults.Weapons.swordCritDmg;
+  fightManager.lastStandEnabled = defaults.FightManager.lastStandEnabled;
+  fightManager.lastStandThreshold = defaults.FightManager.lastStandThreshold;
+  fightManager.lastStandDamageMultiplier = defaults.FightManager.lastStandDamageMultiplier;
 }
 
 export function reapplySavedCards(cardIds = []) {

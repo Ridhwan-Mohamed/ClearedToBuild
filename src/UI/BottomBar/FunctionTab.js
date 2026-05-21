@@ -33,6 +33,9 @@ const MODE_COLORS = {
 const TOGGLE_COLORS = {
   water: 0x74cbff,
 };
+const WATER_CONTROL_BUTTON_WIDTH = 24;
+const WATER_ACTION_BUTTON_WIDTH = 72;
+const WATER_CONTROL_BUTTON_HEIGHT = 18;
 
 const GATHER_RESOURCES = [
   { key: "wood", label: "WOOD", color: 0x166534, text: "#86efac" },
@@ -100,7 +103,8 @@ export default class FunctionTab {
       this.mainButtonOrder.push(button);
     });
 
-    this.mainButtons.water = this._createMainButton("water", TOGGLE_COLORS.water, () => this.toggleWaterAutomation());
+    this.mainButtons.water = this._createMainButton("water", TOGGLE_COLORS.water, () => this._handleWaterPrimaryAction());
+    this._createWaterControls(this.mainButtons.water);
     this.mainButtonOrder.push(this.mainButtons.water);
 
     REST_GROUPS.forEach((cfg) => {
@@ -174,6 +178,85 @@ export default class FunctionTab {
     return button;
   }
 
+  _createWaterControls(button) {
+    if (!button?.root) return;
+
+    const makeText = (fontSize) => this.scene.add.text(0, 0, "", {
+      fontFamily: "Bungee",
+      fontSize,
+      color: "#ffffff",
+      stroke: "#081621",
+      strokeThickness: 3,
+      align: "center",
+    }).setOrigin(0.5);
+
+    button.controlBg = this.scene.add.graphics();
+    button.minusText = makeText("12px");
+    button.countText = makeText("13px");
+    button.plusText = makeText("12px");
+    button.unitText = this.scene.add.text(0, 0, "", {
+      fontFamily: "Bungee",
+      fontSize: "10px",
+      color: "#f8fdff",
+      stroke: "#081621",
+      strokeThickness: 3,
+      align: "left",
+    }).setOrigin(0, 0.5);
+    button.actionText = makeText("10px");
+
+    button.minusHit = this.scene.add.zone(0, 0, WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    button.plusHit = this.scene.add.zone(0, 0, WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    button.actionHit = this.scene.add.zone(0, 0, WATER_ACTION_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT)
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+
+    const bindPressable = (hit, hoverKey, pressKey, handler) => {
+      hit.on("pointerover", (_pointer, _lx, _ly, event) => {
+        event?.stopPropagation?.();
+        button[hoverKey] = true;
+        this._drawMainButton(button, button.active);
+      });
+      hit.on("pointerout", (_pointer, event) => {
+        event?.stopPropagation?.();
+        button[hoverKey] = false;
+        button[pressKey] = false;
+        this._drawMainButton(button, button.active);
+      });
+      hit.on("pointerdown", (_pointer, _lx, _ly, event) => {
+        event?.stopPropagation?.();
+        button[pressKey] = true;
+        this._drawMainButton(button, button.active);
+      });
+      hit.on("pointerup", (_pointer, _lx, _ly, event) => {
+        event?.stopPropagation?.();
+        button[pressKey] = false;
+        this._drawMainButton(button, button.active);
+        AudioManager.playBottomBarClick();
+        handler?.();
+      });
+    };
+
+    bindPressable(button.minusHit, "minusHovered", "minusPressed", () => this._adjustWaterTarget(-1));
+    bindPressable(button.plusHit, "plusHovered", "plusPressed", () => this._adjustWaterTarget(1));
+    bindPressable(button.actionHit, "actionHovered", "actionPressed", () => this._handleWaterPrimaryAction());
+
+    button.root.add([
+      button.controlBg,
+      button.minusText,
+      button.countText,
+      button.plusText,
+      button.unitText,
+      button.actionText,
+      button.minusHit,
+      button.plusHit,
+      button.actionHit,
+    ]);
+  }
+
   relayout() {
     const liveWidth = Math.max(
       this.width,
@@ -220,8 +303,14 @@ export default class FunctionTab {
       button.height = topRowHeight;
       button.root.setPosition(mainStartX + index * (mainButtonWidth + MAIN_BUTTON_GAP), row1Y);
       button.hit.setSize(button.width, button.height);
-      button.text.setPosition(0, 0);
-      button.text.setFixedSize(button.width - 14, button.height - 10);
+      if (button.key === "water") {
+        button.text.setPosition(0, -12);
+        button.text.setFixedSize(button.width - 18, 18);
+        this._layoutWaterControls(button);
+      } else {
+        button.text.setPosition(0, 0);
+        button.text.setFixedSize(button.width - 14, button.height - 10);
+      }
       button.text.setOrigin(0.5);
     });
 
@@ -241,6 +330,26 @@ export default class FunctionTab {
       button.text.setFixedSize(button.width - 12, button.height - 8);
       button.text.setOrigin(0.5);
     });
+  }
+
+  _layoutWaterControls(button) {
+    if (!button?.controlBg) return;
+    const countY = 1;
+    const actionY = Math.round(button.height / 2 - 10);
+    const countX = -Math.round(button.width * 0.11);
+    const minusX = countX - 26;
+    const plusX = countX + 26;
+    const unitX = countX + 42;
+
+    button.minusText.setPosition(minusX, countY);
+    button.countText.setPosition(countX, countY);
+    button.plusText.setPosition(plusX, countY);
+    button.unitText.setPosition(unitX, countY);
+    button.actionText.setPosition(0, actionY);
+
+    button.minusHit.setPosition(minusX, countY).setSize(WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT);
+    button.plusHit.setPosition(plusX, countY).setSize(WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT);
+    button.actionHit.setPosition(0, actionY).setSize(WATER_ACTION_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT);
   }
 
   _getSceneActiveMode() {
@@ -297,32 +406,110 @@ export default class FunctionTab {
     }
   }
 
-  toggleWaterAutomation() {
+  _getAutomation() {
+    return Teams.ensureTownAutomation(this.teamNumber);
+  }
+
+  _getWaterUiState(automation = this._getAutomation()) {
+    const draft = Math.max(1, Number(automation?.waterDraftCount || Teams.DEFAULT_WATER_BATCH_COUNT || 5));
+    const remaining = Math.max(0, Number(automation?.waterRemainingCount || 0));
+    const delivered = Math.max(0, Number(automation?.waterDeliveredCount || 0));
+    const committed = Math.max(0, Number(automation?.waterCommittedCount || 0));
+    const batchActive = !!automation?.waterOrderId && (
+      !!automation?.waterEnabled ||
+      remaining > 0 ||
+      committed > 0
+    );
+    return {
+      draft,
+      remaining,
+      delivered,
+      committed,
+      batchActive,
+      finishing: batchActive && remaining <= 0 && committed > 0,
+      total: Math.max(delivered + remaining, delivered || draft),
+    };
+  }
+
+  _adjustWaterTarget(delta = 0) {
     const automation = this._getAutomation();
     if (!automation) return;
-    const tutorial = this._getTutorialManager();
-    const enabled = !automation.waterEnabled;
 
-    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled })) {
+    const amount = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+    if (!amount) return;
+
+    this._reconcileTownAutomation(true);
+    const state = this._getWaterUiState(automation);
+
+    if (state.batchActive) {
+      const nextRemaining = Math.max(0, state.remaining + amount);
+      if (nextRemaining === state.remaining) return;
+
+      automation.waterRemainingCount = nextRemaining;
+      if (amount < 0 && automation.waterOrderId != null) {
+        OrderRunner.trimManagedWaterOrder?.(automation.waterOrderId, nextRemaining, this.teamNumber);
+      }
+      if (automation.waterRemainingCount <= 0 && automation.waterCommittedCount <= 0) {
+        Teams.clearTownWaterBatch?.(this.teamNumber, automation.waterOrderId);
+      }
+    } else {
+      automation.waterDraftCount = Math.max(1, state.draft + amount);
+    }
+
+    this._reconcileTownAutomation(true);
+    this.updateVisuals();
+  }
+
+  _startWaterBatch() {
+    const automation = this._getAutomation();
+    if (!automation) return;
+
+    const tutorial = this._getTutorialManager();
+    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled: true })) {
       return;
     }
 
-    automation.waterEnabled = enabled;
+    const target = Math.max(1, Number(automation.waterDraftCount || Teams.DEFAULT_WATER_BATCH_COUNT || 5));
+    const orderId = OrderRunner._nextId();
+    Teams.startTownWaterBatch?.(this.teamNumber, target, orderId);
     this._reconcileTownAutomation(true);
     this.updateVisuals();
 
-    showAlert(
-      this.scene,
-      automation.waterEnabled ? "Water production enabled for all firemen" : "Water production winding down",
-      "#93c5fd"
-    );
-    tutorial?.notifyAction?.("function.water", {
-      enabled,
-    });
+    showAlert(this.scene, `Producing ${target} clean water`, "#93c5fd");
+    tutorial?.notifyAction?.("function.water", { enabled: true });
   }
 
-  _getAutomation() {
-    return Teams.ensureTownAutomation(this.teamNumber);
+  _cancelWaterBatch() {
+    const automation = this._getAutomation();
+    if (!automation?.waterOrderId) return;
+
+    const tutorial = this._getTutorialManager();
+    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled: false })) {
+      return;
+    }
+
+    automation.waterRemainingCount = 0;
+    OrderRunner.trimManagedWaterOrder?.(automation.waterOrderId, 0, this.teamNumber);
+    if (automation.waterCommittedCount <= 0) {
+      Teams.clearTownWaterBatch?.(this.teamNumber, automation.waterOrderId);
+    }
+    this._reconcileTownAutomation(true);
+    this.updateVisuals();
+
+    showAlert(this.scene, "Water batch winding down", "#93c5fd");
+    tutorial?.notifyAction?.("function.water", { enabled: false });
+  }
+
+  _handleWaterPrimaryAction() {
+    const automation = this._getAutomation();
+    if (!automation) return;
+    const state = this._getWaterUiState(automation);
+    if (state.batchActive) {
+      if (state.finishing) return;
+      this._cancelWaterBatch();
+      return;
+    }
+    this._startWaterBatch();
   }
 
   _sumGatherTargets(gatherTargets = {}) {
@@ -431,6 +618,7 @@ export default class FunctionTab {
 
   _reconcileWaterAutomation(team, automation) {
     const firemen = this._getTeamTroops(team.firemanList);
+    const waterState = this._getWaterUiState(automation);
 
     this._managedWaterTroops(firemen)
       .filter((troop) => troop?.currentOrder?.shuttingDown)
@@ -438,20 +626,20 @@ export default class FunctionTab {
         OrderRunner.stepUnit(troop);
       });
 
-    if (!automation.waterEnabled) {
+    if (!waterState.batchActive || !automation.waterOrderId) {
       this._managedWaterTroops(firemen).forEach((troop) => {
         this._markOrderShuttingDown(troop);
       });
       return;
     }
 
-    if (!automation.waterOrderId) {
-      automation.waterOrderId = OrderRunner._nextId();
-    }
-
     firemen.forEach((troop) => {
       const order = troop?.currentOrder;
-      if (this._isManagedOrder(order, ORDER_KINDS.MAKE_WATER) && !order.shuttingDown) return;
+      if (this._isManagedOrder(order, ORDER_KINDS.MAKE_WATER) && order.id === automation.waterOrderId && !order.shuttingDown) return;
+      if (this._isManagedOrder(order, ORDER_KINDS.MAKE_WATER) && order.id !== automation.waterOrderId) {
+        this._markOrderShuttingDown(troop);
+        return;
+      }
       if (!this._canAssignNow(troop)) return;
       if (order && order.source && order.source !== FUNCTION_TAB_SOURCE) return;
       this._assignManagedWaterOrder(troop, automation.waterOrderId);
@@ -732,14 +920,33 @@ export default class FunctionTab {
     const managed = this._managedWaterTroops(firemen);
     const active = managed.filter((troop) => !troop?.currentOrder?.shuttingDown).length;
     const finishing = managed.length - active;
+    const state = this._getWaterUiState(automation);
 
-    if (automation.waterEnabled) {
-      return `WATER ON\n${active} firemen`;
+    if (state.batchActive) {
+      const total = Math.max(1, state.total);
+      const done = Math.min(total, Math.max(0, state.delivered));
+      return `${done}/${total} done`;
     }
     if (finishing > 0) {
-      return `WATER OFF\n${finishing} finishing`;
+      return "Finishing current batch";
     }
-    return "WATER OFF\nStandby";
+    return "Start production of";
+  }
+
+  _getWaterCountValue(automation) {
+    const state = this._getWaterUiState(automation);
+    return state.batchActive ? state.remaining : state.draft;
+  }
+
+  _getWaterCountUnitLabel(automation) {
+    const state = this._getWaterUiState(automation);
+    return state.batchActive ? "left" : "waters";
+  }
+
+  _getWaterActionLabel(automation) {
+    const state = this._getWaterUiState(automation);
+    if (!state.batchActive) return "START";
+    return state.finishing ? "FINISHING" : "CANCEL";
   }
 
   _setMainButtonLabel(button, label) {
@@ -771,6 +978,48 @@ export default class FunctionTab {
 
     button.text.setColor(active ? "#fffaf0" : Phaser.Display.Color.IntegerToColor(button.accentColor).rgba);
     button.root.setScale(button.pressed ? 0.99 : active ? 1.015 : button.hovered ? 1.01 : 1);
+    if (button.key === "water") {
+      this._drawWaterControls(button, active);
+    }
+  }
+
+  _drawWaterControls(button, active) {
+    if (!button?.controlBg) return;
+
+    const drawPill = (cx, cy, width, height, label, hovered, pressed, enabled = true) => {
+      const x = cx - width / 2;
+      const y = cy - height / 2;
+      const alpha = !enabled ? 0.34 : pressed ? 0.92 : hovered ? 0.86 : 0.76;
+      const fill = mixColor(button.accentColor, 0xffffff, !enabled ? 0.06 : hovered ? 0.18 : 0.12);
+      const stroke = enabled ? button.accentColor : mixColor(button.accentColor, 0x6b7280, 0.52);
+      button.controlBg.fillStyle(fill, alpha);
+      button.controlBg.fillRoundedRect(x, y, width, height, 8);
+      button.controlBg.lineStyle(enabled ? 1.5 : 1, stroke, enabled ? 0.58 : 0.24);
+      button.controlBg.strokeRoundedRect(x, y, width, height, 8);
+      label.setColor(enabled ? "#f8fdff" : "#7f93a1");
+    };
+
+    const automation = this._getAutomation() || Teams.createTownAutomationState();
+    const state = this._getWaterUiState(automation);
+    const countY = 1;
+    const actionY = Math.round(button.height / 2 - 10);
+    const countX = -Math.round(button.width * 0.11);
+    const minusX = countX - 26;
+    const plusX = countX + 26;
+    const unitX = countX + 42;
+
+    button.controlBg.clear();
+    drawPill(minusX, countY, WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT, button.minusText, !!button.minusHovered, !!button.minusPressed, true);
+    drawPill(plusX, countY, WATER_CONTROL_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT, button.plusText, !!button.plusHovered, !!button.plusPressed, true);
+    drawPill(0, actionY, WATER_ACTION_BUTTON_WIDTH, WATER_CONTROL_BUTTON_HEIGHT, button.actionText, !!button.actionHovered, !!button.actionPressed, !state.finishing);
+
+    button.minusText.setText("-");
+    button.countText.setText(`${this._getWaterCountValue(automation)}`);
+    button.countText.setPosition(countX, countY);
+    button.plusText.setText("+");
+    button.unitText.setText(this._getWaterCountUnitLabel(automation));
+    button.unitText.setPosition(unitX, countY);
+    button.actionText.setText(this._getWaterActionLabel(automation));
   }
 
   updateVisuals() {
@@ -794,7 +1043,7 @@ export default class FunctionTab {
     });
 
     this._setMainButtonLabel(this.mainButtons.water, this._getWaterSummary(automation, firemen));
-    this._drawMainButton(this.mainButtons.water, !!automation?.waterEnabled);
+    this._drawMainButton(this.mainButtons.water, this._getWaterUiState(automation).batchActive);
 
     REST_GROUPS.forEach((cfg) => {
       const button = this.restButtons[cfg.key];

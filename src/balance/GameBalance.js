@@ -53,7 +53,7 @@ const ENEMY_KILL_REWARDS = Object.freeze({
 });
 
 const NIGHT_HORDE_TOTALS = Object.freeze([3, 4, 6, 7, 8, 9, 10]);
-const NIGHT_HORDE_LANES = Object.freeze([1, 1, 2, 2, 3, 3, 3]);
+const NIGHT_HORDE_LANES = Object.freeze([1, 1, 2, 2, 3, 3, 4]);
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -194,10 +194,13 @@ export function getMarketPriceMultiplier(scene) {
   return 1 + (Math.max(0, day - 1) * 0.1) + (getIncomeTier(scene) * 0.05);
 }
 
-export function buildMarketPriceTable(scene, basePrices = {}) {
+export function buildMarketPriceTable(scene, basePrices = {}, inflationMultipliers = null) {
   const multiplier = getMarketPriceMultiplier(scene);
   return Object.fromEntries(
-    Object.entries(basePrices || {}).map(([key, value]) => [key, roundPrice(Number(value || 0) * multiplier, 10)])
+    Object.entries(basePrices || {}).map(([key, value]) => {
+      const inflation = Math.max(1, Number(inflationMultipliers?.[key] || 1));
+      return [key, roundPrice(Number(value || 0) * multiplier * inflation, 10)];
+    })
   );
 }
 
@@ -242,7 +245,7 @@ export function buildPressureSpawnerProfile(scene, difficulty = 1, modifier = nu
   const diff = clamp(Math.floor(toWholeNumber(difficulty, 1)), 1, 3);
   const extraSpawners = Math.max(0, Math.floor(toWholeNumber(modifier?.extraSpawners, 0)));
   const spawnerCount = clamp(diff + extraSpawners, 1, 3);
-  const quotaBase = 3 + Math.floor(Math.max(0, day - 1) / 3);
+  const quotaBase = Math.min(6, 3 + Math.floor(Math.max(0, day - 1) / 4));
   const quotaPerSpawner = Math.max(
     2,
     Math.round(quotaBase * Math.max(0.5, toWholeNumber(modifier?.quotaMultiplier, 1)))
@@ -258,6 +261,7 @@ export function buildPressureSpawnerProfile(scene, difficulty = 1, modifier = nu
     damageMultiplier: Math.max(0.5, toWholeNumber(modifier?.damageMultiplier, 1)),
     modifierKey: modifier?.key ?? null,
     modifierLabel: modifier?.label ?? null,
+    visual: modifier?.visual ? { ...modifier.visual } : null,
   };
   const spawnerEnemyTypes = Array.from({ length: spawnerCount }, (_, index) =>
     getPressureSpawnerEnemyType(day, diff, index, spawnerCount)

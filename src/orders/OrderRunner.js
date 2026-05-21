@@ -14,6 +14,7 @@ import { StaminaManager } from "../Manager/staminaManager";
 import { StageState } from "../parcelController/StageState";
 import { buildingManager } from "../Manager/buildingManager";
 import { UI_ITEM_TYPES } from "../UI/UIConstants";
+import { ClayOven } from "../buildings/ClayOven";
 import {
   canSellTroopsNow,
   getTroopSellLockMessage,
@@ -743,6 +744,7 @@ export class OrderRunner {
     }
 
     this._cleanupDirectOvenJobs(orderId, 1);
+    Teams.clearTownWaterBatch?.(1, orderId);
   }
 
   static _getTownCenterWorld(teamNumber = 1) {
@@ -1164,7 +1166,7 @@ export class OrderRunner {
         return true;
       }
 
-      const nextAction = this._selectMakeWaterAction(troop);
+      const nextAction = this._selectMakeWaterAction(troop, order);
       if (!nextAction) {
         this._parkGatherTroopInTown(troop);
         return true;
@@ -1188,6 +1190,9 @@ export class OrderRunner {
     }
 
     if (order.kind === ORDER_KINDS.FILL_OVENS) {
+      if (this._tryAssignMakeWaterPickup(troop, order)) {
+        return true;
+      }
       if (troop.type?.assignFromOvenJobs?.(troop)) return true;
       if (this._createNextFillOvenJob(troop, order)) {
         return troop.type?.assignFromOvenJobs?.(troop) || true;
@@ -1216,7 +1221,15 @@ export class OrderRunner {
         return troop.type?.goRefuelOven?.(troop, troop.pendingFuelJob) || false;
       }
       if (troop.pendingOvenJob) {
-        return troop.type?.maybeAssignOvenJobDelivery?.(troop, troop.pendingOvenJob, troop.carrying) || false;
+        const job = troop.pendingOvenJob;
+        if (troop.type?.maybeAssignOvenJobDelivery?.(troop, job, troop.carrying)) {
+          return true;
+        }
+        if (job && Number(job.assigned || 0) > 0) {
+          job.assigned = Math.max(0, Number(job.assigned || 0) - 1);
+        }
+        troop.pendingOvenJob = null;
+        return StorageManager.tryCreateStorageDeliveryTask(troop) || false;
       }
     }
 
@@ -1243,20 +1256,50 @@ export class OrderRunner {
     return false;
   }
 
-  static _selectMakeWaterAction(troop) {
+  static _isManagedFunctionWaterOrder(order) {
+    return order?.kind === ORDER_KINDS.MAKE_WATER && order?.source === "function_tab";
+  }
+
+  static _getManagedWaterUnitsStillNeeded(order, teamNumber = 1) {
+    if (!this._isManagedFunctionWaterOrder(order)) return Number.POSITIVE_INFINITY;
+    const automation = Teams.ensureTownAutomation?.(teamNumber);
+    if (!automation || automation.waterOrderId !== order.id) return 0;
+    return Math.max(
+      0,
+      Number(automation.waterRemainingCount || 0) - Number(automation.waterCommittedCount || 0)
+    );
+  }
+
+  static _compareCandidateScores(a = [], b = []) {
+    const length = Math.max(a.length, b.length);
+    for (let index = 0; index < length; index += 1) {
+      const aValue = Number(a[index] ?? 0);
+      const bValue = Number(b[index] ?? 0);
+      if (aValue === bValue) continue;
+      return aValue - bValue;
+    }
+    return 0;
+  }
+
+  static _selectMakeWaterAction(troop, order = null) {
     const teamNumber = troop?.body?.team ?? 1;
     const team = Teams.teamLists?.[`${teamNumber}`];
     if (!team) return null;
 
-    const maxPerBurner = Number(UI_ITEM_TYPES.unclean_water?.stacks || 1);
+    const maxPerBurner = ClayOven.getItemCapacityPerSlot();
+    const unitsStillNeeded = this._getManagedWaterUnitsStillNeeded(order, teamNumber);
     const ovens = [...(team.ovenList || [])]
       .filter(oven => oven?.sprite?.active)
       .sort((a, b) => this._ovenDistanceToTroop(troop, a) - this._ovenDistanceToTroop(troop, b));
 
     let bestFuel = null;
+    let bestFuelScore = null;
     let bestWater = null;
+    let bestWaterScore = null;
 
     for (const oven of ovens) {
+      if (this._isOvenInputBlockedByOutput(oven, 0)) continue;
+
       const slot = oven.cookingSlots?.[0] || null;
       if (slot && slot.item?.name !== UI_ITEM_TYPES.unclean_water.name) continue;
 
@@ -1271,24 +1314,57 @@ export class OrderRunner {
 
       const fuelNeeded = Math.max(0, Math.min(maxFuel, totalWater) - totalFuel);
       if (fuelNeeded > 0) {
-        bestFuel = { type: "fuel", oven };
-        break;
+        const fuelScore = [
+          this._ovenDistanceToTroop(troop, oven),
+          Number(currentFuel || 0),
+          Number(inSlot || 0),
+          Number(oven?.x || 0),
+          Number(oven?.y || 0),
+        ];
+        if (!bestFuel || this._compareCandidateScores(fuelScore, bestFuelScore) < 0) {
+          bestFuel = { type: "fuel", oven };
+          bestFuelScore = fuelScore;
+        }
       }
 
       const waterNeeded = Math.max(0, maxPerBurner - totalWater);
-      if (waterNeeded > 0 && !bestWater) {
-        bestWater = { type: "water", oven };
+      if (waterNeeded > 0 && unitsStillNeeded > 0) {
+        const waterScore = [
+          slot ? 1 : 0,
+          Number(totalWater || 0),
+          this._ovenDistanceToTroop(troop, oven),
+          Number(oven?.x || 0),
+          Number(oven?.y || 0),
+        ];
+        if (!bestWater || this._compareCandidateScores(waterScore, bestWaterScore) < 0) {
+          bestWater = { type: "water", oven };
+          bestWaterScore = waterScore;
+        }
       }
     }
 
     return bestFuel || bestWater || null;
   }
 
+  static _isOvenInputBlockedByOutput(oven, inputidx = 0) {
+    const out = oven?.outputSlots?.[inputidx] || null;
+    return !!(out?.item && Number(out.amount || 0) > 0);
+  }
+
   static _tryAssignMakeWaterPickup(troop, order) {
     const teamNumber = troop?.body?.team ?? 1;
     const team = Teams.teamLists?.[`${teamNumber}`];
     if (!team) return false;
-    if (!Teams.getStorageWithCapacity(teamNumber, UI_ITEM_TYPES.clean_water, 1)) return false;
+    if (!Teams.getStorageWithCapacity(teamNumber, UI_ITEM_TYPES.clean_water, 1)) {
+      if (this._hasCleanWaterOvenOutput(team)) {
+        Player.showStatusEmote?.(troop, "STORAGE FULL", {
+          key: "water_storage_full",
+          cooldownMs: 3200,
+          fontSize: 12,
+        });
+      }
+      return false;
+    }
 
     const existingJobs = (team.ovenPickupJobs || [])
       .filter(job => job?.oven?.sprite?.active)
@@ -1298,6 +1374,9 @@ export class OrderRunner {
       .sort((a, b) => this._ovenDistanceToTroop(troop, a.oven) - this._ovenDistanceToTroop(troop, b.oven));
 
     for (const job of existingJobs) {
+      if (this._isManagedFunctionWaterOrder(order) && job.directOrderId == null) {
+        job.directOrderId = order.id;
+      }
       if (Manager.assignOneTroopToAction(troop, [job], CONTROL_STATES.GET_FROM_OVEN)) {
         return true;
       }
@@ -1321,6 +1400,16 @@ export class OrderRunner {
     }
 
     return false;
+  }
+
+  static _hasCleanWaterOvenOutput(team) {
+    return (team?.ovenList || []).some(oven => {
+      if (!oven?.sprite?.active) return false;
+      return (oven.outputSlots || []).some(slot =>
+        slot?.item?.name === UI_ITEM_TYPES.clean_water.name &&
+        Number(slot.amount || 0) > 0
+      );
+    });
   }
 
   static _createMakeWaterPickupJob(oven, order, teamNumber = 1) {
@@ -1359,11 +1448,12 @@ export class OrderRunner {
   static _createMakeWaterFillJob(oven, order, teamNumber = 1) {
     const team = Teams.teamLists?.[`${teamNumber}`];
     if (!team || !oven?.sprite?.active) return null;
+    if (this._isOvenInputBlockedByOutput(oven, 0)) return null;
 
     const slot = oven.cookingSlots?.[0] || null;
     if (slot && slot.item?.name !== UI_ITEM_TYPES.unclean_water.name) return null;
 
-    const maxPerBurner = Number(UI_ITEM_TYPES.unclean_water?.stacks || 1);
+    const maxPerBurner = ClayOven.getItemCapacityPerSlot();
     const inSlot = slot?.item?.name === UI_ITEM_TYPES.unclean_water.name ? Number(slot.amount || 0) : 0;
     const planned = this._plannedWaterForOven(teamNumber, oven, 0);
     const missing = Math.max(0, maxPerBurner - inSlot - planned);
@@ -1383,6 +1473,9 @@ export class OrderRunner {
       y: oven.y,
     };
     team.ovenJobs.push(job);
+    if (this._isManagedFunctionWaterOrder(order)) {
+      Teams.commitTownWaterUnits?.(teamNumber, order.id, 1);
+    }
     Player.scene?.events?.emit?.("oven:updated", oven);
     return job;
   }
@@ -1390,6 +1483,7 @@ export class OrderRunner {
   static _createMakeWaterFuelJob(oven, order, teamNumber = 1) {
     const team = Teams.teamLists?.[`${teamNumber}`];
     if (!team || !oven?.sprite?.active) return null;
+    if (this._isOvenInputBlockedByOutput(oven, 0)) return null;
 
     const slot = oven.cookingSlots?.[0] || null;
     if (slot && slot.item?.name !== UI_ITEM_TYPES.unclean_water.name) return null;
@@ -1427,8 +1521,10 @@ export class OrderRunner {
       .filter(oven => oven?.sprite?.active)
       .sort((a, b) => this._ovenDistanceToTroop(troop, a) - this._ovenDistanceToTroop(troop, b));
 
-    const maxPerBurner = Number(UI_ITEM_TYPES.unclean_water?.stacks || 1);
+    const maxPerBurner = ClayOven.getItemCapacityPerSlot();
     for (const oven of ovens) {
+      if (this._isOvenInputBlockedByOutput(oven, 0)) continue;
+
       const slot = oven.cookingSlots?.[0] || null;
       if (slot && slot.item?.name !== UI_ITEM_TYPES.unclean_water.name) continue;
 
@@ -1545,6 +1641,59 @@ export class OrderRunner {
     pruneTasks("ovenPickupJobs");
 
     removedOvens.forEach(oven => Player.scene?.events?.emit?.("oven:updated", oven));
+  }
+
+  static trimManagedWaterOrder(orderId, keepCommitted = 0, teamNumber = 1) {
+    const team = Teams.teamLists?.[`${teamNumber}`];
+    const automation = Teams.ensureTownAutomation?.(teamNumber);
+    if (!team || !automation || automation.waterOrderId !== orderId) return 0;
+
+    let removableUnits = Math.max(
+      0,
+      Number(automation.waterCommittedCount || 0) - Math.max(0, Number(keepCommitted || 0) || 0)
+    );
+    if (removableUnits <= 0) return 0;
+
+    const jobs = Array.isArray(team.ovenJobs)
+      ? team.ovenJobs
+          .map((job, index) => ({ job, index }))
+          .filter(({ job }) => (
+            job?.directOrderId === orderId &&
+            job?.item?.name === UI_ITEM_TYPES.unclean_water.name &&
+            Number(job?.assigned || 0) <= 0
+          ))
+          .sort((a, b) => {
+            const byAssigned = Number(a.job?.assigned || 0) - Number(b.job?.assigned || 0);
+            if (byAssigned !== 0) return byAssigned;
+            return a.index - b.index;
+          })
+      : [];
+
+    const removedOvens = new Set();
+    let removedUnits = 0;
+
+    const removableEntries = jobs
+      .slice()
+      .sort((a, b) => b.index - a.index);
+
+    for (const entry of removableEntries) {
+      if (removableUnits <= 0) break;
+      const units = Math.max(0, Number(entry.job?.remaining || entry.job?.target || 0) || 0);
+      if (units <= 0) continue;
+
+      team.ovenJobs.splice(entry.index, 1);
+      entry.job.canceled = true;
+      removedOvens.add(entry.job.oven);
+      removedUnits += units;
+      removableUnits -= units;
+    }
+
+    if (removedUnits > 0) {
+      Teams.uncommitTownWaterUnits?.(teamNumber, orderId, removedUnits);
+      removedOvens.forEach((oven) => Player.scene?.events?.emit?.("oven:updated", oven));
+    }
+
+    return removedUnits;
   }
 
   static _ovenDistanceToTroop(troop, oven) {

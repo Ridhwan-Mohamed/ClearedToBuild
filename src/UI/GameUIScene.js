@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { UIDEPTH } from "../constants";
+import { UIDEPTH, getAlertTone } from "../constants";
 import { DailyNeedsTracker } from "./DailyNeedsTracker";
 import { Clock } from "../Controllers/Clock";
 import { CreateBottomBar } from "./BottomBar/BottomBar";
@@ -18,6 +18,9 @@ import { RELIEF_PACKAGE_MONEY_GRANT, RELIEF_PACKAGE_PRICE } from "../ReliefPacka
 import { StorageBuilding } from "../buildings/Storage.js";
 import { ClayOven } from "../buildings/ClayOven.js";
 import { createGlassStatusBubble } from "./BuildingTheme.js";
+import { UI_ITEM_TYPES } from "./UIConstants.js";
+import { ORDER_KINDS, isGatherOrder } from "../orders/OrderTypes.js";
+import { BODY_FONT_FAMILY } from "./Typography.js";
 
 export class GameUIScene extends Phaser.Scene {
   constructor() {
@@ -63,6 +66,9 @@ export class GameUIScene extends Phaser.Scene {
     this.raiderEdgeHud = null;
     this.raiderEdgeIndicators = null;
     this.contractHud = null;
+    this.productionStatusHud = null;
+    this.productionStatusEntries = null;
+    this._productionStatusSignature = "";
     this.achievementBoard = null;
     this.selectionCommandBar = null;
     this.uiBottomBar = null;
@@ -82,6 +88,9 @@ export class GameUIScene extends Phaser.Scene {
     this._townXpRewardPresentation = null;
     this._adrenalineHud = null;
     this._adrenalineUntil = 0;
+    this._adrenalineHudLastSeconds = null;
+    this._meleeCritUntil = 0;
+    this._projectileCritUntil = 0;
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
     this._townStatusHudSignature = null;
@@ -221,6 +230,7 @@ export class GameUIScene extends Phaser.Scene {
     this.selectionCommandBar = null;
     this.contractHud?.destroy?.();
     this.contractHud = null;
+    this._destroyProductionStatusHud();
     this.uiBottomBar?.destroy?.();
     this.playerTab?.destroy?.();
     this.playerTab = null;
@@ -348,11 +358,13 @@ export class GameUIScene extends Phaser.Scene {
       "housing:updated",
       "relief-package:changed",
       "store:unlock-changed",
+      "reward-state:changed",
       "cards:updated",
       "mode:completed",
       "achievements:changed",
       "achievement:completed",
       "market:adrenaline-changed",
+      "market:timed-buff-changed",
     ];
 
     passthrough.forEach((evt) => {
@@ -364,6 +376,10 @@ export class GameUIScene extends Phaser.Scene {
     const adrenalineFn = (payload) => this._setAdrenalineHud(payload);
     this.events.on("market:adrenaline-changed", adrenalineFn);
     this._bridged.push({ evt: "market:adrenaline-changed", fn: adrenalineFn, sourceScene: { events: this.events } });
+
+    const timedBuffFn = (payload) => this._setTimedMarketBuffHud(payload);
+    this.events.on("market:timed-buff-changed", timedBuffFn);
+    this._bridged.push({ evt: "market:timed-buff-changed", fn: timedBuffFn, sourceScene: { events: this.events } });
   }
 
   _forwardWorldState() {
@@ -429,6 +445,7 @@ export class GameUIScene extends Phaser.Scene {
     this._buildContractHud();
     this._buildSelectionCommandBar();
     CreateBottomBar(this);
+    this._buildProductionStatusHud();
     this._hudBuilt = true;
 
     this._syncWorldUiRefs();
@@ -512,40 +529,22 @@ export class GameUIScene extends Phaser.Scene {
     });
   }
 
-  _parseAlertColor(color = "#ffffff") {
-    const hex = String(color || "").trim().replace(/^#/, "");
-    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-
-  _isErrorAlert(message = "", color = "#ffffff") {
-    const upper = String(message || "").toUpperCase();
-    if (
-      upper.includes("ERROR")
-      || upper.includes("FAILED")
-      || upper.includes("INVALID")
-      || upper.includes("COULD NOT")
-      || upper.includes("MISSED")
-      || upper.includes("REQUIRED")
-      || upper.includes("CANNOT")
-    ) {
-      return true;
-    }
-
-    const parsed = this._parseAlertColor(color);
-    if (!parsed) return false;
-    return parsed.r >= 180 && parsed.r > (parsed.g * 1.14) && parsed.r > (parsed.b * 1.14);
+  _getAlertTone(message = "", color = "#ffffff") {
+    return getAlertTone(message, color);
   }
 
   showAlertMessage(message, color = "#ffffff", duration = 1400) {
     if (!message) return null;
     this._buildAlertHud();
-    if (this._isErrorAlert(message, color)) {
+    const tweenScale = Number(this.tweens?.timeScale);
+    const unscaledTweenTimeScale = Number.isFinite(tweenScale) && tweenScale > 0 ? 1 / tweenScale : 1;
+    const alertTone = this._getAlertTone(message, color);
+    if (alertTone === "bad") {
       AudioManager.playError({ volume: 0.24 });
+    } else if (alertTone === "good") {
+      AudioManager.playNotificationGood({ volume: 0.23 });
+    } else {
+      AudioManager.playNotification({ volume: 0.22 });
     }
 
     const label = this.add
@@ -586,6 +585,7 @@ export class GameUIScene extends Phaser.Scene {
       scaleY: 1,
       y: entry.targetY,
       duration: 170,
+      timeScale: unscaledTweenTimeScale,
       ease: "Back.Out",
       onComplete: () => {
         entry.isEntering = false;
@@ -598,6 +598,7 @@ export class GameUIScene extends Phaser.Scene {
       y: entry.targetY - 10,
       delay: Math.max(150, Number(duration) || 1400),
       duration: 220,
+      timeScale: unscaledTweenTimeScale,
       ease: "Quad.Out",
       onComplete: () => {
         const nextAlerts = (this._activeAlerts || []).filter((candidate) => candidate !== entry);
@@ -1232,24 +1233,44 @@ export class GameUIScene extends Phaser.Scene {
       const top = 7;
       const trackHeight = 14;
 
+      const segmentCount = xp.level >= 7 ? 10 : xp.level >= 4 ? 8 : 5;
+      const gap = 3;
+      const innerLeft = left + 2;
+      const innerTop = top + 2;
+      const innerWidth = Math.max(0, width - 4);
+      const innerHeight = trackHeight - 4;
+      const segmentWidth = Math.max(8, (innerWidth - (gap * (segmentCount - 1))) / segmentCount);
+      const fillSegments = ratio * segmentCount;
+
       track.clear();
       track.fillStyle(0x0a1a27, 0.82);
       track.lineStyle(2, 0xffffff, 0.10);
       track.fillRoundedRect(left, top, width, trackHeight, 8);
       track.strokeRoundedRect(left, top, width, trackHeight, 8);
+      for (let i = 0; i < segmentCount; i += 1) {
+        const x = innerLeft + i * (segmentWidth + gap);
+        track.fillStyle(0x102d42, 0.92);
+        track.fillRoundedRect(x, innerTop, segmentWidth, innerHeight, 4);
+        track.lineStyle(1, 0xbdefff, 0.12);
+        track.strokeRoundedRect(x, innerTop, segmentWidth, innerHeight, 4);
+      }
 
-      const maxFillWidth = Math.max(0, width - 4);
-      const fillWidth = ratio <= 0 ? 0 : Math.max(10, Math.round(maxFillWidth * ratio));
       fill.clear();
-      if (fillWidth > 0) {
+      if (ratio > 0) {
         fill.fillStyle(xp.pendingLevelRewards > 0 ? 0xffd785 : 0x78e6ff, 0.96);
-        fill.fillRoundedRect(left + 2, top + 2, Math.min(maxFillWidth, fillWidth), trackHeight - 4, 6);
+        for (let i = 0; i < segmentCount; i += 1) {
+          const segmentRatio = Phaser.Math.Clamp(fillSegments - i, 0, 1);
+          if (segmentRatio <= 0) continue;
+          const x = innerLeft + i * (segmentWidth + gap);
+          fill.fillRoundedRect(x, innerTop, segmentWidth * segmentRatio, innerHeight, 4);
+        }
       }
 
       fillGlow.clear();
-      if (fillWidth > 0) {
+      if (ratio > 0) {
+        const glowX = innerLeft + Math.min(innerWidth - 18, Math.max(0, innerWidth * ratio - 9));
         fillGlow.fillStyle(xp.pendingLevelRewards > 0 ? 0xfff1b5 : 0xbdefff, xp.pendingLevelRewards > 0 ? 0.28 : 0.18);
-        fillGlow.fillRoundedRect(left + Math.max(4, Math.min(width - 20, fillWidth - 14)), top - 3, 20, trackHeight + 6, 9);
+        fillGlow.fillRoundedRect(glowX, top - 3, 18, trackHeight + 6, 9);
       }
     };
 
@@ -2863,6 +2884,391 @@ export class GameUIScene extends Phaser.Scene {
     if (this.selectionCommandBar) return;
     this.selectionCommandBar = new SelectionCommandBar(this);
   }
+
+  _buildProductionStatusHud() {
+    if (this.productionStatusHud) return;
+    this.productionStatusHud = this.add.container(0, 0).setDepth(UIDEPTH + 16);
+    this.productionStatusEntries = new Map();
+    this._productionStatusSignature = "";
+  }
+
+  _destroyProductionStatusHud() {
+    this.productionStatusEntries?.forEach?.((entry) => {
+      this.tweens.killTweensOf(entry?.root);
+      this.tweens.killTweensOf(entry?.glow);
+      entry?.root?.destroy?.(true);
+    });
+    this.productionStatusEntries?.clear?.();
+    this.productionStatusEntries = null;
+    this.productionStatusHud?.destroy?.(true);
+    this.productionStatusHud = null;
+    this._productionStatusSignature = "";
+  }
+
+  _normalizeProductionKind(kind = null) {
+    const raw = String(kind || "").trim();
+    if (!raw) return null;
+    const normalized = raw.toLowerCase();
+    if (normalized === "water" || normalized === "clean_water" || normalized === "unclean_water") return "water";
+    if (normalized === "wood" || normalized === "pine") return "wood";
+    if (normalized === "stone" || normalized === "rock") return "stone";
+    if (normalized === "gold" || normalized === "goldore") return "gold";
+    if (normalized === "seed" || normalized === "seedcrop" || normalized === "seedbush") return "seed";
+    if (normalized === "berry" || normalized === "berries" || normalized === "seedberry" || normalized === "berrybush") return "berry";
+    return null;
+  }
+
+  _getProductionIndicatorConfig(kind = null) {
+    switch (kind) {
+      case "water":
+        return {
+          key: "water",
+          iconKey: UI_ITEM_TYPES.clean_water.icon,
+          glowColor: 0x74d7ff,
+          hoverLabel: "Producing Clean Water",
+        };
+      case "wood":
+        return {
+          key: "wood",
+          iconKey: UI_ITEM_TYPES.wood.icon,
+          glowColor: 0xf59e0b,
+          hoverLabel: "Gathering Wood",
+        };
+      case "stone":
+        return {
+          key: "stone",
+          iconKey: UI_ITEM_TYPES.stone.icon,
+          glowColor: 0xd6deeb,
+          hoverLabel: "Gathering Stone",
+        };
+      case "seed":
+        return {
+          key: "seed",
+          iconKey: UI_ITEM_TYPES.seedCrop.icon,
+          glowColor: 0x86efac,
+          hoverLabel: "Gathering Crop Seeds",
+        };
+      case "berry":
+        return {
+          key: "berry",
+          iconKey: UI_ITEM_TYPES.seedBerry.icon,
+          glowColor: 0xfb7185,
+          hoverLabel: "Gathering Berry Seeds",
+        };
+      case "gold":
+        return {
+          key: "gold",
+          iconKey: "monies",
+          glowColor: 0xfacc15,
+          hoverLabel: "Gathering Gold",
+        };
+      default:
+        return null;
+    }
+  }
+
+  _getAdrenalineRemainingMs() {
+    if (!this._adrenalineUntil) return 0;
+    const now = this.worldScene?.getSimulationNow?.() ?? this.worldScene?.simNowMs ?? this.time.now;
+    return Math.max(0, this._adrenalineUntil - now);
+  }
+
+  _getAdrenalineIndicatorConfig() {
+    const remaining = this._getAdrenalineRemainingMs();
+    if (remaining <= 0) return null;
+    return {
+      key: "adrenaline",
+      iconKey: MARKET_REAL_ASSETS.cardIcons.adrenalineDraft,
+      glowColor: 0xfff17a,
+      hoverLabel: "Adrenaline Draft active",
+      timerText: `${Math.ceil(remaining / 1000)}s`,
+      width: 78,
+    };
+  }
+
+  _getTimedBuffRemainingMs(kind = "") {
+    const now = this.worldScene?.getSimulationNow?.() ?? this.worldScene?.simNowMs ?? this.time.now;
+    if (kind === "meleeCrit") return Math.max(0, Number(this._meleeCritUntil || 0) - now);
+    if (kind === "projectileCrit") return Math.max(0, Number(this._projectileCritUntil || 0) - now);
+    return 0;
+  }
+
+  _getMeleeCritIndicatorConfig() {
+    const remaining = this._getTimedBuffRemainingMs("meleeCrit");
+    if (remaining <= 0) return null;
+    return {
+      key: "meleeCrit",
+      iconKey: MARKET_REAL_ASSETS.cardIcons.meleeCritBuff,
+      glowColor: 0xff8a6b,
+      hoverLabel: "Killer Instinct active",
+      timerText: `${Math.ceil(remaining / 1000)}s`,
+      width: 78,
+    };
+  }
+
+  _getProjectileCritIndicatorConfig() {
+    const remaining = this._getTimedBuffRemainingMs("projectileCrit");
+    if (remaining <= 0) return null;
+    return {
+      key: "projectileCrit",
+      iconKey: MARKET_REAL_ASSETS.cardIcons.projectileCritBuff,
+      glowColor: 0xffd166,
+      hoverLabel: "Deadeye Volley active",
+      timerText: `${Math.ceil(remaining / 1000)}s`,
+      width: 78,
+    };
+  }
+
+  _isWaterProductionJob(job = null) {
+    if (!job) return false;
+    if (job.item?.name === UI_ITEM_TYPES.unclean_water.name) return true;
+    const output = job.oven?.outputSlots?.[job.outputidx ?? 0];
+    return output?.item?.name === UI_ITEM_TYPES.clean_water.name;
+  }
+
+  _isWaterProductionActive(team) {
+    const firemen = team?.firemanList || [];
+    if (firemen.some((troop) => (
+      troop?.active
+      && troop?.currentOrder?.status === "active"
+      && troop.currentOrder.kind === ORDER_KINDS.MAKE_WATER
+      && !troop.currentOrder?.shuttingDown
+    ))) {
+      return true;
+    }
+
+    return ["ovenJobs", "ovenPickupJobs"].some((listKey) => (
+      (team?.[listKey] || []).some((job) => this._isWaterProductionJob(job))
+    ));
+  }
+
+  _collectGatherKindsForTroop(troop) {
+    const order = troop?.currentOrder;
+    if (!troop?.active || !isGatherOrder(order) || order?.shuttingDown) return [];
+
+    const kinds = new Set();
+    const addKind = (value) => {
+      const normalized = this._normalizeProductionKind(value);
+      if (normalized) kinds.add(normalized);
+    };
+
+    addKind(order?.resourceType);
+    addKind(troop?.task?.resource?.name);
+    addKind(troop?.task?.value?.resourceKind);
+    addKind(troop?.task?.type?.resourceKind);
+    addKind(troop?.task?.type?.name);
+    addKind(troop?.carrying?.name);
+
+    if (order?.kind === ORDER_KINDS.GATHER_SET) {
+      (order.nodeKeys || []).forEach((nodeKey) => addKind(String(nodeKey || "").split(":")[0]));
+    }
+
+    return Array.from(kinds);
+  }
+
+  _getActiveProductionKinds() {
+    const team = Teams.getTeam(1);
+    if (!team) return [];
+
+    const kinds = new Set();
+    if (this._isWaterProductionActive(team)) {
+      kinds.add("water");
+    }
+
+    (team.foragerList || []).forEach((troop) => {
+      this._collectGatherKindsForTroop(troop).forEach((kind) => kinds.add(kind));
+    });
+
+    const order = ["water", "wood", "stone", "seed", "berry", "gold"];
+    return order.filter((kind) => kinds.has(kind));
+  }
+
+  _getActiveStatusConfigs() {
+    const configs = [];
+    const adrenaline = this._getAdrenalineIndicatorConfig();
+    if (adrenaline) configs.push(adrenaline);
+    const meleeCrit = this._getMeleeCritIndicatorConfig();
+    if (meleeCrit) configs.push(meleeCrit);
+    const projectileCrit = this._getProjectileCritIndicatorConfig();
+    if (projectileCrit) configs.push(projectileCrit);
+    return configs.concat(
+      this._getActiveProductionKinds()
+        .map((kind) => this._getProductionIndicatorConfig(kind))
+        .filter(Boolean)
+    );
+  }
+
+  _createProductionStatusEntry(config, index = 0) {
+    const width = Math.max(34, Number(config.width ?? (config.timerText ? 78 : 34)));
+    const height = 34;
+    const halfW = width / 2;
+    const root = this.add.container(0, 0);
+    const glow = this.add.graphics().setAlpha(0.74);
+    const frame = this.add.graphics();
+    const hasTimer = !!config.timerText;
+    const iconX = hasTimer ? (-halfW + 16) : 0;
+    const icon = this.textures.exists(config.iconKey)
+      ? this.add.image(iconX, 0, config.iconKey).setDisplaySize(18, 18).setAlpha(0.98)
+      : this.add.text(iconX, 0, "!", {
+        fontFamily: "Bungee",
+        fontSize: "12px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 3,
+      }).setOrigin(0.5);
+    const timerText = hasTimer
+      ? this.add.text(iconX + 16, 0, config.timerText, {
+        fontFamily: "Bungee",
+        fontSize: "11px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 3,
+      }).setOrigin(0, 0.5)
+      : null;
+    const hit = this.add.zone(0, 0, width + 6, height + 4).setInteractive({ useHandCursor: true });
+
+    glow.fillStyle(config.glowColor, 0.09);
+    glow.fillCircle(iconX, 0, 15);
+    glow.lineStyle(1, config.glowColor, 0.24);
+    glow.strokeRoundedRect(-halfW + 1, -height / 2 + 1, width - 2, height - 2, 12);
+
+    frame.lineStyle(1.6, config.glowColor, 0.66);
+    frame.strokeRoundedRect(-halfW, -height / 2, width, height, 12);
+    frame.lineStyle(1, 0xffffff, 0.12);
+    frame.strokeRoundedRect(-halfW + 2, -height / 2 + 2, width - 4, height - 4, 10);
+
+    hit.on("pointerover", () => {
+      const anchor = this._getUiPoint(root);
+      if (!anchor) return;
+      this._showTopHudHover(config.hoverLabel || "", anchor.x, anchor.y - 34);
+    });
+    hit.on("pointerout", () => this._hideTopHudHover());
+
+    root.add([glow, frame, icon, hit]);
+    if (timerText) root.add(timerText);
+    root.setAlpha(0);
+    root.setScale(0.94);
+    this.productionStatusHud?.add?.(root);
+
+    this.tweens.add({
+      targets: root,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 180,
+      delay: index * 40,
+      ease: "Back.easeOut",
+    });
+    this.tweens.add({
+      targets: glow,
+      alpha: 0.34,
+      duration: 900,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+      delay: index * 80,
+    });
+    this.tweens.add({
+      targets: root,
+      scaleX: 1.04,
+      scaleY: 1.04,
+      duration: 980,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+      delay: index * 80,
+    });
+
+    return { key: config.key, root, glow, timerText, width };
+  }
+
+  _updateProductionStatusEntry(entry, config) {
+    if (!entry) return;
+    if (entry.timerText) {
+      const nextTimer = String(config.timerText || "");
+      if (entry._lastTimerText !== nextTimer) {
+        entry._lastTimerText = nextTimer;
+        entry.timerText.setText(nextTimer);
+      }
+    }
+    entry.width = Math.max(34, Number(config.width ?? (config.timerText ? 78 : 34)));
+  }
+
+  _getProductionStatusAnchor() {
+    const buttons = this.uiBottomBar?.tabs?.buttons || [];
+    const functionButton = buttons.find((button) => button?.name === "functions") || buttons[0] || null;
+    const buttonBounds = functionButton?.getBounds?.();
+    if (buttonBounds && Number.isFinite(buttonBounds.left) && Number.isFinite(buttonBounds.top)) {
+      return {
+        x: Math.round(buttonBounds.left + 10),
+        y: Math.round(buttonBounds.top - 18),
+      };
+    }
+
+    const tabsBounds = this.uiBottomBar?.tabs?.getBounds?.();
+    if (tabsBounds && Number.isFinite(tabsBounds.left) && Number.isFinite(tabsBounds.top)) {
+      return {
+        x: Math.round(tabsBounds.left + 10),
+        y: Math.round(tabsBounds.top - 18),
+      };
+    }
+
+    const bottomBarProgress = Phaser.Math.Clamp(
+      Number(this.uiBottomBar?.openProgress ?? (this.uiBottomBar?.expanded ? 1 : 0)),
+      0,
+      1
+    );
+    const bottomReserve = Phaser.Math.Linear(74, 190, bottomBarProgress);
+    return {
+      x: 24,
+      y: Math.round(this.scale.height - bottomReserve - 36),
+    };
+  }
+
+  _refreshProductionStatusHud() {
+    if (!this.productionStatusHud) return;
+
+    const configs = this._getActiveStatusConfigs();
+
+    const signature = configs.map((config) => config.key).join("|");
+    if (signature !== this._productionStatusSignature) {
+      const activeKeys = new Set(configs.map((config) => config.key));
+      this.productionStatusEntries?.forEach?.((entry, key) => {
+        if (activeKeys.has(key)) return;
+        this.tweens.killTweensOf(entry?.root);
+        this.tweens.killTweensOf(entry?.glow);
+        entry?.root?.destroy?.(true);
+        this.productionStatusEntries.delete(key);
+      });
+
+      configs.forEach((config, index) => {
+        if (this.productionStatusEntries?.has?.(config.key)) return;
+        const entry = this._createProductionStatusEntry(config, index);
+        this.productionStatusEntries?.set?.(config.key, entry);
+      });
+
+      this._productionStatusSignature = signature;
+    }
+
+    const visible = configs.length > 0;
+    this.productionStatusHud.setVisible(visible);
+    if (!visible) return;
+
+    const anchor = this._getProductionStatusAnchor();
+    const gap = 8;
+    let cursorX = anchor.x;
+
+    configs.forEach((config, index) => {
+      const entry = this.productionStatusEntries?.get?.(config.key);
+      if (!entry?.root) return;
+      this._updateProductionStatusEntry(entry, config);
+      const width = entry.width || 34;
+      entry.root.setPosition(cursorX + width / 2, anchor.y);
+      entry.root.setVisible(true);
+      cursorX += width + gap;
+    });
+  }
+
   _ghostAt(targetText, content, color) {
     if (this._sceneShuttingDown || !this._canMutateText(targetText)) return;
     const ghost = this.add
@@ -3729,9 +4135,11 @@ export class GameUIScene extends Phaser.Scene {
     let selectDelayMs = 0;
     const visualTop = -(cardHeight / 2) + 84;
     let contentBottom = visualTop + 64;
+    const rewardBadgeHeight = 32;
+    const cardVisualOffsetY = rewardBadgeHeight + 15;
 
     if (option?.presentationType === "card") {
-      const frameWrap = this.add.container(0, visualTop - 6);
+      const frameWrap = this.add.container(0, visualTop - 6 + cardVisualOffsetY);
       const hasCardFrame = this.textures.exists("reward_mini_card");
       const plateShadow = this.add.image(4, 8, hasCardFrame ? "reward_mini_card" : "__WHITE")
         .setAlpha(hasCardFrame ? 0.18 : 0.10)
@@ -4110,24 +4518,22 @@ export class GameUIScene extends Phaser.Scene {
         wordWrap: { width: cardWidth - 34 },
       }).setOrigin(0.5);
       const subtitleText = this.add.text(0, 0, String(option?.subtitle || ""), {
-        fontFamily: "Bungee",
-        fontSize: "10px",
+        fontFamily: BODY_FONT_FAMILY,
+        fontSize: "11px",
         color: "#d7efff",
-        stroke: "#08131d",
-        strokeThickness: 2,
+        fontStyle: "600",
         align: "center",
         wordWrap: { width: cardWidth - 42 },
-        lineSpacing: 3,
+        lineSpacing: 2,
       }).setOrigin(0.5);
       const hintText = this.add.text(0, 0, String(option?.hint || ""), {
-        fontFamily: "Bungee",
-        fontSize: "9px",
+        fontFamily: BODY_FONT_FAMILY,
+        fontSize: "10px",
         color: "#ffe9c7",
-        stroke: "#08131d",
-        strokeThickness: 2,
+        fontStyle: "600",
         align: "center",
         wordWrap: { width: cardWidth - 44 },
-        lineSpacing: 3,
+        lineSpacing: 2,
       }).setOrigin(0.5);
       const selectText = this.add.text(0, selectY, "Choose", {
         fontFamily: "Bungee",
@@ -4139,6 +4545,7 @@ export class GameUIScene extends Phaser.Scene {
       const layoutCardText = () => {
         const bodyTop = Math.max(12, Math.round(Number(visual?.contentBottom || 0) + 24));
         const bodyBottom = Math.round(selectY - 34);
+        const textOffsetY = option?.presentationType === "card" ? -15 : 0;
         let titleGap = 10;
         let bodyGap = String(option?.hint || "").trim() ? 8 : 0;
         let tuned = false;
@@ -4155,14 +4562,14 @@ export class GameUIScene extends Phaser.Scene {
             tuned = true;
             titleGap = 8;
             bodyGap = hintVisible ? 6 : 0;
-            subtitleText.setFontSize("9px");
-            subtitleText.setLineSpacing(2);
-            hintText.setFontSize("8px");
-            hintText.setLineSpacing(2);
+            subtitleText.setFontSize("10px");
+            subtitleText.setLineSpacing(1);
+            hintText.setFontSize("9px");
+            hintText.setLineSpacing(1);
             return placeTextBlock();
           }
 
-          const startY = bodyTop + Math.max(0, Math.floor((availableHeight - totalHeight) / 2));
+          const startY = bodyTop + Math.max(0, Math.floor((availableHeight - totalHeight) / 2)) + textOffsetY;
           let cursorY = startY;
 
           titleText.setY(cursorY + (titleHeight / 2));
@@ -5124,14 +5531,30 @@ export class GameUIScene extends Phaser.Scene {
     this._adrenalineHudLastSeconds = null;
   }
 
+  _setTimedMarketBuffHud(payload = {}) {
+    const key = String(payload?.key || "");
+    const until = Math.max(0, Number(payload?.until || 0));
+    if (key === "meleeCrit") {
+      this._meleeCritUntil = until;
+    } else if (key === "projectileCrit") {
+      this._projectileCritUntil = until;
+    } else {
+      return;
+    }
+    this._refreshProductionStatusHud();
+  }
+
   _setAdrenalineHud(payload = {}) {
     const until = Number(payload?.until || 0);
     if (!(until > 0)) {
       this._destroyAdrenalineHud();
+      this._refreshProductionStatusHud();
       return;
     }
     this._adrenalineUntil = Math.max(this._adrenalineUntil || 0, until);
-    if (!this._adrenalineHud) this._buildAdrenalineHud();
+    this._adrenalineHud?.destroy?.(true);
+    this._adrenalineHud = null;
+    this._adrenalineHudText = null;
     this._refreshAdrenalineHud(true);
   }
 
@@ -5140,47 +5563,20 @@ export class GameUIScene extends Phaser.Scene {
     this._adrenalineHud = null;
     this._adrenalineHudText = null;
     this._adrenalineHudLastSeconds = null;
-    const width = 96;
-    const height = 30;
-    const y = 18;
-    const bg = this.add.graphics();
-    bg.fillStyle(0x122d3f, 0.9);
-    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
-    bg.lineStyle(2, 0xfff17a, 0.74);
-    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
-    bg.fillStyle(0xffffff, 0.08);
-    bg.fillRoundedRect(-width / 2 + 4, -height / 2 + 3, width - 8, 9, 5);
-
-    const iconKey = MARKET_REAL_ASSETS.cardIcons.adrenalineDraft;
-    const icon = this.textures.exists(iconKey)
-      ? this.add.image(-width / 2 + 18, 0, iconKey).setDisplaySize(22, 22)
-      : this.add.text(-width / 2 + 10, -10, "AD", { fontFamily: "Bungee", fontSize: "10px", color: "#fff17a" });
-    this._adrenalineHudText = this.add.text(-width / 2 + 36, 0, "0s", {
-      fontFamily: "Bungee",
-      fontSize: "13px",
-      color: "#ffffff",
-      stroke: "#000000",
-      strokeThickness: 3,
-    }).setOrigin(0, 0.5);
-
-    this._adrenalineHud = this.add
-      .container(Math.round(this.scale.width / 2 + 92), y, [bg, icon, this._adrenalineHudText])
-      .setDepth(UIDEPTH + 8);
   }
 
   _refreshAdrenalineHud(force = false) {
-    if (!this._adrenalineHud || !this._adrenalineUntil) return;
-    this._adrenalineHud.setPosition(Math.round(this.scale.width / 2 + 92), 18);
-    const now = this.worldScene?.getSimulationNow?.() ?? this.worldScene?.simNowMs ?? this.time.now;
-    const remaining = Math.max(0, this._adrenalineUntil - now);
+    if (!this._adrenalineUntil) return;
+    const remaining = this._getAdrenalineRemainingMs();
     if (remaining <= 0) {
       this._destroyAdrenalineHud();
+      this._refreshProductionStatusHud();
       return;
     }
     const seconds = Math.ceil(remaining / 1000);
     if (force || this._adrenalineHudLastSeconds !== seconds) {
       this._adrenalineHudLastSeconds = seconds;
-      this._mutateText(this._adrenalineHudText, (node) => node.setText(`${seconds}s`));
+      this._refreshProductionStatusHud();
     }
   }
 
@@ -5481,6 +5877,7 @@ export class GameUIScene extends Phaser.Scene {
     this.contractHud?.update?.();
     this.selectionCommandBar?.update?.();
     this.functionTab?.update?.();
+    this._refreshProductionStatusHud();
     this._refreshAdrenalineHud();
     this._refreshBossHud();
     this._updateBossStorm();

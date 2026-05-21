@@ -4,9 +4,7 @@ export const TUTORIAL_STEPS = Object.freeze([
     speaker: "farmer",
     selectRole: "farmer",
     faceDown: true,
-    titleText: "Cleared to Build",
-    titleColor: "#ffd166",
-    text: "Welcome in. The loop is simple: take contracts, gather goods, farm food, make water, build homes and storage, defend the town, then expand again.",
+    text: "Welcome to Cleared to Build. The loop is simple: take contracts, gather goods, farm food, make water, build homes and storage, defend the town, then expand again.",
   },
   {
     id: "top_bar",

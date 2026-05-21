@@ -88,12 +88,12 @@ export class StorageBuilding {
         this.sprite.on('pointerover', () => {
             this.isHovered = true;
             this.updateHealthBar?.();
-            StorageUI.showMinor(this)
+            StorageUI.showMinor(this);
         });
         this.sprite.on('pointerout', () => {
             this.isHovered = false;
             this.updateHealthBar?.();
-            StorageUI.hideMinor(this)
+            StorageUI.hideMinor(this);
         });
         this.sprite.on('pointerdown', () => {
             if (this.scene?.destroyWallMode) return;

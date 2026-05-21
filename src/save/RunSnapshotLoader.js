@@ -146,6 +146,79 @@ function restoreBuildingState(building, saved) {
   building.updateHealthBar?.();
 }
 
+function restoreQueuedItemRef(itemRef) {
+  if (!itemRef) return null;
+  if (typeof itemRef === "object" && itemRef.name) return itemRef;
+  if (typeof itemRef !== "string") return null;
+  return restoreItemStack({ item: itemRef, amount: 1 })?.item ?? null;
+}
+
+function resolveSavedOvenRef(task, teamId, buildingRegistry) {
+  if (!task || !buildingRegistry) return null;
+  const ovenRef = task.oven;
+  const x = Number(ovenRef?.x ?? task.x);
+  const y = Number(ovenRef?.y ?? task.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+  const ref = makeBuildingRef(teamId, "clayOven", x, y);
+  const oven = buildingRegistry.get(ref);
+  return oven?.tileType?.name === "clayOven" ? oven : null;
+}
+
+function normalizeSavedOvenJob(task, oven) {
+  if (!task || !oven) return null;
+  const normalized = task;
+  normalized.oven = oven;
+  normalized.type = TILE_TYPES.clayOven;
+  normalized.x = Number(oven.x ?? normalized.x ?? 0);
+  normalized.y = Number(oven.y ?? normalized.y ?? 0);
+  normalized.assigned = Math.max(0, Number(normalized.assigned || 0));
+  normalized.canceled = !!normalized.canceled;
+  return normalized;
+}
+
+function rehydrateOvenQueues(buildingRegistry) {
+  for (const [teamId, team] of Object.entries(Teams.teamLists || {})) {
+    if (!team) continue;
+
+    const normalizedCookJobs = [];
+    for (const task of Array.isArray(team.ovenJobs) ? team.ovenJobs : []) {
+      const oven = resolveSavedOvenRef(task, teamId, buildingRegistry);
+      const job = normalizeSavedOvenJob(task, oven);
+      if (!job) continue;
+
+      job.item = restoreQueuedItemRef(job.item);
+      if (!job.item?.name) continue;
+      job.inputidx = Number.isFinite(Number(job.inputidx)) ? Number(job.inputidx) : 0;
+      job.target = Math.max(0, Number(job.target || job.remaining || 0));
+      job.delivered = Math.max(0, Number(job.delivered || 0));
+      job.remaining = Math.max(0, Number(job.remaining ?? Math.max(0, job.target - job.delivered)));
+      normalizedCookJobs.push(job);
+    }
+    team.ovenJobs = normalizedCookJobs;
+
+    const normalizedFuelJobs = [];
+    for (const task of Array.isArray(team.ovenFuelJobs) ? team.ovenFuelJobs : []) {
+      const oven = resolveSavedOvenRef(task, teamId, buildingRegistry);
+      const job = normalizeSavedOvenJob(task, oven);
+      if (!job) continue;
+
+      job.target = Math.max(0, Number(job.target || job.remaining || 0));
+      job.delivered = Math.max(0, Number(job.delivered || 0));
+      job.remaining = Math.max(0, Number(job.remaining ?? Math.max(0, job.target - job.delivered)));
+      normalizedFuelJobs.push(job);
+    }
+    team.ovenFuelJobs = normalizedFuelJobs;
+
+    team.ovenPickupJobs = [];
+    for (const oven of team.ovenList || []) {
+      if (!oven?.sprite?.active) continue;
+      oven._syncOutputPickupJobs?.();
+      oven._updateCookingState?.();
+    }
+  }
+}
+
 function rebuildBuildingRegistry(scene) {
   const registry = new Map();
   for (const [teamId, team] of Object.entries(Teams.teamLists || {})) {
@@ -469,6 +542,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
         if (building) restoreBuildingState(building, saved);
       }
     }
+    rehydrateOvenQueues(buildingRegistry);
 
     restoreWalls(snapshot?.world?.walls || []);
     restoreNonParcelResources(snapshot?.world || {});

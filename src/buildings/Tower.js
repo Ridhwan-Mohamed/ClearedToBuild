@@ -112,22 +112,21 @@ export class TowerBuilding {
     const w = lenX * SQUARESIZE;
     const h = lenY * SQUARESIZE;
 
-    // create an invisible physics body that matches footprint
-    this.collider = this.scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
-    this.collider.setAlpha(0);
-    this.collider.setSize(w, h);
-    this.collider.refreshBody();
-
-    this.collider.buildingRef = this;
-    Map.structureBarrier.add(this.collider);
+    this.collider = Map.addStructureBarrier(px, py, w, h, {
+      team: this.team,
+      buildingRef: this,
+    });
 
     if (this.isPressureTower) {
       this.scene?.towerPressureController?.registerTower?.(this, this.pressureSlotId);
     }
 
     // add to your structure barrier group that projectiles overlap against
-    this.collider.isBuilding = true;
-    this.collider.team = this.team;
+    if (this.collider) {
+      this.collider.buildingRef = this;
+      this.collider.isBuilding = true;
+      this.collider.team = this.team;
+    }
 
     this.sprite.buildingRef = this;
     this.sprite.team = this.team;
@@ -453,13 +452,12 @@ export class TowerBuilding {
       stats.destroyed += 1;
     }
 
-    // ✅ keep sprite, swap to destroyed anim, disable interaction
+    // Collapse visually like other buildings: smoke at the footprint, then remove the tower art.
     if (this.sprite?.active) {
       playBuildingCollapseSmoke(this);
       this.sprite._destroyed = true;
-      this.sprite.setTexture("tower_destroyed", 0);
-      this.sprite.play("tower_destroyed_idle");
       this.sprite.disableInteractive();
+      this.sprite.destroy();
     }
 
     if (this.isTownTower && !TowerBuilding.hasLivingTownTowers(this.team)) {

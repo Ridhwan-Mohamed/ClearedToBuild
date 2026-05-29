@@ -258,6 +258,7 @@ export class Catapult {
       null,
       false,
       {
+        sourceStructure: this,
         travelDistance,
         distanceRatio,
         impactX: impactPoint.x,

@@ -52,6 +52,11 @@ import scream3 from 'url:../assets/audio/scream3.ogg';
 import scream4 from 'url:../assets/audio/scream4.ogg';
 import scream5 from 'url:../assets/audio/scream5.ogg';
 import scream6 from 'url:../assets/audio/scream6.ogg';
+import zap1 from 'url:../assets/audio/zap1.ogg';
+import zap2 from 'url:../assets/audio/zap2.ogg';
+import zap3 from 'url:../assets/audio/zap3.ogg';
+import rain_ambience from 'url:../assets/audio/rain_ambience.ogg';
+import thunder from 'url:../assets/audio/thunder.ogg';
 
 export class AudioManager {
   static scene = null;
@@ -85,6 +90,11 @@ export class AudioManager {
   static _lastSwimMoveSoundKey = null;
   static FLEE_SCREAM_WINDOW_MS = 850;
   static recentFleeStarts = [];
+  static SHOCKER_ZAP_KEYS = ["sfx_shocker_zap_1", "sfx_shocker_zap_2", "sfx_shocker_zap_3"];
+  static _shockerZapCursor = Math.floor(Math.random() * 3);
+  static BOSS_RAIN_MASTER = 0.3;
+  static BOSS_THUNDER_COOLDOWN_MS = 4500;
+  static _nextBossThunderAt = 0;
 
   // construction loop
   static constructionWorkers = new Set(); // sprite.id numbers
@@ -158,6 +168,11 @@ export class AudioManager {
     scene.load.audio("sfx_flee_scream_4", scream4);
     scene.load.audio("sfx_flee_scream_5", scream5);
     scene.load.audio("sfx_flee_scream_6", scream6);
+    scene.load.audio("sfx_shocker_zap_1", zap1);
+    scene.load.audio("sfx_shocker_zap_2", zap2);
+    scene.load.audio("sfx_shocker_zap_3", zap3);
+    scene.load.audio("amb_boss_rain", rain_ambience);
+    scene.load.audio("sfx_boss_thunder", thunder);
   }
 
   static _loadSettings() {
@@ -372,6 +387,50 @@ export class AudioManager {
             volume,
             rate: opts.rate ?? (0.96 + Math.random() * 0.12),
         });
+    }
+
+    static playShockerZap(_index = null, opts = {}) {
+        if (!this.scene) return false;
+
+        const keys = this.SHOCKER_ZAP_KEYS.filter((key) => this.scene.cache.audio.exists(key));
+        if (!keys.length) return false;
+
+        const key = keys[this._shockerZapCursor % keys.length];
+        this._shockerZapCursor = (this._shockerZapCursor + 1) % keys.length;
+
+        this.scene.sound.play(key, {
+            volume: this._clamp(Number(opts.volume ?? 0.28), 0, 0.48),
+            rate: this._clamp(Number(opts.rate ?? (0.94 + Math.random() * 0.12)), 0.84, 1.16),
+        });
+        return true;
+    }
+
+    static startBossRainAmbience(opts = {}) {
+        if (!this.scene) return;
+        this._ensureLoop(this.loops, "amb_boss_rain");
+        this._fadeTo(
+            this.loops.get("amb_boss_rain"),
+            this._clamp(Number(opts.volume ?? this.BOSS_RAIN_MASTER), 0, 0.45)
+        );
+    }
+
+    static stopBossRainAmbience() {
+        this._fadeTo(this.loops.get("amb_boss_rain"), 0);
+    }
+
+    static playBossThunder(opts = {}) {
+        if (!this.scene) return false;
+        if (!this.scene.cache.audio.exists("sfx_boss_thunder")) return false;
+
+        const now = this.scene.time?.now ?? Date.now();
+        if (now < this._nextBossThunderAt) return false;
+        this._nextBossThunderAt = now + Math.max(1000, Number(opts.cooldownMs ?? this.BOSS_THUNDER_COOLDOWN_MS));
+
+        this.scene.sound.play("sfx_boss_thunder", {
+            volume: this._clamp(Number(opts.volume ?? 0.34), 0, 0.62),
+            rate: this._clamp(Number(opts.rate ?? (0.94 + Math.random() * 0.12)), 0.82, 1.14),
+        });
+        return true;
     }
 
     static playCoinsGain(amount = 0, opts = {}) {

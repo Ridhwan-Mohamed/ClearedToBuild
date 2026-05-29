@@ -7,6 +7,7 @@ import {
   getSlotFavorConfig,
   getSlotFavorShortLabel,
 } from "../parcel_system/SlotFavorSystem.js";
+import { getMilitiaTierConfig, getMilitiaTierLayout } from "../parcel_system/MilitiaTierConfig.js";
 
 export class SlotPanel {
   constructor(scene, cfg) {
@@ -28,7 +29,9 @@ export class SlotPanel {
     this._overviewCards = [];
     this._overviewPressureCards = [];
     this._overviewPressureObjects = [];
-    this._overviewMenu = "GRID"; // GRID | PRESSURE
+    this._overviewMilitiaCards = [];
+    this._overviewMilitiaObjects = [];
+    this._overviewMenu = "GRID"; // GRID | PRESSURE | MILITIA
     this.mode = "detailed";
     this._detailHovered = false;
 
@@ -311,7 +314,7 @@ export class SlotPanel {
     ];
 
     if (this._canAccessMilitia()) {
-      defs.push({ type: "MILITIA", emoji: "🛡", cost: () => 0 });
+      defs.push({ type: "MILITIA", emoji: "🛡" });
     } else {
       defs.push({
         type: "LOCKED_MILITIA",
@@ -386,6 +389,10 @@ export class SlotPanel {
           this._openOverviewPressureMenu();
           return;
         }
+        if (def.type === "MILITIA") {
+          this._openOverviewMilitiaMenu();
+          return;
+        }
         this.commit(payload);
       });
 
@@ -433,8 +440,10 @@ export class SlotPanel {
 
     this.container.add([this._overviewStatusPrimary, this._overviewStatusSecondary, this._overviewFavorBg, this._overviewFavorLabel]);
     this._buildOverviewPressureMenu(cellW, cellH, innerW, innerH);
+    this._buildOverviewMilitiaMenu(cellW, cellH, innerW, innerH);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+    this._refreshOverviewMilitiaCosts();
     this._refreshOverviewFavorLabel();
   }
 
@@ -470,6 +479,11 @@ export class SlotPanel {
     });
     this._overviewPressureObjects = [];
     this._overviewPressureCards = [];
+    this._overviewMilitiaObjects?.forEach((o) => {
+      try { o.destroy?.(); } catch {}
+    });
+    this._overviewMilitiaObjects = [];
+    this._overviewMilitiaCards = [];
     this._overviewStatusPrimary?.destroy?.();
     this._overviewStatusSecondary?.destroy?.();
     this._overviewFavorBg?.destroy?.();
@@ -498,6 +512,11 @@ export class SlotPanel {
       if (card.def.type === "PRESSURE") {
         card.costText.setColor("#ffffff");
         card.costText.setText("PICK\nLEVEL");
+        continue;
+      }
+      if (card.def.type === "MILITIA") {
+        card.costText.setColor("#ffffff");
+        card.costText.setText("PICK\nTIER");
         continue;
       }
       const permitCost = Number(card.def.cost?.() ?? 0);
@@ -559,7 +578,7 @@ export class SlotPanel {
         bg.setFillStyle(0xffffff, 0.16);
         if (this.mode !== "overview" || this._pressureMode || this._overviewMenu !== "PRESSURE") return;
         if (def.close) {
-          this._closeOverviewPressureMenu();
+          this._closeOverviewDetailMenu();
           return;
         }
         this.commit({ type: "PRESSURE", difficulty: def.difficulty });
@@ -581,6 +600,99 @@ export class SlotPanel {
       }
       const permitCost = Number(getContractPermitCost("PRESSURE", card.def.difficulty, this.scene) ?? 0);
       const moneyCost = getContractMoneyCost(this.scene, "PRESSURE", card.def.difficulty);
+      card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
+    }
+  }
+
+  _buildOverviewMilitiaMenu(cellW, cellH, innerW, innerH) {
+    const closeEmoji = "❌";
+    const gap = 12;
+    const cardW = Math.floor((innerW - gap) / 2);
+    const cardH = Math.floor((innerH - gap) / 2);
+    const leftX = -(cardW / 2) - (gap / 2);
+    const rightX = (cardW / 2) + (gap / 2);
+    const topY = -(cardH / 2) - (gap / 2);
+    const bottomY = (cardH / 2) + (gap / 2);
+    const defs = [
+      { difficulty: 1, x: leftX, y: topY },
+      { difficulty: 2, x: rightX, y: topY },
+      { difficulty: 3, x: leftX, y: bottomY },
+      { close: true, emoji: closeEmoji, x: rightX, y: bottomY },
+    ];
+
+    this._overviewMilitiaCards = [];
+    this._overviewMilitiaObjects = [];
+
+    for (const def of defs) {
+      const tier = def.close ? null : getMilitiaTierConfig(def.difficulty);
+      const bg = this.scene.add.rectangle(def.x, def.y, cardW, cardH, 0xffffff, 0.08)
+        .setStrokeStyle(2, 0xffffff, 0.28)
+        .setScrollFactor(1)
+        .setInteractive({ useHandCursor: true })
+        .setVisible(false);
+
+      const title = this.scene.add.text(def.x, def.y - 34, def.close ? def.emoji : `T${def.difficulty}`, {
+        fontSize: def.close ? "64px" : "50px",
+        color: def.close ? "#ff6b6b" : "#eef7ff",
+        stroke: def.close ? "#3a0000" : "#001018",
+        strokeThickness: 8,
+      }).setOrigin(0.5).setScrollFactor(1).setVisible(false);
+
+      const summary = this.scene.add.text(def.x, def.y + 2, def.close ? "" : tier.summary.toUpperCase(), {
+        fontFamily: "Bungee",
+        fontSize: "12px",
+        color: "#d6f5ff",
+        stroke: "#001018",
+        strokeThickness: 4,
+        align: "center",
+        wordWrap: { width: cardW - 18 },
+      }).setOrigin(0.5).setScrollFactor(1).setVisible(!def.close);
+
+      const cost = this.scene.add.text(def.x, def.y + 48, "", {
+        fontFamily: "Bungee",
+        fontSize: "20px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 7,
+        align: "center",
+      }).setOrigin(0.5).setScrollFactor(1).setVisible(!def.close);
+
+      bg.on("pointerover", () => bg.setFillStyle(0xffffff, 0.16));
+      bg.on("pointerout", () => bg.setFillStyle(0xffffff, 0.08));
+      bg.on("pointerdown", () => bg.setFillStyle(0xffffff, 0.22));
+      bg.on("pointerup", () => {
+        bg.setFillStyle(0xffffff, 0.16);
+        if (this.mode !== "overview" || this._pressureMode || this._overviewMenu !== "MILITIA") return;
+        if (def.close) {
+          this._closeOverviewDetailMenu();
+          return;
+        }
+        this.commit({
+          type: "MILITIA",
+          difficulty: def.difficulty,
+          militiaConfig: {
+            tier: def.difficulty,
+            layout: getMilitiaTierLayout(def.difficulty),
+          },
+        });
+      });
+
+      this.container.add([bg, title, summary, cost]);
+      this._overviewMilitiaObjects.push(bg, title, summary, cost);
+      if (!def.close) this._overviewMilitiaCards.push({ def, costText: cost });
+    }
+  }
+
+  _refreshOverviewMilitiaCosts() {
+    const canBuy = this._canBuyContracts();
+    for (const card of this._overviewMilitiaCards) {
+      if (!card?.costText || card.def?.close) continue;
+      if (!canBuy) {
+        card.costText.setText("LOCK");
+        continue;
+      }
+      const permitCost = Number(getContractPermitCost("MILITIA", card.def.difficulty, this.scene) ?? 0);
+      const moneyCost = getContractMoneyCost(this.scene, "MILITIA", card.def.difficulty);
       card.costText.setText(`${formatPermitCostText(permitCost)}\n$${moneyCost}`);
     }
   }
@@ -647,7 +759,22 @@ export class SlotPanel {
     this._syncOverviewVisibility();
   }
 
-  _closeOverviewPressureMenu() {
+  _openOverviewMilitiaMenu() {
+    if (!this._canBuyContracts()) {
+      this._showParcelLockedMessage();
+      return;
+    }
+    if (!this._canAccessMilitia()) {
+      this._showMilitiaLockedMessage();
+      return;
+    }
+    this._overviewMenu = "MILITIA";
+    this._hideOverviewStatus();
+    this._refreshOverviewMilitiaCosts();
+    this._syncOverviewVisibility();
+  }
+
+  _closeOverviewDetailMenu() {
     this._overviewMenu = "GRID";
     this._hideOverviewStatus();
     this._syncOverviewVisibility();
@@ -671,9 +798,16 @@ export class SlotPanel {
       !hasActiveContract &&
       !showingStatus &&
       this._overviewMenu === "PRESSURE";
+    const showMilitiaMenu =
+      this.mode === "overview" &&
+      !this._pressureMode &&
+      !hasActiveContract &&
+      !showingStatus &&
+      this._overviewMenu === "MILITIA";
 
     this.overviewGridObjects?.forEach(o => o.setVisible(showGrid));
     this._overviewPressureObjects?.forEach(o => o.setVisible(showPressureMenu));
+    this._overviewMilitiaObjects?.forEach(o => o.setVisible(showMilitiaMenu));
     this._syncOverviewFavorVisibility(showGrid);
   }
 
@@ -686,6 +820,7 @@ export class SlotPanel {
     this._overviewFavorLabel?.setVisible(false);
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+    this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
   }
 
   _hideOverviewStatus() {
@@ -705,6 +840,7 @@ export class SlotPanel {
       this.gridObjects?.forEach(o => o.setVisible(false));
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
       this._overviewFavorLabel?.setVisible(false);
       this._hideOverviewStatus();
       this._pressureText?.setVisible(false);
@@ -716,6 +852,7 @@ export class SlotPanel {
       this.frameG?.setVisible(this.container.visible);
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
       this._overviewFavorLabel?.setVisible(false);
       this._hideOverviewStatus();
       this._pressureText?.setVisible(false);
@@ -728,6 +865,7 @@ export class SlotPanel {
       this.frameG?.setVisible(this.container.visible);
       this.gridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
       this._overviewFavorLabel?.setVisible(false);
       return;
     }
@@ -751,6 +889,7 @@ export class SlotPanel {
     this.header?.setVisible(false);
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+    this._refreshOverviewMilitiaCosts();
 
     if (this._pressureMode) {
       this.gridObjects?.forEach(o => o.setVisible(false));
@@ -760,11 +899,13 @@ export class SlotPanel {
         this._overviewStatusPrimary?.setVisible(true);
         this._overviewStatusSecondary?.setVisible(true);
         this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+        this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
         this._overviewFavorLabel?.setVisible(false);
       } else {
         this._hideOverviewStatus();
         this.overviewGridObjects?.forEach(o => o.setVisible(false));
         this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+        this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
         this._pressureText?.setVisible(false);
       }
       this._refreshDetailedProxyVisual();
@@ -777,6 +918,7 @@ export class SlotPanel {
     if (isOverview && hasActiveContract) {
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
     }
 
     this._applyModeVisibilityState();
@@ -799,11 +941,12 @@ export class SlotPanel {
   }
 
   resetUiState() {
-    this._closeOverviewPressureMenu();
+    this._closeOverviewDetailMenu();
     this._hideOverviewStatus();
     this._state = "GRID";
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+    this._refreshOverviewMilitiaCosts();
     if (!this._pressureMode) {
       if (this.mode === "overview") this._syncOverviewVisibility();
       else this.gridObjects?.forEach(o => o.setVisible(false));
@@ -814,12 +957,9 @@ export class SlotPanel {
   refreshDisplayState() {
     this._refreshOverviewGridCosts();
     this._refreshOverviewPressureCosts();
+    this._refreshOverviewMilitiaCosts();
     this._refreshOverviewFavorLabel();
     this._applyModeVisibilityState();
-  }
-
-  _canUseMilitiaParcel() {
-    return hasStoreUnlock(STORE_UNLOCK_KEYS.gunslinger);
   }
 
   _canBuyContracts() {
@@ -845,7 +985,7 @@ export class SlotPanel {
       this._showParcelLockedMessage();
       return;
     }
-    this._closeOverviewPressureMenu();
+    this._closeOverviewDetailMenu();
 
     const type = payload.type;
     const difficulty = payload.difficulty ?? 1;
@@ -860,11 +1000,6 @@ export class SlotPanel {
 
     if (type === "MILITIA" && !this._canAccessMilitia()) {
       this._showMilitiaLockedMessage();
-      return;
-    }
-
-    if (type === "MILITIA" && !this._canUseMilitiaParcel()) {
-      showAlert(this.scene, "Militia parcel unlocks after Gunslinger.", "#ffcc66");
       return;
     }
 
@@ -899,7 +1034,7 @@ export class SlotPanel {
       else if (type === "ROCK") started = pm.startRock(this.id);
       else if (type === "FARM") started = pm.startFarm?.(this.id);
       else if (type === "MILITIA") {
-        started = pm.startMilitia?.(this.id, {
+        started = pm.startMilitia?.(this.id, difficulty, {
           militiaConfig: payload.militiaConfig ?? null,
           moneyCost,
         });
@@ -920,6 +1055,8 @@ export class SlotPanel {
       if (moneyCost > 0) this.scene.updateMoney(+moneyCost);
       return;
     }
+
+    pm.markContractPermitCost?.(started, cost);
 
     tutorial?.notifyAction?.("parcel.commit", {
       type,
@@ -966,6 +1103,7 @@ export class SlotPanel {
     this.gridObjects?.forEach(o => o.setVisible(false));
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+    this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
 
     if (this.mode === "overview") {
       this._pressureText.setVisible(false);
@@ -1014,6 +1152,7 @@ export class SlotPanel {
     this.gridObjects?.forEach(o => o.setVisible(false));
     this.overviewGridObjects?.forEach(o => o.setVisible(false));
     this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+    this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
 
     if (this.mode === "overview") {
       this._pressureText.setVisible(false);
@@ -1064,6 +1203,7 @@ export class SlotPanel {
     } else {
       this.overviewGridObjects?.forEach(o => o.setVisible(false));
       this._overviewPressureObjects?.forEach(o => o.setVisible(false));
+      this._overviewMilitiaObjects?.forEach(o => o.setVisible(false));
       this.gridObjects?.forEach(o => o.setVisible(false));
     }
     this._refreshDetailedProxyVisual();
@@ -1074,6 +1214,7 @@ export class SlotPanel {
     if (v) {
       this._refreshOverviewGridCosts();
       this._refreshOverviewPressureCosts();
+      this._refreshOverviewMilitiaCosts();
     }
     this.container.setVisible(v);
     if (!v) {
@@ -1100,6 +1241,7 @@ export class SlotPanel {
       ...(this.gridObjects ?? []),
       ...(this.overviewGridObjects ?? []),
       ...(this._overviewPressureObjects ?? []),
+      ...(this._overviewMilitiaObjects ?? []),
       this._overviewStatusPrimary,
       this._overviewStatusSecondary,
       this._pressureText,
@@ -1131,6 +1273,7 @@ export class SlotPanel {
         this.gridObjects?.forEach(o => o.setAlpha?.(1));
         this.overviewGridObjects?.forEach(o => o.setAlpha?.(1));
         this._overviewPressureObjects?.forEach(o => o.setAlpha?.(1));
+        this._overviewMilitiaObjects?.forEach(o => o.setAlpha?.(1));
         this._overviewStatusPrimary?.setAlpha?.(1);
         this._overviewStatusSecondary?.setAlpha?.(1);
         this._pressureText?.setAlpha?.(1);
@@ -1152,6 +1295,7 @@ export class SlotPanel {
     this.gridObjects?.forEach(o => o.setAlpha?.(0));
     this.overviewGridObjects?.forEach(o => o.setAlpha?.(0));
     this._overviewPressureObjects?.forEach(o => o.setAlpha?.(0));
+    this._overviewMilitiaObjects?.forEach(o => o.setAlpha?.(0));
     this._overviewStatusPrimary?.setAlpha?.(0);
     this._overviewStatusSecondary?.setAlpha?.(0);
     this._pressureText?.setAlpha?.(0);
@@ -1173,6 +1317,7 @@ export class SlotPanel {
       ...(this.gridObjects ?? []),
       ...(this.overviewGridObjects ?? []),
       ...(this._overviewPressureObjects ?? []),
+      ...(this._overviewMilitiaObjects ?? []),
       this._overviewStatusPrimary,
       this._overviewStatusSecondary,
       this._pressureText,

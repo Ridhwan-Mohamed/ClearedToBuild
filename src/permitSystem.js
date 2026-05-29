@@ -1,3 +1,5 @@
+import { getMilitiaTierConfig } from "./parcel_system/MilitiaTierConfig.js";
+
 export const PERMIT_EMOJI = "📜";
 
 export function formatPermitCostText(cost = 0) {
@@ -23,10 +25,15 @@ export function getContractPermitCost(type, difficulty = 1, runContext = null) {
 
   const normalizedType = String(type || "").toUpperCase();
   const completedBossWeeks = getCompletedPermitBossWeeks(runContext);
+  const militiaInflation = completedBossWeeks >= 1 ? 1 : 0;
 
   if (completedBossWeeks >= 1) {
     if (normalizedType === "ROCK" || normalizedType === "MARKET") return 2;
     if (normalizedType === "FOREST" || normalizedType === "FARM") return 1;
+  }
+
+  if (normalizedType === "MILITIA") {
+    return getMilitiaTierConfig(difficulty).permitCost + militiaInflation;
   }
 
   switch (normalizedType) {
@@ -35,7 +42,6 @@ export function getContractPermitCost(type, difficulty = 1, runContext = null) {
     case "PRESSURE":
     case "MARKET":
     case "FARM":
-    case "MILITIA":
       return 1;
     default:
       return 0;

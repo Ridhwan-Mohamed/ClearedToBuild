@@ -316,6 +316,10 @@ export class mapView extends Phaser.Scene {
         };
     }
 
+    _isTutorialActive() {
+        return !!this.tutorialManager?.isActive?.();
+    }
+
     getTownXpSnapshot() {
         const state = this._townXp || (this._townXp = this._createTownXpState());
         const level = Math.max(1, Number(state.level || 1));
@@ -417,6 +421,7 @@ export class mapView extends Phaser.Scene {
             onComplete: () => {
                 this._activeBossRewardUI = null;
                 this.parcelSpawnUI?.resetUiState?.();
+                this.time?.delayedCall?.(180, () => this._tryPresentPendingTownXpReward());
             },
         });
 
@@ -1191,7 +1196,12 @@ export class mapView extends Phaser.Scene {
     _spawnReliefRecoveryStorage(referenceStorage = null) {
         const placement = this._findReliefRecoveryStoragePlacement(referenceStorage);
         if (!placement) return null;
-        return new StorageBuilding(placement.x, placement.y, 1);
+        const storage = new StorageBuilding(placement.x, placement.y, 1);
+        buildingManager.blockBuildingFootprintInLiveNav(storage, {
+            evacuateTeamNumber: 1,
+            warningLabel: "relief recovery storage",
+        });
+        return storage;
     }
 
     _spawnRecoveryTroopIfMissing(roleKey) {
@@ -2083,22 +2093,27 @@ export class mapView extends Phaser.Scene {
         }
 
         const newLevel = Math.max(1, Number(state.level || 1));
+        const tutorialActive = this._isTutorialActive();
         if (levelsGained > 0) {
-            this._maybeUnlockMilitiaParcelFromTownXp(previousLevel, newLevel);
+            if (!tutorialActive) {
+                this._maybeUnlockMilitiaParcelFromTownXp(previousLevel, newLevel);
+            }
         }
 
         const now = Number(this.time?.now || 0);
         if (levelsGained > 0) {
             state.rewardReadyAt = Math.max(now + 320, Number(state.rewardReadyAt || 0));
-            showAlert(
-                this,
-                `Town Level ${state.level}! A new village reward is ready.`,
-                "#ffe8b8",
-                1700
-            );
-            this.time?.delayedCall?.(360, () => {
-                this._tryPresentPendingTownXpReward();
-            });
+            if (!tutorialActive) {
+                showAlert(
+                    this,
+                    `Town Level ${state.level}! A new village reward is ready.`,
+                    "#ffe8b8",
+                    1700
+                );
+                this.time?.delayedCall?.(360, () => {
+                    this._tryPresentPendingTownXpReward();
+                });
+            }
         } else if (opts.alert) {
             showAlert(this, `${reason}: +${normalized} XP`, "#8fe7ff", 1100);
         }
@@ -2107,7 +2122,7 @@ export class mapView extends Phaser.Scene {
             state.level >= 3
             && !this._isMilitiaParcelUnlocked();
 
-        if (militiaJustUnlocked) {
+        if (militiaJustUnlocked && !tutorialActive) {
             unlockStoreItem(STORE_UNLOCK_KEYS.militiaParcel, this);
             state.rewardReadyAt = Math.max(Number(this.time?.now || 0) + 380, Number(state.rewardReadyAt || 0));
 
@@ -2125,6 +2140,7 @@ export class mapView extends Phaser.Scene {
     _canPresentPendingTownXpReward() {
         const state = this._townXp || (this._townXp = this._createTownXpState());
         if (!(state.pendingLevelRewards > 0)) return false;
+        if (this._isTutorialActive()) return false;
         if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return false;
         if (this._activeRewardUI || this._activeBossRewardUI || this._activeTownXpRewardUI) return false;
         if (this._hordeRewardInProgress || this.stageCompleteLock) return false;
@@ -2181,6 +2197,23 @@ export class mapView extends Phaser.Scene {
         });
 
         return true;
+    }
+
+    _tryPresentPostTutorialTownXpRewards() {
+        if (this._isTutorialActive()) return false;
+        if (this._townTowerLossInProgress || this._restartToMainMenuInProgress) return false;
+
+        const state = this._townXp || (this._townXp = this._createTownXpState());
+        const level = Math.max(1, Number(state.level || 1));
+        if (level >= 3 && !this._isMilitiaParcelUnlocked()) {
+            return this._maybeUnlockMilitiaParcelFromTownXp(2, level);
+        }
+
+        state.rewardReadyAt = Math.min(
+            Math.max(0, Number(state.rewardReadyAt || 0)),
+            Number(this.time?.now || 0) + 220
+        );
+        return this._tryPresentPendingTownXpReward();
     }
 
     _getRunSummaryData() {
@@ -2529,7 +2562,7 @@ export class mapView extends Phaser.Scene {
         this.uiScene?.flashStormLightning?.(220, 0.42);
         this.uiScene?.showBossIncomingPresentation?.({
             title: SHOCKER_BOSS_NAME.toUpperCase(),
-            subtitle: "SUNDAY NIGHT BOSS",
+            subtitle: "BOSS NIGHT",
             caption: appearanceIndex > 0
                 ? `Night will not end until it is destroyed. HP +${Math.round((hpMultiplier - 1) * 100)}%.`
                 : "Night will not end until it is destroyed",
@@ -3860,6 +3893,9 @@ export class mapView extends Phaser.Scene {
         SaveManager.attachScene(this);
         this.achievementSystem = new AchievementSystem(this);
         this.tutorialManager = new TutorialManager(this);
+        this.events.on("tutorial:completed", () => {
+            this.time?.delayedCall?.(280, () => this._tryPresentPostTutorialTownXpRewards());
+        });
         this.events.on('store:unlock-changed', () => SaveManager.queueAutosave('store_unlock'));
         this.events.on("storage:removed", (storage) => {
             if (storage?.teamNumber === 1) {

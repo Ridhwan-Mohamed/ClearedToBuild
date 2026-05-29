@@ -1032,6 +1032,7 @@ export class MainMenu {
 
         const continueMeta = SaveManager.getRunSaveMeta();
         const hasContinue = !!continueMeta?.hasContinue;
+        const continueDay = Math.max(1, Math.floor(Number(continueMeta?.day ?? 1) || 1));
         const startButton = MainMenu._createMainMenuImageButton(overlayScene, centerX, startButtonY, {
             artKey: 'startBtn',
             widthFactor: hasContinue ? 0.112 : 0.122,
@@ -1069,7 +1070,7 @@ export class MainMenu {
         if (continueButton) {
             continueButton._otherButton = startButton;
             continueButton._menuHoverKey = 'continue';
-            continueButton._menuHoverText = 'Continue old run from last save point';
+            continueButton._menuHoverText = `Continue on last save - Day ${continueDay}`;
         }
         itchButton._menuHoverKey = 'itch';
         itchButton._menuHoverText = 'A game by badbaado';

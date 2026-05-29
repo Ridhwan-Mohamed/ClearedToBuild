@@ -19,6 +19,9 @@ function getFloorVal(cellVal){
 
 const ROAD_PAD = 1;
 const WALL_PAD = ROAD_PAD + 1; // walls sit one tile outside the road ring
+const DRAFT_SPAWN_ICON_DISPLAY_HEIGHT = 7 * 1.15;
+const DRAFT_SPAWN_ICON_HOVER_SCALE = 1.12;
+const DRAFT_SPAWN_ICON_HIT_PAD = 4;
 
 function isWallOrDoorOverlay(overlayVal){
   return overlayVal === TILE_TYPES.wall?.grid ||
@@ -46,7 +49,10 @@ export class DraftStartPreviewController {
     this.spawnIconContainer?.destroy?.();
     this.spawnIconContainer = this.worldScene.add.container(0, 0).setDepth(UIDEPTH - 1);
     this._spawnIcons = []; // Phaser Images
+    this._spawnIconBaseDisplayHeight = null;
     this._spawnPreviewVisible = true;
+    this._hoveredSpawnPoint = null;
+    this._hoveredSpawnIcon = null;
     this.repaintBounds = menuRefs.repaintBounds;
     this.fullRepaint = menuRefs.fullRepaintPreview;
     this.srcW = menuRefs.srcW;
@@ -567,23 +573,107 @@ export class DraftStartPreviewController {
     }
   }
 
+  _getSpawnIconBaseDisplayHeight(zoom) {
+    if (!Number.isFinite(this._spawnIconBaseDisplayHeight) || this._spawnIconBaseDisplayHeight <= 0) {
+      const safeZoom = Number.isFinite(zoom) ? Math.max(0.0001, zoom) : 1;
+      this._spawnIconBaseDisplayHeight = DRAFT_SPAWN_ICON_DISPLAY_HEIGHT / safeZoom;
+    }
+    return this._spawnIconBaseDisplayHeight;
+  }
+
   _applyDraftPortrait(icon, portraitKey, zoom) {
     if (!icon) return;
     const key = portraitKey || DEFAULT_PLAYER_PORTRAIT_KEY;
     const frame = this.worldScene.textures.getFrame(key, 0);
     const frameWidth = frame?.width ?? 54;
     const frameHeight = frame?.height ?? 50;
-    const displayHeight = 7 / Math.max(0.0001, zoom);
+    const displayHeight = this._getSpawnIconBaseDisplayHeight(zoom);
     const displayWidth = Math.round((frameWidth / frameHeight) * displayHeight);
+    const hoverScale = icon._draftSpawnHovered ? DRAFT_SPAWN_ICON_HOVER_SCALE : 1;
 
     icon.anims?.stop?.();
+    icon._draftSpawnBaseDisplayWidth = displayWidth;
+    icon._draftSpawnBaseDisplayHeight = displayHeight;
     icon
       .setTexture(key, 0)
-      .setDisplaySize(displayWidth, displayHeight);
+      .setDisplaySize(displayWidth * hoverScale, displayHeight * hoverScale);
     icon.clearTint?.();
   }
 
+  _setSpawnIconHoverVisual(icon, hovered = false) {
+    if (!icon?.active) return;
+    icon._draftSpawnHovered = !!hovered;
+    const baseWidth = icon._draftSpawnBaseDisplayWidth ?? icon.displayWidth ?? 0;
+    const baseHeight = icon._draftSpawnBaseDisplayHeight ?? icon.displayHeight ?? 0;
+    const scale = hovered ? DRAFT_SPAWN_ICON_HOVER_SCALE : 1;
+    const targetWidth = baseWidth * scale;
+    const targetHeight = baseHeight * scale;
+
+    this.worldScene?.tweens?.killTweensOf?.(icon);
+    if (this.worldScene?.tweens && baseWidth > 0 && baseHeight > 0) {
+      this.worldScene.tweens.add({
+        targets: icon,
+        displayWidth: targetWidth,
+        displayHeight: targetHeight,
+        duration: 90,
+        ease: "Quad.easeOut",
+      });
+    } else {
+      icon.setDisplaySize?.(targetWidth, targetHeight);
+    }
+    icon.setDepth?.((UIDEPTH - 1) + (hovered ? 2 : 0));
+  }
+
+  setHoveredSpawnPoint(point = null) {
+    if (this._hoveredSpawnPoint === point) return;
+    if (this._hoveredSpawnIcon) {
+      this._setSpawnIconHoverVisual(this._hoveredSpawnIcon, false);
+    }
+
+    this._hoveredSpawnPoint = point || null;
+    this._hoveredSpawnIcon = point?._icon || null;
+    if (this._hoveredSpawnIcon) {
+      this._setSpawnIconHoverVisual(this._hoveredSpawnIcon, true);
+    }
+  }
+
+  clearSpawnIconHover() {
+    this.setHoveredSpawnPoint(null);
+  }
+
+  hitTestSpawnIcon(worldX, worldY) {
+    if (this._spawnPreviewVisible === false || !Number.isFinite(worldX) || !Number.isFinite(worldY)) return null;
+
+    const zoom = Math.max(0.0001, this.worldScene?.cameras?.main?.zoom ?? 1);
+    const pad = DRAFT_SPAWN_ICON_HIT_PAD / zoom;
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (const point of this.spawnPoints ?? []) {
+      const icon = point?._icon;
+      if (!icon?.active || icon.visible === false) continue;
+
+      const width = Math.max(icon.displayWidth ?? 0, icon._draftSpawnBaseDisplayWidth ?? 0);
+      const height = Math.max(icon.displayHeight ?? 0, icon._draftSpawnBaseDisplayHeight ?? 0);
+      const dx = worldX - icon.x;
+      const dy = worldY - icon.y;
+      if (Math.abs(dx) > width / 2 + pad || Math.abs(dy) > height / 2 + pad) continue;
+
+      const distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = point;
+      }
+    }
+
+    return best;
+  }
+
   _setSpawnIcons(points) {
+    if (this._hoveredSpawnPoint && !points.includes(this._hoveredSpawnPoint)) {
+      this.clearSpawnIconHover();
+    }
+
     // reuse icons
     while (this._spawnIcons.length > points.length) {
       const icon = this._spawnIcons.pop();
@@ -597,7 +687,7 @@ export class DraftStartPreviewController {
       const worldX = p.x * SQUARESIZE + SQUARESIZE / 2;
       const worldY = p.y * SQUARESIZE + SQUARESIZE / 2;
       const portraitKey = this._getDraftPortraitKey(p.type);
-      const zoom = this.worldScene.cameras.main.zoom;
+      const zoom = this.worldScene?.cameras?.main?.zoom ?? 1;
 
       let icon = this._spawnIcons[i];
       if (!icon) {
@@ -611,6 +701,8 @@ export class DraftStartPreviewController {
         icon.setPosition(worldX, worldY);
         this._applyDraftPortrait(icon, portraitKey, zoom);
       }
+      icon._draftSpawnPoint = p;
+      p._icon = icon;
       icon.setVisible(this._spawnPreviewVisible !== false);
     }
 
@@ -620,6 +712,9 @@ export class DraftStartPreviewController {
 
   setSpawnPreviewVisible(visible = true) {
     this._spawnPreviewVisible = visible !== false;
+    if (!this._spawnPreviewVisible) {
+      this.clearSpawnIconHover();
+    }
     this.spawnIconContainer?.setVisible?.(this._spawnPreviewVisible);
     this.spawnIconContainer?.setAlpha?.(this._spawnPreviewVisible ? 1 : 0);
     for (const icon of this._spawnIcons ?? []) {
@@ -628,6 +723,8 @@ export class DraftStartPreviewController {
   }
 
   clearDraftPlayerIcons() {
+    this.clearSpawnIconHover();
+
     if (this.spawnIconContainer) {
       this.spawnIconContainer.destroy(true);
       this.spawnIconContainer = null;
@@ -637,6 +734,7 @@ export class DraftStartPreviewController {
       for (const icon of this._spawnIcons) this._safeDestroyIcon(icon);
       this._spawnIcons.length = 0;
     }
+    this._spawnIconBaseDisplayHeight = null;
   }
 
   /**

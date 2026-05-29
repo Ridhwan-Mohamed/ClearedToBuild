@@ -116,6 +116,10 @@ export class Raider {
             troop._spawnWorldY = troop.y;
         }
 
+        if (Raider._handleEnemyWaterRecovery(troop)) {
+            return true;
+        }
+
         Raider._clearInvalidMission(troop);
         if (Raider._shouldDropPlayerChase(troop)) {
             Raider._dropPlayerChase(troop);
@@ -136,63 +140,7 @@ export class Raider {
             return false;
         }
         // -------------------------
-        // 1) Sea-raider swimming phase
-        // -------------------------
-        if (troop.isSeaRaider && troop.isSwimming) {
-            const gx = Math.floor(troop.x / SQUARESIZE);
-            const gy = Math.floor(troop.y / SQUARESIZE);
-
-            const onLandForRaider = Map.enemyNavGrid?.[gy]?.[gx] === 1;
-
-            if (onLandForRaider) {
-            troop.isSwimming = false;
-            troop.body.setVelocity(0, 0);
-
-            // Now that we are on land, lock the "start" point to the landing spot
-            troop._spawnWorldX = troop.x;
-            troop._spawnWorldY = troop.y;
-
-            // Immediately pick a reachable building (random) using region checks
-            troop.task = null;
-            troop.currentPath = null;
-            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
-            } else {
-            let dx = troop.swimDirX || 0;
-            let dy = troop.swimDirY || 0;
-            const targetX = Number.isFinite(troop.swimTargetX) ? troop.swimTargetX : null;
-            const targetY = Number.isFinite(troop.swimTargetY) ? troop.swimTargetY : null;
-            if (targetX != null && targetY != null) {
-                const vecX = targetX - troop.x;
-                const vecY = targetY - troop.y;
-                const dist = Math.hypot(vecX, vecY);
-                if (dist > 0.001) {
-                    dx = vecX / dist;
-                    dy = vecY / dist;
-                    troop.swimDirX = dx;
-                    troop.swimDirY = dy;
-                }
-            }
-            const baseSpeed = Math.max(100, 100 * Math.max(1, Number(troop.moveSpeedMultiplier ?? 1) || 1));
-            const speed = Math.max(baseSpeed, Number(troop.swimSpeed ?? 0) || 0);
-            const vx = dx * speed;
-            const vy = dy * speed;
-
-            Player.setAnimState(troop, troop.swim || troop.idle);
-            troop.body.setVelocity(vx, vy);
-            AudioManager.tryPlayStep(troop);
-            updateDirectionalAnimationFromVelocity(troop, vx, vy, true);
-
-            if (!shouldUseDirectionalFacing(troop)) {
-                troop.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
-            }
-            }
-
-            // swimming uses manual velocity
-            return true;
-        }
-
-        // -------------------------
-        // 2) Land behaviour: fight nearby TEAM 1 units first
+        // 1) Land behaviour: fight nearby TEAM 1 units first
         // -------------------------
         if (troop.forcedTarget?.active && troop.forcedTarget?.body?.team === 1) {
             if (!troop._raiderPlayerChase) {
@@ -299,6 +247,12 @@ export class Raider {
                 duration: Raider._buildingTargetHealth(chosen.building).current,
                 totalDuration: Raider._buildingTargetHealth(chosen.building).max,
                 assigned: 0,
+                perimeterReservationKey: Raider._buildingDestroyReservationKey(
+                    chosen.bx,
+                    chosen.by,
+                    chosen.type,
+                    chosen.building
+                ),
             };
         };
 
@@ -442,6 +396,240 @@ export class Raider {
         return false;
     }
 
+    static _handleEnemyWaterRecovery(troop) {
+        if (!troop?.active || !troop.body || troop.body.team !== 0) return false;
+
+        const gx = Math.floor(troop.x / SQUARESIZE);
+        const gy = Math.floor(troop.y / SQUARESIZE);
+        const onEnemyLand = Map.enemyNavGrid?.[gy]?.[gx] === 1;
+        const onWater = Player._isOnWater?.(troop) === true;
+        const recovering = troop._enemyWaterRecovery === true;
+        const swimming = troop.isSwimming === true;
+        if (!recovering && !swimming && !onWater) return false;
+
+        if (onWater && !swimming) {
+            Raider._startEnemyWaterRecovery(troop);
+        } else if (recovering && !swimming) {
+            Raider._startEnemyWaterRecovery(troop, { preserveMission: true });
+        }
+
+        if (troop.isSwimming !== true) return false;
+
+        const canLandHere = onEnemyLand && !onWater;
+        const reachedRecoveryLand = !troop._enemyWaterRecovery || Raider._isOnMainIslandTile(troop);
+        if (canLandHere && reachedRecoveryLand) {
+            Raider._finishEnemyWaterRecovery(troop);
+            return false;
+        }
+
+        if (troop._enemyWaterRecovery && (!Number.isFinite(troop.swimTargetX) || !Number.isFinite(troop.swimTargetY))) {
+            Raider._setEnemySwimTarget(troop, Raider._findMainIslandWalkableWorld(troop));
+        }
+
+        let dx = troop.swimDirX || 0;
+        let dy = troop.swimDirY || 0;
+        const targetX = Number.isFinite(troop.swimTargetX) ? troop.swimTargetX : null;
+        const targetY = Number.isFinite(troop.swimTargetY) ? troop.swimTargetY : null;
+        if (targetX != null && targetY != null) {
+            const vecX = targetX - troop.x;
+            const vecY = targetY - troop.y;
+            const dist = Math.hypot(vecX, vecY);
+            if (dist > 0.001) {
+                dx = vecX / dist;
+                dy = vecY / dist;
+                troop.swimDirX = dx;
+                troop.swimDirY = dy;
+            }
+        }
+        if (Math.hypot(dx, dy) <= 0.001) {
+            dx = 0;
+            dy = 1;
+            troop.swimDirX = dx;
+            troop.swimDirY = dy;
+        }
+
+        const baseSpeed = Math.max(100, 100 * Math.max(1, Number(troop.moveSpeedMultiplier ?? 1) || 1));
+        const speed = Math.max(baseSpeed, Number(troop.swimSpeed ?? 0) || 0);
+        const vx = dx * speed;
+        const vy = dy * speed;
+
+        Player.setAnimState(troop, troop.swim || troop.idle);
+        troop.body.setVelocity(vx, vy);
+        AudioManager.tryPlayStep(troop);
+        updateDirectionalAnimationFromVelocity(troop, vx, vy, true);
+
+        if (!shouldUseDirectionalFacing(troop)) {
+            troop.rotation = Phaser.Math.Angle.Between(0, 0, vx, vy);
+        }
+
+        return true;
+    }
+
+    static _startEnemyWaterRecovery(troop, { preserveMission = false } = {}) {
+        if (!troop?.active || !troop.body) return false;
+
+        if (!preserveMission) {
+            const mission = Raider._waterRecoveryMission(troop);
+            if (mission) Raider._rememberMission(troop, mission);
+            Raider._releaseEnemyTaskForWaterRecovery(troop);
+        }
+
+        troop.isSwimming = true;
+        troop._enemyWaterRecovery = true;
+        troop.roam = false;
+        troop.currentPath?.splice?.(0);
+        troop.finalPos = null;
+        troop.__pendingPolyIds = [];
+        troop.body.setVelocity(0, 0);
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+        Raider._setEnemySwimTarget(troop, Raider._findMainIslandWalkableWorld(troop));
+        return true;
+    }
+
+    static _finishEnemyWaterRecovery(troop) {
+        const wasRecovery = troop?._enemyWaterRecovery === true;
+        troop.isSwimming = false;
+        troop._enemyWaterRecovery = false;
+        troop._enemyWaterRecoveryTarget = null;
+        troop.body?.setVelocity?.(0, 0);
+        troop._spawnWorldX = troop.x;
+        troop._spawnWorldY = troop.y;
+        troop.task = null;
+        troop.taskMeta = null;
+        troop.currentPath = null;
+        troop.finalPos = null;
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+
+        if (wasRecovery) {
+            Raider._resumeMission(troop);
+        }
+    }
+
+    static _waterRecoveryMission(troop) {
+        const candidates = [
+            troop?.task?.siege ? null : troop?.task,
+            troop?._postSiegeTask,
+            troop?._raidMissionTask,
+        ];
+        return candidates.find(task => task && !task.siege && Raider._isBuildingTaskValid(task)) || null;
+    }
+
+    static _releaseEnemyTaskForWaterRecovery(troop) {
+        if (!troop) return;
+
+        if (troop.task?.siege) {
+            Raider._releaseSiegeTasks(troop);
+        } else if (troop.task) {
+            InterruptController.releaseTaskClaim?.({
+                troop,
+                task: troop.task,
+                meta: troop.taskMeta || null,
+                reason: "enemy_water_recovery",
+            });
+        }
+
+        troop.task = null;
+        troop.taskMeta = null;
+        troop._postSiegeTask = null;
+        troop._siegeQueue = [];
+        troop.track = null;
+        troop.forcedTarget = null;
+        troop._raiderPlayerChase = null;
+        troop._raiderRetaliationTarget = null;
+        troop.timer?.remove?.(false);
+        troop.timer = null;
+        troop.currentPath?.splice?.(0);
+        troop.finalPos = null;
+        fightManager.clearAttackRecovery?.(troop);
+        fightManager.clearHitReaction?.(troop);
+        CombatSpacingCoordinator.clearTroopFocus(troop);
+        CombatSpacingCoordinator.clearRoamReservation?.(troop);
+    }
+
+    static _getMainIslandBounds(troop) {
+        const bounds = troop?.scene?._getMainIslandBounds?.();
+        if (!bounds) return null;
+        const minx = Number(bounds.minx);
+        const miny = Number(bounds.miny);
+        const maxx = Number(bounds.maxx);
+        const maxy = Number(bounds.maxy);
+        if (![minx, miny, maxx, maxy].every(Number.isFinite)) return null;
+        return {
+            minx: Math.floor(minx),
+            miny: Math.floor(miny),
+            maxx: Math.floor(maxx),
+            maxy: Math.floor(maxy),
+        };
+    }
+
+    static _isOnMainIslandTile(troop) {
+        const bounds = Raider._getMainIslandBounds(troop);
+        if (!bounds) return true;
+        const gx = Math.floor(troop.x / SQUARESIZE);
+        const gy = Math.floor(troop.y / SQUARESIZE);
+        return gx >= bounds.minx && gx <= bounds.maxx && gy >= bounds.miny && gy <= bounds.maxy;
+    }
+
+    static _findMainIslandWalkableWorld(troop) {
+        const bounds = Raider._getMainIslandBounds(troop);
+        const nav = Map.enemyNavGrid;
+        if (bounds && Array.isArray(nav) && nav.length) {
+            const h = nav.length;
+            const w = nav[0]?.length || 0;
+            const minx = Math.max(0, bounds.minx);
+            const miny = Math.max(0, bounds.miny);
+            const maxx = Math.min(w - 1, bounds.maxx);
+            const maxy = Math.min(h - 1, bounds.maxy);
+            let best = null;
+            let bestD2 = Infinity;
+
+            for (let y = miny; y <= maxy; y++) {
+                for (let x = minx; x <= maxx; x++) {
+                    if (nav?.[y]?.[x] !== 1) continue;
+                    const wx = x * SQUARESIZE + SQUARESIZE / 2;
+                    const wy = y * SQUARESIZE + SQUARESIZE / 2;
+                    const dx = wx - troop.x;
+                    const dy = wy - troop.y;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < bestD2) {
+                        bestD2 = d2;
+                        best = { x: wx, y: wy };
+                    }
+                }
+            }
+            if (best) return best;
+        }
+
+        const center = troop?.scene?._getMainIslandCenterWorld?.();
+        if (center && Number.isFinite(center.x) && Number.isFinite(center.y)) return center;
+        return {
+            x: (WORLD_DIMENSIONX * SQUARESIZE) / 2,
+            y: (WORLD_DIMENSIONY * SQUARESIZE) / 2,
+        };
+    }
+
+    static _setEnemySwimTarget(troop, target) {
+        const tx = Number.isFinite(target?.x) ? target.x : (WORLD_DIMENSIONX * SQUARESIZE) / 2;
+        const ty = Number.isFinite(target?.y) ? target.y : (WORLD_DIMENSIONY * SQUARESIZE) / 2;
+        let dx = tx - troop.x;
+        let dy = ty - troop.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0.001) {
+            dx /= dist;
+            dy /= dist;
+        } else {
+            dx = 0;
+            dy = 1;
+        }
+
+        troop.swimTargetX = tx;
+        troop.swimTargetY = ty;
+        troop.swimDirX = dx;
+        troop.swimDirY = dy;
+        troop.swimSpeed = Math.max(Number(troop.swimSpeed ?? 0) || 0, Number(troop.type?.speed ?? Raider.speed ?? 80) * 1.35, 100);
+        troop._enemyWaterRecoveryTarget = { x: tx, y: ty };
+    }
+
     static _buildingFromTask(task) {
         return task?.value?.buildingRef || task?.value || null;
     }
@@ -485,8 +673,22 @@ export class Raider {
         };
     }
 
+    static _buildingDestroyReservationKey(x, y, type, building) {
+        const targetId = building?.id ?? building?.buildingId ?? building?.uid ?? null;
+        if (targetId != null) return `enemy-building-destroy:${targetId}`;
+
+        const gx = Number.isFinite(Number(x)) ? Number(x) : Number(building?.x ?? building?.gridX ?? 0);
+        const gy = Number.isFinite(Number(y)) ? Number(y) : Number(building?.y ?? building?.gridY ?? 0);
+        const typeName = type?.name ?? building?.buildType?.name ?? building?.type?.name ?? "building";
+        return `enemy-building-destroy:${typeName}:${gx},${gy}`;
+    }
+
     static _rememberMission(troop, task = troop?.task) {
         if (!troop || !task || task.siege || !Raider._isBuildingTaskValid(task)) return null;
+        if (!task.perimeterReservationKey) {
+            const building = Raider._buildingFromTask(task);
+            task.perimeterReservationKey = Raider._buildingDestroyReservationKey(task.x, task.y, task.type, building);
+        }
         troop._raidMissionTask = task;
         return task;
     }

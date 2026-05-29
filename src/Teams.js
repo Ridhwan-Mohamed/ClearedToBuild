@@ -8,12 +8,14 @@ export class Teams {
     static houseCapacityPerBuilding = 2;
     static _townSpawnReservations = new globalThis.Map();
     static TOWN_SPAWN_RESERVATION_MS = 2000;
-    static cropReseedChance = 0;
+    static DEFAULT_CROP_RESEED_CHANCE = 0.15;
+    static cropReseedChance = 0.15;
     static DEFAULT_WATER_BATCH_COUNT = 5;
 
     static resetAll() {
       this.teamLists = {};
       this._townSpawnReservations = new globalThis.Map();
+      this.cropReseedChance = this.DEFAULT_CROP_RESEED_CHANCE;
     }
 
     static createTownAutomationState() {
@@ -913,7 +915,7 @@ export class Teams {
     }
 
     static resetCrop(crop) {
-      if (!crop) return;
+      if (!crop) return false;
 
       crop.dailyWatered = false;
 
@@ -923,11 +925,13 @@ export class Teams {
         crop.growthStage = 0;
         crop.sprite.setFrame(1); // show seeded soil
         Teams.setCropForWatering(crop);
+        return true;
       } else {
         crop.hasSeed = false;
         crop.growthStage = 0;
         crop.sprite.setFrame(0); // show bare dirt
         Teams.syncCropWaterIndicator(crop);
+        return false;
       }
     }
 

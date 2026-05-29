@@ -87,6 +87,12 @@ function restoreQueuedBuildVisuals(scene) {
   }
 }
 
+function restoreQueuedDestroyVisuals(scene) {
+  for (const [teamId] of Object.entries(Teams.teamLists || {})) {
+    buildingManager.refreshQueuedDestroyJobVisuals(Number(teamId || 1));
+  }
+}
+
 function setSceneResource(scene, key, value) {
   scene[key] = Number(value || 0);
 }
@@ -270,6 +276,7 @@ function restoreTeamSnapshots(snapshot) {
     team.foragerQueue = rehydrateTaskList(saved.foragerQueue, "foragerQueue", teamId);
     team.buildingTileStates = rehydrateTaskList(saved.buildingTileStates, "buildingTileStates", teamId);
     team.blockBuildingStates = rehydrateTaskList(saved.blockBuildingStates, "blockBuildingStates", teamId);
+    team.destroyTileStates = rehydrateTaskList(saved.destroyTileStates, "destroyTileStates", teamId);
     team.destroyStates = rehydrateTaskList(saved.destroyStates, "destroyStates", teamId);
     team.enemyDestroyStates = rehydrateTaskList(saved.enemyDestroyStates, "enemyDestroyStates", teamId);
     team.enemyDestroyTileStates = rehydrateTaskList(saved.enemyDestroyTileStates, "enemyDestroyTileStates", teamId);
@@ -554,6 +561,7 @@ export function restoreRunSnapshotIntoScene(scene, snapshot) {
     scene.restoreShockerBossState?.(snapshot?.progression?.shockerBoss || null);
     restoreQueuedFarmPreviews(scene);
     restoreQueuedBuildVisuals(scene);
+    restoreQueuedDestroyVisuals(scene);
 
     scene._activeNightHorde = cloneSimple(snapshot?.progression?.activeNightHorde, null);
     scene.achievementSystem?.restoreSnapshot?.(snapshot?.progression?.achievements || null);

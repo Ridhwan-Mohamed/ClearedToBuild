@@ -186,6 +186,7 @@ function snapshotTeamState(teamId, team) {
     foragerQueue: (team.foragerQueue || []).map(snapshotTaskLike),
     buildingTileStates: (team.buildingTileStates || []).map(snapshotTaskLike),
     blockBuildingStates: (team.blockBuildingStates || []).map(snapshotTaskLike),
+    destroyTileStates: (team.destroyTileStates || []).map(snapshotTaskLike),
     destroyStates: (team.destroyStates || []).map(snapshotTaskLike),
     enemyDestroyStates: (team.enemyDestroyStates || []).map(snapshotTaskLike),
     enemyDestroyTileStates: (team.enemyDestroyTileStates || []).map(snapshotTaskLike),

@@ -368,8 +368,8 @@ export class Map{
             if (!canPaintRoadOverBase(baseTypeName)) return false;
             // skip if base already road (no need to repaint)
             if (TILE_MAP(baseVal) === 'road') return false;
-            // leave crops / queued farm spots alone on the perimeter ring
-            if (Map._cellHasProtectedFarmSpot?.(gx, gy, team ?? 1)) return false;
+            // leave planted crops alone on the perimeter ring
+            if (Map._cellHasPlacedCrop?.(gx, gy)) return false;
             // skip if base itself is blocking
             if (baseType?.block) return false;
 
@@ -466,6 +466,15 @@ export class Map{
         );
     }
 
+    static _cellHasPlacedCrop(x, y) {
+        const row = this.grid?.[y];
+        if (!row || row[x] == null) return false;
+
+        const cell = row[x];
+        if (TILE_MAP(this.grabDepth(cell, FLOORDEPTH)) === "crops") return true;
+        return Array.isArray(cell) && cell.some((val) => TILE_MAP(val) === "crops");
+    }
+
     static _cellHasProtectedFarmSpot(x, y, teamNumber = 1) {
         const row = this.grid?.[y];
         if (!row || row[x] == null) return false;
@@ -475,8 +484,7 @@ export class Map{
             Teams.teamLists?.[teamNumber];
         if (!team) return false;
 
-        const floorVal = this.grabDepth(row[x], FLOORDEPTH);
-        if (TILE_MAP(floorVal) === "crops") return true;
+        if (this._cellHasPlacedCrop(x, y)) return true;
         if (Teams.getCropAt?.(x, y, teamNumber)) return true;
 
         if (team.tileList?.some((spot) => spot?.x === x && spot?.y === y)) return true;
@@ -551,6 +559,7 @@ export class Map{
             typeName === "tower" ||
             typeName === "turret" ||
             typeName === "catapult" ||
+            typeName === "spawn" ||
             typeName === "prison" ||
             typeName === "bank"
         );
@@ -605,6 +614,65 @@ export class Map{
                 item.depth == FLOORDEPTH? index = 0: index = 1
                 this.addSpreadArr(x,y,item,index)
             }   
+        }
+    }
+
+    static _floorInteriorValAtOrNear(x, y, fallbackType = "dirt") {
+        const fromVal = (val) => {
+            const name = TILE_MAP(val);
+            const def = name ? TILE_TYPES[name] : null;
+            if (!def || def.depth !== FLOORDEPTH) return null;
+            return def.interior ?? def.grid ?? null;
+        };
+
+        const cell = this.grid?.[y]?.[x];
+        if (Array.isArray(cell)) {
+            const baseVal = fromVal(cell[0]);
+            if (baseVal != null) return baseVal;
+            const topVal = fromVal(cell[1]);
+            if (topVal != null) return topVal;
+        } else {
+            const currentVal = fromVal(cell);
+            if (currentVal != null) return currentVal;
+        }
+
+        const samples = [
+            [0, -1], [1, 0], [0, 1], [-1, 0],
+            [-1, -1], [1, -1], [1, 1], [-1, 1],
+        ];
+        for (const [dx, dy] of samples) {
+            const nearby = this.grid?.[y + dy]?.[x + dx];
+            if (Array.isArray(nearby)) {
+                const baseVal = fromVal(nearby[0]);
+                if (baseVal != null) return baseVal;
+                const topVal = fromVal(nearby[1]);
+                if (topVal != null) return topVal;
+                continue;
+            }
+
+            const nearbyVal = fromVal(nearby);
+            if (nearbyVal != null) return nearbyVal;
+        }
+
+        const fallback = TILE_TYPES[fallbackType];
+        return fallback?.interior ?? fallback?.grid ?? null;
+    }
+
+    static addTopLayerItem(posX, posY, item, opts = {}) {
+        const lenX = Math.max(1, Number(item?.lenX || 1) || 1);
+        const lenY = Math.max(1, Number(item?.lenY || 1) || 1);
+        const fallbackFloorType = opts?.fallbackFloorType || "dirt";
+
+        for (let y = posY; y < posY + lenY; y++) {
+            if (!this.grid?.[y]) continue;
+            for (let x = posX; x < posX + lenX; x++) {
+                if (this.grid[y][x] == null) continue;
+
+                const floorVal = this._floorInteriorValAtOrNear(x, y, fallbackFloorType);
+                if (floorVal == null) continue;
+                this.grid[y][x] = [floorVal, item.grid];
+                this._refreshRenderCacheAround(x, y);
+            }
         }
     }
 
@@ -722,6 +790,7 @@ export class Map{
         const upd = (gx, gy) => {
             if (!this.grid[gy]) return;
             if (!this._hasTypeAt(gx, gy, tileType)) return;
+            if (tileType === "road" && this._cellHasPlacedCrop(gx, gy)) return;
                 // choose the correct layer in the neighbor to rewrite
                 const nIdx = this._layerIndexFor(gx, gy, depth, tileType);
                 if (Array.isArray(this.grid[gy][gx])) {
@@ -876,7 +945,7 @@ export class Map{
 
         const addStarterItems = (itemType, amount) => {
             const n = Math.max(0, Math.floor(Number(amount) || 0));
-            if (n > 0) StorageManager.grantItemToTeam("1", itemType, n, scene);
+            if (n > 0) StorageManager.grantItemToTeam("1", itemType, n, scene, { silent: true });
         };
 
         addStarterItems("seedCrop", starterResources.seeds);
@@ -1140,8 +1209,11 @@ export class Map{
 
         const { shape, angle } = this._shapeAndAngle(def, val);
         const a = def.assets;
-        if (name === 'water' || shape === 'interior' || shape === 'island') {
+        if (name === 'water' || shape === 'island') {
             return [this._makeRenderEntry(a.interior, 0)];
+        }
+        if (shape === 'interior') {
+            return this._appendGrassWaterInnerOverlay([this._makeRenderEntry(a.interior, 0)], x, y, name);
         }
         if (shape === 'innerCorner') {
             const innerKind = this._innerCornerTransitionKind(x, y, angle);
@@ -1915,6 +1987,7 @@ static fillGroundRect(x0, y0, w, h, tileType, opts = {}) {
             // family match for adjacency logic
             if (typeName === "wall")      return mapped === "wall" || mapped === "wall_door";
             if (typeName === "woodWall")  return mapped === "woodWall" || mapped === "woodWall_door";
+            if (typeName === "road")      return mapped === "road" || mapped === "crops";
 
             // optional convenience if you ever want it:
             if (typeName === "door") return mapped === "wall_door" || mapped === "woodWall_door";

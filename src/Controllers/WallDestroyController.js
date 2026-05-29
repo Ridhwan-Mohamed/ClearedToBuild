@@ -146,6 +146,8 @@ export class WallDestroyController {
 
         const destroyTileTasks = [];
         const destroyBlockTasks = [];
+        const destroyJobId = buildingManager.createDestroyJobId?.("1") ?? null;
+        let destroyJobOrder = 0;
         for (const target of this.selected.values()) {
             if (target.kind === "wall") {
                 destroyTileTasks.push({
@@ -154,6 +156,8 @@ export class WallDestroyController {
                     originalGridVal: target.originalGridVal,
                     type: target.type,
                     refundCost: target.refundCost,
+                    destroyJobId,
+                    destroyJobOrder: destroyJobOrder++,
                 });
                 continue;
             }
@@ -167,15 +171,17 @@ export class WallDestroyController {
                 value: target.value,
                 refundCost: target.refundCost,
                 assigned: 0,
+                destroyJobId,
+                destroyJobOrder: destroyJobOrder++,
             });
         }
 
         if (destroyTileTasks.length) {
-            buildingManager.createDestroyTileStateArray(destroyTileTasks, "1");
+            buildingManager.createDestroyTileStateArray(destroyTileTasks, "1", { destroyJobId });
             buildingManager.assignTroopsToDestroyTile?.(1);
         }
         if (destroyBlockTasks.length) {
-            buildingManager.createDestroyStateArray?.(destroyBlockTasks, "1");
+            buildingManager.createDestroyStateArray?.(destroyBlockTasks, "1", { destroyJobId });
             buildingManager.assingTroopsToDestroy?.(1);
         }
 

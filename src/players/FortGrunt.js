@@ -5,6 +5,7 @@ import { Teams } from "../Teams";
 import { weapons } from "../weapons";
 import { ZoomMixer } from "../UI/ZoomMixer";
 import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
+import { Raider } from "./Raider";
 
 export class FortGrunt {
     static speed = 110;      // near brawler speed
@@ -105,6 +106,8 @@ export class FortGrunt {
     }
 
     static update(troop) {
+        if (Raider._handleEnemyWaterRecovery(troop)) return true;
+
         Player.updateTracking(troop);
 
         // Never chase targets outside fort bounds.

@@ -12,8 +12,12 @@ import {
   getPlayerPortraitKey,
 } from '../../players/playerPortraits.js';
 import {
+  addScrollablePanelAffordance,
   BOTTOM_BAR_THEME,
+  getBottomBarWidth,
+  handleScrollablePanelWheel,
   makeGlassRoundRect,
+  makeBottomBarEmptyRow,
   mixColor,
   setHoverLiftState,
 } from "./BottomBarTheme";
@@ -30,6 +34,7 @@ export default class HousesTab {
     this.rows = new Map(); // house -> { row, bg, hpFill, occText }
     this._onWheel = null;
     this._rowBaseY = new WeakMap();
+    this._scrollAffordances = [];
 
     this.root = this.build();
     this.bindScrollInput();
@@ -50,6 +55,8 @@ export default class HousesTab {
     }
     this.root?.destroy();
     this.rows.clear();
+    this._scrollAffordances.forEach((affordance) => affordance?.destroy?.());
+    this._scrollAffordances = [];
   }
 
   get view() { return this.root; }
@@ -58,7 +65,9 @@ export default class HousesTab {
   build() {
     const scene = this.scene;
     const compact = scene.scale.width < 1180;
-    const detailWidth = Math.max(228, Math.floor(scene.scale.width / 3) - (compact ? 36 : 42));
+    const barWidth = getBottomBarWidth(scene);
+    const detailWidth = Math.max(228, Math.floor(barWidth / 3) - (compact ? 28 : 34));
+    const listWidth = Math.max(300, Math.floor(barWidth * (2 / 3)) - 44);
     const detailHeight = compact ? 112 : 118;
 
     const root = scene.rexUI.add.sizer({
@@ -90,7 +99,7 @@ export default class HousesTab {
     this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
 
     this.scroll = scene.rexUI.add.scrollablePanel({
-      width: Math.floor(scene.scale.width * (2 / 3)) - 48,
+      width: listWidth,
       height: detailHeight,
       scrollMode: 0,
       scrollDetectionMode: 'rectBounds',
@@ -101,30 +110,15 @@ export default class HousesTab {
         strokeAlpha: 0.12,
       }),
       panel: { child: this.listBody, mask: { padding: 1 } },
-      sliderY: scene.rexUI.add.slider({
-        height: Math.max(72, detailHeight - 24),
-        orientation: 'y',
-        track: makeGlassRoundRect(scene, 10, 0, 5, {
-          fill: 0x0b2230,
-          alpha: 0.82,
-          stroke: 0x98e7ff,
-          strokeAlpha: 0.08,
-          strokeWidth: 1,
-        }),
-        thumb: makeGlassRoundRect(scene, 10, 28, 5, {
-          fill: 0x72d8ff,
-          alpha: 0.86,
-          stroke: 0xffffff,
-          strokeAlpha: 0.18,
-          strokeWidth: 1,
-        }),
-      }),
       scrollerY: {
         pointerOutRelease: true,
         rectBoundsInteractive: true,
       },
       space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
     }).setDepth(TAB_BASE_DEPTH);
+    this._scrollAffordances.push(addScrollablePanelAffordance(scene, this.scroll, {
+      isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === 'houses',
+    }));
 
     root.add(detailSizer, { proportion: 1, expand: true });
     root.add(this.scroll,  { proportion: 2, expand: true });
@@ -168,7 +162,7 @@ export default class HousesTab {
   buildHouseDetailPanel(scene) {
     const rr = (w, h, r, color, alpha = 1) => scene.rexUI.add.roundRectangle(0, 0, w, h, r, color, alpha);
     const compact = scene.scale.width < 1180;
-    const detailWidth = Math.max(228, Math.floor(scene.scale.width / 3) - (compact ? 36 : 42));
+    const detailWidth = Math.max(228, Math.floor(getBottomBarWidth(scene) / 3) - (compact ? 28 : 34));
     const slotGap = compact ? 6 : 8;
     const slotWidth = Math.max(102, Math.floor((detailWidth - slotGap) / 2) - 6);
 
@@ -449,6 +443,10 @@ export default class HousesTab {
 
     houses.sort((a, b) => (a.y - b.y) || (a.x - b.x));
 
+    if (!houses.length) {
+      this.listBody.add(this.createEmptyRow(), { expand: true });
+    }
+
     houses.forEach((h, i) => {
       const row = this.createRow(h);
       this.listBody.add(row, { expand: true });
@@ -464,14 +462,8 @@ export default class HousesTab {
     this._onWheel = (pointer, _gameObjects, dx, dy) => {
       if (this.scene.uiBottomBar?.currentPage !== 'houses') return;
       if (!this.scene.uiBottomBar?.expanded) return;
-      if (!this.scroll?.isOverflowY) return;
-      if (!this.isPointerOverScroll(pointer)) return;
-
-      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      if (Math.abs(dominantDelta) < 0.1) return;
-
-      this.scroll.addChildOY(-dominantDelta * 0.8, true);
-      this.scene.input.stopPropagation();
+      const panels = [this.scroll];
+      panels.some((panel) => handleScrollablePanelWheel(this.scene, panel, pointer, dx, dy));
     };
 
     this.scene.input.on('wheel', this._onWheel);
@@ -504,7 +496,7 @@ export default class HousesTab {
     const occText = scene.add.text(0, 0, `Occ: ${occCount}/2`, { fontFamily: 'Bungee', fontSize: '10px', color: BOTTOM_BAR_THEME.textMuted, stroke: '#081621', strokeThickness: 2 });
 
     // Make the bar span (almost) the full row width
-    const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
+    const fullWidth = Math.max(220, Math.floor(getBottomBarWidth(scene) * (2 / 3)) - 72);
     const hpW = Math.max(160, fullWidth - 70); // padding buffer so it doesn't touch edges
 
     const hp = this.makeBar(hpW, 6, 0x4caf50);
@@ -546,6 +538,17 @@ export default class HousesTab {
     this.updateRowVisual(house);
 
     return row;
+  }
+
+  createEmptyRow() {
+    const fullWidth = Math.max(220, Math.floor(getBottomBarWidth(this.scene) * (2 / 3)) - 72);
+    return makeBottomBarEmptyRow(this.scene, {
+      width: fullWidth,
+      height: 46,
+      title: "No houses",
+      subtitle: "Build a house from Store",
+      accent: 0xa78bfa,
+    });
   }
 
   select(house) {
@@ -626,7 +629,7 @@ export default class HousesTab {
 
     // list changed?
     const houses = this.getHouseList();
-    if (houses.length !== this.listBody.getChildren?.().length) {
+    if (houses.length !== this.rows.size) {
       this.rebuildList();
     }
 

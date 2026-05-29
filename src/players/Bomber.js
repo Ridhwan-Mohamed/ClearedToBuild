@@ -102,6 +102,11 @@ export class Bomber {
     }
 
     static update(troop) {
+        const recoveringFromWater = !!(troop && (troop._enemyWaterRecovery || Player._isOnWater?.(troop)));
+        if (recoveringFromWater && troop?._bomberArming) {
+            Bomber._cancelArming(troop);
+        }
+        if (Raider._handleEnemyWaterRecovery(troop)) return true;
         if (Bomber._updateArming(troop)) return false;
         return Raider.update(troop);
     }

@@ -1433,20 +1433,25 @@ export class ParcelContractInstance {
 
     this._stopUITick();
 
-    if (this.type === "FOREST" || this.type === "ROCK" || this.type === "FARM") {
-      blockResourceManager.abortParcelResourceWork({
-        teamNumber: 1,
-        contractId: this.id,
-        slotId: this.slotId,
-        origin: this.origin,
-        size: PARCEL_SIZE,
-      });
-    }
-
     this._disablePlacedObjectInteractions();
 
     this._completionPromise = this._completeWithRemovalAnimation(reason);
     return this._completionPromise;
+  }
+
+  _abortResourceWorkAfterRemovalCommitted() {
+    if (this._resourceWorkCleanupDone) return;
+    if (this.type !== "FOREST" && this.type !== "ROCK" && this.type !== "FARM") return;
+
+    this._resourceWorkCleanupDone = true;
+    blockResourceManager.abortParcelResourceWork({
+      teamNumber: 1,
+      contractId: this.id,
+      slotId: this.slotId,
+      contractType: this.type,
+      origin: this.origin,
+      size: PARCEL_SIZE,
+    });
   }
 
   _shouldGrantCompletionBonus(reason) {
@@ -1494,6 +1499,7 @@ export class ParcelContractInstance {
       this._removalCommitted = true;
       this._applyWaterRemovalPlan(removalPlan);
       this._destroyPlacedObjectsForRemoval();
+      this._abortResourceWorkAfterRemovalCommitted();
 
       const refreshOpts = {
         waterSourceUpdate: {
@@ -1523,6 +1529,10 @@ export class ParcelContractInstance {
         this._removalCommitted = true;
         this._applyWaterRemovalPlan(removalPlan);
         this._destroyPlacedObjectsForRemoval();
+        this._abortResourceWorkAfterRemovalCommitted();
+      }
+      if (this._removalCommitted) {
+        this._abortResourceWorkAfterRemovalCommitted();
       }
       this._fallbackRefreshRemovalArea();
     }

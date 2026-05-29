@@ -7,6 +7,8 @@ import { Raider } from "./Raider";
 import { Wall } from "../buildings/Wall";
 import { buildingManager } from "../Manager/buildingManager";
 import { fightManager } from "../Manager/fightManager";
+import { Manager } from "../Manager/Manager";
+import { AudioManager } from "../Manager/AudioManager";
 import { ZoomMixer } from "../UI/ZoomMixer";
 import { attachDirectionalSix } from "./PlayerDirectionalAnimator";
 import shockerWalkDown from "url:../assets/Players/shocker/shocker_walk_down.png";
@@ -117,7 +119,16 @@ export class Shocker {
     }
 
     static update(troop) {
-        return Raider.update(troop);
+        const recoveringFromWater = !!(troop && (troop._enemyWaterRecovery || Player._isOnWater?.(troop)));
+        if (recoveringFromWater) {
+            Shocker._clearShockCycle(troop);
+        }
+        const hadPlayerTarget = Shocker._hasActivePlayerTarget(troop) || !!troop?._raiderPlayerChase;
+        const result = Raider.update(troop);
+        if (hadPlayerTarget && !Shocker._hasActivePlayerTarget(troop) && !troop?._raiderPlayerChase) {
+            Shocker._clearShockCycle(troop);
+        }
+        return result;
     }
 
     static postUpdate(troop) {
@@ -167,6 +178,22 @@ export class Shocker {
             troop.scene.handleShockerBossDefeated?.(troop);
         }
         return Raider.destroy(troop, opts);
+    }
+
+    static _dropPlayerChase(troop) {
+        if (!troop?.active) return false;
+        Shocker._clearShockCycle(troop);
+        Shocker._clearCombatTaskClaim(troop);
+        return Raider._dropPlayerChase(troop);
+    }
+
+    static _clearCombatTaskClaim(troop) {
+        if (troop?.taskMeta?.state !== CONTROL_STATES.TRACK_TARGET) return;
+        if (typeof troop.task?.assigned === "number" && troop.task.assigned > 0) {
+            troop.task.assigned -= 1;
+        }
+        troop.task = null;
+        troop.taskMeta = null;
     }
 
     static _startShockCycle(troop, plan) {
@@ -265,11 +292,14 @@ export class Shocker {
     }
 
     static _resolveContextualPrimary(troop) {
-        const target = troop.forcedTarget?.active
-            ? troop.forcedTarget
-            : troop.track?.[0]?.gameObject;
-        if (target?.active && Shocker._canShockSameRegionTarget(troop, target, SHOCK_RANGE)) {
-            return Shocker._describeTarget("player", target, troop);
+        const playerTargets = [
+            troop.forcedTarget,
+            troop.track?.[0]?.gameObject,
+        ];
+        for (const target of playerTargets) {
+            if (Shocker._canShockSameRegionTarget(troop, target, SHOCK_RANGE)) {
+                return Shocker._describeTarget("player", target, troop);
+            }
         }
 
         const wallTask = Shocker._getTaskWall(troop);
@@ -288,13 +318,11 @@ export class Shocker {
     static _collectSameRegionTargets(troop) {
         const out = [];
         const pushIfValid = (kind, target) => {
-            if (!target?.active) return;
             if (!Shocker._canShockSameRegionTarget(troop, target, SHOCK_RANGE)) return;
             out.push(Shocker._describeTarget(kind, target, troop));
         };
 
         for (const target of Teams.teamLists?.["1"]?.playerList || []) {
-            if (!target?.active) continue;
             pushIfValid("player", target);
         }
 
@@ -348,6 +376,11 @@ export class Shocker {
         const from = { x: troop.x, y: troop.y - 8 };
         unique.forEach((entry, index) => {
             const to = Shocker._targetPoint(entry);
+            const primaryArc = index === 0;
+            AudioManager.playShockerZap(index, {
+                volume: primaryArc ? (0.29 + Math.random() * 0.05) : (0.16 + Math.random() * 0.07),
+                rate: 0.94 + Math.random() * 0.12,
+            });
             Shocker._drawElectricArc(troop.scene, from, to, index);
             Shocker._applyShockDamage(troop, entry, index === 0);
         });
@@ -358,10 +391,15 @@ export class Shocker {
         if (entry.kind === "player") {
             const target = entry.target;
             if (!target?.active) return false;
+            const wasFocusedTarget = Shocker._isFocusedPlayerTarget(troop, target);
             target.health = Math.max(0, Number(target.health || 0) - PLAYER_DAMAGE);
             fightManager.applyHitReaction(target, troop, troop.weapon);
             if (target.health <= 0) {
+                Player._cleanupCombatTicketForTarget?.(troop.body?.team, target);
                 Player.destroyPlayer(target);
+                if (wasFocusedTarget) {
+                    Shocker._dropPlayerChase(troop);
+                }
             }
             return true;
         }
@@ -380,14 +418,141 @@ export class Shocker {
         if (entry.kind === "wall") {
             const wall = entry.wall || entry.target;
             if (!wall?.active) return false;
+            const missionTask = Shocker._getMissionTask(troop);
+            const countsSiegeProgress = Shocker._isActiveBreachWall(troop, entry, wall);
+            const completionTask = countsSiegeProgress
+                ? troop.task
+                : (entry.task || Shocker._makeWallTask(wall));
             const destroyed = wall.damage(isPrimary ? WALL_DAMAGE_PRIMARY : WALL_DAMAGE_CHAIN);
             if (destroyed) {
-                buildingManager._completeDestroyTile(troop, entry.task || Shocker._makeWallTask(wall), wall.x, wall.y);
+                buildingManager._completeDestroyTile(troop, completionTask, wall.x, wall.y, {
+                    countRaiderSiegeProgress: countsSiegeProgress,
+                    preserveSpriteTimer: !countsSiegeProgress,
+                    preserveTroopState: !countsSiegeProgress,
+                });
+                if (!countsSiegeProgress) {
+                    Shocker._removeDestroyedWallFromPendingSiege(troop, wall.x, wall.y);
+                }
+                Shocker._tryResumeReachableMission(troop, missionTask);
             }
             return true;
         }
 
         return false;
+    }
+
+    static _hasActivePlayerTarget(troop) {
+        const forced = troop?.forcedTarget;
+        if (forced?.active && forced.body?.team === 1) return true;
+        const tracked = troop?.track?.[0]?.gameObject;
+        return !!(tracked?.active && tracked.body?.team === 1);
+    }
+
+    static _isFocusedPlayerTarget(troop, target) {
+        if (!target?.body || target.body.team !== 1) return false;
+        return troop?.forcedTarget === target || troop?.track?.[0]?.gameObject === target;
+    }
+
+    static _wallTaskMatches(task, wallOrX, y = null) {
+        if (!task?.siege) return false;
+        const tx = Number(task.tx ?? task.x);
+        const ty = Number(task.ty ?? task.y);
+        const wx = typeof wallOrX === "object" ? Number(wallOrX?.x) : Number(wallOrX);
+        const wy = typeof wallOrX === "object" ? Number(wallOrX?.y) : Number(y);
+        return Number.isFinite(tx) && Number.isFinite(ty) && tx === wx && ty === wy;
+    }
+
+    static _isActiveBreachWall(troop, entry, wall) {
+        return !!(
+            troop?.task?.siege &&
+            Shocker._wallTaskMatches(troop.task, wall) &&
+            (!entry?.task || Shocker._wallTaskMatches(entry.task, wall))
+        );
+    }
+
+    static _getMissionTask(troop, preferredTask = null) {
+        const candidates = [
+            preferredTask,
+            troop?._postSiegeTask,
+            troop?._raidMissionTask,
+            troop?.task,
+        ];
+        for (const task of candidates) {
+            if (!task || task.siege) continue;
+            if (Raider._isBuildingTaskValid(task)) return task;
+        }
+        return null;
+    }
+
+    static _findMissionApproach(troop, task) {
+        const building = Raider._buildingFromTask(task);
+        const type = task?.type || building?.tileType || building?.buildType || building?.type;
+        const x = Number(task?.x ?? building?.x ?? building?.gridX);
+        const y = Number(task?.y ?? building?.y ?? building?.gridY);
+        if (!troop?.active || !type || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return buildingManager.findApproachAnyPerimeter(x, y, type, troop, null, null, task);
+    }
+
+    static _removeDestroyedWallFromPendingSiege(troop, tx, ty) {
+        const key = `${tx},${ty}`;
+        const matches = (task) => Shocker._wallTaskMatches(task, tx, ty);
+        const team0 = Teams.teamLists?.["0"];
+
+        if (Array.isArray(troop?._siegeQueue)) {
+            troop._siegeQueue = troop._siegeQueue.filter((task) => {
+                if (!matches(task)) return true;
+                team0?._siegeSeen?.delete?.(key);
+                if (Array.isArray(team0?.siegeTileStates)) {
+                    Teams.removeFromStateArray("0", "siegeTileStates", task);
+                }
+                return false;
+            });
+        }
+
+        if (Array.isArray(team0?.siegeTileStates)) {
+            for (let i = team0.siegeTileStates.length - 1; i >= 0; i--) {
+                const task = team0.siegeTileStates[i];
+                if (matches(task)) team0.siegeTileStates.splice(i, 1);
+            }
+        }
+        team0?._siegeSeen?.delete?.(key);
+    }
+
+    static _tryResumeReachableMission(troop, preferredTask = null) {
+        if (!troop?.active || Shocker._hasActivePlayerTarget(troop)) return false;
+
+        const task = Shocker._getMissionTask(troop, preferredTask);
+        if (!task) return false;
+        if (troop.task === task && !task.siege) {
+            Raider._rememberMission(troop, task);
+            return true;
+        }
+
+        const approach = Shocker._findMissionApproach(troop, task);
+        if (!approach?.path?.length) return false;
+
+        Shocker._clearShockCycle(troop);
+        Raider._releaseSiegeTasks?.(troop);
+        troop._postSiegeTask = null;
+        troop._siegeQueue = [];
+        troop.task = null;
+        troop.taskMeta = null;
+        troop.roam = false;
+        troop.currentPath?.splice?.(0);
+        troop.finalPos = null;
+        troop.body?.setVelocity?.(0, 0);
+
+        Raider._rememberMission(troop, task);
+        task.assigned = Math.max(0, Number(task.assigned || 0));
+        Teams.movePlayerState(troop, CONTROL_STATES.DESTROY_MODE);
+        troop.task = task;
+        troop.task.assigned += 1;
+        troop.destX = approach.tx;
+        troop.destY = approach.ty;
+        Manager._setTaskMeta?.(troop, task, CONTROL_STATES.DESTROY_MODE, null);
+        if (approach.polyIds?.length) troop.__pendingPolyIds = approach.polyIds;
+        Player.moveTo(troop, approach.path);
+        return true;
     }
 
     static _describeTarget(kind, target, troop = null) {
@@ -401,8 +566,12 @@ export class Shocker {
         };
     }
 
+    static _liveTargetVisual(target) {
+        return target?.sprite || target?.baseSprite || target;
+    }
+
     static _worldPointForTarget(target) {
-        const sprite = target?.sprite || target?.baseSprite || target;
+        const sprite = Shocker._liveTargetVisual(target);
         return {
             x: Number(sprite?.x ?? target?.x ?? 0),
             y: Number(sprite?.y ?? target?.y ?? 0),
@@ -420,7 +589,7 @@ export class Shocker {
     }
 
     static _canShockSameRegionTarget(troop, target, range = SHOCK_RANGE) {
-        if (!troop?.active || !target?.active) return false;
+        if (!troop?.active || !Shocker._isShockTargetActive(target)) return false;
         const point = Shocker._worldPointForTarget(target);
         const dist = Phaser.Math.Distance.Between(troop.x, troop.y, point.x, point.y);
         if (dist > range) return false;
@@ -447,12 +616,19 @@ export class Shocker {
         return Phaser.Math.Distance.Between(troop.x, troop.y, x, y);
     }
 
-    static _isBuildingActive(target) {
+    static _isShockTargetActive(target) {
         if (!target || target._destroyed || target._isDestroyed) return false;
+        const visual = Shocker._liveTargetVisual(target);
+        if (visual?._destroyed || visual?._isDestroyed) return false;
+        if (target.active === false || visual?.active === false) return false;
+        const health = Number(target.health ?? target.hp ?? visual?.health ?? visual?.hp ?? 1);
+        return !Number.isFinite(health) || health > 0;
+    }
+
+    static _isBuildingActive(target) {
+        if (!Shocker._isShockTargetActive(target)) return false;
         const health = Number(target.health ?? target.hp ?? target.maxHealth ?? target.maxHp ?? 1);
-        if (health <= 0) return false;
-        const sprite = target.sprite || target.baseSprite || target;
-        return sprite?.active !== false;
+        return !Number.isFinite(health) || health > 0;
     }
 
     static _getTaskWall(troop) {

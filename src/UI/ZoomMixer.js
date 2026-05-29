@@ -458,10 +458,17 @@ export class ZoomMixer {
       padding: { x: 4, y: 2 }
     }).setOrigin(0.5, 1).setDepth(depth + 1).setVisible(false);
     label.setScale(baseScale / cam.zoom);
+    const syncLabelPosition = () => {
+      const zoom = Math.max(0.0001, cam.zoom);
+      const gapWorld = 6 / zoom;
+      label.setPosition(icon.x, icon.y - (Number(icon.displayHeight || 0) * 0.5) - gapWorld);
+    };
+    syncLabelPosition();
 
     scene.events.on('update', () => {
       icon.setScale(baseScale / cam.zoom);
       label.setScale(baseScale / cam.zoom);
+      syncLabelPosition();
     });
     icon.on('pointerover', () => {
       label.setVisible(true);
@@ -525,6 +532,12 @@ export class ZoomMixer {
       padding: { x: 4, y: 2 }
     }).setOrigin(0.5, 1).setDepth(depth + 1).setVisible(false);
     label.setScale(1 / Math.max(0.0001, cam.zoom));
+    const syncLabelPosition = () => {
+      const zoom = Math.max(0.0001, cam.zoom);
+      const gapWorld = 6 / zoom;
+      label.setPosition(icon.x, icon.y - (Number(icon.displayHeight || 0) * 0.5) - gapWorld);
+    };
+    syncLabelPosition();
 
     const onUpdateScale = () => {
       if (!icon?.active || !label?.active) return;
@@ -535,6 +548,7 @@ export class ZoomMixer {
       const liveWorldWidth = Math.round((liveFrameWidth / liveFrameHeight) * liveWorldHeight);
       icon.setDisplaySize(liveWorldWidth, liveWorldHeight);
       label.setScale(1 / Math.max(0.0001, cam.zoom));
+      syncLabelPosition();
     };
 
     scene.events.on('update', onUpdateScale);

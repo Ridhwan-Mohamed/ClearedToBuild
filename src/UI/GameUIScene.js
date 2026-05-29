@@ -15,11 +15,9 @@ import { SaveManager } from "../save/SaveManager.js";
 import { AchievementBoard } from "./AchievementBoard.js";
 import { MARKET_REAL_ASSETS } from "../Cards/MarketCards.js";
 import { RELIEF_PACKAGE_MONEY_GRANT, RELIEF_PACKAGE_PRICE } from "../ReliefPackageConfig.js";
-import { StorageBuilding } from "../buildings/Storage.js";
-import { ClayOven } from "../buildings/ClayOven.js";
-import { createGlassStatusBubble } from "./BuildingTheme.js";
 import { UI_ITEM_TYPES } from "./UIConstants.js";
 import { ORDER_KINDS, isGatherOrder } from "../orders/OrderTypes.js";
+import { OrderRunner } from "../orders/OrderRunner.js";
 import { BODY_FONT_FAMILY } from "./Typography.js";
 
 export class GameUIScene extends Phaser.Scene {
@@ -60,7 +58,7 @@ export class GameUIScene extends Phaser.Scene {
     this.townXpHud = null;
     this.phaseClock = null;
     this.townStatusHud = null;
-    this.townStatusHudBottomY = null;
+    this.townStatusEntries = null;
     this.stageMetaText = null;
     this.zoomControls = null;
     this.raiderEdgeHud = null;
@@ -93,9 +91,7 @@ export class GameUIScene extends Phaser.Scene {
     this._projectileCritUntil = 0;
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
-    this._townStatusHudSignature = null;
-    this._townStatusCycleIndex = 0;
-    this._townStatusNextCycleAt = 0;
+    this._townStatusSignature = "";
     this._scaleResizeHandlers = [];
     this._stageMetaRecompute = null;
     this._stageMetaRefreshTimer = null;
@@ -263,9 +259,7 @@ export class GameUIScene extends Phaser.Scene {
     this._destroyAdrenalineHud();
     this.phaseClock?.destroy?.(true);
     this.phaseClock = null;
-    this.townStatusHud?.destroy?.(true);
-    this.townStatusHud = null;
-    this.townStatusHudBottomY = null;
+    this._destroyTownStatusHud();
     this.stageMetaText?.destroy?.();
     this.stageMetaText = null;
     this.stageMetaSubText?.destroy?.();
@@ -293,9 +287,7 @@ export class GameUIScene extends Phaser.Scene {
     this.topHudHoverTargets = [];
     this._townXpHudSignature = null;
     this._townXpLastGainSerial = 0;
-    this._townStatusHudSignature = null;
-    this._townStatusCycleIndex = 0;
-    this._townStatusNextCycleAt = 0;
+    this._townStatusSignature = "";
     this._hudBuilt = false;
 
     if (world) {
@@ -447,6 +439,8 @@ export class GameUIScene extends Phaser.Scene {
     CreateBottomBar(this);
     this._buildProductionStatusHud();
     this._hudBuilt = true;
+    this._refreshProductionStatusHud(true);
+    this._refreshTownStatusHud(true);
 
     this._syncWorldUiRefs();
     this.worldScene?.setSimulationSpeedReady?.(true);
@@ -458,7 +452,6 @@ export class GameUIScene extends Phaser.Scene {
     this._buildTopHud();
     this._buildTownXpHud();
     this._buildPhaseClock();
-    this._buildTownStatusHud();
     this._buildAchievementBoard();
     this._buildZoomControls();
     this._buildRaiderEdgeHud();
@@ -896,6 +889,10 @@ export class GameUIScene extends Phaser.Scene {
     this.topHud = this.add.container(0, 0, [shadow, bg, inset, shine, ...this.topHudElements]).setDepth(UIDEPTH);
     this._refreshTopHudValues(true);
     this._buildPauseMenuButton();
+    this._layoutTopHudLeftGroups();
+    this._trackScaleResize(({ width }) => {
+      this._layoutTopHudLeftGroups(Number(width || this.scale?.width || 0));
+    });
   }
 
   _setTopHudHoverBounds(target, leftX, rightX, height = 44) {
@@ -927,18 +924,69 @@ export class GameUIScene extends Phaser.Scene {
     return Number(this._topHudLayoutConfig?.measureTextWidth?.(sample) || textNode?.width || 0);
   }
 
-  _layoutTopHudMoneyGroup(leftFlowRight = 0) {
+  _getTopHudNodeBounds(node, fallback = null) {
+    if (!node) return typeof fallback === "function" ? fallback() : null;
+    try {
+      const bounds = node.getBounds?.();
+      if (bounds && Number.isFinite(bounds.left) && Number.isFinite(bounds.right)) {
+        return bounds;
+      }
+    } catch {}
+    return typeof fallback === "function" ? fallback() : null;
+  }
+
+  _getTopHudRightOccupiedLeft(width = Number(this.scale?.width || 0)) {
+    const leftEdges = [];
+    const pushLeft = (value) => {
+      if (!Number.isFinite(value)) return;
+      leftEdges.push(value);
+    };
+
+    const phaseClockBounds = this._getTopHudNodeBounds(this.phaseClock, () => {
+      const panelWidth = Number(this.phaseClock?.panelWidth || 0);
+      if (!(panelWidth > 0) || !(width > 0)) return null;
+      return {
+        left: width - panelWidth - 18,
+        right: width - 18,
+      };
+    });
+    pushLeft(phaseClockBounds?.left);
+
+    const pauseBounds = this._getTopHudNodeBounds(this.pauseMenuButton, () => {
+      if (!(width > 0)) return null;
+      const centerX = Math.round(width - 34);
+      return {
+        left: centerX - 21,
+        right: centerX + 21,
+      };
+    });
+    pushLeft(pauseBounds?.left);
+
+    if (!leftEdges.length) return Math.max(12, width - 12);
+    return Math.min(...leftEdges);
+  }
+
+  _layoutTopHudMoneyGroup(leftFlowRight = 0, layoutWidth = Number(this.scale?.width || 0)) {
     if (!this.moneyIcon || !this.moneyText) return;
 
-    const width = Number(this.scale?.width || 0);
+    const width = Number(layoutWidth || this.scale?.width || 0);
     const iconWidth = Number(this.moneyIcon.displayWidth || this.moneyIcon.width || 0);
     const textWidth = Number(this.moneyText.width || 0);
     const moneyGap = Number(this._topHudLayoutConfig?.moneyGap || 6);
     const totalWidth = iconWidth + moneyGap + textWidth;
-    const baseIconX = (width / 2) - 30;
-    const minIconX = Math.max(baseIconX, Number(leftFlowRight || 0) + 16);
-    const maxIconX = Math.max(baseIconX, width - 12 - totalWidth);
-    const iconX = Math.min(minIconX, maxIconX);
+    const pureCenterIconX = (width - totalWidth) * 0.5;
+    const leftLimit = Math.max(12, Number(leftFlowRight || 0) + 16);
+    const rightOccupiedLeft = Math.max(leftLimit, this._getTopHudRightOccupiedLeft(width) - 12);
+    const gapWidth = Math.max(0, rightOccupiedLeft - leftLimit);
+
+    let iconX;
+    if (gapWidth >= totalWidth) {
+      iconX = Phaser.Math.Clamp(pureCenterIconX, leftLimit, rightOccupiedLeft - totalWidth);
+    } else {
+      const gapCenter = leftLimit + (gapWidth * 0.5);
+      iconX = gapCenter - (totalWidth * 0.5);
+      iconX = Phaser.Math.Clamp(iconX, 12, Math.max(12, width - 12 - totalWidth));
+    }
 
     this.moneyIcon.setX(iconX);
     this.moneyText.setX(iconX + iconWidth + moneyGap);
@@ -953,7 +1001,7 @@ export class GameUIScene extends Phaser.Scene {
     }
   }
 
-  _layoutTopHudLeftGroups() {
+  _layoutTopHudLeftGroups(layoutWidth = Number(this.scale?.width || 0)) {
     if (!this._topHudLeftGroups?.length) return;
 
     const {
@@ -996,7 +1044,7 @@ export class GameUIScene extends Phaser.Scene {
       }
     }
 
-    this._layoutTopHudMoneyGroup(x - spacing);
+    this._layoutTopHudMoneyGroup(x - spacing, layoutWidth);
   }
 
   _getTopHudNeedCount() {
@@ -2015,6 +2063,7 @@ export class GameUIScene extends Phaser.Scene {
     const layout = () => {
       root.setPosition(this.scale.width - PANEL_W / 2 - 18, 42 + 10 + PANEL_H / 2);
       this.phaseClockBottomY = root.y + PANEL_H / 2;
+      this._layoutTopHudLeftGroups();
       this.achievementBoard?.reposition?.();
       this.zoomControls?.reposition?.();
     };
@@ -2099,14 +2148,6 @@ export class GameUIScene extends Phaser.Scene {
     this.phaseClock?.refresh?.(force);
   }
 
-  _getTroopCarriedItem(troop) {
-    const carry = troop?.carrying;
-    if (!carry) return null;
-    if (carry?.item?.name) return carry.item;
-    if (carry?.name) return carry;
-    return null;
-  }
-
   _formatStatusItemSummary(entries = []) {
     return entries
       .slice(0, 3)
@@ -2114,235 +2155,261 @@ export class GameUIScene extends Phaser.Scene {
       .join("  |  ");
   }
 
-  _getTownStatusMessages() {
+  _getTownStatusIndicatorConfigs() {
     const team = Teams.getTeam?.(1) ?? Teams.teamLists?.["1"];
     if (!team) return [];
 
-    const messages = [];
-    const activePlayers = (team.playerList || []).filter((troop) => troop?.active !== false);
+    const configs = [];
     const storages = (team.storageList || []).filter((storage) => storage?.sprite?.active !== false);
     const ovens = (team.ovenList || []).filter((oven) => oven?.sprite?.active !== false);
 
+    const cookingCounts = new Map();
+    const cookingOvens = ovens.filter((oven) => !!oven?.cooking);
+    cookingOvens.forEach((oven) => {
+      (oven?.cookingSlots || []).forEach((slot) => {
+        if (!slot?.item) return;
+        const label = slot.item.label || slot.item.name || "Batch";
+        cookingCounts.set(label, (cookingCounts.get(label) || 0) + Math.max(1, Number(slot.amount || 1)));
+      });
+    });
+
+    if (cookingOvens.length > 0) {
+      const summary = this._formatStatusItemSummary(Array.from(cookingCounts.entries()));
+      const ovenWord = cookingOvens.length === 1 ? "oven is" : "ovens are";
+      configs.push({
+        key: "town-cooking",
+        iconText: "\u{1F525}",
+        glowColor: 0xff9f1c,
+        bgColor: 0x9a3412,
+        hoverLabel: [
+          `Fire: ${cookingOvens.length} ${ovenWord} cooking.`,
+          summary ? `Queue: ${summary}.` : null,
+        ].filter(Boolean).join("\n"),
+      });
+    }
+
     const hardFullStorages = storages.filter((storage) => storage.getStorageWarningState?.() === "full");
     const slotLockedStorages = storages.filter((storage) => storage.getStorageWarningState?.() === "slots");
-    const blockedStorageWorkers = activePlayers.filter((troop) => {
-      const carriedItem = this._getTroopCarriedItem(troop);
-      if (!carriedItem) return false;
-      return !StorageBuilding.canAcceptItem(carriedItem, troop?.body?.team ?? 1, null, troop);
-    });
-
-    if (blockedStorageWorkers.length > 0) {
-      messages.push({
-        key: "storage-blocked",
-        tone: "danger",
-        title: `${blockedStorageWorkers.length} WORKER${blockedStorageWorkers.length === 1 ? "" : "S"} BLOCKED`,
-        detail: "NO STORAGE ROOM FOR CARRIED GOODS",
-      });
-    }
-
-    if (storages.length > 0 && hardFullStorages.length === storages.length) {
-      messages.push({
-        key: "storage-full",
-        tone: "danger",
-        title: "ALL STORAGES FULL",
-        detail: `${hardFullStorages.length} / ${storages.length} OUT OF ROOM`,
-      });
-    } else if (hardFullStorages.length > 0 || slotLockedStorages.length > 0) {
+    if (hardFullStorages.length > 0 || slotLockedStorages.length > 0) {
       const detailParts = [];
-      if (hardFullStorages.length > 0) detailParts.push(`${hardFullStorages.length} FULL`);
-      if (slotLockedStorages.length > 0) detailParts.push(`${slotLockedStorages.length} STACK-LOCKED`);
-      messages.push({
-        key: "storage-pressure",
-        tone: "warn",
-        title: "STORAGE PRESSURE",
-        detail: detailParts.join("  |  "),
+      if (hardFullStorages.length > 0) detailParts.push(`${hardFullStorages.length} full`);
+      if (slotLockedStorages.length > 0) detailParts.push(`${slotLockedStorages.length} slot-filled`);
+      configs.push({
+        key: "town-storage-pressure",
+        iconText: "\u{1F4E6}",
+        cancelBadge: true,
+        glowColor: hardFullStorages.length > 0 ? 0xff5f76 : 0xffc85a,
+        bgColor: hardFullStorages.length > 0 ? 0x7f1d2d : 0x7c3f12,
+        hoverLabel: [
+          `Storage blocked: ${detailParts.join(", ")}.`,
+          hardFullStorages.length > 0 ? "Full = no slot or stack room." : null,
+          slotLockedStorages.length > 0 ? "Slot-filled = no empty slot" : null,
+          slotLockedStorages.length > 0 ? "for new item types." : null,
+        ].filter(Boolean).join("\n"),
       });
     }
 
-    const blockedOvenWorkers = activePlayers.filter((troop) => {
-      const carriedItem = this._getTroopCarriedItem(troop);
-      if (!troop?.isFireman || !carriedItem?.cooksTo) return false;
-      return !ClayOven.findFreeCookingSlot(carriedItem, troop?.body?.team ?? 1);
-    });
-
-    if (blockedOvenWorkers.length > 0) {
-      messages.push({
-        key: "oven-blocked",
-        tone: "danger",
-        title: `${blockedOvenWorkers.length} FIREMAN${blockedOvenWorkers.length === 1 ? "" : "S"} BLOCKED`,
-        detail: "NO OVEN INPUT ROOM",
-      });
-    }
-
-    const fuelStarvedOvens = ovens.filter((oven) => {
-      const hasInput = oven?.cookingSlots?.some((slot) => slot?.item);
-      return hasInput && Number(oven?.fuel || 0) <= 0 && !oven?.cooking;
-    });
-    if (fuelStarvedOvens.length > 0) {
-      messages.push({
-        key: "oven-fuel",
-        tone: "warn",
-        title: "OVENS NEED WOOD",
-        detail: `${fuelStarvedOvens.length} WAITING ON FUEL`,
-      });
-    }
-
-    const cookingCounts = new Map();
-    ovens.forEach((oven) => {
-      const hasActiveCook = !!oven?.cooking;
-      const slot = oven?.cookingSlots?.find((entry) => entry?.item) || null;
-      if (!hasActiveCook || !slot?.item) return;
-      const label = slot.item.label || slot.item.name || "Batch";
-      cookingCounts.set(label, (cookingCounts.get(label) || 0) + 1);
-    });
-    if (cookingCounts.size > 0) {
-      messages.push({
-        key: "cooking",
-        tone: "info",
-        title: `${Array.from(cookingCounts.values()).reduce((sum, count) => sum + count, 0)} OVEN${Array.from(cookingCounts.values()).reduce((sum, count) => sum + count, 0) === 1 ? "" : "S"} COOKING`,
-        detail: this._formatStatusItemSummary(Array.from(cookingCounts.entries())),
-      });
-    }
-
-    const readyOutputs = new Map();
-    ovens.forEach((oven) => {
-      const output = oven?.outputSlots?.find((slot) => slot?.item) || null;
-      if (!output?.item) return;
-      const label = output.item.label || output.item.name || "Output";
-      readyOutputs.set(label, (readyOutputs.get(label) || 0) + 1);
-    });
-    if (readyOutputs.size > 0) {
-      messages.push({
-        key: "oven-ready",
-        tone: "good",
-        title: "OVEN OUTPUT READY",
-        detail: this._formatStatusItemSummary(Array.from(readyOutputs.entries())),
-      });
-    }
-
-    return messages;
+    return configs;
   }
 
   _buildTownStatusHud() {
     if (this.townStatusHud) return;
+    this.townStatusHud = this.add.container(0, 0).setDepth(UIDEPTH + 16);
+    this.townStatusEntries = new Map();
+    this._townStatusSignature = "";
+  }
 
-    const root = createGlassStatusBubble(this, {
-      width: 300,
-      height: 40,
-      radius: 18,
-      depth: UIDEPTH + 15,
-      scrollFactor: 0,
-      fillColor: 0x143347,
-      fillAlpha: 0.92,
-      strokeColor: 0xaee8ff,
-      strokeAlpha: 0.2,
-      accentColor: 0x7dd3fc,
-      accentAlpha: 0.18,
+  _destroyTownStatusHud() {
+    this.townStatusEntries?.forEach?.((entry) => {
+      this.tweens.killTweensOf(entry?.root);
+      this.tweens.killTweensOf(entry?.glow);
+      entry?.root?.destroy?.(true);
     });
-    const header = this.add.text(0, -8, "TOWN STATUS", {
-      fontFamily: "Bungee",
-      fontSize: "8px",
-      color: "#d9f3ff",
+    this.townStatusEntries?.clear?.();
+    this.townStatusEntries = null;
+    this.townStatusHud?.destroy?.(true);
+    this.townStatusHud = null;
+    this._townStatusSignature = "";
+  }
+
+  _createTownStatusEntry(config, index = 0) {
+    const width = 38;
+    const height = 34;
+    const root = this.add.container(0, 0);
+    const glow = this.add.graphics().setAlpha(0.74);
+    const bg = this.add.graphics();
+    const frame = this.add.graphics();
+    const icon = this.add.text(0, -1, config.iconText || "!", {
+      fontFamily: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif",
+      fontSize: "20px",
+      color: "#ffffff",
       stroke: "#07111b",
       strokeThickness: 2,
       align: "center",
     }).setOrigin(0.5);
-    const detail = this.add.text(0, 7, "", {
-      fontFamily: "Bungee",
-      fontSize: "10px",
-      color: "#f6fcff",
-      stroke: "#07111b",
-      strokeThickness: 3,
-      align: "center",
-      wordWrap: { width: 246, useAdvancedWrap: true },
-    }).setOrigin(0.5);
+    const hit = this.add.zone(0, 0, width + 6, height + 4).setInteractive({ useHandCursor: true });
 
-    root.add([header, detail]);
-    root.headerText = header;
-    root.detailText = detail;
-    root.currentIndex = 0;
-
-    const toneStyles = {
-      danger: { fillColor: 0x4d1d2b, strokeColor: 0xffc2cd, accentColor: 0xff7f96, detailColor: "#fff1f4" },
-      warn: { fillColor: 0x5a3b12, strokeColor: 0xffe0a3, accentColor: 0xffc85a, detailColor: "#fff7de" },
-      info: { fillColor: 0x15374c, strokeColor: 0xc7efff, accentColor: 0x74d7ff, detailColor: "#eefbff" },
-      good: { fillColor: 0x234227, strokeColor: 0xc8f8cf, accentColor: 0x70e08a, detailColor: "#effff2" },
+    const entry = {
+      key: config.key,
+      root,
+      glow,
+      bg,
+      width,
+      hoverLabel: config.hoverLabel || "",
+      glowColor: null,
+      bgColor: null,
     };
 
-    const layout = () => {
-      const clock = this.phaseClock;
-      const panelWidth = Math.max(300, Number(clock?.panelWidth || 300));
-      const centerX = Math.round(Number(clock?.x || (this.scale.width - (panelWidth / 2) - 18)));
-      const clockBottom = Number(this.phaseClockBottomY || (Number(clock?.y || 96) + Number(clock?.panelHeight || 104) / 2));
-      const height = Number(root.bubbleHeight || 40);
-      root.setPosition(centerX, Math.round(clockBottom + 10 + (height / 2)));
-      this.townStatusHudBottomY = root.y + (height / 2);
-      this.achievementBoard?.reposition?.();
+    entry.redraw = (glowColor = config.glowColor || 0x74d7ff, bgColor = config.bgColor || glowColor) => {
+      glow.clear();
+      glow.fillStyle(glowColor, 0.09);
+      glow.fillCircle(0, 0, 15);
+      glow.lineStyle(1, glowColor, 0.24);
+      glow.strokeRoundedRect((-width / 2) + 1, (-height / 2) + 1, width - 2, height - 2, 12);
+
+      bg.clear();
+      bg.fillStyle(bgColor, 0.5);
+      bg.fillRoundedRect(-width / 2, -height / 2, width, height, 12);
+
+      frame.clear();
+      frame.lineStyle(1.6, glowColor, 0.66);
+      frame.strokeRoundedRect(-width / 2, -height / 2, width, height, 12);
+      frame.lineStyle(1, 0xffffff, 0.12);
+      frame.strokeRoundedRect((-width / 2) + 2, (-height / 2) + 2, width - 4, height - 4, 10);
+      entry.glowColor = glowColor;
+      entry.bgColor = bgColor;
     };
 
-    root.refresh = (force = false) => {
-      const messages = this._getTownStatusMessages();
-      const signature = messages.map((entry) => `${entry.key}:${entry.title}:${entry.detail}`).join("|");
-      const now = this.time.now;
+    const children = [glow, bg, frame, icon];
+    if (config.cancelBadge) {
+      const cancel = this.add.container(11, -11);
+      const cancelBg = this.add.circle(0, 0, 7, 0xff3344, 0.96).setStrokeStyle(1, 0xffffff, 0.78);
+      const slash = this.add.graphics();
+      slash.lineStyle(2, 0xffffff, 0.95);
+      slash.beginPath();
+      slash.moveTo(-4, 4);
+      slash.lineTo(4, -4);
+      slash.strokePath();
+      cancel.add([cancelBg, slash]);
+      children.push(cancel);
+    }
 
-      if (force || signature !== this._townStatusHudSignature) {
-        this._townStatusHudSignature = signature;
-        this._townStatusCycleIndex = 0;
-        this._townStatusNextCycleAt = now + 2600;
-      }
+    hit.on("pointerover", () => {
+      const anchor = this._getUiPoint(root);
+      if (!anchor) return;
+      this._showTopHudHover(entry.hoverLabel || "", anchor.x, anchor.y - 34);
+    });
+    hit.on("pointerout", () => this._hideTopHudHover());
 
-      if (!messages.length) {
-        this._townStatusHudSignature = "";
-        root.setVisible(false);
-        this.townStatusHudBottomY = this.phaseClockBottomY || null;
-        this.achievementBoard?.reposition?.();
-        return;
-      }
+    root.add([...children, hit]);
+    root.setAlpha(0);
+    root.setScale(0.94);
+    entry.redraw(config.glowColor);
+    this.townStatusHud?.add?.(root);
 
-      root.setVisible(true);
-      if (messages.length > 1 && now >= this._townStatusNextCycleAt) {
-        this._townStatusCycleIndex = (this._townStatusCycleIndex + 1) % messages.length;
-        this._townStatusNextCycleAt = now + 2600;
-      } else if (messages.length <= 1) {
-        this._townStatusCycleIndex = 0;
-        this._townStatusNextCycleAt = now + 2600;
-      }
-
-      const activeIndex = Math.max(0, Math.min(messages.length - 1, this._townStatusCycleIndex));
-      const message = messages[activeIndex];
-      const style = toneStyles[message.tone] || toneStyles.info;
-      const titleText = messages.length > 1
-        ? `TOWN STATUS ${activeIndex + 1}/${messages.length}`
-        : "TOWN STATUS";
-
-      root.headerText.setText(titleText);
-      root.detailText.setText(`${message.title}\n${message.detail}`).setColor(style.detailColor);
-      root.redraw?.({
-        width: Math.max(300, Math.ceil(root.detailText.width) + 40),
-        height: 44,
-        radius: 18,
-        fillColor: style.fillColor,
-        strokeColor: style.strokeColor,
-        accentColor: style.accentColor,
-        fillAlpha: 0.93,
-        strokeAlpha: 0.22,
-        accentAlpha: 0.2,
-      });
-      layout();
-    };
-
-    layout();
-    root.refresh(true);
-    this.scale.on("resize", layout);
-    this.events.once("shutdown", () => {
-      this.scale.off("resize", layout);
+    this.tweens.add({
+      targets: root,
+      alpha: 1,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 180,
+      delay: index * 40,
+      ease: "Back.easeOut",
+    });
+    this.tweens.add({
+      targets: glow,
+      alpha: 0.34,
+      duration: 900,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+      delay: index * 80,
+    });
+    this.tweens.add({
+      targets: root,
+      scaleX: 1.04,
+      scaleY: 1.04,
+      duration: 980,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+      delay: index * 80,
     });
 
-    this.townStatusHud = root;
+    return entry;
+  }
+
+  _updateTownStatusEntry(entry, config) {
+    if (!entry) return;
+    entry.hoverLabel = config.hoverLabel || "";
+    if (entry.glowColor !== config.glowColor || entry.bgColor !== config.bgColor) {
+      entry.redraw?.(config.glowColor, config.bgColor);
+    }
+  }
+
+  _getTownStatusAnchor() {
+    const edgeMargin = 5;
+    const productionAnchor = this._getProductionStatusAnchor?.();
+    if (productionAnchor && Number.isFinite(productionAnchor.y)) {
+      return {
+        x: Math.round(this.scale.width - edgeMargin),
+        y: Math.round(productionAnchor.y),
+      };
+    }
+
+    const bottomBarProgress = Phaser.Math.Clamp(
+      Number(this.uiBottomBar?.openProgress ?? (this.uiBottomBar?.expanded ? 1 : 0)),
+      0,
+      1
+    );
+    const bottomReserve = Phaser.Math.Linear(74, 190, bottomBarProgress);
+    return {
+      x: Math.round(this.scale.width - edgeMargin),
+      y: Math.round(this.scale.height - bottomReserve - 36),
+    };
   }
 
   _refreshTownStatusHud(force = false) {
-    this.townStatusHud?.refresh?.(force);
+    if (!this.townStatusHud) return;
+
+    const configs = this._getTownStatusIndicatorConfigs();
+    const signature = configs.map((config) => config.key).join("|");
+    if (force || signature !== this._townStatusSignature) {
+      const activeKeys = new Set(configs.map((config) => config.key));
+      this.townStatusEntries?.forEach?.((entry, key) => {
+        if (activeKeys.has(key)) return;
+        this.tweens.killTweensOf(entry?.root);
+        this.tweens.killTweensOf(entry?.glow);
+        entry?.root?.destroy?.(true);
+        this.townStatusEntries.delete(key);
+      });
+
+      configs.forEach((config, index) => {
+        if (this.townStatusEntries?.has?.(config.key)) return;
+        const entry = this._createTownStatusEntry(config, index);
+        this.townStatusEntries?.set?.(config.key, entry);
+      });
+
+      this._townStatusSignature = signature;
+    }
+
+    const visible = configs.length > 0;
+    this.townStatusHud.setVisible(visible);
+    if (!visible) return;
+
+    const anchor = this._getTownStatusAnchor();
+    const gap = 8;
+    let cursorRight = anchor.x;
+
+    configs.forEach((config) => {
+      const entry = this.townStatusEntries?.get?.(config.key);
+      if (!entry?.root) return;
+      this._updateTownStatusEntry(entry, config);
+      const width = entry.width || 38;
+      entry.root.setPosition(cursorRight - (width / 2), anchor.y);
+      entry.root.setVisible(true);
+      cursorRight -= width + gap;
+    });
   }
 
   _buildStageMetaHud() {
@@ -2925,6 +2992,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "water",
           iconKey: UI_ITEM_TYPES.clean_water.icon,
           glowColor: 0x74d7ff,
+          bgColor: 0x075985,
           hoverLabel: "Producing Clean Water",
         };
       case "wood":
@@ -2932,6 +3000,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "wood",
           iconKey: UI_ITEM_TYPES.wood.icon,
           glowColor: 0xf59e0b,
+          bgColor: 0x92400e,
           hoverLabel: "Gathering Wood",
         };
       case "stone":
@@ -2939,6 +3008,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "stone",
           iconKey: UI_ITEM_TYPES.stone.icon,
           glowColor: 0xd6deeb,
+          bgColor: 0x475569,
           hoverLabel: "Gathering Stone",
         };
       case "seed":
@@ -2946,6 +3016,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "seed",
           iconKey: UI_ITEM_TYPES.seedCrop.icon,
           glowColor: 0x86efac,
+          bgColor: 0x166534,
           hoverLabel: "Gathering Crop Seeds",
         };
       case "berry":
@@ -2953,6 +3024,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "berry",
           iconKey: UI_ITEM_TYPES.seedBerry.icon,
           glowColor: 0xfb7185,
+          bgColor: 0x9f1239,
           hoverLabel: "Gathering Berry Seeds",
         };
       case "gold":
@@ -2960,6 +3032,7 @@ export class GameUIScene extends Phaser.Scene {
           key: "gold",
           iconKey: "monies",
           glowColor: 0xfacc15,
+          bgColor: 0x854d0e,
           hoverLabel: "Gathering Gold",
         };
       default:
@@ -2980,6 +3053,7 @@ export class GameUIScene extends Phaser.Scene {
       key: "adrenaline",
       iconKey: MARKET_REAL_ASSETS.cardIcons.adrenalineDraft,
       glowColor: 0xfff17a,
+      bgColor: 0x854d0e,
       hoverLabel: "Adrenaline Draft active",
       timerText: `${Math.ceil(remaining / 1000)}s`,
       width: 78,
@@ -3000,6 +3074,7 @@ export class GameUIScene extends Phaser.Scene {
       key: "meleeCrit",
       iconKey: MARKET_REAL_ASSETS.cardIcons.meleeCritBuff,
       glowColor: 0xff8a6b,
+      bgColor: 0x7f1d1d,
       hoverLabel: "Killer Instinct active",
       timerText: `${Math.ceil(remaining / 1000)}s`,
       width: 78,
@@ -3013,6 +3088,7 @@ export class GameUIScene extends Phaser.Scene {
       key: "projectileCrit",
       iconKey: MARKET_REAL_ASSETS.cardIcons.projectileCritBuff,
       glowColor: 0xffd166,
+      bgColor: 0x78350f,
       hoverLabel: "Deadeye Volley active",
       timerText: `${Math.ceil(remaining / 1000)}s`,
       width: 78,
@@ -3045,6 +3121,12 @@ export class GameUIScene extends Phaser.Scene {
   _collectGatherKindsForTroop(troop) {
     const order = troop?.currentOrder;
     if (!troop?.active || !isGatherOrder(order) || order?.shuttingDown) return [];
+    if (
+      order.kind === ORDER_KINDS.GATHER_TYPE &&
+      !OrderRunner.isGatherCommandAvailable(order.resourceType, this.worldScene ?? this)
+    ) {
+      return [];
+    }
 
     const kinds = new Set();
     const addKind = (value) => {
@@ -3104,6 +3186,7 @@ export class GameUIScene extends Phaser.Scene {
     const halfW = width / 2;
     const root = this.add.container(0, 0);
     const glow = this.add.graphics().setAlpha(0.74);
+    const bg = this.add.graphics();
     const frame = this.add.graphics();
     const hasTimer = !!config.timerText;
     const iconX = hasTimer ? (-halfW + 16) : 0;
@@ -3132,6 +3215,9 @@ export class GameUIScene extends Phaser.Scene {
     glow.lineStyle(1, config.glowColor, 0.24);
     glow.strokeRoundedRect(-halfW + 1, -height / 2 + 1, width - 2, height - 2, 12);
 
+    bg.fillStyle(config.bgColor || config.glowColor, 0.5);
+    bg.fillRoundedRect(-halfW, -height / 2, width, height, 12);
+
     frame.lineStyle(1.6, config.glowColor, 0.66);
     frame.strokeRoundedRect(-halfW, -height / 2, width, height, 12);
     frame.lineStyle(1, 0xffffff, 0.12);
@@ -3144,7 +3230,7 @@ export class GameUIScene extends Phaser.Scene {
     });
     hit.on("pointerout", () => this._hideTopHudHover());
 
-    root.add([glow, frame, icon, hit]);
+    root.add([glow, bg, frame, icon, hit]);
     if (timerText) root.add(timerText);
     root.setAlpha(0);
     root.setScale(0.94);
@@ -3195,21 +3281,25 @@ export class GameUIScene extends Phaser.Scene {
   }
 
   _getProductionStatusAnchor() {
+    const edgeMargin = 5;
+    const iconBottomGap = 5;
+    const iconHeight = 34;
+    const yOffsetFromBarTop = Math.round((iconHeight / 2) + iconBottomGap);
     const buttons = this.uiBottomBar?.tabs?.buttons || [];
     const functionButton = buttons.find((button) => button?.name === "functions") || buttons[0] || null;
     const buttonBounds = functionButton?.getBounds?.();
     if (buttonBounds && Number.isFinite(buttonBounds.left) && Number.isFinite(buttonBounds.top)) {
       return {
-        x: Math.round(buttonBounds.left + 10),
-        y: Math.round(buttonBounds.top - 18),
+        x: edgeMargin,
+        y: Math.round(buttonBounds.top - yOffsetFromBarTop),
       };
     }
 
     const tabsBounds = this.uiBottomBar?.tabs?.getBounds?.();
     if (tabsBounds && Number.isFinite(tabsBounds.left) && Number.isFinite(tabsBounds.top)) {
       return {
-        x: Math.round(tabsBounds.left + 10),
-        y: Math.round(tabsBounds.top - 18),
+        x: edgeMargin,
+        y: Math.round(tabsBounds.top - yOffsetFromBarTop),
       };
     }
 
@@ -3220,18 +3310,18 @@ export class GameUIScene extends Phaser.Scene {
     );
     const bottomReserve = Phaser.Math.Linear(74, 190, bottomBarProgress);
     return {
-      x: 24,
-      y: Math.round(this.scale.height - bottomReserve - 36),
+      x: edgeMargin,
+      y: Math.round(this.scale.height - bottomReserve - yOffsetFromBarTop),
     };
   }
 
-  _refreshProductionStatusHud() {
+  _refreshProductionStatusHud(force = false) {
     if (!this.productionStatusHud) return;
 
     const configs = this._getActiveStatusConfigs();
 
     const signature = configs.map((config) => config.key).join("|");
-    if (signature !== this._productionStatusSignature) {
+    if (force || signature !== this._productionStatusSignature) {
       const activeKeys = new Set(configs.map((config) => config.key));
       this.productionStatusEntries?.forEach?.((entry, key) => {
         if (activeKeys.has(key)) return;
@@ -4544,8 +4634,8 @@ export class GameUIScene extends Phaser.Scene {
       }).setOrigin(0.5);
       const layoutCardText = () => {
         const bodyTop = Math.max(12, Math.round(Number(visual?.contentBottom || 0) + 24));
-        const bodyBottom = Math.round(selectY - 34);
-        const textOffsetY = option?.presentationType === "card" ? -15 : 0;
+        const bodyBottom = Math.round(selectY - 46);
+        const textOffsetY = (option?.presentationType === "card" ? -15 : 0) - 10;
         let titleGap = 10;
         let bodyGap = String(option?.hint || "").trim() ? 8 : 0;
         let tuned = false;
@@ -4569,7 +4659,8 @@ export class GameUIScene extends Phaser.Scene {
             return placeTextBlock();
           }
 
-          const startY = bodyTop + Math.max(0, Math.floor((availableHeight - totalHeight) / 2)) + textOffsetY;
+          const centeredStartY = bodyTop + Math.max(0, Math.floor((availableHeight - totalHeight) / 2)) + textOffsetY;
+          const startY = Math.min(centeredStartY, bodyBottom - totalHeight);
           let cursorY = startY;
 
           titleText.setY(cursorY + (titleHeight / 2));
@@ -5782,8 +5873,15 @@ export class GameUIScene extends Phaser.Scene {
   }
 
   _destroyBossStorm() {
-    this._bossStorm?.rainGraphics?.destroy?.();
-    this._bossStorm?.flashRect?.destroy?.();
+    AudioManager.stopBossRainAmbience();
+    const storm = this._bossStorm;
+    storm?.thunderGraphics?.forEach?.((graphic) => {
+      this.tweens.killTweensOf(graphic);
+      graphic?.destroy?.();
+    });
+    storm?.thunderGraphics?.clear?.();
+    storm?.rainGraphics?.destroy?.();
+    storm?.flashRect?.destroy?.();
     this._bossStorm = null;
   }
 
@@ -5809,9 +5907,13 @@ export class GameUIScene extends Phaser.Scene {
         flashRect,
         drops,
         lastAt: this.time.now,
-        nextLightningAt: this.time.now + 1500,
+        nextThunderAt: this.time.now + Phaser.Math.Between(4000, 9000),
+        thunderGraphics: new Set(),
       };
+    } else if (!Number.isFinite(Number(this._bossStorm.nextThunderAt))) {
+      this._bossStorm.nextThunderAt = this.time.now + Phaser.Math.Between(4000, 9000);
     }
+    AudioManager.startBossRainAmbience({ volume: 0.3 });
   }
 
   flashStormLightning(duration = 140, alpha = 0.36) {
@@ -5826,6 +5928,96 @@ export class GameUIScene extends Phaser.Scene {
       duration,
       ease: "Quad.easeOut",
     });
+  }
+
+  _triggerBossStormThunder() {
+    const storm = this._bossStorm;
+    if (!storm?.rainGraphics) return;
+    AudioManager.playBossThunder({
+      volume: 0.32 + Math.random() * 0.08,
+      rate: 0.92 + Math.random() * 0.12,
+    });
+    this.flashStormLightning(160, 0.3 + Math.random() * 0.18);
+    this._drawBossStormThunderBolt(storm);
+  }
+
+  _drawBossStormThunderBolt(storm = this._bossStorm) {
+    if (!storm) return null;
+    const width = Math.max(1, this.scale.width);
+    const height = Math.max(1, this.scale.height);
+    const graphic = this.add.graphics()
+      .setDepth(UIDEPTH + 40)
+      .setAlpha(0.95);
+    graphic.setScrollFactor?.(0);
+
+    const startX = Phaser.Math.Between(Math.round(width * 0.12), Math.round(width * 0.88));
+    const endX = Phaser.Math.Clamp(startX + Phaser.Math.Between(-190, 190), 36, width - 36);
+    const endY = Phaser.Math.Between(Math.round(height * 0.34), Math.round(height * 0.72));
+    const pointCount = Phaser.Math.Between(7, 11);
+    const points = [];
+
+    for (let i = 0; i <= pointCount; i++) {
+      const t = i / pointCount;
+      const taper = 1 - (t * 0.42);
+      const x = Phaser.Math.Clamp(
+        Phaser.Math.Linear(startX, endX, t) + Phaser.Math.Between(-42, 42) * taper,
+        18,
+        width - 18
+      );
+      const y = Phaser.Math.Linear(-18, endY, t);
+      points.push({ x, y });
+    }
+
+    const drawPath = (path, lineWidth, color, alpha) => {
+      if (!path.length) return;
+      graphic.lineStyle(lineWidth, color, alpha);
+      graphic.beginPath();
+      graphic.moveTo(path[0].x, path[0].y);
+      for (let i = 1; i < path.length; i++) {
+        graphic.lineTo(path[i].x, path[i].y);
+      }
+      graphic.strokePath();
+    };
+
+    drawPath(points, 7, 0x7dd3fc, 0.25);
+    drawPath(points, 4, 0xdff6ff, 0.8);
+    drawPath(points, 1.5, 0xffffff, 1);
+
+    const branchCount = Phaser.Math.Between(2, 4);
+    for (let i = 0; i < branchCount; i++) {
+      const anchor = points[Phaser.Math.Between(2, Math.max(2, points.length - 3))];
+      if (!anchor) continue;
+      const direction = Math.random() < 0.5 ? -1 : 1;
+      const branchLength = Phaser.Math.Between(42, 118);
+      const branch = [
+        anchor,
+        {
+          x: Phaser.Math.Clamp(anchor.x + direction * branchLength * 0.45, 12, width - 12),
+          y: anchor.y + Phaser.Math.Between(18, 46),
+        },
+        {
+          x: Phaser.Math.Clamp(anchor.x + direction * branchLength, 12, width - 12),
+          y: anchor.y + Phaser.Math.Between(38, 92),
+        },
+      ];
+      drawPath(branch, 3, 0xbfefff, 0.52);
+      drawPath(branch, 1.2, 0xffffff, 0.8);
+    }
+
+    storm.thunderGraphics?.add?.(graphic);
+    this.tweens.add({
+      targets: graphic,
+      alpha: 0,
+      delay: 70,
+      duration: 260,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        storm.thunderGraphics?.delete?.(graphic);
+        graphic.destroy();
+      },
+    });
+
+    return graphic;
   }
 
   _updateBossStorm() {
@@ -5852,9 +6044,12 @@ export class GameUIScene extends Phaser.Scene {
 
     storm.flashRect.setPosition(this.scale.width / 2, this.scale.height / 2);
     storm.flashRect.setSize(this.scale.width, this.scale.height);
-    if (now >= Number(storm.nextLightningAt || 0)) {
-      storm.nextLightningAt = now + Phaser.Math.Between(2200, 5200);
-      this.flashStormLightning(150, 0.22 + Math.random() * 0.16);
+    if (!Number.isFinite(Number(storm.nextThunderAt))) {
+      storm.nextThunderAt = now + Phaser.Math.Between(4000, 9000);
+    }
+    if (now >= Number(storm.nextThunderAt || 0)) {
+      storm.nextThunderAt = now + Phaser.Math.Between(10000, 22000);
+      this._triggerBossStormThunder();
     }
   }
 

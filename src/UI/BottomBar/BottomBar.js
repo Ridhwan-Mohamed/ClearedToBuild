@@ -7,6 +7,7 @@ import HousesTab from "./HousesTab"
 import BuildTab from "./BuildTab";
 import {
   BOTTOM_BAR_THEME,
+  getBottomBarWidth,
   makeGlassRoundRect,
   mixColor,
   setHoverLiftState,
@@ -28,11 +29,6 @@ const BOTTOM_BAR_DEPTH = UIDEPTH + 40;
 const COLLAPSED = 100;     // how much of the bar stays visible when hidden
 const EXPANDED  = 160;    // full bar height (tall enough for your tabs/pages)
 const START_OPEN  = false; // start expanded?
-const BOTTOM_BAR_SIDE_INSET = 18;
-
-function getBottomBarWidth(scene) {
-  return Math.max(0, scene.scale.width - (BOTTOM_BAR_SIDE_INSET * 2));
-}
 
 function destroyBottomBarRoot(root) {
   if (!root) return;
@@ -167,10 +163,7 @@ export function CreateBottomBar(scene) {
   };
 
   const onTogglePointerUp = () => {
-    if (!canUseDuringTutorial("bottomBar.toggle", {
-      open: !expanded,
-      message: "Finish the highlighted tutorial step first.",
-    })) {
+    if (!canUseDuringTutorial("bottomBar.toggle", { open: !expanded })) {
       return;
     }
     toggleBottomBar();
@@ -255,10 +248,7 @@ export function CreateBottomBar(scene) {
   const onTabButtonClick = (btn) => {
     const key = btn?.name;
     if (!key) return;
-    if (!canUseDuringTutorial("bottomBar.tab", {
-      key,
-      message: "Use the highlighted tutorial control first.",
-    })) {
+    if (!canUseDuringTutorial("bottomBar.tab", { key })) {
       tabs.setValue?.(scene.uiBottomBar.currentPage);
       updateTabButtonStyles(tabs, scene.uiBottomBar.currentPage);
       return;

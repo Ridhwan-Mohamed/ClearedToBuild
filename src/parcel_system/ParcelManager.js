@@ -15,6 +15,7 @@ import {
   isSlotFavorEligibleContractType,
   pickRandomSlotFavor,
 } from "./SlotFavorSystem.js";
+import { clampMilitiaTier, getMilitiaTierLayout } from "./MilitiaTierConfig.js";
 
 export class ParcelManager {
   constructor({ scene, opts }) {
@@ -220,11 +221,24 @@ export class ParcelManager {
     this.scene?.parcelSpawnUI?.setMode?.(this.scene?.zoomMixer?.mode || "detailed");
   }
 
-  startMilitia(slotId, opts = {}) {
+  startMilitia(slotId, difficulty = 1, opts = {}) {
+    if (difficulty && typeof difficulty === "object") {
+      opts = difficulty;
+      difficulty = opts.difficulty ?? 1;
+    }
     if (this.slotToContractId[slotId] || this.hasActiveContractType("MILITIA")) return null;
 
     const id = `MILITIA_${slotId}_${Date.now()}`;
     const origin = this.getSlotOrigin(slotId);
+    const tier = clampMilitiaTier(difficulty);
+    const layout = Array.isArray(opts.militiaConfig?.layout) && opts.militiaConfig.layout.length === 3
+      ? [...opts.militiaConfig.layout]
+      : getMilitiaTierLayout(tier);
+    const militiaConfig = {
+      ...(opts.militiaConfig || {}),
+      tier,
+      layout,
+    };
 
     const inst = new ParcelContractInstance({
       id,
@@ -235,7 +249,8 @@ export class ParcelManager {
       rng: this.rng,
       map: this.map,
       parcelManager: this,
-      militiaConfig: opts.militiaConfig ?? null,
+      difficulty: tier,
+      militiaConfig,
     });
 
     inst.moneyCost = Math.max(0, Number(opts.moneyCost ?? 0));

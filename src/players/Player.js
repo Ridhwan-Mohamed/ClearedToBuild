@@ -203,10 +203,21 @@ export class Player {
         if (!troop) return;
         const task = troop.task;
         const teamNumber = troop?.body?.team;
+        if (task?.taskType === "storagePickup" && task.storage && task.item) {
+            task.storage.releasePickup?.(task.item, 1);
+        }
         if (task && typeof task === "object" && typeof task.assigned === "number" && task.assigned > 0) {
             task.assigned -= 1;
         }
+        if (troop.isFireman) {
+            if (troop.pendingFuelJob?.assigned > 0) troop.pendingFuelJob.assigned -= 1;
+            if (troop.pendingOvenJob?.assigned > 0) troop.pendingOvenJob.assigned -= 1;
+            troop.pendingFuelJob = null;
+            troop.pendingOvenJob = null;
+            troop.skip = false;
+        }
         troop.task = null;
+        troop.taskMeta = null;
         if ((task?.forageType === "block" || task?.forageType === "seed") && teamNumber != null) {
             blockResourceManager.syncNodeFlash(teamNumber, task.value || task);
         }
@@ -866,6 +877,24 @@ export class Player {
         if (troop.state === CONTROL_STATES.HEADING_TO_GUARD && idleNoMotion) {
             Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             troop.roam = false;
+        }
+
+        if (troop.state === CONTROL_STATES.BACK_TO_TOWN && idleNoMotion) {
+            if (StorageManager.isCarrying(troop) && StorageManager.tryCreateStorageDeliveryTask(troop)) {
+                return;
+            }
+            if (troop.currentOrder?.status === "active" && OrderRunner.stepUnit(troop)) {
+                return;
+            }
+            const path = Teams.sendTroopToTown(troop);
+            if (path?.length) {
+                return;
+            }
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            troop.roam = false;
+            troop.finalPos = null;
+            troop.body?.setVelocity?.(0, 0);
+            troop.play?.(troop.idle);
         }
 
         if (
@@ -2598,7 +2627,14 @@ export class Player {
 
         // Fallbacks by intent.
         if (troop.state === CONTROL_STATES.BACK_TO_TOWN) {
-            Teams.sendTroopToTown(troop);
+            const path = Teams.sendTroopToTown(troop);
+            if (!path?.length) {
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+                troop.currentPath?.splice?.(0);
+                troop.finalPos = null;
+                troop.body?.setVelocity?.(0, 0);
+                OrderRunner.stepUnit?.(troop);
+            }
             return;
         }
 
@@ -2752,7 +2788,7 @@ export class Player {
                 Brawler.update(troop);
             }
             else if (troop.isFortGrunt) {
-                FortGrunt.update(troop);
+                skipTail = FortGrunt.update(troop) === true;
             }
             else if (troop.isFarmer) {
                 Farmer.update(troop);
@@ -3053,6 +3089,11 @@ export class Player {
 
     static _updateMiniBars(troop) {
     if (!this.scene || !troop || !troop.active) return;
+
+    if (troop.isBoss || troop.isShocker) {
+        this._hideMiniBars(troop);
+        return;
+    }
 
     if (troop.state === CONTROL_STATES.SLEEP_MODE || troop.visible === false || troop.alpha === 0) {
         this._hideMiniBars(troop);

@@ -3,6 +3,9 @@ import { SQUARESIZE, UIDEPTH, showAlert } from "../constants.js";
 import { AudioManager } from "../Manager/AudioManager.js";
 import { SaveManager } from "../save/SaveManager.js";
 import { Teams } from "../Teams.js";
+import { UI_ITEM_TYPES } from "../UI/UIConstants.js";
+import { buildingManager } from "../Manager/buildingManager.js";
+import { StorageManager } from "../Manager/StorageManager.js";
 import { Player } from "../players/Player.js";
 import { TUTORIAL_STEPS } from "./TutorialSteps.js";
 import { TutorialOverlay } from "./TutorialOverlay.js";
@@ -137,6 +140,7 @@ export class TutorialManager {
 
   notifyAction(action, payload = {}) {
     if (!this.active) return false;
+    this._handleAuxiliaryAction(action, payload);
     const wait = this.waitFor;
     if (!wait || !this._matchesRule(wait, action, payload)) return false;
 
@@ -164,14 +168,23 @@ export class TutorialManager {
       this._ensureDetailedMode();
     }
     if (step.selectRole) {
-      this._selectRole(step.selectRole, { faceDown: !!step.faceDown });
+      this._selectRole(step.selectRole, {
+        faceDown: !!step.faceDown,
+        focus: step.focusRole !== false,
+      });
     }
     if (step.openTab) {
       this._openTab(step.openTab);
     }
+    if (step.ensureMaterials) {
+      this._ensureTutorialMaterials(step.ensureMaterials);
+    }
     this._syncBottomBarForStep(step);
     if (step.setBuildMode) {
       this._setBuildMode(step.setBuildMode);
+    }
+    if (Number.isFinite(Number(step.setWaterDraft))) {
+      this._setWaterDraft(step.setWaterDraft);
     }
     if (step.focusParcel) {
       this._focusParcel(step.focusParcel);
@@ -223,6 +236,34 @@ export class TutorialManager {
     this.scene.uiScene?._refreshTopHudValues?.();
   }
 
+  _ensureTutorialMaterials(minimums = {}) {
+    for (const [key, rawMinimum] of Object.entries(minimums)) {
+      const minimum = Math.max(0, Math.floor(Number(rawMinimum) || 0));
+      if (!(minimum > 0)) continue;
+
+      const current = buildingManager.getAvailableMaterialCount?.(key, "1") ?? 0;
+      if (current >= minimum) continue;
+      const delta = minimum - current;
+
+      if (key === "money") {
+        this.scene.updateMoney?.(delta);
+        continue;
+      }
+      if (key === "permits") {
+        this.scene.updatePermits?.(delta);
+        continue;
+      }
+
+      const itemType = UI_ITEM_TYPES[key];
+      if (!itemType) continue;
+      const added = StorageManager.grantItemToTeam("1", itemType, delta, this.scene);
+      if (added < delta && !Teams.teamLists?.["1"]?.storageList?.length) {
+        this.scene.uiScene?._refreshTopHudValues?.();
+      }
+    }
+    this.scene.uiScene?._refreshTopHudValues?.();
+  }
+
   _matchesRule(rule, action, payload = {}) {
     if (!rule || rule.action !== action) return false;
     if (rule.key && rule.key !== payload.key) return false;
@@ -232,18 +273,12 @@ export class TutorialManager {
     if (rule.mode && rule.mode !== payload.mode) return false;
     if (rule.resourceType && rule.resourceType !== payload.resourceType) return false;
     if (Object.prototype.hasOwnProperty.call(rule, "enabled") && rule.enabled !== payload.enabled) return false;
+    if (Object.prototype.hasOwnProperty.call(rule, "target") && Number(rule.target) !== Number(payload.target)) return false;
     return true;
   }
 
   _blockedMessageForStep() {
-    const id = this.currentStep?.id || "";
-    if (id.includes("storage")) return "Build the storage first.";
-    if (id.includes("house")) return "Build the house first.";
-    if (id.includes("brawler")) return "Recruit the brawler first.";
-    if (id.includes("contract_slot")) return "Open the East contract first.";
-    if (id.includes("contract_type")) return "Choose the Forest contract first.";
-    if (id.includes("parcel") || id.includes("contract_buy")) return "Buy the forest parcel first.";
-    return "Finish this tutorial step first.";
+    return "Follow the tutorial instructions.";
   }
 
   _selectRole(roleKey, opts = {}) {
@@ -251,7 +286,7 @@ export class TutorialManager {
     if (!troop) return null;
     Player.selectSingleTroop(troop);
     if (opts.faceDown) this._faceTroopDown(troop, roleKey);
-    this._focusTroop(troop);
+    if (opts.focus !== false) this._focusTroop(troop);
     return troop;
   }
 
@@ -277,13 +312,18 @@ export class TutorialManager {
 
   _focusTroop(troop) {
     if (!troop?.active) return;
-    this._focusWorldPoint(troop.x, troop.y, 1.08, 520);
+    this._focusWorldPoint(troop.x, troop.y, null, 520);
   }
 
   _openTab(pageKey) {
     const ui = this.scene.uiScene;
     const bar = ui?.uiBottomBar;
     if (!ui || !bar?.pages) return;
+
+    if (typeof bar.activatePage === "function") {
+      bar.activatePage(pageKey, { playAudio: false, expandBar: true });
+      return;
+    }
 
     bar.pages.swapPage(pageKey);
     bar.currentPage = pageKey;
@@ -312,6 +352,29 @@ export class TutorialManager {
     const tab = this.scene.uiScene?.buildTab;
     if (!tab) return;
     tab._setMode?.(mode);
+  }
+
+  _setWaterDraft(count) {
+    const automation = Teams.ensureTownAutomation?.(1);
+    if (!automation) return;
+    automation.waterDraftCount = Math.max(1, Math.floor(Number(count) || 1));
+    this.scene.uiScene?.functionTab?.updateVisuals?.();
+  }
+
+  _handleAuxiliaryAction(action, payload = {}) {
+    if (
+      this.currentStep?.id === "forest_contract_buy" &&
+      action === "contractHud.type" &&
+      payload?.slotId === "E" &&
+      payload?.type === "FOREST"
+    ) {
+      this.currentStep = { ...this.currentStep, highlight: "contractBuyButton" };
+      if (this.overlay?.currentStep?.id === "forest_contract_buy") {
+        this.overlay.currentStep = this.currentStep;
+      }
+      this._clearHighlights();
+      this.scene.time?.delayedCall?.(80, () => this._showUiHighlight("contractBuyButton"));
+    }
   }
 
   _syncBottomBarForStep(step = this.currentStep) {
@@ -453,7 +516,6 @@ export class TutorialManager {
     if (key === "contractFarmButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:FARM") ?? null;
     if (key === "contractMarketButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:MARKET") ?? null;
     if (key === "contractPressureButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:PRESSURE") ?? null;
-    if (key === "contractLockedMilitiaButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contract:LOCKED_MILITIA") ?? null;
     if (key === "contractBuyButton") return ui.contractHud?.getTutorialTargetBounds?.("button:contractBuy:FOREST") ?? null;
     return null;
   }

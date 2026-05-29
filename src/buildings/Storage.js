@@ -40,13 +40,22 @@ export class StorageBuilding {
         const w = (tileType.lenX || 1) * SQUARESIZE;
         const h = (tileType.lenY || 1) * SQUARESIZE;
 
-        this.collider = StorageBuilding.scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
-        this.collider.setDisplaySize(w, h).setAlpha(0);
-        Map.structureBarrier.add(this.collider);
+        this.collider = Map.addStructureBarrier(
+            x * SQUARESIZE + (w / 2),
+            y * SQUARESIZE + (h / 2),
+            w,
+            h,
+            {
+                team: this.teamNumber,
+                buildingRef: this,
+            }
+        );
 
-        this.collider.buildingRef = this;
-        this.collider.isBuilding = true;
-        this.collider.team = this.teamNumber;
+        if (this.collider) {
+            this.collider.buildingRef = this;
+            this.collider.isBuilding = true;
+            this.collider.team = this.teamNumber;
+        }
 
         Map.drawRoadAround(x,y,item,teamNumber)
         Map.addBlockItem(x,y,item)
@@ -357,7 +366,7 @@ export class StorageBuilding {
         return false;
     }
 
-    addItem(itemType, amount) {
+    addItem(itemType, amount, opts = {}) {
         const itemDef = itemType;
         const OGAmnt = amount;
         if (!itemDef) return false;
@@ -395,7 +404,7 @@ export class StorageBuilding {
             StorageUI.refreshStatus?.(this);
 
             const added = OGAmnt - amount;
-            if (added > 0) {
+            if (added > 0 && !opts?.silent) {
                 const icon = GHOST_ITEM_ICONS[itemType.name];
                 const text = `+${added} ${icon}`;
                 // teamNumber 0 ⇒ green in showGhostText

@@ -10,6 +10,49 @@ import {
 
 const OVERLAY_DEPTH = UIDEPTH + 520;
 const TYPE_DELAY_MS = 27;
+const BODY_TEXT_COLOR = "#f4fbff";
+const KEYWORD_STROKE = "#04111a";
+
+const TUTORIAL_TERM_STYLES = [
+  { terms: ["Cleared to Build"], color: "#9ee7ff", strokeThickness: 4 },
+  { terms: ["Functions tab", "Functions"], color: "#8f7cff", strokeThickness: 3 },
+  { terms: ["Store tab", "Store"], color: "#ff97c2", strokeThickness: 3 },
+  { terms: ["Cards tab", "Cards"], color: "#ffdd73", strokeThickness: 3 },
+  { terms: ["Town Towers", "Town Tower"], color: "#c4b5fd", strokeThickness: 3 },
+  { terms: ["Clay Ovens", "Clay Oven"], color: "#fdba74", strokeThickness: 3 },
+  { terms: ["House", "Houses"], color: "#f8d48b", strokeThickness: 3 },
+  { terms: ["Storage"], color: "#fcd34d", strokeThickness: 3 },
+  { terms: ["Farmer", "Farmers"], color: "#ffd9a1", strokeThickness: 3 },
+  { terms: ["Forager"], color: "#a7f3d0", strokeThickness: 3 },
+  { terms: ["Builder", "Builders"], color: "#c7d2fe", strokeThickness: 3 },
+  { terms: ["Fireman"], color: "#fed7aa", strokeThickness: 3 },
+  { terms: ["Brawler"], color: "#fef08a", strokeThickness: 3 },
+  { terms: ["Food"], color: "#86efac", strokeThickness: 3 },
+  { terms: ["Water"], color: "#93c5fd", strokeThickness: 3 },
+  { terms: ["Seeds"], color: "#fde68a", strokeThickness: 3 },
+  { terms: ["Berries"], color: "#e9d5ff", strokeThickness: 3 },
+  { terms: ["Wood"], color: "#bbf7d0", strokeThickness: 3 },
+  { terms: ["Stone"], color: "#cbd5e1", strokeThickness: 3 },
+  { terms: ["Growth Permits", "expansion permit", "permits"], color: "#f9a8d4", strokeThickness: 3 },
+  { terms: ["Money"], color: "#fef08a", strokeThickness: 3 },
+  { terms: ["Gold"], color: "#facc15", strokeThickness: 3 },
+  { terms: ["XP"], color: "#a5b4fc", strokeThickness: 3 },
+  { terms: ["Forest"], color: "#86efac", strokeThickness: 3 },
+  { terms: ["Rock"], color: "#cbd5e1", strokeThickness: 3 },
+  { terms: ["Field"], color: "#fde68a", strokeThickness: 3 },
+  { terms: ["Market"], color: "#67e8f9", strokeThickness: 3 },
+  { terms: ["Pressure"], color: "#fca5a5", strokeThickness: 3 },
+];
+
+const TUTORIAL_TERMS = TUTORIAL_TERM_STYLES
+  .flatMap((style) => style.terms.map((term) => ({
+    term,
+    lower: term.toLowerCase(),
+    style,
+  })))
+  .sort((a, b) => b.term.length - a.term.length);
+
+const WORD_CHAR_RE = /[a-z0-9]/i;
 
 export class TutorialOverlay {
   constructor(scene, manager) {
@@ -20,6 +63,7 @@ export class TutorialOverlay {
     this.currentStep = null;
     this.typeEvent = null;
     this.fullText = "";
+    this.fullRuns = [];
     this.visibleText = "";
     this.isTyping = false;
     this._charIndex = 0;
@@ -28,6 +72,11 @@ export class TutorialOverlay {
     this._spaceHandler = null;
     this._resizeHandler = null;
     this.stepTitle = null;
+    this.bodyRich = null;
+    this.bodyTextNodes = [];
+    this._bodyFontSize = 17;
+    this._bodyLineSpacing = 6;
+    this._bodyWrapWidth = 480;
   }
 
   destroy() {
@@ -35,6 +84,7 @@ export class TutorialOverlay {
     this.typeEvent = null;
     this.avatarFrameEvent?.remove(false);
     this.avatarFrameEvent = null;
+    this._clearBodyRichText();
     this._unbindSpace();
     this._setResizeHandler(null);
     this.promptRoot?.destroy?.(true);
@@ -57,7 +107,7 @@ export class TutorialOverlay {
     const height = 250;
     const bg = this.scene.add.graphics();
     this._drawPanel(bg, width, height, 0x123148, 0x9ee7ff, 26);
-    const title = this.scene.add.text(0, -78, "PLAY SHORT TUTORIAL?", createDisplayTextStyle({
+    const title = this.scene.add.text(0, -78, "Play the tutorial?", createDisplayTextStyle({
       fontSize: 24,
       min: 22,
       color: "#f4fbff",
@@ -65,7 +115,7 @@ export class TutorialOverlay {
       strokeThickness: 4,
       align: "center",
     })).setOrigin(0.5);
-    const body = this.scene.add.text(0, -24, "A quick guided start explains farming, parcels, building, water and defense.", createBodyTextStyle({
+    const body = this.scene.add.text(0, -24, "This is a short guided start for the current version of the game.", createBodyTextStyle({
       fontSize: 16,
       min: 14,
       color: "#c7e8f5",
@@ -74,8 +124,8 @@ export class TutorialOverlay {
       lineSpacing: 6,
     })).setOrigin(0.5);
 
-    const yes = this._makeButton(-112, 74, 166, "START", "#eafffb", 0x1f7667, onStart);
-    const no = this._makeButton(112, 74, 166, "SKIP", "#ffe7ed", 0x682a3a, onSkip);
+    const yes = this._makeButton(-112, 74, 166, "Start", "#eafffb", 0x1f7667, onStart);
+    const no = this._makeButton(112, 74, 166, "Skip", "#ffe7ed", 0x682a3a, onSkip);
     card.add([bg, title, body, ...yes, ...no]);
     root.add([shade, card]);
 
@@ -112,11 +162,12 @@ export class TutorialOverlay {
           : 4,
         align: "left",
         wordWrap: { width: 480 },
-      }));
+    }));
     this.fullText = String(step.text || "");
+    this.fullRuns = this._parseStyledRuns(this.fullText);
     this.visibleText = "";
-    this.bodyText.setText("");
-    this.nextText.setText(step.waitFor ? "WAITING" : (step.completeOnAdvance ? "DONE" : "NEXT"));
+    this._setBodyText("");
+    this.nextText.setText(step.waitFor ? "WAITING" : (step.completeOnAdvance ? "Finish Tutorial" : "NEXT"));
     this.nextHint.setText(step.waitFor ? "finish the highlighted action" : "click or press space");
     this._setNextEnabled(!step.waitFor);
     this._layoutSpeech();
@@ -133,7 +184,7 @@ export class TutorialOverlay {
     this.typeEvent = null;
     this.isTyping = false;
     this.visibleText = this.fullText;
-    this.bodyText.setText(this.fullText);
+    this._setBodyText(this.fullText);
     this.avatarFrameEvent?.remove(false);
     this.avatarFrameEvent = null;
     this.avatar?.anims?.stop?.();
@@ -160,7 +211,7 @@ export class TutorialOverlay {
 
         const char = this.fullText[this._charIndex];
         this.visibleText += char;
-        this.bodyText.setText(this.visibleText);
+        this._setBodyText(this.visibleText);
         if (char.trim() && this._charIndex % 3 === 0) {
           AudioManager.playUiType({ volume: 0.12, rate: 0.96 + Math.random() * 0.12 });
         }
@@ -196,14 +247,7 @@ export class TutorialOverlay {
       align: "left",
     })).setOrigin(0, 0).setVisible(false);
     this.stepTitle.setShadow(0, 2, "#021018", 2, true, true);
-    this.bodyText = this.scene.add.text(0, 0, "", createBodyTextStyle({
-      fontSize: 18,
-      min: 16,
-      color: "#f4fbff",
-      align: "left",
-      lineSpacing: 5,
-      wordWrap: { width: 480 },
-    })).setOrigin(0, 0);
+    this.bodyRich = this.scene.add.container(0, 0);
     this.nextBg = this.scene.add.graphics();
     this.nextText = this.scene.add.text(0, 0, "NEXT", createLabelTextStyle({
       fontSize: 14,
@@ -233,7 +277,7 @@ export class TutorialOverlay {
       this.avatar,
       this.nameText,
       this.stepTitle,
-      this.bodyText,
+      this.bodyRich,
       this.nextBg,
       this.nextText,
       this.nextHint,
@@ -317,19 +361,21 @@ export class TutorialOverlay {
       .setPosition(bubbleX, titleY)
       .setWordWrapWidth(Math.max(220, bubbleW - 34))
       .setVisible(hasTitle);
-    this.bodyText
-      .setFontSize(compact ? "15px" : "17px")
-      .setLineSpacing(compact ? 5 : 6)
-      .setPosition(bubbleX, bodyY);
-    this.bodyText.setWordWrapWidth(Math.max(260, bubbleW - 34));
-    this.nextBg.setPosition(bubbleX + bubbleW - 68, panelH - 34);
+    this._bodyFontSize = compact ? 15 : 17;
+    this._bodyLineSpacing = compact ? 5 : 6;
+    this._bodyWrapWidth = Math.max(260, bubbleW - 34);
+    this.bodyRich.setPosition(bubbleX, bodyY);
+    this._renderRichBody(this.visibleText);
+    const nextButtonW = this.currentStep?.completeOnAdvance ? 142 : 108;
+    const nextButtonX = bubbleX + bubbleW - nextButtonW / 2 - 14;
+    this.nextBg.setPosition(nextButtonX, panelH - 34);
     this.nextText
       .setFontSize(compact ? "12px" : "14px")
-      .setPosition(bubbleX + bubbleW - 68, panelH - 40);
+      .setPosition(nextButtonX, panelH - 40);
     this.nextHint
       .setFontSize(compact ? "10px" : "11px")
-      .setPosition(bubbleX + bubbleW - 68, panelH - 22);
-    this.nextHit.setPosition(bubbleX + bubbleW - 68, panelH - 32).setSize(108, 38);
+      .setPosition(nextButtonX, panelH - 22);
+    this.nextHit.setPosition(nextButtonX, panelH - 32).setSize(nextButtonW, 38);
     this._drawNextButton();
   }
 
@@ -464,15 +510,149 @@ export class TutorialOverlay {
   }
 
   _drawNextButton() {
+    const buttonW = this.currentStep?.completeOnAdvance ? 142 : 108;
+    const x = -buttonW / 2;
     this.nextBg.clear();
     this.nextBg.fillStyle(0x031019, 0.20);
-    this.nextBg.fillRoundedRect(-54, -19 + 4, 108, 38, 12);
+    this.nextBg.fillRoundedRect(x, -19 + 4, buttonW, 38, 12);
     this.nextBg.fillStyle(0x1d766a, 0.92);
-    this.nextBg.fillRoundedRect(-54, -19, 108, 38, 12);
+    this.nextBg.fillRoundedRect(x, -19, buttonW, 38, 12);
     this.nextBg.fillStyle(0xffffff, 0.08);
-    this.nextBg.fillRoundedRect(-45, -14, 90, 11, 7);
+    this.nextBg.fillRoundedRect(x + 9, -14, Math.max(18, buttonW - 18), 11, 7);
     this.nextBg.lineStyle(2, 0xb9fff0, 0.22);
-    this.nextBg.strokeRoundedRect(-54, -19, 108, 38, 12);
+    this.nextBg.strokeRoundedRect(x, -19, buttonW, 38, 12);
+  }
+
+  _setBodyText(text) {
+    this.visibleText = String(text || "");
+    this._renderRichBody(this.visibleText);
+  }
+
+  _clearBodyRichText() {
+    this.bodyTextNodes.forEach((node) => node?.destroy?.());
+    this.bodyTextNodes = [];
+    this.bodyRich?.removeAll?.(false);
+  }
+
+  _renderRichBody(text) {
+    if (!this.bodyRich) return;
+    this._clearBodyRichText();
+
+    const visibleLength = String(text || "").length;
+    const runs = this._visibleStyledRuns(visibleLength);
+    const lineHeight = this._bodyFontSize + this._bodyLineSpacing;
+    const wrapWidth = Math.max(120, this._bodyWrapWidth || 480);
+    const spaceWidth = Math.max(4, Math.round(this._bodyFontSize * 0.34));
+    let x = 0;
+    let line = 0;
+
+    runs.forEach((run) => {
+      const style = this._bodyTextStyle(run.style);
+      const tokens = String(run.text || "").match(/\n|[^\S\n]+|[^\s]+/g) || [];
+      tokens.forEach((token) => {
+        if (token === "\n") {
+          x = 0;
+          line += 1;
+          return;
+        }
+
+        if (/^[^\S\n]+$/.test(token)) {
+          if (x > 0) x += spaceWidth * token.length;
+          return;
+        }
+
+        const node = this.scene.add.text(0, 0, token, style).setOrigin(0, 0);
+        if (x > 0 && x + node.width > wrapWidth) {
+          x = 0;
+          line += 1;
+        }
+        const baselineOffset = run.style
+          ? -Math.ceil(Number(run.style.strokeThickness || 0) / 2)
+          : 0;
+        node.setPosition(x, line * lineHeight + baselineOffset);
+        this.bodyRich.add(node);
+        this.bodyTextNodes.push(node);
+        x += node.width;
+      });
+    });
+  }
+
+  _visibleStyledRuns(visibleLength) {
+    let remaining = Math.max(0, Number(visibleLength) || 0);
+    const sourceRuns = this.fullRuns?.length ? this.fullRuns : this._parseStyledRuns(this.visibleText);
+    const visibleRuns = [];
+
+    for (const run of sourceRuns) {
+      if (remaining <= 0) break;
+      const text = String(run.text || "");
+      const take = Math.min(text.length, remaining);
+      if (take > 0) {
+        visibleRuns.push({
+          text: text.slice(0, take),
+          style: run.style,
+        });
+      }
+      remaining -= take;
+    }
+
+    return visibleRuns;
+  }
+
+  _bodyTextStyle(termStyle = null) {
+    return createBodyTextStyle({
+      fontSize: this._bodyFontSize,
+      min: 12,
+      color: termStyle?.color || BODY_TEXT_COLOR,
+      stroke: termStyle ? (termStyle.stroke || KEYWORD_STROKE) : undefined,
+      strokeThickness: termStyle ? (termStyle.strokeThickness || 3) : 0,
+    });
+  }
+
+  _parseStyledRuns(text) {
+    const runs = [];
+    let index = 0;
+    let plain = "";
+
+    const pushPlain = () => {
+      if (!plain) return;
+      runs.push({ text: plain, style: null });
+      plain = "";
+    };
+
+    while (index < text.length) {
+      const match = this._matchTutorialTerm(text, index);
+      if (match) {
+        pushPlain();
+        runs.push({
+          text: text.slice(index, index + match.term.length),
+          style: match.style,
+        });
+        index += match.term.length;
+        continue;
+      }
+
+      plain += text[index];
+      index += 1;
+    }
+
+    pushPlain();
+    return runs;
+  }
+
+  _matchTutorialTerm(text, index) {
+    const lower = text.toLowerCase();
+    for (const entry of TUTORIAL_TERMS) {
+      if (!lower.startsWith(entry.lower, index)) continue;
+      if (!this._isTermBoundary(text, index, entry.term.length)) continue;
+      return entry;
+    }
+    return null;
+  }
+
+  _isTermBoundary(text, index, length) {
+    const before = index > 0 ? text[index - 1] : "";
+    const after = text[index + length] || "";
+    return !WORD_CHAR_RE.test(before) && !WORD_CHAR_RE.test(after);
   }
 
   _makeButton(x, y, width, label, color, fill, onClick) {

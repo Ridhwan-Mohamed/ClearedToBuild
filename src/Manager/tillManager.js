@@ -1,4 +1,4 @@
-import { BLOCKDEPTH, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES } from "../constants";
+import { BLOCKDEPTH, CONTROL_STATES, MAX_CROP_GROWTH_STAGE, SQUARESIZE, TILE_TYPES, showGhostText } from "../constants";
 import { Manager } from "./Manager";
 import { StorageManager } from "./StorageManager";
 import { Map } from "../map";
@@ -47,7 +47,10 @@ export class tillManager {
         }
 
         // Reward and reset
-        Teams.resetCrop(cropData);
+        const reseeded = Teams.resetCrop(cropData);
+        if (reseeded) {
+            this.playReseedProcFeedback(cropData);
+        }
         this.scene?.achievementSystem?.addStat?.("cropsHarvested", 1);
         StorageManager.addCarriedItem(sprite,UI_ITEM_TYPES.crop);
         AudioManager.playCropHarvest();
@@ -56,6 +59,47 @@ export class tillManager {
         if (!StorageManager.tryCreateStorageDeliveryTask(sprite)) {
             Teams.movePlayerState(sprite, CONTROL_STATES.TRACK_MODE);
         }
+    }
+
+    static playReseedProcFeedback(crop) {
+        const scene = this.scene || crop?.sprite?.scene;
+        if (!scene || !crop) return;
+
+        const centerX = Number(crop.sprite?.x ?? ((crop.x + 0.5) * SQUARESIZE));
+        const centerY = Number(crop.sprite?.y ?? ((crop.y + 0.5) * SQUARESIZE));
+        const depth = (crop.sprite?.depth ?? BLOCKDEPTH) + 2;
+
+        const ring = scene.add.circle(centerX, centerY, 10, 0x9dffa5, 0.24)
+            .setDepth(depth);
+        scene.tweens.add({
+            targets: ring,
+            alpha: 0,
+            scaleX: 2.1,
+            scaleY: 2.1,
+            duration: 420,
+            ease: "Quad.Out",
+            onComplete: () => ring.destroy(),
+        });
+
+        if (scene.textures?.exists?.("sparkle")) {
+            const sparkle = scene.add.image(centerX, centerY, "sparkle")
+                .setDepth(depth + 1)
+                .setScale(0.58)
+                .setTint(0x9dffa5)
+                .setAlpha(0.88);
+            scene.tweens.add({
+                targets: sparkle,
+                alpha: 0,
+                scaleX: 1.15,
+                scaleY: 1.15,
+                y: centerY - 8,
+                duration: 360,
+                ease: "Sine.easeOut",
+                onComplete: () => sparkle.destroy(),
+            });
+        }
+
+        showGhostText(scene, centerX, centerY - 10, "RESEEDED", crop.teamNumber ?? 1, false, false, "#9dffa5");
     }
 
     static beginTilling(sprite) {
@@ -84,7 +128,11 @@ export class tillManager {
             } else {
                 // plant new crop
                 Map.grid[y][x] = TILE_TYPES.crops.grid;
-                Map.drawGridValue(x,y);
+                if (Map.redrawRect) {
+                    Map.redrawRect(x, y, 1, 1, 1);
+                } else {
+                    Map.drawGridValue(x, y);
+                }
 
                 // Update overview image in real time
                 if (this.scene?.zoomMixer) {

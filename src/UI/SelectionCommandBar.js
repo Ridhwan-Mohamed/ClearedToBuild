@@ -35,6 +35,7 @@ export class SelectionCommandBar {
     this.currentSelectionProfile = null;
     this.externalContext = null;
     this.contextButtons = {};
+    this.pendingSellConfirmation = null;
 
     this.container = scene.add.container(0, 0)
       .setDepth(UIDEPTH + 2)
@@ -54,6 +55,10 @@ export class SelectionCommandBar {
     this.container.add([this.helperBg, this.helperText]);
 
     this.buttons = {
+      close: this._makeButton("close", "CLOSE", (snapshot) => {
+        const troops = snapshot?.troops?.length ? snapshot.troops : this._getCommandTroops();
+        this._dismissForCurrentSelection(troops);
+      }, { styleKey: "neutral" }),
       details: this._makeButton("details", "DETAILS", (snapshot) => {
         const troop = this._getActionTroops(snapshot)?.[0];
         if (!troop?.active) return;
@@ -107,17 +112,7 @@ export class SelectionCommandBar {
         showAlert(this.scene, `Distributed ${result.fed} berr${result.fed === 1 ? "y" : "ies"} (+${result.healAmount} HP, +${result.staminaAmount} STA)`, "#e9d5ff");
       }, { iconKey: "berry" }),
       sell: this._makeButton("sell", "CASH OUT", (snapshot) => {
-        const result = OrderRunner.sellTroops(this._getActionTroops(snapshot), this.scene, {
-          sourceUiTarget: this.buttons.sell?.root ?? null,
-        });
-        if (!result.ok) {
-          if (result.reason === "phase_locked") {
-            showAlert(this.scene, result.message || "Troops can only be sold during dawn or day.", "#fecaca");
-          }
-          return;
-        }
-        this._dismissForCurrentSelection(snapshot?.troops);
-        showAlert(this.scene, `Sold ${result.sold} troop${result.sold === 1 ? "" : "s"} for $${result.money}`, "#fcd34d");
+        this._openSellConfirmation(snapshot);
       }),
       wood: this._makeButton("wood", "GATHER WOOD", (snapshot) => {
         this._issueGatherCommand(snapshot, "wood", "Selected foragers will prioritize wood", "#a7f3d0");
@@ -174,8 +169,16 @@ export class SelectionCommandBar {
   update() {
     const tutorial = this.scene.worldScene?.tutorialManager || this.scene.tutorialManager || null;
     if (tutorial?.isActive?.()) {
+      this._closeSellConfirmation();
       this._hide();
       return;
+    }
+
+    if (this.externalContext?.source === "sell-confirm") {
+      const pendingTroops = (this.pendingSellConfirmation?.troops || []).filter((troop) => troop?.active);
+      if (!pendingTroops.length) {
+        this._closeSellConfirmation();
+      }
     }
 
     if (this.externalContext) {
@@ -208,11 +211,11 @@ export class SelectionCommandBar {
 
     this._show();
 
-    const layoutKeys = [];
+    const layoutKeys = ["close"];
     if (profile.count === 1) {
       layoutKeys.push("details");
     }
-    layoutKeys.push("return", "cancel", "auto", "sleep", "berry", "sell");
+    layoutKeys.push("return", "sleep", "berry", "sell");
     this._setDynamicLabels(profile);
 
     const gap = 6;
@@ -486,7 +489,7 @@ export class SelectionCommandBar {
   }
 
   _drawButton(btn, active, disabled = false) {
-    const style = BUTTON_STYLES[btn.styleKey || btn.key] || BUTTON_STYLES.auto;
+    const style = BUTTON_STYLES[btn.styleKey || btn.key] || BUTTON_STYLES.neutral;
     const glowColor = style.glow;
     btn.active = active;
     btn.disabled = disabled;
@@ -637,5 +640,70 @@ export class SelectionCommandBar {
 
     this._dismissForCurrentSelection(snapshot?.troops);
     showAlert(this.scene, successMessage, color);
+  }
+
+  _openSellConfirmation(snapshot) {
+    const troops = this._getActionTroops(snapshot);
+    const profile = this._getActionProfile(snapshot, troops);
+    if (!troops.length || !(profile?.count > 0)) return;
+
+    this.pendingSellConfirmation = {
+      troops: [...troops],
+      profile: profile ? { ...profile, troops: [...troops] } : null,
+    };
+
+    this.setContext("sell-confirm", {
+      helperText: () => {
+        const liveTroops = (this.pendingSellConfirmation?.troops || []).filter((troop) => troop?.active);
+        const liveProfile = this._getActionProfile(
+          this.pendingSellConfirmation,
+          liveTroops
+        );
+        return `SELL ${liveProfile?.count || 0} FOR $${liveProfile?.sellValue || 0}?`;
+      },
+      buttons: () => [
+        {
+          id: "sell-cancel",
+          label: "CANCEL",
+          styleKey: "cancel",
+          onClick: () => this._closeSellConfirmation(),
+        },
+        {
+          id: "sell-confirm",
+          label: "CONFIRM SELL",
+          styleKey: "sell",
+          onClick: () => this._confirmSellTroops(),
+        },
+      ],
+    });
+  }
+
+  _closeSellConfirmation() {
+    this.pendingSellConfirmation = null;
+    this.clearContext("sell-confirm");
+  }
+
+  _confirmSellTroops() {
+    const pending = this.pendingSellConfirmation;
+    const troops = (pending?.troops || []).filter((troop) => troop?.active);
+    if (!troops.length) {
+      this._closeSellConfirmation();
+      return;
+    }
+
+    const result = OrderRunner.sellTroops(troops, this.scene, {
+      sourceUiTarget: this.buttons.sell?.root ?? null,
+    });
+
+    this._closeSellConfirmation();
+    if (!result.ok) {
+      if (result.reason === "phase_locked") {
+        showAlert(this.scene, result.message || "Troops can only be sold during dawn or day.", "#fecaca");
+      }
+      return;
+    }
+
+    this._dismissForCurrentSelection(pending?.troops);
+    showAlert(this.scene, `Sold ${result.sold} troop${result.sold === 1 ? "" : "s"} for $${result.money}`, "#fcd34d");
   }
 }

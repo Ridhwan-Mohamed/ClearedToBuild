@@ -54,6 +54,16 @@ const BUILDING_META = Object.freeze({
   clayOven: { emoji: "\u{1F525}", label: "Clay Oven", color: "#ff6958" },
 });
 
+const PLAYER_META = Object.freeze({
+  farmer: { emoji: "\u{1F33E}", label: "Farmer", color: "#74d68e" },
+  forager: { emoji: "\u{26CF}\uFE0F", label: "Forager", color: "#9fd8ff" },
+  fireman: { emoji: "\u{1F525}", label: "Fireman", color: "#ff6958" },
+  builder: { emoji: "\u{1F528}", label: "Builder", color: "#f0b35a" },
+  brawler: { emoji: "\u{1F94A}", label: "Brawler", color: "#ff9b77" },
+  gunslinger: { emoji: "\u{1F3AF}", label: "Gunslinger", color: "#ffd27d" },
+  blademaster: { emoji: "\u{2694}\uFE0F", label: "Blademaster", color: "#cbb6ff" },
+});
+
 function hexToColorInt(value, fallback = 0xffffff) {
   if (!value) return fallback;
   return Phaser.Display.Color.HexStringToColor(value).color;
@@ -467,6 +477,14 @@ export class DraftStartMenu {
     return BUILDING_META[typeKey] ?? { emoji: "\u{1F3D7}\uFE0F", label: typeKey ?? "Building" };
   }
 
+  _getPlayerMeta(typeKey) {
+    return PLAYER_META[typeKey] ?? {
+      emoji: "\u{1F464}",
+      label: typeKey ? String(typeKey).replace(/^\w/, (char) => char.toUpperCase()) : "Player",
+      color: "#d2f6ff",
+    };
+  }
+
   _countPlacedBuildings(typeKeys) {
     const allowed = new Set(typeKeys);
     return (this.state.placedBuildings ?? []).reduce((count, building) => {
@@ -584,6 +602,7 @@ export class DraftStartMenu {
       if (this.phase !== "layout") return;
       if (this._isPointerOnLayoutUi(pointer)) {
         this.preview.clearHover?.();
+        this.preview.clearSpawnIconHover?.();
         this._hideLayoutTooltip();
         return;
       }
@@ -592,6 +611,7 @@ export class DraftStartMenu {
       if (!point) return;
 
       if (this.selectedPlacedBuilding) {
+        this.preview.clearSpawnIconHover?.();
         const targetX = point.gridX - (this.selectedPlacedBuildingGrab?.x ?? 0);
         const targetY = point.gridY - (this.selectedPlacedBuildingGrab?.y ?? 0);
         this.preview.setMoveHover(this.selectedPlacedBuilding, this.state, targetX, targetY);
@@ -600,6 +620,16 @@ export class DraftStartMenu {
         return;
       }
 
+      const hoveredPlayer = this.preview.hitTestSpawnIcon?.(point.worldX, point.worldY);
+      if (hoveredPlayer) {
+        this.preview.clearHover?.();
+        this.preview.setHoveredSpawnPoint?.(hoveredPlayer);
+        const meta = this._getPlayerMeta(hoveredPlayer.type);
+        this._showLayoutTooltip(pointer, `${meta.emoji} ${meta.label}`, meta.color);
+        return;
+      }
+
+      this.preview.clearSpawnIconHover?.();
       const hovered = this.preview.hitTestPlaced(point.gridX, point.gridY);
       this.preview.clearHover?.();
       if (!hovered) {
@@ -618,8 +648,10 @@ export class DraftStartMenu {
       const point = this._pointerToGrid(pointer);
       if (!point) return;
 
+      const hitPlayer = this.preview.hitTestSpawnIcon?.(point.worldX, point.worldY);
       const hitBuilding = this.preview.hitTestPlaced(point.gridX, point.gridY);
       if (!this.selectedPlacedBuilding) {
+        if (hitPlayer) return;
         if (hitBuilding) {
           this._selectPlacedBuilding(hitBuilding, point.gridX, point.gridY);
           const meta = this._getBuildingMeta(hitBuilding.typeKey ?? hitBuilding.type?.name);

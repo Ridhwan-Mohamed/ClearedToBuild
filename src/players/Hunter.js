@@ -86,4 +86,9 @@ export class Hunter {
         ZoomMixer.createPlayerMoniker(hunter);
         return hunter;
     }
+
+    static update(troop) {
+        if (Raider._handleEnemyWaterRecovery(troop)) return true;
+        return Raider.update(troop);
+    }
 }

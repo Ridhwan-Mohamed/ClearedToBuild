@@ -1,7 +1,5 @@
 import Phaser from "phaser";
-import { House } from "../../buildings/House.js";
 import { showAlert, CONTROL_STATES } from "../../constants";
-import { StaminaManager } from "../../Manager/staminaManager.js";
 import { AudioManager } from "../../Manager/AudioManager.js";
 import { OrderRunner } from "../../orders/OrderRunner.js";
 import { Player } from "../../players/Player";
@@ -12,8 +10,12 @@ import {
 } from "../../players/playerPortraits.js";
 import { Teams } from "../../Teams.js";
 import {
+    addScrollablePanelAffordance,
     BOTTOM_BAR_THEME,
+    getBottomBarWidth,
+    handleScrollablePanelWheel,
     makeGlassRoundRect,
+    makeBottomBarEmptyRow,
     mixColor,
     setHoverLiftState,
 } from "./BottomBarTheme";
@@ -21,34 +23,28 @@ import {
 const TAB_BASE_DEPTH = 51;
 const TAB_BG_DEPTH = 0;
 const TAB_CONTENT_DEPTH = 1;
+const TAB_ACTION_DEPTH = TAB_CONTENT_DEPTH + 3;
 
 
 export default class PlayerTab {
   constructor(scene) {
     this.scene = scene;
     this.selected = null;
+    this.pendingSellConfirmationId = null;
+    this.pendingSellConfirmEvt = null;
         this.rows = new Map(); // sprite.id -> { row, hpBar, stBar, nameText, bg }
         this.refreshEvt = null;
         this._onWheel = null;
         this._rowBaseY = new WeakMap();
+        this._scrollAffordances = [];
         this.BAR_SEG_UNIT = 25;
         this.BAR_SEG_GAP  = 1;
 
     // ---- config ----
-    this.W = Math.floor(scene.scale.width - 40); // will be constrained by bottom bar
+    this.W = Math.floor(getBottomBarWidth(scene) - 20); // constrained by bottom bar
     this.H = 130; // the bar will decide height; content is responsive
     this.RIGHT_W = 300; // list (right)
     this.ROW_H = 34;
-
-    // price by type
-    this.SELL_PRICE = {
-      Farmer: 50,
-      Forager: 45,
-      Fireman: 55,
-      Builder: 70,
-      Gunslinger: 120,
-      Default: 30,
-    };
 
     // build UI
     this.root = this.build();
@@ -65,17 +61,23 @@ export default class PlayerTab {
     destroy() {
         this.refreshEvt?.remove(false);
         this.refreshEvt = null;
+        this.pendingSellConfirmEvt?.remove(false);
+        this.pendingSellConfirmEvt = null;
         if (this._onWheel) {
             this.scene.input.off('wheel', this._onWheel);
             this._onWheel = null;
         }
         this.root?.destroy();
         this.rows.clear();
+        this._scrollAffordances.forEach((affordance) => affordance?.destroy?.());
+        this._scrollAffordances = [];
     }
 
     build() {
         const scene = this.scene;
-        const detailWidth = Math.max(260, Math.floor(scene.scale.width / 3) - 40);
+        const barWidth = getBottomBarWidth(scene);
+        const detailWidth = Math.max(260, Math.floor(barWidth / 3) - 34);
+        const listWidth = Math.max(300, Math.floor(barWidth * (2 / 3)) - 44);
         const detailHeight = 180;
 
         const root = scene.rexUI.add.sizer({
@@ -108,7 +110,7 @@ export default class PlayerTab {
         // RIGHT (list) — 2/3
         this.listBody = scene.rexUI.add.sizer({ orientation: 'y', space: { item: 6 } });
         this.scroll = scene.rexUI.add.scrollablePanel({
-            width: this.RIGHT_W,
+            width: listWidth,
             height: 180,
             scrollMode: 0,
             scrollDetectionMode: 'rectBounds',
@@ -119,30 +121,15 @@ export default class PlayerTab {
                 strokeAlpha: 0.12,
             }),
             panel: { child: this.listBody, mask: { padding: 1 } },
-            sliderY: scene.rexUI.add.slider({
-            height: 160,
-            orientation: 'y',
-            track: makeGlassRoundRect(scene, 10, 0, 5, {
-                fill: 0x0b2230,
-                alpha: 0.82,
-                stroke: 0x98e7ff,
-                strokeAlpha: 0.08,
-                strokeWidth: 1,
-            }),
-            thumb: makeGlassRoundRect(scene, 10, 28, 5, {
-                fill: 0x72d8ff,
-                alpha: 0.86,
-                stroke: 0xffffff,
-                strokeAlpha: 0.18,
-                strokeWidth: 1,
-            }),
-            }),
             scrollerY: {
                 pointerOutRelease: true,
                 rectBoundsInteractive: true,
             },
             space: { left: 4, right: 4, top: 4, bottom: 4, panel: 6 },
         }).setDepth(TAB_BASE_DEPTH);
+        this._scrollAffordances.push(addScrollablePanelAffordance(scene, this.scroll, {
+            isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === 'players',
+        }));
 
         // 🔒 proportions fixed here
         root.add(this.detailSizer, { proportion: 1, expand: true });
@@ -172,6 +159,10 @@ export default class PlayerTab {
         const BAR_W = compact ? 232 : 244;
         const BAR_H = compact ? 12 : 13;
         const BUTTON_H = compact ? 30 : 32;
+        const ACTION_GAP = compact ? 5 : 6;
+        const SIDE_BUTTON_W = compact ? 62 : 66;
+        const SLEEP_BUTTON_W = Math.max(92, BAR_W - (SIDE_BUTTON_W * 2) - (ACTION_GAP * 2));
+        const ACTION_FONT_SIZE = compact ? 10 : 11;
 
         // ---------- helpers ----------
         const rr = (w, h, r, color, alpha = 1) =>
@@ -239,25 +230,52 @@ export default class PlayerTab {
         const stBar = makeSegmentedBar(BAR_W, BAR_H, 0x69D6FF);
         const stVal = scene.add.text(0, 0, '0/0', { fontFamily: 'Bungee', fontSize: compact ? 10 : 11, color: BOTTOM_BAR_THEME.text, stroke: '#081621', strokeThickness: 2 });
 
-        function makeButton(labelText, onClick) {
+        const actionButtonStyles = {
+            sleep: {
+                fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0x7acfff, 0.2),
+                stroke: 0x7acfff,
+                text: '#ffffff',
+                textStroke: '#081621',
+            },
+            berry: {
+                fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xb98cff, 0.2),
+                stroke: 0xb98cff,
+                text: '#f5e9ff',
+                textStroke: '#2e1758',
+            },
+            sell: {
+                fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffd07d, 0.2),
+                stroke: 0xffd07d,
+                text: '#fff8e5',
+                textStroke: '#5a2c00',
+            },
+        };
+
+        function makeActionButton(labelText, onClick, style, width) {
+            const text = scene.add.text(0, 0, labelText, {
+                fontFamily: 'Bungee',
+                fontSize: ACTION_FONT_SIZE,
+                color: style.text,
+                stroke: style.textStroke,
+                strokeThickness: 2,
+                align: 'center',
+            }).setDepth(TAB_ACTION_DEPTH + 1);
+            const background = makeGlassRoundRect(scene, 0, BUTTON_H, 10, {
+                fill: style.fill,
+                alpha: 0.9,
+                stroke: style.stroke,
+                strokeAlpha: 0.2,
+                strokeWidth: 1.5,
+            }).setDepth(TAB_ACTION_DEPTH);
             const label = scene.rexUI.add.label({
-                background: makeGlassRoundRect(scene, 0, BUTTON_H, 10, {
-                    fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0x7acfff, 0.2),
-                    alpha: 0.9,
-                    stroke: 0x7acfff,
-                    strokeAlpha: 0.2,
-                    strokeWidth: 1.5,
-                }),
-                text: scene.add.text(0, 0, labelText, {
-                    fontFamily: 'Bungee',
-                    fontSize: compact ? 12 : 13,
-                    color: '#ffffff',
-                    stroke: '#081621',
-                    strokeThickness: 2,
-                }),
-                space: { left: compact ? 12 : 14, right: compact ? 12 : 14, top: compact ? 6 : 7, bottom: compact ? 6 : 7 }
-            });
-            label.setMinSize(compact ? 74 : 80, BUTTON_H);
+                background,
+                text,
+                space: { left: 4, right: 4, top: compact ? 6 : 7, bottom: compact ? 6 : 7 }
+            }).setDepth(TAB_ACTION_DEPTH);
+            label.setMinSize(width, BUTTON_H);
+            label.__background = background;
+            label.__labelText = text;
+            label.__fixedWidth = width;
 
             label
                 .setInteractive({ useHandCursor: true })
@@ -268,7 +286,6 @@ export default class PlayerTab {
                 .on('pointerover', () => {
                     label.__baseY ??= label.y;
                     setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
-                    // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('pointer');
                     }
@@ -276,7 +293,6 @@ export default class PlayerTab {
                 .on('pointerout', () => {
                     label.__baseY ??= label.y;
                     setHoverLiftState(scene, label, false, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
-                    // Don’t clobber guard placement cursor
                     if (!scene.guardPlacement?.active) {
                     scene.input.setDefaultCursor('default');
                     }
@@ -285,50 +301,25 @@ export default class PlayerTab {
             return label;
         }
 
-        function makeSellButton(onClick) {
-            const label = scene.rexUI.add.label({
-                background: makeGlassRoundRect(scene, 0, BUTTON_H, 10, {
-                    fill: mixColor(BOTTOM_BAR_THEME.panelFill, 0xffd07d, 0.2),
-                    alpha: 0.92,
-                    stroke: 0xffd07d,
-                    strokeAlpha: 0.2,
-                    strokeWidth: 1.5,
-                }),
-                text: scene.add.text(0, 0, 'Sell', {
-                    fontFamily: 'Bungee',
-                    fontSize: compact ? 12 : 13,
-                    color: '#fff8e5',
-                    stroke: '#5a2c00',
-                    strokeThickness: 2,
-                }),
-                space: { left: compact ? 12 : 14, right: compact ? 12 : 14, top: compact ? 6 : 7, bottom: compact ? 6 : 7 }
-            });
-            label.setMinSize(compact ? 74 : 80, BUTTON_H);
+        function setActionButtonVisible(button, visible) {
+            const background = button?.__background ?? button?.getElement?.('background');
+            const text = button?.__labelText ?? button?.getElement?.('text');
+            button?.setVisible?.(visible);
+            background?.setVisible?.(visible);
+            text?.setVisible?.(visible);
+            if (visible) {
+                button?.setAlpha?.(1);
+                background?.setAlpha?.(1);
+                text?.setAlpha?.(1);
+            }
+        }
 
-            label
-                .setInteractive({ useHandCursor: true })
-                .on('pointerup', () => {
-                    AudioManager.playBottomBarClick();
-                    onClick?.();
-                })
-                .on('pointerover', () => {
-                    label.__baseY ??= label.y;
-                    setHoverLiftState(scene, label, true, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
-                    // Don’t clobber guard placement cursor
-                    if (!scene.guardPlacement?.active) {
-                    scene.input.setDefaultCursor('pointer');
-                    }
-                })
-                .on('pointerout', () => {
-                    label.__baseY ??= label.y;
-                    setHoverLiftState(scene, label, false, { baseY: label.__baseY, hoverLift: 3, hoverScale: 1.03 });
-                    // Don’t clobber guard placement cursor
-                    if (!scene.guardPlacement?.active) {
-                    scene.input.setDefaultCursor('default');
-                    }
-                });
-
-            return label;
+        function setButtonLabel(button, labelText) {
+            const text = button?.__labelText ?? button?.getElement?.('text');
+            if (!text || text.text === labelText) return;
+            text.setText(labelText);
+            button.setMinSize?.(button.__fixedWidth ?? 0, BUTTON_H);
+            button.layout?.();
         }
 
         // ---------- header row: portrait + details ----------
@@ -374,27 +365,32 @@ export default class PlayerTab {
         // ---------- buttons row ----------
         const buttonsRow = scene.rexUI.add.sizer({
             orientation: 'x',
-            space: { item: 16 }
-        });
+            space: { item: ACTION_GAP }
+        }).setDepth(TAB_ACTION_DEPTH);
 
         // make the row as wide as the HP/ST bars so alignment is predictable
         buttonsRow.setMinSize(BAR_W, BUTTON_H + 8);
 
-        const sellBtn   = makeSellButton(() => ui.sellSelected());
-        const sleepBtn  = makeButton('Sleep', () => ui.sendSelectedToSleep())
+        const sellBtn = makeActionButton('Sell', () => ui.sellSelected(), actionButtonStyles.sell, SIDE_BUTTON_W);
+        const berryBtn = makeActionButton('Berry', () => ui.useBerryOnSelected(), actionButtonStyles.berry, SIDE_BUTTON_W);
+        const sleepBtn = makeActionButton('Sleep', () => ui.toggleSelectedSleep(), actionButtonStyles.sleep, SLEEP_BUTTON_W);
         // layout helper: rebuild row so things always pack from the left
-        function updateButtonsLayout({ isFriendly, isCombatant }) {
+        function updateButtonsLayout({ isFriendly }) {
             // remove all children from the row, but keep them alive
             buttonsRow.clear(false);
 
             // hard reset visibility so dropped buttons don't float on screen
-            sellBtn.setVisible(false);
-            sleepBtn.setVisible(false);
+            setActionButtonVisible(sellBtn, false);
+            setActionButtonVisible(berryBtn, false);
+            setActionButtonVisible(sleepBtn, false);
             if (isFriendly) {
-                sellBtn.setVisible(true);
+                setActionButtonVisible(sellBtn, true);
                 buttonsRow.add(sellBtn,  0, 'top', 0, false);
 
-                sleepBtn.setVisible(true);
+                setActionButtonVisible(berryBtn, true);
+                buttonsRow.add(berryBtn, 0, 'top', 0, false);
+
+                setActionButtonVisible(sleepBtn, true);
                 buttonsRow.add(sleepBtn, 0, 'top', 0, false);
             }
 
@@ -443,55 +439,103 @@ export default class PlayerTab {
                 );
                 applyPortraitKeyToSprite(scene, portrait, u.portraitKey, compact ? 42 : 44);
             },
-            setPrices() {},
-            setSleepButton() {},
+            setActionLabels({ sell = 'Sell', berry = 'Berry', sleep = 'Sleep' } = {}) {
+                setButtonLabel(sellBtn, sell);
+                setButtonLabel(berryBtn, berry);
+                setButtonLabel(sleepBtn, sleep);
+                buttonsRow.layout();
+            },
+            setSellConfirming(isConfirming) {
+                setButtonLabel(sellBtn, isConfirming ? 'Confirm' : 'Sell');
+                buttonsRow.layout();
+            },
             setButtonsLayout(layout = {}) { updateButtonsLayout(layout); },
             sellButton: sellBtn,
+            berryButton: berryBtn,
             sleepButton: sleepBtn,
         };
     }
 
-    sendSelectedToSleep() {
+    resetSellConfirmation() {
+        this.pendingSellConfirmationId = null;
+        this.pendingSellConfirmEvt?.remove(false);
+        this.pendingSellConfirmEvt = null;
+        this.detailCard?.setSellConfirming?.(false);
+    }
+
+    beginSellConfirmation(troop) {
+        if (!troop?.active) return;
+        this.pendingSellConfirmationId = troop.id;
+        this.detailCard?.setSellConfirming?.(true);
+        this.pendingSellConfirmEvt?.remove(false);
+        this.pendingSellConfirmEvt = this.scene.time.delayedCall(2500, () => {
+            if (this.pendingSellConfirmationId !== troop.id) return;
+            this.resetSellConfirmation();
+        });
+    }
+
+    isSellConfirmationFor(troop) {
+        return !!troop?.active && this.pendingSellConfirmationId === troop.id;
+    }
+
+    getSleepButtonLabel(troop) {
+        if (troop?.state === CONTROL_STATES.GO_HOME_MODE) return 'Cancel Sleep';
+        if (troop?.state === CONTROL_STATES.SLEEP_MODE) return 'Wake';
+        return 'Sleep';
+    }
+
+    useBerryOnSelected() {
+        this.resetSellConfirmation();
         const s = this.selected;
         if (!s || !s.active) return;
 
-        const ok = StaminaManager.sendTroopHome(s);
-
-        if (ok) {
-            showAlert?.(this.scene, `${s.name} went to sleep in a house.`, '#33aaff', 1800);
-            this.clearDetails();
-            this.rebuildList();
-        } else {
-            showAlert?.(this.scene, `No available house for ${s.name}.`, '#ff4444', 1800);
+        const profile = OrderRunner.getSelectionProfile([s]);
+        const required = profile.count || 0;
+        const available = Number(this.scene?.berries ?? 0);
+        if (!required) return;
+        if (available < required) {
+            showAlert(this.scene, `Need ${required} berries for ${required} selected troop${required === 1 ? "" : "s"}`, "#fecaca");
+            return;
         }
+
+        const result = OrderRunner.disperseBerries(profile.troops, this.scene);
+        if (!result.ok) {
+            showAlert(this.scene, `Need ${required} berries for ${required} selected troop${required === 1 ? "" : "s"}`, "#fecaca");
+            return;
+        }
+
+        showAlert(this.scene, `Distributed ${result.fed} berr${result.fed === 1 ? "y" : "ies"} (+${result.healAmount} HP, +${result.staminaAmount} STA)`, "#e9d5ff");
+        this.paintDetails(s);
+    }
+
+    toggleSelectedSleep() {
+        this.resetSellConfirmation();
+        const s = this.selected;
+        if (!s || !s.active) return;
+
+        const previousLabel = this.getSleepButtonLabel(s);
+        const result = OrderRunner.toggleSleepTroops([s]);
+        if (!result.ok) {
+            showAlert(this.scene, "No selected troops could change sleep state", "#fecaca");
+            this.paintDetails(s);
+            return;
+        }
+
+        if (previousLabel === 'Wake') {
+            showAlert(this.scene, `${s.name || 'Troop'} woke up.`, "#a7f3d0", 1800);
+        } else if (previousLabel === 'Cancel Sleep') {
+            showAlert(this.scene, `${s.name || 'Troop'} will stay awake.`, "#a7f3d0", 1800);
+        } else if (result.failed > 0) {
+            showAlert(this.scene, `${s.name || 'Troop'} could not sleep.`, "#fde68a", 1800);
+        } else {
+            showAlert(this.scene, `Sent ${s.name || 'troop'} home`, "#a7f3d0", 1800);
+        }
+
+        this.paintDetails(s);
     }
 
     startGuardPlacementForSelected() {
         return;
-    }
-
-    wakeOrCancelSelected() {
-        const s = this.selected;
-        if (!s || !s.active) return;
-
-        const state = s.state;
-
-        // If already sleeping in a house → wake up early
-        if (state === CONTROL_STATES.SLEEP_MODE) {
-            StaminaManager.wakeUp(s);
-            showAlert?.(this.scene, `${s.name} woke up.`, '#33ff77', 1800);
-        }
-        // If walking home to sleep → cancel that trip
-        else if (state === CONTROL_STATES.GO_HOME_MODE) {
-            s.task = null;
-            if (s.currentPath) s.currentPath.length = 0;
-            if (s.body?.setVelocity) s.body.setVelocity(0, 0);
-            Teams.movePlayerState(s, CONTROL_STATES.TRACK_MODE);
-            showAlert?.(this.scene, `${s.name} will stay awake.`, '#33ff77', 1800);
-        }
-
-        // Refresh detail panel to update button text/state
-        this.paintDetails(s);
     }
 
     attackSelectedTarget() {
@@ -539,10 +583,14 @@ export default class PlayerTab {
 
         // "your team" is team 1 in your codebase
         // Instead of Player.troops...
-        const team1 = Teams.teamLists['1'].playerList
+        const team1 = (Teams.teamLists['1']?.playerList || []).slice();
 
         // sort by type then name for stability
         team1.sort((a, b) => (this.typeOf(a).localeCompare(this.typeOf(b))) || (a.name || '').localeCompare(b.name || ''));
+
+        if (!team1.length) {
+            this.listBody.add(this.createEmptyRow(), { expand: true });
+        }
 
         team1.forEach(sprite => {
             const row = this.createRow(sprite);
@@ -560,14 +608,8 @@ export default class PlayerTab {
         this._onWheel = (pointer, _gameObjects, dx, dy) => {
             if (this.scene.uiBottomBar?.currentPage !== 'players') return;
             if (!this.scene.uiBottomBar?.expanded) return;
-            if (!this.scroll?.isOverflowY) return;
-            if (!this.isPointerOverScroll(pointer)) return;
-
-            const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-            if (Math.abs(dominantDelta) < 0.1) return;
-
-            this.scroll.addChildOY(-dominantDelta * 0.8, true);
-            this.scene.input.stopPropagation();
+            const panels = [this.scroll];
+            panels.some((panel) => handleScrollablePanelWheel(this.scene, panel, pointer, dx, dy));
         };
 
         this.scene.input.on('wheel', this._onWheel);
@@ -694,7 +736,7 @@ export default class PlayerTab {
             .setDepth(TAB_BASE_DEPTH);
         
         // 🔥 stretch full width
-        const fullWidth = Math.floor(scene.scale.width * (2 / 3)) - 72;
+        const fullWidth = Math.max(220, Math.floor(getBottomBarWidth(scene) * (2 / 3)) - 72);
         row.setMinSize(fullWidth, 6);
 
         // row.setMinSize(this.RIGHT_W - 20, this.ROW_H);
@@ -733,8 +775,22 @@ export default class PlayerTab {
         return row;
     }
 
+    createEmptyRow() {
+        const width = Math.max(220, Math.floor(getBottomBarWidth(this.scene) * (2 / 3)) - 72);
+        return makeBottomBarEmptyRow(this.scene, {
+            width,
+            height: Math.max(44, this.ROW_H + 10),
+            title: "No players",
+            subtitle: "Recruit from Store",
+            accent: 0x57d68d,
+        });
+    }
+
     // --------- selection & details ----------
     select(sprite) {
+        if (this.selected !== sprite) {
+            this.resetSellConfirmation();
+        }
         this.selected = sprite;
         // highlight selected row
         for (const data of this.rows.values()) {
@@ -756,7 +812,7 @@ export default class PlayerTab {
         }
 
         const type = this.typeOf(s);
-        const price = this.SELL_PRICE[type] ?? this.SELL_PRICE.Default;
+        const profile = OrderRunner.getSelectionProfile([s]);
 
         // same close-up logic as before
         const portraitKey = getPlayerPortraitKey(s);
@@ -774,37 +830,25 @@ export default class PlayerTab {
         // Segmented bars + correct labels (current / type max)
         this.detailCard.setHPValues?.(s.health ?? 0, maxHP);
         this.detailCard.setSTValues?.(s.stamina ?? 0, maxST);
-        this.detailCard.setPrices({ seed: price, sleep: null });
 
-        const state = s.state;
-        const isSleepingLike =
-            state === CONTROL_STATES.SLEEP_MODE ||
-            state === CONTROL_STATES.GO_HOME_MODE;
-
-        if (this.detailCard.setSleepButton) {
-            if (isSleepingLike) {
-                this.detailCard.setSleepButton('Wake', () => this.wakeOrCancelSelected());
-            } else {
-                this.detailCard.setSleepButton('Sleep', () => this.sendSelectedToSleep());
-            }
+        const isFriendly = profile.hasSelection;
+        if (!isFriendly && this.isSellConfirmationFor(s)) {
+            this.resetSellConfirmation();
         }
 
-        // ---- NEW: control which buttons you see ----
-        const team = s.body?.team;
-        const isFriendly = team === 1;
-
-        const isCombatant =
-            type === 'Gunslinger' ||
-            type === 'Blademaster' ||
-            type === 'Brawler';
+        this.detailCard.setActionLabels?.({
+            sell: this.isSellConfirmationFor(s) ? 'Confirm' : 'Sell',
+            berry: 'Berry',
+            sleep: this.getSleepButtonLabel(s),
+        });
 
         this.detailCard.setButtonsLayout?.({
-            isFriendly,
-            isCombatant
+            isFriendly
         });
     }
 
     clearDetails() {
+        this.resetSellConfirmation();
         this.selected = null;
         Player.setMiniBarSelectedFromTab?.(null);
         this.detailCard.setUnit({
@@ -816,29 +860,45 @@ export default class PlayerTab {
         });
         this.detailCard.setHPValues?.(100, 100);
         this.detailCard.setSTValues?.(100, 100);
-        this.detailCard.setPrices({ seed: 0, sleep: null });
+        this.detailCard.setActionLabels?.({ sell: 'Sell', berry: 'Berry', sleep: 'Sleep' });
         this.detailCard.setButtonsLayout?.({
-            isFriendly: false,
-            isCombatant: false
+            isFriendly: false
         });
     }
 
     sellSelected() {
         const s = this.selected;
-        if (!s || !s.active) return;
-        const result = OrderRunner.sellTroops([s], this.scene, {
+        if (!s || !s.active) {
+            this.resetSellConfirmation();
+            return;
+        }
+
+        const profile = OrderRunner.getSelectionProfile([s]);
+        if (!profile.hasSelection) {
+            this.resetSellConfirmation();
+            return;
+        }
+
+        if (!this.isSellConfirmationFor(s)) {
+            this.beginSellConfirmation(s);
+            this.paintDetails(s);
+            return;
+        }
+
+        const soldName = s.name || 'troop';
+        this.resetSellConfirmation();
+        const result = OrderRunner.sellTroops(profile.troops, this.scene, {
             sourceUiTarget: this.detailCard?.sellButton ?? null,
         });
         if (!result.ok) {
             if (result.reason === "phase_locked") {
                 showAlert?.(this.scene, result.message || "Troops can only be sold during dawn or day.", '#ff7777', 1800);
             }
+            if (s.active) this.paintDetails(s);
             return;
         }
 
-        showAlert?.(this.scene, `Sold ${s.name} for $${result.money}`, '#33ff77', 1800);
-        this.clearDetails();
-        this.rebuildList();
+        showAlert?.(this.scene, `Sold ${soldName} for $${result.money}`, '#33ff77', 1800);
     }
 
     // --------- tick / refresh ---------
@@ -847,7 +907,7 @@ export default class PlayerTab {
         if (current !== 'players') return;
 
         // if any troop was removed/added, rebuild
-        const team1Count = Teams.teamLists['1'].playerList.length;
+        const team1Count = Teams.teamLists['1']?.playerList?.length || 0;
         if (team1Count !== this.rows.size) {
             this.rebuildList();
         }
@@ -888,8 +948,8 @@ export default class PlayerTab {
         this.scroll?.layout?.();
 
         // fallback: if counts are now out of sync for any reason, hard refresh
-        const team1Count = Teams.teamLists['1'].playerList.length;
-        if (team1Count !== this.rows.size) {
+        const team1Count = Teams.teamLists['1']?.playerList?.length || 0;
+        if (team1Count === 0 || team1Count !== this.rows.size) {
             this.rebuildList();
         }
     }

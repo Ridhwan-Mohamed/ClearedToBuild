@@ -3,6 +3,7 @@ import { Teams } from "../Teams";
 import { Player } from "../players/Player";
 import { buildingManager } from "./buildingManager";
 import { InterruptController } from "../ai/scheduler/InterruptController";
+import { AudioManager } from "./AudioManager";
 
 export class StaminaManager {
     static scene;
@@ -52,6 +53,7 @@ export class StaminaManager {
     }
 
     static arriveAtHome(troop) {
+        const wasSleeping = troop?.state === CONTROL_STATES.SLEEP_MODE;
         Player.prepareTroopForSleep(troop);
         troop.setVisible(false);
         troop.body.setEnable(false);
@@ -69,10 +71,15 @@ export class StaminaManager {
 
             house.startSleepingVisual?.(troop);
         }
+
+        if (!wasSleeping) {
+            AudioManager.playSound("sfx_door_close", { volume: 0.24 });
+        }
     }
 
 
     static wakeUp(troop) {
+        const wasSleeping = troop?.state === CONTROL_STATES.SLEEP_MODE;
         troop.home?.stopSleepingVisual?.(troop);
         troop.task = null;
         troop.setVisible(true);
@@ -81,6 +88,10 @@ export class StaminaManager {
 
         if (troop.icon) {
             troop.icon.followingHouse = false;
+        }
+
+        if (wasSleeping) {
+            AudioManager.playSound("sfx_door_open", { volume: 0.24 });
         }
     }
 

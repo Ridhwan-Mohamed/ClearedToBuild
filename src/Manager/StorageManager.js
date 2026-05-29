@@ -119,7 +119,7 @@ export class StorageManager {
         this.pruneTeamDeliveryTasks(teamNumber);
     }
 
-    static grantItemToTeam(teamNumber, itemType, amount, scene = this.scene) {
+    static grantItemToTeam(teamNumber, itemType, amount, scene = this.scene, opts = {}) {
         const team = this._getTeam(teamNumber);
         const itemDef = typeof itemType === "string" ? UI_ITEM_TYPES[itemType] : itemType;
         const requested = Math.max(0, Math.floor(Number(amount) || 0));
@@ -131,7 +131,7 @@ export class StorageManager {
         for (const storage of storages) {
             if (!(remaining > 0) || !storage?.addItem) break;
             const before = storage.getItemCount?.(itemDef) ?? 0;
-            storage.addItem(itemDef, remaining);
+            storage.addItem(itemDef, remaining, opts);
             const after = storage.getItemCount?.(itemDef) ?? before;
             remaining -= Math.max(0, after - before);
         }
@@ -431,12 +431,22 @@ export class StorageManager {
         if (troop.isFireman) {
             // 🔥 fuel run: wood for an oven fuel job
             if (troop.pendingFuelJob && troop.carrying === UI_ITEM_TYPES.wood) {
-                Fireman.goRefuelOven(troop, troop.pendingFuelJob);
+                if (!Fireman.goRefuelOven(troop, troop.pendingFuelJob)) {
+                    this.tryCreateStorageDeliveryTask(troop);
+                }
                 return;
             }
 
             // regular oven ingredient delivery
-            Fireman.maybeAssignOvenJobDelivery(troop, troop.pendingOvenJob, task.item);
+            const assigned = Fireman.maybeAssignOvenJobDelivery(troop, troop.pendingOvenJob, task.item);
+            if (!assigned) {
+                const job = troop.pendingOvenJob;
+                if (job?.assigned > 0) job.assigned -= 1;
+                troop.pendingOvenJob = null;
+                troop.task = null;
+                if (this.tryCreateStorageDeliveryTask(troop)) return;
+                Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
+            }
         } 
         else if (troop.isFarmer) {
             //if pending job go check if you can do it

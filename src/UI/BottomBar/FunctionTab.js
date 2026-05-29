@@ -6,7 +6,7 @@ import { OrderRunner } from "../../orders/OrderRunner";
 import { ORDER_KINDS } from "../../orders/OrderTypes";
 import { InterruptController } from "../../ai/scheduler/InterruptController";
 import { AudioManager } from "../../Manager/AudioManager.js";
-import { BOTTOM_BAR_THEME, mixColor } from "./BottomBarTheme";
+import { BOTTOM_BAR_THEME, getBottomBarWidth, mixColor } from "./BottomBarTheme";
 
 const FUNCTION_TAB_SOURCE = "function_tab";
 const CONTENT_PADDING_X = 14;
@@ -70,7 +70,7 @@ export default class FunctionTab {
 
     this._onKeyFarm = () => this.toggleMode("Farm");
     this._onResize = (gameSize) => {
-      this.width = Number(gameSize?.width || this.scene.scale.width || this.width);
+      this.width = getBottomBarWidth(this.scene);
       this.relayout();
       this.updateVisuals();
     };
@@ -258,14 +258,13 @@ export default class FunctionTab {
   }
 
   relayout() {
-    const liveWidth = Math.max(
-      this.width,
-      Number(this.view?.width || 0),
-      Number(this.view?.displayWidth || 0),
-      Number(this.view?.getBounds?.()?.width || 0),
+    const barWidth = Math.max(
+      320,
       Number(this.scene.uiBottomBar?.pages?.width || 0),
-      Number(this.scene.scale.width || 0),
+      Number(this.scene.uiBottomBar?.ui?.width || 0),
+      getBottomBarWidth(this.scene),
     );
+    const liveWidth = Math.max(320, Math.min(barWidth, Number(this.width || barWidth)));
     const liveHeight = Math.max(
       this.height,
       Number(this.view?.height || 0),
@@ -369,7 +368,7 @@ export default class FunctionTab {
 
     if (tutorial?.isActive?.()) {
       if (!turningOn) {
-        tutorial.blockAction("Keep the highlighted tutorial mode active.");
+        tutorial.blockAction();
         return;
       }
       if (!tutorial.canPerformAction?.("function.mode", { mode })) {
@@ -465,18 +464,18 @@ export default class FunctionTab {
     if (!automation) return;
 
     const tutorial = this._getTutorialManager();
-    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled: true })) {
+    const target = Math.max(1, Number(automation.waterDraftCount || Teams.DEFAULT_WATER_BATCH_COUNT || 5));
+    if (tutorial?.isActive?.() && !tutorial.canPerformAction?.("function.water", { enabled: true, target })) {
       return;
     }
 
-    const target = Math.max(1, Number(automation.waterDraftCount || Teams.DEFAULT_WATER_BATCH_COUNT || 5));
     const orderId = OrderRunner._nextId();
     Teams.startTownWaterBatch?.(this.teamNumber, target, orderId);
     this._reconcileTownAutomation(true);
     this.updateVisuals();
 
     showAlert(this.scene, `Producing ${target} clean water`, "#93c5fd");
-    tutorial?.notifyAction?.("function.water", { enabled: true });
+    tutorial?.notifyAction?.("function.water", { enabled: true, target });
   }
 
   _cancelWaterBatch() {
@@ -659,7 +658,8 @@ export default class FunctionTab {
     });
 
     GATHER_RESOURCES.forEach((resource) => {
-      const desired = automation.gatherEnabled ? Math.max(0, Number(automation.gatherTargets?.[resource.key] || 0)) : 0;
+      const desiredTarget = automation.gatherEnabled ? Math.max(0, Number(automation.gatherTargets?.[resource.key] || 0)) : 0;
+      const desired = OrderRunner.isGatherCommandAvailable(resource.key, this.scene) ? desiredTarget : 0;
       const assigned = this._managedGatherTroops(foragers, resource.key).filter((troop) => !troop?.currentOrder?.shuttingDown);
       const overflow = Math.max(0, assigned.length - desired);
       if (overflow <= 0) return;
@@ -673,6 +673,7 @@ export default class FunctionTab {
     GATHER_RESOURCES.forEach((resource) => {
       const desired = automation.gatherEnabled ? Math.max(0, Number(automation.gatherTargets?.[resource.key] || 0)) : 0;
       if (desired <= 0) return;
+      if (!OrderRunner.isGatherCommandAvailable(resource.key, this.scene)) return;
 
       const assignedCount = this._managedGatherTroops(foragers, resource.key)
         .filter((troop) => !troop?.currentOrder?.shuttingDown)
@@ -853,7 +854,7 @@ export default class FunctionTab {
   _runRestAction(groupKey, mode) {
     const tutorial = this._getTutorialManager();
     if (tutorial?.isActive?.()) {
-      tutorial.blockAction("Use the highlighted tutorial control first.");
+      tutorial.blockAction();
       return;
     }
 

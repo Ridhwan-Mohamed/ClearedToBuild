@@ -23,7 +23,9 @@ import { formatPermitCostText } from "../../permitSystem";
 import { hasStoreUnlock, STORE_UNLOCK_KEYS } from "../../parcel_system/StoreUnlockSystem";
 import { getRecruitCost } from "../../balance/GameBalance";
 import {
+  addViewportScrollAffordance,
   BOTTOM_BAR_THEME,
+  getBottomBarWidth,
   makeGlassRoundRect,
   mixColor,
 } from "./BottomBarTheme";
@@ -202,6 +204,27 @@ function hasResources(scene, cost) {
   return buildingManager.hasRequiredMaterials(cost, "1");
 }
 
+function joinNatural(parts) {
+  if (!parts.length) return "";
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+function formatMissingCostMessage(cost) {
+  const missing = buildingManager.getMissingMaterials?.(cost, "1") || [];
+  if (!missing.length) return "Not enough resources";
+
+  const parts = missing.map((entry) => {
+    const amount = Math.max(0, Number(entry.missing || 0));
+    if (entry.key === "money") return `$${amount}`;
+    if (entry.key === "permits") return `${amount} permit${amount === 1 ? "" : "s"}`;
+    return `${amount} ${entry.label || String(entry.key).replace(/_/g, " ")}`;
+  });
+
+  return `Missing ${joinNatural(parts)}`;
+}
+
 function spendResources(scene, cost) {
   if (!cost) return;
   buildingManager.consumeRequiredMaterials(cost, "1");
@@ -375,6 +398,8 @@ export default class BuildTab {
       this.scene.input.off("wheel", this._onCardsWheel);
       this._onCardsWheel = null;
     }
+    this._cardsScrollAffordance?.destroy?.();
+    this._cardsScrollAffordance = null;
     if (this._placementInputScene?.input && this._onPlacePointerDown) {
       this._placementInputScene.input.off("pointerdown", this._onPlacePointerDown);
     }
@@ -704,6 +729,9 @@ export default class BuildTab {
   _makeUI() {
     const scene = this.scene;
 
+    this._cardsScrollAffordance?.destroy?.();
+    this._cardsScrollAffordance = null;
+
     // Clear old children if hot-reloading
     this.view.removeAll(true);
     this._cardRefs = [];
@@ -737,7 +765,7 @@ export default class BuildTab {
       strokeWidth: 1.5,
     }).setPosition(centerX + 70, toggleY)
       .setInteractive({ useHandCursor: true });
-    const unitToggleText = scene.add.text(centerX + 70, toggleY, "Units", {
+    const unitToggleText = scene.add.text(centerX + 70, toggleY, "Troops", {
       fontSize: "12px",
       fontFamily: "Bungee",
       color: this.mode === "units" ? "#ffe7f4" : BOTTOM_BAR_THEME.textSoft,
@@ -776,7 +804,8 @@ export default class BuildTab {
 
     // ----- Scroller viewport (masked) -----
     // width: leave margin so it looks like CardsTab and doesn't touch edges
-    const viewportW = scene.scale.width - 32;
+    const pageWidth = Math.max(320, Math.min(this.width || getBottomBarWidth(scene), getBottomBarWidth(scene)));
+    const viewportW = Math.max(320, pageWidth - 32);
     const viewportH = CARD_H + 18;
     const viewportY = topY + 38;
     const viewportX = centerX;
@@ -814,6 +843,31 @@ export default class BuildTab {
     this._cardsViewportHit = viewportHit;
     this._cardsScrollX = 0;
     this._cardsContentW = 0;
+    this._cardsScrollAffordance = addViewportScrollAffordance(
+      scene,
+      this.view,
+      () => this._cardsViewport,
+      () => {
+        const viewportW = this._cardsViewport?.w || 0;
+        const contentW = this._cardsContentW || 0;
+        const minScroll = Math.min(0, viewportW - contentW);
+        const bounds = this._cardsViewportHit?.getBounds?.();
+        const pointer = scene.input?.activePointer;
+        const hovered = this._cardsDragging || !!(bounds && pointer && Phaser.Geom.Rectangle.Contains(bounds, pointer.x, pointer.y));
+        return {
+          overflow: contentW > viewportW + 1,
+          hovered,
+          canBack: (this._cardsScrollX || 0) < -1,
+          canForward: (this._cardsScrollX || 0) > minScroll + 1,
+          viewportRatio: contentW > 0 ? Phaser.Math.Clamp(viewportW / contentW, 0.12, 1) : 1,
+          progress: minScroll < 0 ? Phaser.Math.Clamp((this._cardsScrollX || 0) / minScroll, 0, 1) : 0,
+        };
+      },
+      {
+        orientation: "x",
+        isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === "build",
+      }
+    );
 
     // ----- Build cards horizontally -----
     let xCursor = 0;
@@ -1139,7 +1193,7 @@ export default class BuildTab {
   _trySetMode(mode) {
     const tutorial = this._getTutorialManager();
     if (tutorial?.isActive?.() && mode !== this.mode) {
-      tutorial.blockAction("Use the highlighted Store item first.");
+      tutorial.blockAction();
       return;
     }
     this._setMode(mode);
@@ -1183,7 +1237,7 @@ export default class BuildTab {
         }
       }
       this._closeQuickSell();
-      showAlert(this.scene, "Not enough money", "#ff5555");
+      showAlert(this.scene, formatMissingCostMessage(costObj), "#ff5555");
       return;
     }
 
@@ -1228,7 +1282,7 @@ export default class BuildTab {
 
     if (this.activeKey === key) {
       if (tutorial?.isActive?.()) {
-        tutorial.blockAction("Place the highlighted building first.");
+        tutorial.blockAction();
         return;
       }
       this._clearSelection(true);
@@ -1348,7 +1402,7 @@ export default class BuildTab {
       }
 
       if (!hasResources(this.scene, costObj)) {
-        showAlert(this.scene, "Not enough resources or permits", "#ff5555");
+        showAlert(this.scene, formatMissingCostMessage(costObj), "#ff5555");
         return;
       }
 

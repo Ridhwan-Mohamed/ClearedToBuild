@@ -12,6 +12,7 @@ import {
   getSlotFavorShortLabel,
   formatFavorDurationMs,
 } from "../parcel_system/SlotFavorSystem.js";
+import { clampMilitiaTier, getMilitiaTierConfig, getMilitiaTierLayout } from "../parcel_system/MilitiaTierConfig.js";
 
 const SLOT_ORDER = ["N", "E", "S", "W"];
 const SLOT_LABELS = {
@@ -1173,7 +1174,7 @@ export class ContractHud {
 
     if (this.popupState?.slotId === slotId) {
       if (this._getTutorialManager()?.isActive?.()) {
-        this._getTutorialManager()?.blockAction?.("Choose the highlighted contract next.");
+        this._getTutorialManager()?.blockAction?.();
         return;
       }
       this.closePopup();
@@ -1604,6 +1605,121 @@ export class ContractHud {
         this._addPopupCloseButton();
         return;
       }
+      if (type === "MILITIA") {
+        const diff = clampMilitiaTier(this.popupState.difficulty ?? 1);
+        const tier = getMilitiaTierConfig(diff);
+        const purchase = this._getPurchaseContext(slotId, "MILITIA", diff);
+        const moneyCost = Math.max(0, Number(purchase?.moneyCost ?? getContractMoneyCost(this.world ?? this.scene, "MILITIA", diff)));
+        this._setPopupTheme({
+          bgColor: 0x0f172a,
+          bgAlpha: 0.88,
+          strokeColor: 0xb7ecff,
+          titleColor: "#ffffff",
+          bodyColor: "#eef7ff",
+          subtitleColor: "#d6f0ff",
+        });
+        this.popupTitle.setText("ðŸ›¡ Militia Contract");
+        this._setPopupSubtitle(`Tier ${diff} | ${tier.summary}`, "#d6f0ff");
+        this.popupBody.setPosition(18, 64);
+        this.popupBody.setText([
+          `${formatPermitCostText(getContractPermitCost("MILITIA", diff, this.world ?? this.scene))} + $${moneyCost}`,
+          "Temporary defensive parcel that lasts 1 day.",
+          `Layout: ${tier.summary}`,
+        ].join("\n"));
+
+        const selectedBtnFill = 0x163042;
+        const selectedBtnStroke = 0xd6f0ff;
+        const unselectedBtnFill = 0x0b2232;
+        const unselectedBtnStroke = 0x86c5e5;
+        const buttons = [
+          {
+            x: 56,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "T1",
+            fillColor: diff === 1 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 1 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 1 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 1 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 1 ? 0.9 : 0.58,
+            textColor: "#eef7ff",
+            onClick: () => { this.popupState.difficulty = 1; this._renderPopup(); },
+          },
+          {
+            x: 140,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "T2",
+            fillColor: diff === 2 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 2 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 2 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 2 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 2 ? 0.9 : 0.58,
+            textColor: "#eef7ff",
+            onClick: () => { this.popupState.difficulty = 2; this._renderPopup(); },
+          },
+          {
+            x: 224,
+            y: 178,
+            w: 60,
+            h: 32,
+            label: "T3",
+            fillColor: diff === 3 ? selectedBtnFill : unselectedBtnFill,
+            fillAlpha: diff === 3 ? 0.96 : 0.82,
+            hoverFillAlpha: diff === 3 ? 1 : 0.92,
+            pressedFillAlpha: 1,
+            strokeColor: diff === 3 ? selectedBtnStroke : unselectedBtnStroke,
+            strokeAlpha: diff === 3 ? 0.9 : 0.58,
+            textColor: "#eef7ff",
+            onClick: () => { this.popupState.difficulty = 3; this._renderPopup(); },
+          },
+          {
+            x: 78,
+            y: 226,
+            w: 90,
+            h: 32,
+            label: "Back",
+            fillColor: 0x581c24,
+            fillAlpha: 0.92,
+            hoverFillAlpha: 1,
+            pressedFillAlpha: 1,
+            strokeColor: 0xfca5a5,
+            strokeAlpha: 0.7,
+            textColor: "#ffe2e2",
+            onClick: () => this._tryBackToChooser(slotId),
+          },
+          {
+            x: 202,
+            y: 226,
+            w: 90,
+            h: 32,
+            label: "Buy",
+            fillColor: 0x14532d,
+            fillAlpha: 0.94,
+            hoverFillAlpha: 1,
+            pressedFillAlpha: 1,
+            strokeColor: 0x86efac,
+            strokeAlpha: 0.76,
+            textColor: "#eafff1",
+            tutorialKey: "contractBuy:MILITIA",
+            onClick: () => this._commit(slotId, {
+              type: "MILITIA",
+              difficulty: diff,
+              militiaConfig: {
+                tier: diff,
+                layout: getMilitiaTierLayout(diff),
+              },
+            }),
+          },
+        ];
+        this._addPopupButtons(buttons);
+        this._addPopupCloseButton();
+        return;
+      }
 
       const def = CONTRACT_DEFS[type];
       const purchase = this._getPurchaseContext(slotId, type, 1);
@@ -1830,7 +1946,15 @@ export class ContractHud {
       if (type === "FOREST") started = pm.startForest(slotId);
       else if (type === "ROCK") started = pm.startRock(slotId);
       else if (type === "FARM") started = pm.startFarm?.(slotId);
-      else if (type === "MILITIA") started = pm.startMilitia?.(slotId, { moneyCost });
+      else if (type === "MILITIA") {
+        started = pm.startMilitia?.(slotId, difficulty, {
+          militiaConfig: payload.militiaConfig ?? {
+            tier: difficulty,
+            layout: getMilitiaTierLayout(difficulty),
+          },
+          moneyCost,
+        });
+      }
       else if (type === "PRESSURE") started = pm.startPressure(slotId, difficulty, { source: "manual" });
       else if (type === "MARKET") started = pm.startMarket(slotId);
     } catch (err) {
@@ -1844,6 +1968,8 @@ export class ContractHud {
       if (moneyCost > 0) this.scene.updateMoney(+moneyCost);
       return;
     }
+
+    pm.markContractPermitCost?.(started, cost);
 
     tutorial?.notifyAction?.("parcel.commit", {
       type,

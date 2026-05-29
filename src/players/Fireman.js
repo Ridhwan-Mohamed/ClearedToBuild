@@ -126,6 +126,8 @@ export class Fireman {
             return;
         }
 
+        Fireman.syncOvenJobAssignments(troop.body?.team);
+
         if (OrderRunner.stepUnit(troop)) return;
         if (troop.task) return;
         if (Player.tryEnterQueuedSleep?.(troop)) return;
@@ -137,9 +139,105 @@ export class Fireman {
         }
     }
 
-    static assignFromOvenJobs(troop) {
+    static syncOvenJobAssignments(teamNumber) {
+        const team = Teams.teamLists?.[`${teamNumber}`] ?? Teams.teamLists?.[teamNumber];
+        if (!team) return false;
+
+        const players = Array.isArray(team.playerList) ? team.playerList : [];
+        const countRefs = (job, kind) => {
+            let count = 0;
+            for (const troop of players) {
+                if (!troop?.active) continue;
+                const hasActiveWork = !!(
+                    troop.task ||
+                    troop.timer ||
+                    StorageManager.isCarrying(troop) ||
+                    troop.state === CONTROL_STATES.FLEE_MODE ||
+                    troop.state === CONTROL_STATES.GET_WATER_MODE ||
+                    troop.state === CONTROL_STATES.GET_FROM_STORAGE ||
+                    troop.state === CONTROL_STATES.SEND_TO_OVEN
+                );
+                if (!hasActiveWork) continue;
+
+                if (kind === "fuel") {
+                    if (troop.pendingFuelJob === job) {
+                        count += 1;
+                        continue;
+                    }
+                    if (troop.deferredCarry?.pendingFuelJob === job) {
+                        count += 1;
+                        continue;
+                    }
+                    if (troop.task?.job === job && troop.task?.taskType === "ovenFuelDelivery") {
+                        count += 1;
+                    }
+                    continue;
+                }
+
+                if (troop.pendingOvenJob === job) {
+                    count += 1;
+                    continue;
+                }
+                if (troop.deferredCarry?.pendingOvenJob === job) {
+                    count += 1;
+                    continue;
+                }
+                if (troop.task?.job === job && troop.task?.taskType === "ovenDelivery") {
+                    count += 1;
+                }
+            }
+            return count;
+        };
+
+        const syncList = (jobs, kind) => {
+            if (!Array.isArray(jobs)) return false;
+            let changed = false;
+            for (const job of jobs) {
+                if (!job || job.canceled) continue;
+                const remaining = Math.max(0, Number(job.remaining || 0));
+                const actualAssigned = Math.min(remaining, countRefs(job, kind));
+                if (Number(job.assigned || 0) !== actualAssigned) {
+                    job.assigned = actualAssigned;
+                    changed = true;
+                }
+            }
+            return changed;
+        };
+
+        const waterChanged = syncList(team.ovenJobs, "water");
+        const fuelChanged = syncList(team.ovenFuelJobs, "fuel");
+        return waterChanged || fuelChanged;
+    }
+
+    static _orderIdActive(team, orderId) {
+        if (orderId == null) return false;
+        return (team?.playerList || []).some(troop =>
+            troop?.active && troop.currentOrder?.id === orderId
+        );
+    }
+
+    static _jobMatchesAssignmentOptions(job, options = {}, team = null) {
+        if (!job) return false;
+        if (options?.oven && job.oven !== options.oven) return false;
+
+        const orderId = options?.orderId ?? options?.order?.id ?? null;
+        if (orderId != null && job.directOrderId != null && job.directOrderId !== orderId) {
+            return !this._orderIdActive(team, job.directOrderId);
+        }
+        return true;
+    }
+
+    static _adoptJobOrder(job, options = {}) {
+        const orderId = options?.orderId ?? options?.order?.id ?? null;
+        if (orderId != null && job && job.directOrderId !== orderId) {
+            job.directOrderId = orderId;
+        }
+    }
+
+    static assignFromOvenJobs(troop, options = {}) {
         const team = Teams.teamLists[troop.body.team];
         if (!team) return false;
+        Fireman.syncOvenJobAssignments(troop.body.team);
 
         // find a job with remaining work, but do not assign input deliveries
         // while the oven output is waiting to be cleared.
@@ -149,10 +247,12 @@ export class Fireman {
                 !j.canceled &&
                 j.remaining > j.assigned &&
                 j.oven?.sprite?.active &&
+                Fireman._jobMatchesAssignmentOptions(j, options, team) &&
                 ClayOven.isSlotOpenForInput(j.oven, inputidx)
             );
         });
         if (!job) return false;
+        Fireman._adoptJobOrder(job, options);
 
         // if the job is water: go to lake (we'll deliver to the exact oven/slot later)
         if (job.item.name === UI_ITEM_TYPES.unclean_water.name) {
@@ -169,6 +269,8 @@ export class Fireman {
                 }
                 console.error("Failed to path to nearest water, WATER PATH ISSUE")
                 troop.task = null;
+                troop.pendingOvenJob = null;
+                troop.skip = false;
                 return false;
             }
             return false; // no lake found -> wait
@@ -186,13 +288,20 @@ export class Fireman {
         return true;
     }
 
-    static assignFromOvenFuelJobs(troop) {
+    static assignFromOvenFuelJobs(troop, options = {}) {
         const team = Teams.teamLists[troop.body.team];
         if (!team) return false;
+        Fireman.syncOvenJobAssignments(troop.body.team);
 
         // find lowest-fuel oven job
-        const job = team.ovenFuelJobs.find(j => !j.canceled && j.remaining > j.assigned && j.oven?.sprite?.active);
+        const job = team.ovenFuelJobs.find(j =>
+            !j.canceled &&
+            j.remaining > j.assigned &&
+            j.oven?.sprite?.active &&
+            Fireman._jobMatchesAssignmentOptions(j, options, team)
+        );
         if (!job) return false;
+        Fireman._adoptJobOrder(job, options);
 
         troop.pendingFuelJob = job;
         const jobPossible = StorageManager.tryCreateStoragePickupTask(troop, UI_ITEM_TYPES.wood);
@@ -244,16 +353,17 @@ export class Fireman {
         const amount = troop.carrying?.count || 1;
 
         if (oven.addFuel(amount)) {
-            job.remaining -= amount;
-            job.assigned -= 1;
+            job.remaining = Math.max(0, Number(job.remaining || 0) - amount);
+            job.assigned = Math.max(0, Number(job.assigned || 0) - 1);
             if (job.remaining <= 0) Teams.removeFromStateArray(troop.body.team, 'ovenFuelJobs', job);
         }else{
             console.error("Failed to add fuel to oven")
-            job.assigned -= 1;
+            job.assigned = Math.max(0, Number(job.assigned || 0) - 1);
         }
 
         StorageManager.removeCarriedItem(troop);
         troop.pendingFuelJob = null;
+        troop.skip = false;
         troop.task = null;
         Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         return true;
@@ -261,7 +371,10 @@ export class Fireman {
 
     static goRefuelOven(troop, job) {
         if (!job?.oven || job.canceled || !job.oven?.sprite?.active) {
+            if (job?.assigned > 0) job.assigned -= 1;
             if (troop.pendingFuelJob === job) troop.pendingFuelJob = null;
+            troop.task = null;
+            Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
             console.error("Failed to refuel oven after wood pickup, OVEN GONE ISSUE")
             return false; // fine for now, scheduler/storage recovery will take over
         }
@@ -282,6 +395,10 @@ export class Fireman {
         else{
             console.error("Failed to refuel oven after wood pickup, PATH ISSUE")
         }
+        if (job.assigned > 0) job.assigned -= 1;
+        if (troop.pendingFuelJob === job) troop.pendingFuelJob = null;
+        troop.task = null;
+        Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
         return false;
     }
 
@@ -435,6 +552,7 @@ export class Fireman {
         }
 
         troop.pendingOvenJob = null;
+        troop.skip = false;
         troop.task = null;
         Teams.movePlayerState(troop, CONTROL_STATES.TRACK_MODE);
     }

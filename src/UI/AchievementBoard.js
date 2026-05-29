@@ -534,8 +534,7 @@ export class AchievementBoard {
       this.scene.scale.width - BOARD_W / 2 - 10
     );
     const anchorBottom = Number(
-      this.scene.townStatusHudBottomY
-      || this.scene.phaseClockBottomY
+      this.scene.phaseClockBottomY
       || (Number(clock?.y || 96) + Number(clock?.panelHeight || 104) / 2)
     );
     const topY = Math.round(anchorBottom + 10 + (HEADER_H / 2));

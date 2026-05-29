@@ -48,7 +48,7 @@ const HYDRATED_FARMERS_WATER_BONUS = 2;
 const MELEE_DAMAGE_BONUS = 1.18;
 const LAST_STAND_THRESHOLD = 0.35;
 const LAST_STAND_DAMAGE_BONUS = 1.2;
-const RESEED_UNLOCK_CHANCE = 0.33;
+const RESEED_UNLOCK_CHANCE = 0.4;
 
 function setStat(objectRef, key, nextValue) {
     objectRef[key] = nextValue;
@@ -517,12 +517,12 @@ export const POWERUP_CARDS = [
         id: "reseed",
         image: "icon_water_jar",
         name: "Reseed",
-        text: "Harvested crops have a 33% chance to reseed themselves.",
+        text: "Harvested crops have a 40% chance to reseed themselves.",
         type: "global",
         target: "crop",
         OUTLINE: "#45c9ff",
         rarity: RARITY.gold,
         apply: () => setStat(Teams, "cropReseedChance", RESEED_UNLOCK_CHANCE),
-        remove: () => setStat(Teams, "cropReseedChance", 0),
+        remove: () => setStat(Teams, "cropReseedChance", Teams.DEFAULT_CROP_RESEED_CHANCE),
     }),
 ];

@@ -1,6 +1,24 @@
 // parcelSystem/PressureSpawner.js
-import { PRESSURE } from "./ParcelConfig.js";
+import { TILE_TYPES } from "../constants.js";
+import { PARCEL_SIZE, PRESSURE } from "./ParcelConfig.js";
 import { buildPressureSpawnerProfile, getEnemyTypeLabel } from "../balance/GameBalance.js";
+
+const PRESSURE_SPAWNER_EDGE_BERTH = 2;
+
+function clampSpawnerPosToParcel(origin, pos) {
+  const spawnType = TILE_TYPES.spawn;
+  const lenX = Math.max(1, Number(spawnType?.lenX ?? 1) || 1);
+  const lenY = Math.max(1, Number(spawnType?.lenY ?? 1) || 1);
+  const minX = origin.x + PRESSURE_SPAWNER_EDGE_BERTH;
+  const minY = origin.y + PRESSURE_SPAWNER_EDGE_BERTH;
+  const maxX = origin.x + PARCEL_SIZE - PRESSURE_SPAWNER_EDGE_BERTH - lenX;
+  const maxY = origin.y + PARCEL_SIZE - PRESSURE_SPAWNER_EDGE_BERTH - lenY;
+
+  return {
+    gx: Math.max(minX, Math.min(maxX, Number(pos?.gx ?? minX))),
+    gy: Math.max(minY, Math.min(maxY, Number(pos?.gy ?? minY))),
+  };
+}
 
 export function buildPressureSpawnerPlan({
   scene,
@@ -19,7 +37,9 @@ export function buildPressureSpawnerPlan({
     { gx: origin.x + 7,  gy: origin.y + 7  },
     { gx: origin.x + 17, gy: origin.y + 7  },
     { gx: origin.x + 12, gy: origin.y + 17 },
-  ].slice(0, spawnerCount);
+  ]
+    .slice(0, spawnerCount)
+    .map((pos) => clampSpawnerPosToParcel(origin, pos));
 
   const totalPlannedEnemies = profile.totalPlannedEnemies;
   const spawnerSpecs = spawnerPositions.map((pos, idx) => {

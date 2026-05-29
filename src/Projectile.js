@@ -52,6 +52,7 @@ export class Projectile {
         newCube.team = teamNumber;
         newCube.weapon = weapon;
         if(player) newCube.player = player;
+        if (options?.sourceStructure) newCube.sourceStructure = options.sourceStructure;
 
         const deferImpactUntilEnd =
             !!weapon?.impactAtEndOnly &&
@@ -377,9 +378,7 @@ export class Projectile {
 
     static shouldIgnoreStructureForShot(source, hit) {
         if (!source || !hit) return false;
-        const shotTeam = this.getShotTeam(source);
-        const hitTeam = this.getStructureTeam(hit);
-        return shotTeam === 1 && hitTeam === 1;
+        return this.isIgnoredStructureHit(hit, this.getStructureIdentitySet(source));
     }
 
     static shouldCollideWithStructure(source, hit) {
@@ -412,6 +411,14 @@ export class Projectile {
         push(obj?.gameObject?.wallRef);
         push(obj?.gameObject?.buildingRef);
         push(obj?.gameObject?.structureOwner);
+        push(obj?.player);
+        push(obj?.player?.sprite);
+        push(obj?.player?.collider);
+        push(obj?.player?.buildingRef);
+        push(obj?.sourceStructure);
+        push(obj?.sourceStructure?.sprite);
+        push(obj?.sourceStructure?.collider);
+        push(obj?.sourceStructure?.buildingRef);
         push(obj?.sprite);
         push(obj?.collider);
         push(obj?.body?.gameObject);

@@ -16,7 +16,9 @@ import {
 } from "../MarketCardUseController";
 import { AudioManager } from "../../Manager/AudioManager";
 import {
+  addViewportScrollAffordance,
   BOTTOM_BAR_THEME,
+  getBottomBarWidth,
   makeGlassRoundRect,
   mixColor,
 } from "./BottomBarTheme";
@@ -163,6 +165,8 @@ export default class CardsTab {
     this.scene.input.off("wheel", this._onWheel);
     this.scene.input.off("pointermove", this._onPointerMove);
     this.scene.input.off("pointerup", this._onPointerUp);
+    this._scrollAffordance?.destroy?.();
+    this._scrollAffordance = null;
     this.view?.destroy(true);
     this.view = null;
   }
@@ -178,7 +182,7 @@ export default class CardsTab {
   }
 
   getTabWidth() {
-    return Math.max(MIN_TAB_W, this.scene.scale.width - 20);
+    return Math.max(320, getBottomBarWidth(this.scene) - 16);
   }
 
   buildShell() {
@@ -189,6 +193,8 @@ export default class CardsTab {
     const viewportX = 0;
     const viewportY = topY + 40;
 
+    this._scrollAffordance?.destroy?.();
+    this._scrollAffordance = null;
     this.view.removeAll(true);
     this._toggles = {};
 
@@ -297,6 +303,28 @@ export default class CardsTab {
     this._cardsContainer = scene.add.container(this._cardsViewport.left, viewportY + 9);
 
     this.view.add([titleBg, title, this.countBg, this.countText, viewportFrame, viewportGlow, viewportHit, this._cardsContainer]);
+    this._scrollAffordance = addViewportScrollAffordance(
+      scene,
+      this.view,
+      () => this._cardsViewport,
+      () => {
+        const viewportW = this._cardsViewport?.w || 0;
+        const contentW = this._contentW || 0;
+        const minScroll = Math.min(0, viewportW - contentW);
+        return {
+          overflow: contentW > viewportW + 1,
+          hovered: this._dragging || this._pointerInViewport(scene.input?.activePointer),
+          canBack: (this._scrollX || 0) < -1,
+          canForward: (this._scrollX || 0) > minScroll + 1,
+          viewportRatio: contentW > 0 ? Phaser.Math.Clamp(viewportW / contentW, 0.12, 1) : 1,
+          progress: minScroll < 0 ? Phaser.Math.Clamp((this._scrollX || 0) / minScroll, 0, 1) : 0,
+        };
+      },
+      {
+        orientation: "x",
+        isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === "cards",
+      }
+    );
     this._applyToggleVisuals();
   }
 

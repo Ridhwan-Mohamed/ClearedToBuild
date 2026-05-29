@@ -31,12 +31,11 @@ export class SpawnerBuilding {
 
     // ✅ bake into grid + block both nav grids + create barrier
     // uses Map.addBlockItem(...) which writes tile + sets navGrid/enemyNavGrid to 0 for blocking items :contentReference[oaicite:1]{index=1}
-    Map.addBlockItem(gx, gy, TILE_TYPES.spawn);
+    // Preserve a dirt interior under the hole so parcel auto-tiling does not
+    // produce corner/edge artifacts around the opening.
+    Map.addTopLayerItem(gx, gy, TILE_TYPES.spawn, { fallbackFloorType: "dirt" });
 
     // compute world position internally
-    const worldX = gx * SQUARESIZE + SQUARESIZE / 2;
-    const worldY = gy * SQUARESIZE + SQUARESIZE / 2;
-
     this.difficulty = opts.difficulty ?? 1;
     this.stageIndex = opts.stageIndex ?? 1;
 
@@ -65,13 +64,18 @@ export class SpawnerBuilding {
 
     this._destroyed = false;
     const tileType = TILE_TYPES.spawn;
+    const w = (tileType.lenX || 1) * SQUARESIZE;
+    const h = (tileType.lenY || 1) * SQUARESIZE;
+    const worldX = gx * SQUARESIZE + (w / 2);
+    const worldY = gy * SQUARESIZE + (h / 2);
+    this.spawnWorldX = worldX;
+    this.spawnWorldY = worldY;
 
-    const item = TILE_TYPES.spawn;
     // create visuals
     this.sprite = Map.addToWorldStatic(
         scene.add.sprite(
-            (gx + Math.floor(item.lenX/2)) * SQUARESIZE,
-            (gy + Math.floor(item.lenY/2)) * SQUARESIZE,
+            worldX,
+            worldY,
             tileType.name
         ).setDepth(BLOCKDEPTH)
     );
@@ -83,18 +87,17 @@ export class SpawnerBuilding {
     this.sprite.buildingRef = this;
     this.sprite.isBuilding = true;
 
-    // ✅ invisible collider (static body) for projectile collisions
-    const w = (tileType.lenX || 1) * SQUARESIZE;
-    const h = (tileType.lenY || 1) * SQUARESIZE;
-
-    this.collider = this.scene.physics.add.staticImage(this.sprite.x, this.sprite.y, "barrier");
-    this.collider.setDisplaySize(w, h).setAlpha(0);
-    Map.structureBarrier.add(this.collider);
+    this.collider = Map.addStructureBarrier(worldX, worldY, w, h, {
+      team: this.team,
+      buildingRef: this,
+    });
 
     // collision backrefs live on collider
-    this.collider.buildingRef = this;
-    this.collider.isBuilding = true;
-    this.collider.team = this.team;
+    if (this.collider) {
+      this.collider.buildingRef = this;
+      this.collider.isBuilding = true;
+      this.collider.team = this.team;
+    }
 
 
     this.sprite.buildingRef = this;
@@ -220,15 +223,16 @@ export class SpawnerBuilding {
   }
 
   _spawnEnemy() {
-    const spawnGX = Math.floor(this.sprite.x / SQUARESIZE);
-    const spawnGY = Math.floor(this.sprite.y / SQUARESIZE);
+    const tileType = TILE_TYPES.spawn;
+    const spawnGX = this.tilePos.tileX + Math.floor(Math.max(1, Number(tileType?.lenX ?? 1) || 1) / 2);
+    const spawnGY = this.tilePos.tileY + Math.floor(Math.max(1, Number(tileType?.lenY ?? 1) || 1) / 2);
     const unit = this.enemyType === "grunt"
       ? new FortGrunt(spawnGX, spawnGY, 0)
       : this.enemyType === "hunter"
       ? new Hunter(spawnGX, spawnGY, 0)
       : this.enemyType === "bomber"
       ? new Bomber(spawnGX, spawnGY, 0)
-      : spawnRaiderAtWorld(this.sprite.x, this.sprite.y);
+      : spawnRaiderAtWorld(this.spawnWorldX, this.spawnWorldY);
 
     if (!unit) return false;
 

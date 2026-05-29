@@ -255,7 +255,8 @@ export class Turret {
       this.teamNumber,
       this.weapon,
       null,
-      this._getProjectileSpawnDistance()
+      this._getProjectileSpawnDistance(),
+      { sourceStructure: this }
     );
 
     this.nextShotAt = now + this.weapon.duration;

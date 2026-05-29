@@ -48,6 +48,10 @@ export class InterruptController {
         const { task, troop, meta } = ctx;
         if (!task) return;
 
+        if (task.taskType === "storagePickup" && task.storage && task.item) {
+            task.storage.releasePickup?.(task.item, 1);
+        }
+
         if (typeof task.assigned === "number" && task.assigned > 0) {
             task.assigned -= 1;
         }
@@ -65,9 +69,6 @@ export class InterruptController {
             troop.pendingFarmSpot = null;
         }
 
-        if (troop.isFireman) {
-            this._releaseFiremanPending(troop);
-        }
     }
 
     static deferCarryTask(ctx) {
@@ -118,8 +119,8 @@ export class InterruptController {
 
     static _cleanupRoleLocalRefs(troop, deferred) {
         if (troop.isFireman && !deferred) {
-            troop.pendingFuelJob = null;
-            troop.pendingOvenJob = null;
+            this._releaseFiremanPending(troop);
+            troop.skip = false;
         }
         if (troop.gatherSwingTween) {
             troop.gatherSwingTween.remove();

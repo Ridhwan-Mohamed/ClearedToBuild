@@ -8,8 +8,12 @@ import { AudioManager } from '../../Manager/AudioManager.js';
 import { StorageManager } from '../../Manager/StorageManager.js';
 import { StorageBuilding } from '../../buildings/Storage.js';
 import {
+  addScrollablePanelAffordance,
   BOTTOM_BAR_THEME,
+  getBottomBarWidth,
+  handleScrollablePanelWheel,
   makeGlassRoundRect,
+  makeBottomBarEmptyRow,
   mixColor,
 } from "./BottomBarTheme";
 
@@ -25,6 +29,7 @@ export default class StorageTab {
     this.selected = null;
     this.cardByStorage = new Map();
     this._onWheel = null;
+    this._scrollAffordances = [];
     this.root = this.build();
     this.bindScrollInput();
 
@@ -35,11 +40,7 @@ export default class StorageTab {
     // --- storage lifecycle listeners ---
     this._onAdded = (storage) => {
       if (!storage || storage.teamNumber !== this.team) return;
-      const idx = (Teams.teamLists[this.team]?.storageList || []).indexOf(storage);
-      const card = this.createCard(storage, idx >= 0 ? idx : this.cardByStorage.size);
-      this.listBody.add(card, { expand: true });
-      this.cardByStorage.set(storage, card);
-      this.scroll.layout();
+      this.rebuildList();
     };
 
     this._onRemoved = (storage) => {
@@ -52,6 +53,9 @@ export default class StorageTab {
       if (this.selected === storage) {
         this.selected = null;
         this.detail.setStorage(null);
+      }
+      if (!(Teams.teamLists[this.team]?.storageList || []).length) {
+        this.rebuildList();
       }
     };
 
@@ -118,6 +122,8 @@ export default class StorageTab {
       this._onWheel = null;
     }
     this.root?.destroy();
+    this._scrollAffordances.forEach((affordance) => affordance?.destroy?.());
+    this._scrollAffordances = [];
   }
 
   // ---------- UI BUILD ----------
@@ -125,8 +131,10 @@ export default class StorageTab {
     const scene = this.scene;
     const CONTENT_H = 112;
     this.contentHeight = CONTENT_H;
-    const listWidth = Math.max(230, Math.floor(scene.scale.width * 0.38) - 28);
-    const detailWidth = Math.max(360, scene.scale.width - listWidth - 42);
+    const barWidth = getBottomBarWidth(scene);
+    const availableWidth = Math.max(520, barWidth - 16);
+    const listWidth = Math.max(230, Math.floor(availableWidth * 0.34));
+    const detailWidth = Math.max(320, availableWidth - listWidth - 26);
     const detailProportion = 2;
     const listProportion = 1;
     this.listWidth = listWidth;
@@ -161,24 +169,6 @@ export default class StorageTab {
         strokeAlpha: 0.12,
       }),
       panel: { child: this.listBody, mask: { padding: 1 } },
-      sliderY: scene.rexUI.add.slider({
-        height: CONTENT_H - 20,
-        orientation: "y",
-        track: makeGlassRoundRect(scene, 10, 0, 5, {
-          fill: 0x0b2230,
-          alpha: 0.82,
-          stroke: 0x98e7ff,
-          strokeAlpha: 0.08,
-          strokeWidth: 1,
-        }),
-        thumb: makeGlassRoundRect(scene, 10, 28, 5, {
-          fill: 0x72d8ff,
-          alpha: 0.86,
-          stroke: 0xffffff,
-          strokeAlpha: 0.18,
-          strokeWidth: 1,
-        }),
-      }),
       scrollerY: {
         pointerOutRelease: true,
         rectBoundsInteractive: true,
@@ -186,6 +176,9 @@ export default class StorageTab {
       space: { left: 6, right: 6, top: 6, bottom: 6, panel: 8 },
     }).setDepth(TAB_BASE_DEPTH);
     this.scroll.setMinSize(0, CONTENT_H);
+    this._scrollAffordances.push(addScrollablePanelAffordance(scene, this.scroll, {
+      isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === 'storage',
+    }));
 
     root.add(this.scroll, { proportion: listProportion, expand: true });
     this.rebuildList();
@@ -199,14 +192,8 @@ export default class StorageTab {
     this._onWheel = (pointer, _gameObjects, dx, dy) => {
       if (this.scene.uiBottomBar?.currentPage !== 'storage') return;
       if (!this.scene.uiBottomBar?.expanded) return;
-      if (!this.scroll?.isOverflowY) return;
-      if (!this.isPointerOverScroll(pointer)) return;
-
-      const dominantDelta = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      if (Math.abs(dominantDelta) < 0.1) return;
-
-      this.scroll.addChildOY(-dominantDelta * 0.8, true);
-      this.scene.input.stopPropagation();
+      const panels = [this.scroll];
+      panels.some((panel) => handleScrollablePanelWheel(this.scene, panel, pointer, dx, dy));
     };
 
     this.scene.input.on('wheel', this._onWheel);
@@ -1089,9 +1076,13 @@ export default class StorageTab {
 
   // ---------- CARD LIST ----------
   rebuildList() {
-    const storages = Teams.teamLists['1']?.storageList || [];
+    const storages = Teams.teamLists[this.team]?.storageList || [];
     this.cardByStorage.clear();
     this.listBody.clear(true);
+
+    if (!storages.length) {
+      this.listBody.add(this.createEmptyCard(), { expand: true });
+    }
 
     storages.forEach((storage, idx) => {
       const card = this.createCard(storage, idx);
@@ -1100,6 +1091,17 @@ export default class StorageTab {
     });
 
     this.scroll.layout();
+  }
+
+  createEmptyCard() {
+    const width = Math.max(220, (this.listWidth ?? Math.floor(getBottomBarWidth(this.scene) * 0.34)) - 16);
+    return makeBottomBarEmptyRow(this.scene, {
+      width,
+      height: 52,
+      title: "No storage",
+      subtitle: "Build storage from Store",
+      accent: 0xffc97a,
+    });
   }
 
   getStorageCountLabel(storage, filledSlots) {
@@ -1164,7 +1166,7 @@ export default class StorageTab {
       iconsRow.add(s);
     });
 
-    const fullWidth = Math.max(220, (this.listWidth ?? Math.floor(scene.scale.width * 0.5)) - 16);
+    const fullWidth = Math.max(220, (this.listWidth ?? Math.floor(getBottomBarWidth(scene) * 0.34)) - 16);
     const tint = 0xa5d8ff;
     const bg = makeGlassRoundRect(scene, 0, 0, 14, {
       fill: mixColor(BOTTOM_BAR_THEME.cardFill, 0xffffff, 0.06),

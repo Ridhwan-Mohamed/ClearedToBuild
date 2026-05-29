@@ -231,6 +231,36 @@ export class blockResourceManager{
         return tileType?.gatherMode === "pickup" ? "seed" : "block";
     }
 
+    static _getResourceTypeForNode(node, tileType = null) {
+        const explicit = node?.resourceKind || tileType?.resourceKind || tileType?.resource?.name || null;
+        if (explicit) return explicit;
+
+        const name = tileType?.name || node?.resourceType || null;
+        if (name === TILE_TYPES.pine?.name) return "wood";
+        if (name === TILE_TYPES.rock?.name) return "stone";
+        if (name === TILE_TYPES.goldOre?.name) return "gold";
+        return name;
+    }
+
+    static _resourceTypesForContractType(contractType) {
+        if (contractType === "FOREST") return new Set(["wood"]);
+        if (contractType === "ROCK") return new Set(["stone", "gold"]);
+        if (contractType === "FARM") return new Set(["seed", "berry"]);
+        return new Set();
+    }
+
+    static _gatherOrderMatchesResourceTypes(order, resourceTypes) {
+        if (!this._isGatherOrder(order) || !(resourceTypes?.size > 0)) return false;
+        if (order.resourceType && resourceTypes.has(order.resourceType)) return true;
+        if (order.kind === ORDER_KINDS.GATHER_SET) {
+            return (order.nodeKeys || []).some((nodeKey) => {
+                const kind = String(nodeKey || "").split(":")[0];
+                return resourceTypes.has(kind);
+            });
+        }
+        return false;
+    }
+
     static _stateForTask(task) {
         return task?.forageType === "seed"
             ? CONTROL_STATES.SEED_MODE
@@ -446,6 +476,15 @@ export class blockResourceManager{
         };
 
         Teams.teamLists?.[`${teamNumber}`]?.foragerQueue?.push(task);
+        const resourceType = this._getResourceTypeForNode(node, tileType);
+        if (resourceType) {
+            this.scene?.tutorialManager?.notifyAction?.("forager.route", {
+                resourceType,
+                node,
+                task,
+                source: "manualClick",
+            });
+        }
         return task;
     }
 
@@ -638,11 +677,13 @@ export class blockResourceManager{
         teamNumber = 1,
         contractId = null,
         slotId = null,
+        contractType = null,
         origin = null,
         size = 0,
     } = {}) {
         const team = Teams.teamLists?.[`${teamNumber}`];
         if (!team) return;
+        const removedResourceTypes = this._resourceTypesForContractType(contractType);
 
         const matchesNode = (node) => {
             if (!node) return false;
@@ -673,9 +714,15 @@ export class blockResourceManager{
         const affectedTroops = new Set();
         for (const troop of team.foragerList || []) {
             if (!troop?.active) continue;
+            const orderMatchesRemovedParcel = this._gatherOrderMatchesResourceTypes(troop.currentOrder, removedResourceTypes);
             const troopTask = this._isResourceTask(troop.task) ? troop.task : null;
             if (troopTask && (parcelTasks.has(troopTask) || matchesNode(troopTask.value))) {
                 parcelTasks.add(troopTask);
+                affectedTroops.add(troop);
+                continue;
+            }
+
+            if (orderMatchesRemovedParcel) {
                 affectedTroops.add(troop);
                 continue;
             }
@@ -696,12 +743,38 @@ export class blockResourceManager{
 
         for (const troop of affectedTroops) {
             const task = this._isResourceTask(troop.task) ? troop.task : null;
-            this._clearTroopBlockTask(troop, task, {
-                removeFromQueue: true,
-                clearNodeTask: true,
-                adjustAssigned: true,
-            });
-            this._postBlockTaskCleanup(troop);
+            const insideRemovedParcel = isInsideParcel(troop);
+            const orderMatchesRemovedParcel = this._gatherOrderMatchesResourceTypes(troop.currentOrder, removedResourceTypes);
+            const retireGatherOrder = this._isGatherOrder(troop.currentOrder) && (
+                orderMatchesRemovedParcel ||
+                (task && (parcelTasks.has(task) || matchesNode(task.value))) ||
+                insideRemovedParcel
+            );
+            const preserveCurrentTask = !!troop.task && !task && !insideRemovedParcel;
+
+            if (!preserveCurrentTask) {
+                if (!task && troop.task) {
+                    Player._releaseTaskAssignment?.(troop);
+                }
+                this._clearTroopBlockTask(troop, task, {
+                    removeFromQueue: true,
+                    clearNodeTask: true,
+                    adjustAssigned: true,
+                });
+            } else {
+                this._stopGatherPresentation(troop);
+                this._stopHarvestLoops(troop);
+            }
+
+            if (retireGatherOrder) {
+                OrderRunner._finishGatherOrder(troop, {
+                    targetState: preserveCurrentTask ? null : CONTROL_STATES.TRACK_MODE,
+                });
+            }
+
+            if (!preserveCurrentTask) {
+                this._postBlockTaskCleanup(troop);
+            }
         }
     }
 

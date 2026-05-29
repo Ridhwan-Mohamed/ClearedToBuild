@@ -169,7 +169,7 @@ export class Gunslinger {
 
             const troopX = Math.floor(sprite.x / SQUARESIZE);
             const troopY = Math.floor(sprite.y / SQUARESIZE);
-            if (!navGrid[troopX]?.[troopY]) return false;
+            if (!navGrid[troopY]?.[troopX]) return false;
 
             const path = navMesh.findPath(
                 { x: sprite.x, y: sprite.y },

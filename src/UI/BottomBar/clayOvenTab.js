@@ -2,7 +2,13 @@ import { Teams } from "../../Teams";
 import { UI_ITEM_TYPES } from "../UIConstants";
 import { AudioManager } from "../../Manager/AudioManager.js";
 import { buildingManager } from "../../Manager/buildingManager.js";
-import { mixColor } from "./BottomBarTheme.js";
+import {
+  addScrollablePanelAffordance,
+  getBottomBarWidth,
+  handleScrollablePanelWheel,
+  makeBottomBarEmptyRow,
+  mixColor,
+} from "./BottomBarTheme.js";
 
 const TAB_BASE_DEPTH = 51;
 
@@ -25,6 +31,7 @@ export default class ClayOvenTab {
     this._destroyed = false;
     this._listDirty = false;
     this._listRefreshQueued = false;
+    this._scrollAffordances = [];
     this.root = this.build();
     this.bindScrollInput();
 
@@ -86,6 +93,8 @@ export default class ClayOvenTab {
     this.scene.events.off("oven:added", this._onOvenAdded);
     this.scene.events.off("oven:removed", this._onOvenRemoved);
     if (this._onWheel) this.scene.input.off("wheel", this._onWheel);
+    this._scrollAffordances.forEach((affordance) => affordance?.destroy?.());
+    this._scrollAffordances = [];
     this.root?.destroy();
   }
 
@@ -254,7 +263,7 @@ export default class ClayOvenTab {
     const scene = this.scene;
     const contentHeight = 200;
     const rootSpace = { left: 10, right: 10, top: 8, bottom: 8, item: 12 };
-    const splitWidth = Math.max(0, scene.scale.width - rootSpace.left - rootSpace.right - rootSpace.item);
+    const splitWidth = Math.max(0, getBottomBarWidth(scene) - rootSpace.left - rootSpace.right - rootSpace.item);
     const detailProportion = 4;
     const listProportion = 5;
     const totalProportion = detailProportion + listProportion;
@@ -276,12 +285,6 @@ export default class ClayOvenTab {
       scrollDetectionMode: "rectBounds",
       background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
       panel: { child: this.detail.panel, mask: { padding: 2 } },
-      sliderY: scene.rexUI.add.slider({
-        height: 160,
-        orientation: "y",
-        track: scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x0f1d28, 0.9),
-        thumb: scene.rexUI.add.roundRectangle(0, 0, 10, 30, 5, 0x7adfff, 0.8),
-      }),
       scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
       space: { left: 8, right: 8, top: 8, bottom: 8, panel: 8 },
     }).setDepth(TAB_BASE_DEPTH);
@@ -300,15 +303,12 @@ export default class ClayOvenTab {
       scrollDetectionMode: "rectBounds",
       background: this.rr(0, 0, 16, 0x0f2432, 0.42, 0x93dfff, 0.14),
       panel: { child: this.listBody, mask: { padding: 2 } },
-      sliderY: this.scene.rexUI.add.slider({
-        height: 168,
-        orientation: "y",
-        track: this.scene.rexUI.add.roundRectangle(0, 0, 10, 0, 5, 0x0f1d28, 0.9),
-        thumb: this.scene.rexUI.add.roundRectangle(0, 0, 10, 34, 5, 0x7adfff, 0.8),
-      }),
       scrollerY: { pointerOutRelease: true, rectBoundsInteractive: true },
       space: { left: 8, right: 8, top: 8, bottom: 8, panel: 10 },
     }).setDepth(TAB_BASE_DEPTH);
+    this._scrollAffordances.push(addScrollablePanelAffordance(scene, this.scroll, {
+      isActive: () => this.scene.uiBottomBar?.expanded && this.scene.uiBottomBar?.currentPage === "ovens",
+    }));
     const listSizer = scene.rexUI.add.sizer({
       orientation: "y",
       height: contentHeight,
@@ -325,12 +325,8 @@ export default class ClayOvenTab {
     this._onWheel = (pointer, _gameObjects, dx, dy) => {
       if (this.scene.uiBottomBar?.currentPage !== "ovens") return;
       if (!this.scene.uiBottomBar?.expanded) return;
-      if (!this.scroll?.isOverflowY) return;
-      if (!this.isPointerOverScroll(pointer)) return;
-      const d = Math.abs(dx) > Math.abs(dy) ? dx : dy;
-      if (Math.abs(d) < 0.1) return;
-      this.scroll.addChildOY(-d * 0.8, true);
-      this.scene.input.stopPropagation();
+      const panels = [this.scroll];
+      panels.some((panel) => handleScrollablePanelWheel(this.scene, panel, pointer, dx, dy));
     };
     this.scene.input.on("wheel", this._onWheel);
   }
@@ -505,6 +501,9 @@ export default class ClayOvenTab {
         this.updateCard(oven);
       });
       this._listDirty = false;
+      if (!this.cardByOven.size) {
+        this.listBody.add(this.createEmptyCard(), { expand: true });
+      }
       return this._safeScrollLayout();
     } catch {
       return false;
@@ -512,7 +511,7 @@ export default class ClayOvenTab {
   }
 
   createCard(oven, idx) {
-    const width = Math.max(220, (this.listWidth || (Math.floor(this.scene.scale.width * (2 / 3)) - 46)) - 24);
+    const width = Math.max(220, (this.listWidth || (Math.floor(getBottomBarWidth(this.scene) * (2 / 3)) - 46)) - 24);
     const compact = width < 420 || this.scene.scale.width < 1080;
     const rowHeight = compact ? 76 : 80;
     const slotSize = compact ? 38 : 44;
@@ -567,6 +566,18 @@ export default class ClayOvenTab {
     });
     this.updateCardVisual(oven);
     return row;
+  }
+
+  createEmptyCard() {
+    const width = Math.max(220, (this.listWidth || (Math.floor(getBottomBarWidth(this.scene) * (2 / 3)) - 46)) - 24);
+    const compact = width < 420 || this.scene.scale.width < 1080;
+    return makeBottomBarEmptyRow(this.scene, {
+      width,
+      height: compact ? 76 : 80,
+      title: "No clay ovens",
+      subtitle: "Build an oven from Store",
+      accent: 0xff8a65,
+    });
   }
 
   updateCard(oven) {

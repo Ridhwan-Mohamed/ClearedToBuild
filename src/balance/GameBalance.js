@@ -34,6 +34,12 @@ const PRESSURE_MONEY_COSTS = Object.freeze({
   3: 240,
 });
 
+const MILITIA_MONEY_COSTS = Object.freeze({
+  1: 220,
+  2: 275,
+  3: 385,
+});
+
 const PRESSURE_CLEAR_BONUSES = Object.freeze({
   1: 60,
   2: 100,
@@ -147,6 +153,10 @@ export function getContractMoneyCost(scene, type, difficulty = 1) {
   if (normalizedType === "PRESSURE") {
     const diff = clamp(Math.floor(toWholeNumber(difficulty, 1)), 1, 3);
     return roundPrice((PRESSURE_MONEY_COSTS[diff] ?? PRESSURE_MONEY_COSTS[1]) * dayScale, 5);
+  }
+  if (normalizedType === "MILITIA") {
+    const diff = clamp(Math.floor(toWholeNumber(difficulty, 1)), 1, 3);
+    return roundPrice((MILITIA_MONEY_COSTS[diff] ?? MILITIA_MONEY_COSTS[1]) * dayScale, 5);
   }
   const base = CONTRACT_BASE_MONEY_COSTS[normalizedType] ?? 0;
   return roundPrice(base * dayScale, 5);
